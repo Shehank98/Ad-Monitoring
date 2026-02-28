@@ -4,88 +4,149 @@
 {% block page_subtitle %}Manage {{ target_user.name }}'s access and settings{% endblock %}
 
 {% block content %}
-<div class="max-w-2xl space-y-4">
+<div class="max-w-2xl space-y-5">
 
-  <!-- User info card -->
-  <div class="card flex items-center gap-4">
-    <div class="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-bold
-      {% if target_user.role == 'super_admin' %}bg-purple-600
-      {% elif target_user.role == 'admin' %}bg-blue-600
-      {% elif target_user.role == 'team_head' %}bg-emerald-600
-      {% elif target_user.role == 'planner' %}bg-amber-500
-      {% else %}bg-orange-500{% endif %}">
-      {{ target_user.initials }}
+  <!-- Back link -->
+  <a href="/dashboard/users/"
+     class="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 transition-colors">
+    <i class="fa-solid fa-arrow-left text-xs"></i> Back to Users
+  </a>
+
+  <!-- ── Profile Card ─────────────────────────────────────────────── -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+
+    <!-- Gradient banner -->
+    <div class="h-20
+      {% if target_user.role == 'super_admin' %}bg-gradient-to-r from-purple-600 to-purple-800
+      {% elif target_user.role == 'admin' %}bg-gradient-to-r from-blue-600 to-blue-800
+      {% elif target_user.role == 'team_head' %}bg-gradient-to-r from-emerald-600 to-emerald-800
+      {% elif target_user.role == 'planner' %}bg-gradient-to-r from-amber-500 to-amber-700
+      {% else %}bg-gradient-to-r from-orange-500 to-orange-700{% endif %}">
     </div>
-    <div>
-      <h2 class="text-lg font-bold text-slate-800">{{ target_user.name }}</h2>
-      <p class="text-sm text-slate-500">{{ target_user.email }}</p>
-      <span class="badge mt-1
-        {% if target_user.role == 'super_admin' %}bg-purple-100 text-purple-700
-        {% elif target_user.role == 'admin' %}bg-blue-100 text-blue-700
-        {% elif target_user.role == 'team_head' %}bg-emerald-100 text-emerald-700
-        {% elif target_user.role == 'planner' %}bg-amber-100 text-amber-700
-        {% else %}bg-orange-100 text-orange-700{% endif %}">
-        {{ target_user.role_label }}
-      </span>
-    </div>
-    <div class="ml-auto">
-      {% if target_user.is_active %}
-        <span class="badge bg-emerald-100 text-emerald-700">Active</span>
-      {% else %}
-        <span class="badge bg-red-100 text-red-700">Inactive</span>
-      {% endif %}
+
+    <div class="px-6 pb-6">
+      <!-- Avatar overlapping banner -->
+      <div class="flex items-end justify-between -mt-8 mb-4">
+        <div class="w-16 h-16 rounded-2xl ring-4 ring-white flex items-center justify-center
+                    text-white text-2xl font-extrabold shadow-lg
+          {% if target_user.role == 'super_admin' %}bg-gradient-to-br from-purple-500 to-purple-700
+          {% elif target_user.role == 'admin' %}bg-gradient-to-br from-blue-500 to-blue-700
+          {% elif target_user.role == 'team_head' %}bg-gradient-to-br from-emerald-500 to-emerald-700
+          {% elif target_user.role == 'planner' %}bg-gradient-to-br from-amber-400 to-amber-600
+          {% else %}bg-gradient-to-br from-orange-400 to-orange-600{% endif %}">
+          {{ target_user.initials }}
+        </div>
+        {% if target_user.is_active %}
+          <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700
+                       text-xs font-semibold ring-1 ring-emerald-200">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Active
+          </span>
+        {% else %}
+          <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 text-red-600
+                       text-xs font-semibold ring-1 ring-red-200">
+            <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> Inactive
+          </span>
+        {% endif %}
+      </div>
+
+      <h2 class="text-xl font-bold text-slate-800 leading-tight">{{ target_user.name }}</h2>
+      <p class="text-sm text-slate-500 mt-0.5">{{ target_user.email }}</p>
+
+      <div class="flex items-center gap-2 mt-3">
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold
+          {% if target_user.role == 'super_admin' %}bg-purple-50 text-purple-700 ring-1 ring-purple-200
+          {% elif target_user.role == 'admin' %}bg-blue-50 text-blue-700 ring-1 ring-blue-200
+          {% elif target_user.role == 'team_head' %}bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200
+          {% elif target_user.role == 'planner' %}bg-amber-50 text-amber-700 ring-1 ring-amber-200
+          {% else %}bg-orange-50 text-orange-700 ring-1 ring-orange-200{% endif %}">
+          <i class="fa-solid
+            {% if target_user.role == 'super_admin' %}fa-shield-halved
+            {% elif target_user.role == 'admin' %}fa-user-shield
+            {% elif target_user.role == 'team_head' %}fa-people-group
+            {% elif target_user.role == 'planner' %}fa-pen-ruler
+            {% else %}fa-gear{% endif %} text-[10px]"></i>
+          {{ target_user.role_label }}
+        </span>
+        <span class="text-xs text-slate-400">
+          <i class="fa-regular fa-calendar mr-1"></i>Joined {{ target_user.date_joined|date:"d M Y" }}
+        </span>
+      </div>
     </div>
   </div>
 
-  <!-- Actions -->
-  <div class="card">
-    <h3 class="font-bold text-slate-800 mb-4">Actions</h3>
+  <!-- ── Account Actions ────────────────────────────────────────── -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+    <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-4">
+      <i class="fa-solid fa-sliders mr-1.5 text-slate-400"></i> Account Actions
+    </h3>
     <div class="flex flex-wrap gap-3">
+
+      <!-- Toggle active/inactive -->
       <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="toggle_active"/>
-        <button type="submit" class="{% if target_user.is_active %}btn-danger{% else %}btn-primary{% endif %}">
-          {% if target_user.is_active %}
-            <i class="fa-solid fa-ban"></i> Deactivate
-          {% else %}
-            <i class="fa-solid fa-circle-check"></i> Activate
-          {% endif %}
-        </button>
+        {% if target_user.is_active %}
+          <button type="submit"
+                  onclick="return confirm('Deactivate {{ target_user.name }}? They will lose access immediately.')"
+                  class="inline-flex items-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100
+                         text-red-700 text-sm font-semibold rounded-xl border border-red-200
+                         hover:border-red-300 transition-all duration-150">
+            <i class="fa-solid fa-ban"></i> Deactivate User
+          </button>
+        {% else %}
+          <button type="submit"
+                  class="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100
+                         text-emerald-700 text-sm font-semibold rounded-xl border border-emerald-200
+                         hover:border-emerald-300 transition-all duration-150">
+            <i class="fa-solid fa-circle-check"></i> Activate User
+          </button>
+        {% endif %}
       </form>
 
+      <!-- Reset password -->
       <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="reset_password"/>
-        <button type="submit" class="btn-secondary" onclick="return confirm('Reset password for {{ target_user.name }}?')">
+        <button type="submit"
+                onclick="return confirm('Reset password for {{ target_user.name }}? A new temporary password will be shown.')"
+                class="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-50 hover:bg-amber-100
+                       text-amber-700 text-sm font-semibold rounded-xl border border-amber-200
+                       hover:border-amber-300 transition-all duration-150">
           <i class="fa-solid fa-key"></i> Reset Password
         </button>
       </form>
 
-      <a href="/dashboard/users/" class="btn-secondary">
-        <i class="fa-solid fa-arrow-left"></i> Back
-      </a>
     </div>
   </div>
 
-  <!-- Assign accounts -->
-  <div class="card">
-    <h3 class="font-bold text-slate-800 mb-4">Assigned Accounts</h3>
+  <!-- ── Assign Accounts ────────────────────────────────────────── -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+    <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">
+      <i class="fa-solid fa-building mr-1.5 text-slate-400"></i> Assigned Accounts
+    </h3>
+    <p class="text-xs text-slate-400 mb-4">Select which brand/client accounts this user can access.</p>
+
     <form method="post">
       {% csrf_token %}
       <input type="hidden" name="action" value="update_accounts"/>
-      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 p-3 border border-slate-200 rounded-xl bg-slate-50 mb-4">
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 p-4 bg-slate-50 border border-slate-200 rounded-xl mb-4">
         {% for acc in all_accounts %}
-          <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+          <label class="flex items-center gap-2.5 p-2 rounded-lg hover:bg-white hover:shadow-sm cursor-pointer transition-all text-sm text-slate-700 group">
             <input type="checkbox" name="accounts" value="{{ acc.id }}"
                    {% if acc.id in user_accounts %}checked{% endif %}
-                   class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"/>
-            {{ acc.name }}
+                   class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4 flex-shrink-0"/>
+            <span class="group-hover:text-slate-900 transition-colors leading-tight">{{ acc.name }}</span>
           </label>
         {% empty %}
-          <p class="text-sm text-slate-400">No accounts configured.</p>
+          <p class="col-span-3 text-sm text-slate-400 py-2 text-center">
+            <i class="fa-solid fa-building mr-1"></i> No accounts configured yet.
+          </p>
         {% endfor %}
       </div>
-      <button type="submit" class="btn-primary">
+      <button type="submit"
+              class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700
+                     text-white text-sm font-semibold rounded-xl shadow-sm shadow-blue-200
+                     transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
         <i class="fa-solid fa-floppy-disk"></i> Save Accounts
       </button>
     </form>

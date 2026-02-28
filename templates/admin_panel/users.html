@@ -4,81 +4,152 @@
 {% block page_subtitle %}Manage platform users and their roles{% endblock %}
 
 {% block content %}
-<div class="flex items-center justify-between mb-5">
-  <p class="text-sm text-slate-500">{{ users.count }} user{{ users.count|pluralize }} in the system</p>
-  <a href="/dashboard/users/create/" class="btn-primary">
+
+<!-- Header row -->
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+  <div class="flex items-center gap-3">
+    <div class="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
+      <i class="fa-solid fa-users text-blue-600"></i>
+    </div>
+    <div>
+      <p class="text-slate-800 font-bold text-base">{{ users.count }} User{{ users.count|pluralize }}</p>
+      <p class="text-xs text-slate-400">Registered on the platform</p>
+    </div>
+  </div>
+  <a href="/dashboard/users/create/"
+     class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700
+            text-white text-sm font-semibold rounded-xl shadow-sm shadow-blue-200
+            transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
     <i class="fa-solid fa-user-plus"></i> Add User
   </a>
 </div>
 
-<div class="card overflow-hidden p-0">
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>User</th>
-        <th>Role</th>
-        <th>Accounts</th>
-        <th>Status</th>
-        <th>Joined</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for u in users %}
-      <tr>
-        <td>
-          <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0
-              {% if u.role == 'super_admin' %}bg-purple-600
-              {% elif u.role == 'admin' %}bg-blue-600
-              {% elif u.role == 'team_head' %}bg-emerald-600
-              {% elif u.role == 'planner' %}bg-amber-500
-              {% else %}bg-orange-500{% endif %}">
-              {{ u.initials }}
+<!-- User table card -->
+<div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+
+  <!-- Table header bar -->
+  <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+    <h3 class="text-sm font-semibold text-slate-600 uppercase tracking-wider">All Users</h3>
+    <span class="badge bg-slate-100 text-slate-600 text-xs">{{ users.count }} total</span>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="bg-slate-50 border-b border-slate-100">
+          <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">User</th>
+          <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Role</th>
+          <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Accounts</th>
+          <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+          <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Joined</th>
+          <th class="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for u in users %}
+        <tr class="hover:bg-slate-50/70 transition-colors group">
+
+          <!-- User cell -->
+          <td class="px-6 py-4">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ring-2 ring-white shadow-sm
+                {% if u.role == 'super_admin' %}bg-gradient-to-br from-purple-500 to-purple-700
+                {% elif u.role == 'admin' %}bg-gradient-to-br from-blue-500 to-blue-700
+                {% elif u.role == 'team_head' %}bg-gradient-to-br from-emerald-500 to-emerald-700
+                {% elif u.role == 'planner' %}bg-gradient-to-br from-amber-400 to-amber-600
+                {% else %}bg-gradient-to-br from-orange-400 to-orange-600{% endif %}">
+                {{ u.initials }}
+              </div>
+              <div>
+                <p class="font-semibold text-slate-800 leading-tight">{{ u.name }}</p>
+                <p class="text-xs text-slate-400 mt-0.5">{{ u.email }}</p>
+              </div>
             </div>
-            <div>
-              <p class="font-semibold text-slate-800 text-sm">{{ u.name }}</p>
-              <p class="text-xs text-slate-400">{{ u.email }}</p>
+          </td>
+
+          <!-- Role cell -->
+          <td class="px-6 py-4">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold
+              {% if u.role == 'super_admin' %}bg-purple-50 text-purple-700 ring-1 ring-purple-200
+              {% elif u.role == 'admin' %}bg-blue-50 text-blue-700 ring-1 ring-blue-200
+              {% elif u.role == 'team_head' %}bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200
+              {% elif u.role == 'planner' %}bg-amber-50 text-amber-700 ring-1 ring-amber-200
+              {% else %}bg-orange-50 text-orange-700 ring-1 ring-orange-200{% endif %}">
+              <i class="fa-solid
+                {% if u.role == 'super_admin' %}fa-shield-halved
+                {% elif u.role == 'admin' %}fa-user-shield
+                {% elif u.role == 'team_head' %}fa-people-group
+                {% elif u.role == 'planner' %}fa-pen-ruler
+                {% else %}fa-gear{% endif %} text-[10px]"></i>
+              {{ u.role_label }}
+            </span>
+          </td>
+
+          <!-- Accounts cell -->
+          <td class="px-6 py-4">
+            <div class="flex flex-wrap gap-1 max-w-[180px]">
+              {% for acc in u.accounts.all %}
+                <span class="inline-block px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md text-xs font-medium">{{ acc.name }}</span>
+              {% empty %}
+                <span class="text-slate-300 text-xs italic">None</span>
+              {% endfor %}
             </div>
-          </div>
-        </td>
-        <td>
-          <span class="badge
-            {% if u.role == 'super_admin' %}bg-purple-100 text-purple-700
-            {% elif u.role == 'admin' %}bg-blue-100 text-blue-700
-            {% elif u.role == 'team_head' %}bg-emerald-100 text-emerald-700
-            {% elif u.role == 'planner' %}bg-amber-100 text-amber-700
-            {% else %}bg-orange-100 text-orange-700{% endif %}">
-            {{ u.role_label }}
-          </span>
-        </td>
-        <td class="text-slate-500 text-xs">
-          {% for acc in u.accounts.all %}{{ acc.name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
-        </td>
-        <td>
-          {% if u.is_active %}
-            <span class="badge bg-emerald-100 text-emerald-700"><i class="fa-solid fa-circle text-[6px] mr-1"></i>Active</span>
-          {% else %}
-            <span class="badge bg-red-100 text-red-700"><i class="fa-solid fa-circle text-[6px] mr-1"></i>Inactive</span>
-          {% endif %}
-        </td>
-        <td class="text-slate-500 text-xs">{{ u.date_joined|date:"d M Y" }}</td>
-        <td>
-          {% if u != request.user %}
-            <a href="/dashboard/users/{{ u.id }}/edit/" class="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium">
-              <i class="fa-solid fa-pen-to-square"></i> Edit
-            </a>
-          {% else %}
-            <span class="text-xs text-slate-400 italic">You</span>
-          {% endif %}
-        </td>
-      </tr>
-      {% empty %}
-      <tr><td colspan="6" class="text-center py-12 text-slate-400">
-        No users found. <a href="/dashboard/users/create/" class="text-blue-600 hover:underline">Add the first user</a>.
-      </td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+          </td>
+
+          <!-- Status cell -->
+          <td class="px-6 py-4">
+            {% if u.is_active %}
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold ring-1 ring-emerald-200">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Active
+              </span>
+            {% else %}
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-50 text-red-600 text-xs font-semibold ring-1 ring-red-200">
+                <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> Inactive
+              </span>
+            {% endif %}
+          </td>
+
+          <!-- Joined cell -->
+          <td class="px-6 py-4 text-xs text-slate-400 whitespace-nowrap">
+            <i class="fa-regular fa-calendar mr-1"></i>{{ u.date_joined|date:"d M Y" }}
+          </td>
+
+          <!-- Actions cell -->
+          <td class="px-6 py-4 text-right">
+            {% if u != request.user %}
+              <a href="/dashboard/users/{{ u.id }}/edit/"
+                 class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200
+                        text-xs font-semibold text-slate-600 hover:border-blue-300 hover:text-blue-600
+                        hover:bg-blue-50 transition-all duration-150">
+                <i class="fa-solid fa-pen-to-square"></i> Edit
+              </a>
+            {% else %}
+              <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 text-xs text-slate-400 italic">
+                <i class="fa-solid fa-circle-user"></i> You
+              </span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="6" class="px-6 py-16 text-center">
+            <div class="flex flex-col items-center gap-3">
+              <div class="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
+                <i class="fa-solid fa-users text-slate-400 text-2xl"></i>
+              </div>
+              <p class="text-slate-500 font-medium">No users found</p>
+              <a href="/dashboard/users/create/"
+                 class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm
+                        font-semibold rounded-lg hover:bg-blue-700 transition-colors">
+                <i class="fa-solid fa-user-plus"></i> Add the first user
+              </a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
+
 {% endblock %}
