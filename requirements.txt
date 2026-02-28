@@ -2,9 +2,12 @@ streamlit>=1.43.0
 pandas>=2.2.0
 numpy>=2.2.0
 fuzzywuzzy>=0.18.0
-python-Levenshtein>=0.27.1  # Enhances fuzzywuzzy performance
+python-Levenshtein>=0.27.1
 plotly>=6.0.0
 openpyxl>=3.1.5
 fpdf>=1.7.2
-# Optional but useful for reading Excel files with different formats
 xlrd>=2.0.1
+firebase-admin>=6.5.0
+google-cloud-storage>=2.14.0
+requests>=2.31.0
+streamlit-option-menu>=0.3.13
