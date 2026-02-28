@@ -1,43 +1,40 @@
-"""
-Management command: ensure_superadmin
---------------------------------------
-Reads SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD from environment variables
-and creates the first Super Admin user if none exists yet.
-
-Called automatically from Procfile on every startup — safe to run repeatedly
-because it does nothing if a super_admin account already exists.
-"""
 import os
 from django.core.management.base import BaseCommand
 from accounts.models import User
 
 
 class Command(BaseCommand):
-    help = 'Create the initial Super Admin user from environment variables if none exists.'
+    help = 'Create or update the Super Admin user from environment variables.'
 
     def handle(self, *args, **options):
-        if User.objects.filter(role='super_admin').exists():
-            self.stdout.write('Super admin already exists — skipping.')
-            return
-
         email    = os.environ.get('SUPER_ADMIN_EMAIL', '').strip()
         password = os.environ.get('SUPER_ADMIN_PASSWORD', '').strip()
         name     = os.environ.get('SUPER_ADMIN_NAME', 'Super Admin').strip()
 
         if not email or not password:
             self.stderr.write(
-                'SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD must be set to '
-                'create the first admin. Skipping.'
+                'SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD must be set. Skipping.'
             )
             return
 
-        user = User.objects.create_superuser(
+        user, created = User.objects.get_or_create(
             email=email,
-            name=name,
-            password=password,
+            defaults={
+                'name': name,
+                'role': 'super_admin',
+                'is_staff': True,
+                'is_superuser': True,
+                'must_change_password': False,
+            }
         )
-        user.must_change_password = False
+        # Always sync the password from the env var so changing it takes effect
+        user.set_password(password)
+        if not created:
+            user.role             = 'super_admin'
+            user.is_staff         = True
+            user.is_superuser     = True
+            user.must_change_password = False
         user.save()
-        self.stdout.write(
-            self.style.SUCCESS(f'Super admin created: {email}')
-        )
+
+        verb = 'created' if created else 'updated'
+        self.stdout.write(self.style.SUCCESS(f'Super admin {verb}: {email}'))
