@@ -1,5 +1,11 @@
-# ── Streamlit secrets (NEVER commit real credentials) ──
+# ── Secrets / credentials (NEVER commit) ──
 .streamlit/secrets.toml
+.env
+
+# ── Django ──
+db.sqlite3
+media/
+staticfiles/
 
 # ── Python artifacts ──
 __pycache__/

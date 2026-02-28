@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Ad Monitor{% endblock %} — Ogilvy Lanka</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            navy: { 900:'#0c1a2e', 800:'#0f2544', 700:'#1B3A6B', 600:'#1e4080' },
+          },
+          fontFamily: { sans: ['Inter','ui-sans-serif','system-ui'] }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
+  <style>
+    body { font-family:'Inter',sans-serif; }
+    .input-field {
+      @apply block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm
+             shadow-sm placeholder-slate-400 focus:border-blue-500 focus:ring-1
+             focus:ring-blue-500 focus:outline-none transition;
+    }
+    .btn-primary {
+      @apply inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm
+             font-semibold text-white hover:bg-blue-700 focus:outline-none
+             focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition;
+    }
+    .btn-secondary {
+      @apply inline-flex items-center gap-2 rounded-lg bg-white border border-slate-300
+             px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition;
+    }
+    .btn-danger {
+      @apply inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm
+             font-semibold text-white hover:bg-red-700 transition;
+    }
+    .card { @apply bg-white rounded-2xl shadow-sm border border-slate-100 p-6; }
+    .nav-link {
+      @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-300 text-sm
+             font-medium hover:bg-white/10 hover:text-white transition-all duration-150 cursor-pointer;
+    }
+    .nav-link.active { @apply bg-blue-600 text-white shadow-lg shadow-blue-500/25; }
+    .badge {
+      @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold;
+    }
+    /* table */
+    .data-table { @apply w-full text-sm; }
+    .data-table th {
+      @apply px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider
+             bg-slate-50 border-b border-slate-200;
+    }
+    .data-table td { @apply px-4 py-3 text-slate-700 border-b border-slate-100; }
+    .data-table tr:last-child td { @apply border-b-0; }
+    .data-table tr:hover td { @apply bg-slate-50/60; }
+  </style>
+  {% block extra_head %}{% endblock %}
+</head>
+
+<body class="h-full bg-slate-50 antialiased">
+<div class="flex h-screen overflow-hidden">
+
+  <!-- ── Sidebar ─────────────────────────────────────────────────── -->
+  <aside class="flex flex-col w-64 min-h-screen bg-gradient-to-b from-navy-900 to-navy-700 shadow-2xl flex-shrink-0">
+
+    <!-- Logo -->
+    <div class="flex items-center gap-3 px-5 py-5 border-b border-white/10">
+      <div class="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center">
+        <i class="fa-solid fa-tv text-white text-base"></i>
+      </div>
+      <div>
+        <p class="text-white font-bold text-base leading-tight">Ad Monitor</p>
+        <p class="text-slate-400 text-xs">Ogilvy Lanka</p>
+      </div>
+    </div>
+
+    <!-- User card -->
+    <div class="mx-3 mt-4 mb-2 bg-white/8 rounded-xl px-4 py-3 border border-white/10">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+          {{ request.user.initials }}
+        </div>
+        <div class="min-w-0">
+          <p class="text-white text-sm font-semibold truncate">{{ request.user.name }}</p>
+          <span class="
+            badge text-[10px]
+            {% if request.user.role == 'super_admin' %}bg-purple-500/30 text-purple-200
+            {% elif request.user.role == 'admin' %}bg-blue-500/30 text-blue-200
+            {% elif request.user.role == 'team_head' %}bg-emerald-500/30 text-emerald-200
+            {% elif request.user.role == 'planner' %}bg-amber-500/30 text-amber-200
+            {% else %}bg-orange-500/30 text-orange-200{% endif %}
+          ">{{ request.user.role_label }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
+      <p class="px-3 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Menu</p>
+
+      {% with path=request.path %}
+
+      <!-- Everyone -->
+      <a href="/dashboard/" class="nav-link {% if path == '/dashboard/' %}active{% endif %}">
+        <i class="fa-solid fa-house w-4"></i> Dashboard
+      </a>
+
+      <!-- Admin+ -->
+      {% if request.user.role in 'super_admin,admin' %}
+        <a href="/dashboard/users/" class="nav-link {% if '/users/' in path %}active{% endif %}">
+          <i class="fa-solid fa-users w-4"></i> Users
+        </a>
+        <a href="/dashboard/accounts/" class="nav-link {% if '/accounts/' in path %}active{% endif %}">
+          <i class="fa-solid fa-building w-4"></i> Accounts
+        </a>
+      {% endif %}
+
+      <!-- Schedules: everyone except operations sees it -->
+      {% if request.user.role != 'operations' %}
+        <p class="px-3 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Schedules</p>
+        <a href="/dashboard/schedules/" class="nav-link {% if '/schedules/' in path and 'upload' not in path %}active{% endif %}">
+          <i class="fa-solid fa-calendar-days w-4"></i> View Schedules
+        </a>
+        {% if request.user.role in 'planner,super_admin,admin' %}
+          <a href="/dashboard/schedules/upload/" class="nav-link {% if 'schedules/upload' in path %}active{% endif %}">
+            <i class="fa-solid fa-file-arrow-up w-4"></i> Upload Schedule
+          </a>
+        {% endif %}
+      {% endif %}
+
+      <!-- Monitoring data -->
+      <p class="px-3 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Monitoring</p>
+      <a href="/dashboard/monitoring/" class="nav-link {% if '/monitoring/' in path and 'upload' not in path %}active{% endif %}">
+        <i class="fa-solid fa-chart-bar w-4"></i> View Data
+      </a>
+      {% if request.user.role in 'operations,super_admin,admin' %}
+        <a href="/dashboard/monitoring/upload/" class="nav-link {% if 'monitoring/upload' in path %}active{% endif %}">
+          <i class="fa-solid fa-cloud-arrow-up w-4"></i> Upload Data
+        </a>
+      {% endif %}
+
+      <!-- Verify -->
+      {% if request.user.role != 'operations' %}
+        <p class="px-3 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Tools</p>
+        <a href="/verify/" class="nav-link {% if '/verify/' in path %}active{% endif %}">
+          <i class="fa-solid fa-magnifying-glass-chart w-4"></i> Verify Ads
+        </a>
+      {% endif %}
+
+      {% endwith %}
+    </nav>
+
+    <!-- Logout -->
+    <div class="p-3 border-t border-white/10">
+      <a href="/auth/logout/"
+         class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-400 text-sm
+                font-medium hover:bg-red-500/20 hover:text-red-300 transition-all">
+        <i class="fa-solid fa-arrow-right-from-bracket w-4"></i> Sign Out
+      </a>
+    </div>
+  </aside>
+
+  <!-- ── Main content ─────────────────────────────────────────────── -->
+  <main class="flex-1 flex flex-col overflow-hidden">
+
+    <!-- Top bar -->
+    <header class="flex items-center justify-between px-6 py-3 bg-white border-b border-slate-200 shadow-sm flex-shrink-0">
+      <div>
+        <h1 class="text-lg font-bold text-slate-800">{% block page_title %}Dashboard{% endblock %}</h1>
+        <p class="text-xs text-slate-400">{% block page_subtitle %}{% endblock %}</p>
+      </div>
+      <div class="flex items-center gap-3">
+        {% if request.user.must_change_password %}
+          <a href="/auth/change-password/"
+             class="badge bg-amber-100 text-amber-700 text-xs animate-pulse">
+            <i class="fa-solid fa-triangle-exclamation mr-1"></i>Change password
+          </a>
+        {% endif %}
+        <span class="text-xs text-slate-400">{{ request.user.email }}</span>
+      </div>
+    </header>
+
+    <!-- Flash messages -->
+    {% if messages %}
+      <div class="px-6 pt-4 space-y-2 flex-shrink-0">
+        {% for msg in messages %}
+          <div class="flex items-start gap-3 rounded-xl px-4 py-3 text-sm font-medium border
+            {% if msg.tags == 'success' %}bg-emerald-50 text-emerald-800 border-emerald-200
+            {% elif msg.tags == 'error' %}bg-red-50 text-red-800 border-red-200
+            {% elif msg.tags == 'warning' %}bg-amber-50 text-amber-800 border-amber-200
+            {% else %}bg-blue-50 text-blue-800 border-blue-200{% endif %}">
+            <i class="
+              fa-solid mt-0.5 flex-shrink-0
+              {% if msg.tags == 'success' %}fa-circle-check text-emerald-500
+              {% elif msg.tags == 'error' %}fa-circle-xmark text-red-500
+              {% elif msg.tags == 'warning' %}fa-triangle-exclamation text-amber-500
+              {% else %}fa-circle-info text-blue-500{% endif %}">
+            </i>
+            <span>{{ msg|safe }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <!-- Page body -->
+    <div class="flex-1 overflow-y-auto px-6 py-5">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+
+</div>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,103 @@
+{% extends 'base.html' %}
+{% block title %}Upload Monitoring Data{% endblock %}
+{% block page_title %}Upload Monitoring Data{% endblock %}
+{% block page_subtitle %}Add MapOnline or MediaWatch (LMRB) data{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl">
+  <div class="card">
+
+    <!-- Source info banners -->
+    <div class="grid grid-cols-2 gap-3 mb-6">
+      <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl">
+        <p class="text-xs font-bold text-blue-700 mb-1"><i class="fa-solid fa-map mr-1"></i> MapOnline</p>
+        <p class="text-xs text-blue-600">Received in 3-day batches. Key columns: Channel, Prg Date, Theme, Ad Dur, Advertiser</p>
+      </div>
+      <div class="p-3 bg-purple-50 border border-purple-200 rounded-xl">
+        <p class="text-xs font-bold text-purple-700 mb-1"><i class="fa-solid fa-chart-line mr-1"></i> MediaWatch (LMRB)</p>
+        <p class="text-xs text-purple-600">Key columns: Advt_Theme, Channel, Dd/Mn/Yr, Dur, Cost</p>
+      </div>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" class="space-y-5" id="upload-form">
+      {% csrf_token %}
+
+      <!-- Data type -->
+      <div>
+        <label class="block text-sm font-semibold text-slate-700 mb-2">Data Source *</label>
+        <div class="flex gap-4">
+          {% for choice in form.data_type %}
+            <label class="flex items-center gap-2 cursor-pointer">
+              {{ choice.tag }}
+              <span class="text-sm text-slate-700 font-medium">{{ choice.choice_label }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
+        <div class="sm:col-span-3">
+          <label class="block text-sm font-semibold text-slate-700 mb-1.5">Channel *</label>
+          {{ form.channel }}
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-1.5">Start Date *</label>
+          {{ form.start_date }}
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-1.5">End Date *</label>
+          {{ form.end_date }}
+        </div>
+      </div>
+
+      <!-- File drop zone -->
+      <div>
+        <label class="block text-sm font-semibold text-slate-700 mb-1.5">Excel File *</label>
+        <label for="monitoring-file"
+               class="flex flex-col items-center justify-center w-full h-36 border-2 border-dashed
+                      border-slate-300 rounded-xl cursor-pointer bg-slate-50 hover:bg-blue-50
+                      hover:border-blue-400 transition-all group"
+               id="drop-label">
+          <i class="fa-solid fa-cloud-arrow-up text-3xl text-slate-300 group-hover:text-blue-400 transition-colors mb-2"></i>
+          <p class="text-sm text-slate-500 group-hover:text-blue-600">
+            <span class="font-semibold">Click to upload</span> or drag & drop
+          </p>
+          <p class="text-xs text-slate-400 mt-1">.xlsx or .xls — max 50 MB</p>
+          <p id="file-name" class="mt-2 text-xs text-blue-600 font-medium hidden"></p>
+        </label>
+        {{ form.file }}
+      </div>
+
+      <div class="flex gap-3 pt-2">
+        <button type="submit" class="btn-primary" id="submit-btn">
+          <i class="fa-solid fa-cloud-arrow-up"></i> Upload Data
+        </button>
+        <a href="/dashboard/monitoring/" class="btn-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  const fi = document.getElementById('monitoring-file');
+  const fn = document.getElementById('file-name');
+  const dl = document.getElementById('drop-label');
+  fi.addEventListener('change', function() {
+    if (this.files[0]) { fn.textContent = this.files[0].name; fn.classList.remove('hidden'); }
+  });
+  document.getElementById('upload-form').addEventListener('submit', function() {
+    const btn = document.getElementById('submit-btn');
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
+    btn.disabled = true;
+  });
+  dl.addEventListener('dragover', e => { e.preventDefault(); dl.classList.add('border-blue-500'); });
+  dl.addEventListener('dragleave', () => dl.classList.remove('border-blue-500'));
+  dl.addEventListener('drop', e => {
+    e.preventDefault();
+    fi.files = e.dataTransfer.files;
+    fi.dispatchEvent(new Event('change'));
+  });
+</script>
+{% endblock %}

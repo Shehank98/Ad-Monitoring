@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% block title %}Edit User{% endblock %}
+{% block page_title %}Edit User{% endblock %}
+{% block page_subtitle %}Manage {{ target_user.name }}'s access and settings{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl space-y-4">
+
+  <!-- User info card -->
+  <div class="card flex items-center gap-4">
+    <div class="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-bold
+      {% if target_user.role == 'super_admin' %}bg-purple-600
+      {% elif target_user.role == 'admin' %}bg-blue-600
+      {% elif target_user.role == 'team_head' %}bg-emerald-600
+      {% elif target_user.role == 'planner' %}bg-amber-500
+      {% else %}bg-orange-500{% endif %}">
+      {{ target_user.initials }}
+    </div>
+    <div>
+      <h2 class="text-lg font-bold text-slate-800">{{ target_user.name }}</h2>
+      <p class="text-sm text-slate-500">{{ target_user.email }}</p>
+      <span class="badge mt-1
+        {% if target_user.role == 'super_admin' %}bg-purple-100 text-purple-700
+        {% elif target_user.role == 'admin' %}bg-blue-100 text-blue-700
+        {% elif target_user.role == 'team_head' %}bg-emerald-100 text-emerald-700
+        {% elif target_user.role == 'planner' %}bg-amber-100 text-amber-700
+        {% else %}bg-orange-100 text-orange-700{% endif %}">
+        {{ target_user.role_label }}
+      </span>
+    </div>
+    <div class="ml-auto">
+      {% if target_user.is_active %}
+        <span class="badge bg-emerald-100 text-emerald-700">Active</span>
+      {% else %}
+        <span class="badge bg-red-100 text-red-700">Inactive</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="card">
+    <h3 class="font-bold text-slate-800 mb-4">Actions</h3>
+    <div class="flex flex-wrap gap-3">
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="toggle_active"/>
+        <button type="submit" class="{% if target_user.is_active %}btn-danger{% else %}btn-primary{% endif %}">
+          {% if target_user.is_active %}
+            <i class="fa-solid fa-ban"></i> Deactivate
+          {% else %}
+            <i class="fa-solid fa-circle-check"></i> Activate
+          {% endif %}
+        </button>
+      </form>
+
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="reset_password"/>
+        <button type="submit" class="btn-secondary" onclick="return confirm('Reset password for {{ target_user.name }}?')">
+          <i class="fa-solid fa-key"></i> Reset Password
+        </button>
+      </form>
+
+      <a href="/dashboard/users/" class="btn-secondary">
+        <i class="fa-solid fa-arrow-left"></i> Back
+      </a>
+    </div>
+  </div>
+
+  <!-- Assign accounts -->
+  <div class="card">
+    <h3 class="font-bold text-slate-800 mb-4">Assigned Accounts</h3>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="update_accounts"/>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 p-3 border border-slate-200 rounded-xl bg-slate-50 mb-4">
+        {% for acc in all_accounts %}
+          <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" name="accounts" value="{{ acc.id }}"
+                   {% if acc.id in user_accounts %}checked{% endif %}
+                   class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"/>
+            {{ acc.name }}
+          </label>
+        {% empty %}
+          <p class="text-sm text-slate-400">No accounts configured.</p>
+        {% endfor %}
+      </div>
+      <button type="submit" class="btn-primary">
+        <i class="fa-solid fa-floppy-disk"></i> Save Accounts
+      </button>
+    </form>
+  </div>
+
+</div>
+{% endblock %}
