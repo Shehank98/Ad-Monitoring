@@ -1,0 +1,41 @@
+# ── Streamlit secrets (NEVER commit real credentials) ──
+.streamlit/secrets.toml
+
+# ── Python artifacts ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# ── Virtual environments ──
+.venv/
+venv/
+env/
+ENV/
+
+# ── Environment files ──
+.env
+.env.local
+.env.*.local
+
+# ── IDE / editor ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Build / dist ──
+dist/
+build/
+*.egg-info/
+
+# ── Test coverage ──
+.coverage
+htmlcov/
+.pytest_cache/
