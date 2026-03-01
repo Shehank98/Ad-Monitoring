@@ -1,45 +1,46 @@
 from django import forms
 from .models import Account, Channel, MonitoringData
-from datetime import date
-
-MONTHS = [
-    f'{date(2024, m, 1).strftime("%B")} {y}'
-    for y in range(2024, 2028)
-    for m in range(1, 13)
-]
 
 
 class ScheduleUploadForm(forms.Form):
-    account         = forms.ModelChoiceField(queryset=Account.objects.all(),
-                                              empty_label='Select account…',
-                                              widget=forms.Select(attrs={'class': 'select-field'}))
-    channel         = forms.ModelChoiceField(queryset=Channel.objects.all(),
-                                              empty_label='Select channel…',
-                                              widget=forms.Select(attrs={'class': 'select-field'}))
-    month           = forms.ChoiceField(choices=[(m, m) for m in MONTHS],
-                                        widget=forms.Select(attrs={'class': 'select-field'}))
-    schedule_number = forms.CharField(max_length=50,
-                                      widget=forms.TextInput(attrs={
-                                          'class': 'input-field', 'placeholder': 'e.g. SCH-001'}))
-    file            = forms.FileField(widget=forms.FileInput(attrs={
-        'class': 'hidden', 'id': 'schedule-file', 'accept': '.xlsx,.xls'}))
+    """Month is removed — auto-detected from the Date column of the uploaded file."""
+    account         = forms.ModelChoiceField(
+        queryset=Account.objects.all(),
+        empty_label='Select account…',
+        widget=forms.Select(attrs={'class': 'select-field'}),
+    )
+    channel         = forms.ModelChoiceField(
+        queryset=Channel.objects.all(),
+        empty_label='Select channel…',
+        widget=forms.Select(attrs={'class': 'select-field'}),
+    )
+    schedule_number = forms.CharField(
+        max_length=50,
+        widget=forms.TextInput(attrs={'class': 'input-field', 'placeholder': 'e.g. SCH-001'}),
+    )
+    file            = forms.FileField(
+        widget=forms.FileInput(attrs={'class': 'hidden', 'id': 'schedule-file', 'accept': '.xlsx,.xls'}),
+    )
 
 
 class MonitoringUploadForm(forms.Form):
-    account    = forms.ModelChoiceField(queryset=Account.objects.none(),
-                                        empty_label='Select account…',
-                                        widget=forms.Select(attrs={'class': 'select-field'}))
-    data_type  = forms.ChoiceField(choices=MonitoringData.DATA_TYPES,
-                                   widget=forms.RadioSelect(attrs={'class': 'radio-input'}))
-    channel    = forms.ModelChoiceField(queryset=Channel.objects.all(),
-                                        empty_label='Select channel…',
-                                        widget=forms.Select(attrs={'class': 'select-field'}))
-    start_date = forms.DateField(widget=forms.DateInput(attrs={
-        'class': 'input-field', 'type': 'date'}))
-    end_date   = forms.DateField(widget=forms.DateInput(attrs={
-        'class': 'input-field', 'type': 'date'}))
-    file       = forms.FileField(widget=forms.FileInput(attrs={
-        'class': 'hidden', 'id': 'monitoring-file', 'accept': '.xlsx,.xls'}))
+    """Channel, start_date and end_date removed — all auto-detected from the uploaded file.
+
+    For LMRB / MapOnline files that contain multiple channels, one MonitoringData record
+    is created per detected channel (all sharing the same physical file).
+    """
+    account   = forms.ModelChoiceField(
+        queryset=Account.objects.none(),
+        empty_label='Select account…',
+        widget=forms.Select(attrs={'class': 'select-field'}),
+    )
+    data_type = forms.ChoiceField(
+        choices=MonitoringData.DATA_TYPES,
+        widget=forms.RadioSelect(attrs={'class': 'radio-input'}),
+    )
+    file      = forms.FileField(
+        widget=forms.FileInput(attrs={'class': 'hidden', 'id': 'monitoring-file', 'accept': '.xlsx,.xls'}),
+    )
 
     def __init__(self, *args, account_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -47,13 +48,6 @@ class MonitoringUploadForm(forms.Form):
             self.fields['account'].queryset = account_queryset
         else:
             self.fields['account'].queryset = Account.objects.all()
-
-    def clean(self):
-        cleaned = super().clean()
-        if cleaned.get('start_date') and cleaned.get('end_date'):
-            if cleaned['start_date'] > cleaned['end_date']:
-                raise forms.ValidationError('Start date must be before end date.')
-        return cleaned
 
 
 class AccountForm(forms.ModelForm):

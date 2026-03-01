@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Upload Monitoring Data{% endblock %}
 {% block page_title %}Upload Monitoring Data{% endblock %}
-{% block page_subtitle %}Add MapOnline or MediaWatch (LMRB) data for an account{% endblock %}
+{% block page_subtitle %}Add MapOnline or MediaWatch (LMRB) data — channels and dates are detected automatically{% endblock %}
 
 {% block content %}
 <div class="max-w-2xl">
@@ -13,22 +13,20 @@
 
   <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
 
-    <!-- Header -->
     <div class="px-6 py-5 border-b border-slate-100 flex items-center gap-3">
       <div class="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
         <i class="fa-solid fa-cloud-arrow-up text-blue-600"></i>
       </div>
       <div>
         <h2 class="font-bold text-slate-800">New Dataset Upload</h2>
-        <p class="text-xs text-slate-400">Each upload is tracked separately — coverage is merged automatically</p>
+        <p class="text-xs text-slate-400">Channels and date ranges are detected automatically from the file</p>
       </div>
     </div>
 
-    <!-- Source info -->
     <div class="px-6 pt-5 grid grid-cols-2 gap-3">
       <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl">
         <p class="text-xs font-bold text-blue-700 mb-1"><i class="fa-solid fa-map mr-1"></i> MapOnline</p>
-        <p class="text-xs text-blue-600">Received in batches. Key columns: Channel, Prg Date, Theme, Ad Dur, Advertiser</p>
+        <p class="text-xs text-blue-600">Key columns: Channel, Prg Date, Theme, Ad Dur, Advertiser</p>
       </div>
       <div class="p-3 bg-purple-50 border border-purple-200 rounded-xl">
         <p class="text-xs font-bold text-purple-700 mb-1"><i class="fa-solid fa-chart-line mr-1"></i> LMRB (MediaWatch)</p>
@@ -39,20 +37,16 @@
     <form method="post" enctype="multipart/form-data" class="px-6 py-6 space-y-5" id="upload-form">
       {% csrf_token %}
 
-      <!-- Account -->
       <div>
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
           <i class="fa-solid fa-building mr-1 text-slate-400"></i> Account <span class="text-red-400">*</span>
         </label>
         {{ form.account }}
         {% if form.account.errors %}
-          <p class="mt-1.5 text-xs text-red-500 flex items-center gap-1">
-            <i class="fa-solid fa-circle-exclamation"></i> {{ form.account.errors.0 }}
-          </p>
+          <p class="mt-1.5 text-xs text-red-500"><i class="fa-solid fa-circle-exclamation"></i> {{ form.account.errors.0 }}</p>
         {% endif %}
       </div>
 
-      <!-- Data source (radio) -->
       <div>
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
           <i class="fa-solid fa-database mr-1 text-slate-400"></i> Data Source <span class="text-red-400">*</span>
@@ -66,51 +60,26 @@
             </label>
           {% endfor %}
         </div>
-        {% if form.data_type.errors %}
-          <p class="mt-1.5 text-xs text-red-500">{{ form.data_type.errors.0 }}</p>
-        {% endif %}
       </div>
 
-      <!-- Channel + dates -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div class="sm:col-span-3">
-          <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-            <i class="fa-solid fa-tv mr-1 text-slate-400"></i> Channel <span class="text-red-400">*</span>
-          </label>
-          {{ form.channel }}
-          {% if form.channel.errors %}
-            <p class="mt-1.5 text-xs text-red-500">{{ form.channel.errors.0 }}</p>
-          {% endif %}
-        </div>
+      <div class="flex items-start gap-2.5 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800">
+        <i class="fa-solid fa-wand-magic-sparkles mt-0.5 flex-shrink-0 text-emerald-600"></i>
         <div>
-          <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-            <i class="fa-regular fa-calendar mr-1 text-slate-400"></i> Start Date <span class="text-red-400">*</span>
-          </label>
-          {{ form.start_date }}
-          {% if form.start_date.errors %}
-            <p class="mt-1.5 text-xs text-red-500">{{ form.start_date.errors.0 }}</p>
-          {% endif %}
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-            <i class="fa-regular fa-calendar-check mr-1 text-slate-400"></i> End Date <span class="text-red-400">*</span>
-          </label>
-          {{ form.end_date }}
-          {% if form.end_date.errors %}
-            <p class="mt-1.5 text-xs text-red-500">{{ form.end_date.errors.0 }}</p>
-          {% endif %}
-        </div>
-        <div class="sm:col-span-1">
-          <div id="date-range-preview" class="hidden h-full flex items-center">
-            <div class="px-3 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-700 font-medium">
-              <i class="fa-solid fa-arrows-left-right mr-1"></i>
-              <span id="date-range-text"></span>
-            </div>
-          </div>
+          <p class="font-semibold mb-0.5">Automatic channel &amp; date detection</p>
+          <p>The system will scan the file, detect every unique channel and its date range,
+             and create separate tracking records for each. No need to enter channels or dates manually.</p>
         </div>
       </div>
 
-      <!-- File drop zone -->
+      <div id="detect-preview" class="hidden">
+        <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+          <p class="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+            <i class="fa-solid fa-magnifying-glass text-slate-400"></i> Detected in file:
+          </p>
+          <div id="detect-content" class="space-y-1.5"></div>
+        </div>
+      </div>
+
       <div>
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
           <i class="fa-solid fa-file-excel mr-1 text-slate-400"></i> Excel File <span class="text-red-400">*</span>
@@ -129,12 +98,6 @@
         {{ form.file }}
       </div>
 
-      <!-- Note about incremental uploads -->
-      <div class="flex items-start gap-2.5 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
-        <i class="fa-solid fa-circle-info mt-0.5 flex-shrink-0"></i>
-        <p>Each upload is stored separately and coverage is shown cumulatively. You can upload March 1–10 today and March 11–20 tomorrow — both will be tracked and the full range shown in the coverage summary.</p>
-      </div>
-
       <div class="border-t border-slate-100 pt-4 flex gap-3">
         <button type="submit" class="btn-primary" id="submit-btn">
           <i class="fa-solid fa-cloud-arrow-up"></i> Upload Data
@@ -147,17 +110,54 @@
 
 {% block extra_js %}
 <script>
-  const fi = document.getElementById('monitoring-file');
-  const fn = document.getElementById('file-name');
-  const dl = document.getElementById('drop-label');
+  const CSRF  = '{{ csrf_token }}';
+  const fi    = document.getElementById('monitoring-file');
+  const fn    = document.getElementById('file-name');
+  const dl    = document.getElementById('drop-label');
+  const prev  = document.getElementById('detect-preview');
+  const pcont = document.getElementById('detect-content');
 
   fi.addEventListener('change', function () {
     if (this.files[0]) {
       fn.textContent = this.files[0].name;
       fn.classList.remove('hidden');
       dl.classList.add('border-blue-400', 'bg-blue-50');
+      detectChannels(this.files[0]);
     }
   });
+
+  async function detectChannels(file) {
+    const dtype = document.querySelector('[name=data_type]:checked');
+    const fd = new FormData();
+    fd.append('csrfmiddlewaretoken', CSRF);
+    fd.append('file', file);
+    fd.append('data_type', dtype ? dtype.value : 'mediawatch');
+    pcont.innerHTML = '<p class="text-xs text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Scanning file…</p>';
+    prev.classList.remove('hidden');
+    try {
+      const res  = await fetch('/dashboard/monitoring/detect/', {method: 'POST', body: fd});
+      const data = await res.json();
+      if (!data.ok) { pcont.innerHTML = `<p class="text-xs text-red-500">${data.error}</p>`; return; }
+      const rows = data.channels.map(ch =>
+        `<div class="flex items-center justify-between text-xs py-1 border-b border-slate-100 last:border-0">
+          <span class="font-semibold text-slate-700 flex items-center gap-1.5">
+            <i class="fa-solid fa-tv text-slate-400 text-[10px]"></i> ${ch.channel}
+          </span>
+          <span class="text-slate-500">
+            ${ch.start_date || '?'} → ${ch.end_date || '?'}
+            <span class="ml-2 text-slate-400">(${ch.row_count.toLocaleString()} rows)</span>
+          </span>
+        </div>`
+      ).join('');
+      pcont.innerHTML = rows || '<p class="text-xs text-amber-600">No channels detected. Check the file format.</p>';
+    } catch (e) {
+      pcont.innerHTML = `<p class="text-xs text-red-500">Detection failed: ${e.message}</p>`;
+    }
+  }
+
+  document.querySelectorAll('[name=data_type]').forEach(r =>
+    r.addEventListener('change', () => { if (fi.files[0]) detectChannels(fi.files[0]); })
+  );
 
   document.getElementById('upload-form').addEventListener('submit', function () {
     const btn = document.getElementById('submit-btn');
@@ -168,28 +168,8 @@
   dl.addEventListener('dragover', e => { e.preventDefault(); dl.classList.add('border-blue-500'); });
   dl.addEventListener('dragleave', () => dl.classList.remove('border-blue-500'));
   dl.addEventListener('drop', e => {
-    e.preventDefault();
-    fi.files = e.dataTransfer.files;
-    fi.dispatchEvent(new Event('change'));
+    e.preventDefault(); fi.files = e.dataTransfer.files; fi.dispatchEvent(new Event('change'));
   });
-
-  // Live date range preview
-  const sd = document.querySelector('[name=start_date]');
-  const ed = document.querySelector('[name=end_date]');
-  const preview = document.getElementById('date-range-preview');
-  const previewText = document.getElementById('date-range-text');
-  function updatePreview() {
-    if (sd.value && ed.value && sd.value <= ed.value) {
-      const s = new Date(sd.value), e = new Date(ed.value);
-      const days = Math.round((e - s) / 86400000) + 1;
-      previewText.textContent = days + ' day' + (days !== 1 ? 's' : '');
-      preview.classList.remove('hidden');
-    } else {
-      preview.classList.add('hidden');
-    }
-  }
-  sd.addEventListener('change', updatePreview);
-  ed.addEventListener('change', updatePreview);
 </script>
 {% endblock %}
 {% endblock %}

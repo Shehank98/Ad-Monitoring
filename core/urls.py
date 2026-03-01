@@ -20,6 +20,7 @@ urlpatterns = [
     # Schedules
     path('schedules/',          views.schedule_list,     name='schedule_list'),
     path('schedules/upload/',   views.schedule_upload,   name='schedule_upload'),
+    path('schedules/detect/',   views.schedule_detect,   name='schedule_detect'),
     path('schedules/<int:pk>/delete/', views.schedule_delete, name='schedule_delete'),
 
     # Brand mappings
@@ -28,5 +29,6 @@ urlpatterns = [
     # Monitoring data
     path('monitoring/',         views.monitoring_list,   name='monitoring_list'),
     path('monitoring/upload/',  views.monitoring_upload, name='monitoring_upload'),
+    path('monitoring/detect/',  views.monitoring_detect, name='monitoring_detect'),
     path('monitoring/<int:pk>/delete/', views.monitoring_delete, name='monitoring_delete'),
 ]

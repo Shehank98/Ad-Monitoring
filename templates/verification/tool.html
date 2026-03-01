@@ -15,26 +15,27 @@
   .tab-btn:hover { color:#1e40af; background:#f1f5f9; }
   .tab-btn.active { color:#2563eb; border-bottom-color:#2563eb; background:white; }
   .stat-card { background:#fff; border-radius:.875rem; border:1px solid #f1f5f9; box-shadow:0 1px 3px rgba(0,0,0,.05); padding:1rem 1.25rem; }
-
-  /* Status badges in results table */
   td .badge-matched        { background:#dcfce7; color:#166534; padding:2px 7px; border-radius:4px; font-size:.7rem; font-weight:600; }
   td .badge-mismatch       { background:#fef3c7; color:#92400e; padding:2px 7px; border-radius:4px; font-size:.7rem; font-weight:600; }
   td .badge-late           { background:#ede9fe; color:#5b21b6; padding:2px 7px; border-radius:4px; font-size:.7rem; font-weight:600; }
   td .badge-not-aired      { background:#fee2e2; color:#991b1b; padding:2px 7px; border-radius:4px; font-size:.7rem; font-weight:600; }
   td .badge-no-mapping     { background:#f1f5f9; color:#475569; padding:2px 7px; border-radius:4px; font-size:.7rem; font-weight:600; }
+  .run-mode-btn { padding:.5rem 1rem; font-size:.8rem; font-weight:600; border-radius:.6rem; border:2px solid; transition:all .15s; }
+  .run-mode-btn.selected   { border-color:#2563eb; background:#eff6ff; color:#1d4ed8; }
+  .run-mode-btn.unselected { border-color:#e2e8f0; background:white; color:#64748b; }
+  .run-mode-btn.unselected:hover { border-color:#94a3b8; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="space-y-5">
 
-  <!-- ── Step 1: Select Account → Channel → Month ───────────── -->
+  <!-- Step 1: Select -->
   <div class="step-card">
     <h2 class="font-bold text-slate-800 mb-5 flex items-center gap-2 text-sm">
       <span class="step-num">1</span> Select Dataset
     </h2>
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-
       <div>
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
           <i class="fa-solid fa-building mr-1 text-slate-400"></i> Account
@@ -46,7 +47,6 @@
           {% endfor %}
         </select>
       </div>
-
       <div>
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
           <i class="fa-solid fa-tv mr-1 text-slate-400"></i> Channel
@@ -55,7 +55,6 @@
           <option value="">Select account first…</option>
         </select>
       </div>
-
       <div>
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
           <i class="fa-regular fa-calendar mr-1 text-slate-400"></i> Month
@@ -70,7 +69,7 @@
     </div>
   </div>
 
-  <!-- ── Step 2: Data Preview ───────────────────────────────── -->
+  <!-- Step 2: Data Preview -->
   <div class="step-card" id="step2" style="display:none">
     <h2 class="font-bold text-slate-800 mb-5 flex items-center gap-2 text-sm">
       <span class="step-num">2</span> Data Preview
@@ -78,11 +77,42 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4" id="preview-grid"></div>
   </div>
 
-  <!-- ── Step 3: Run ────────────────────────────────────────── -->
+  <!-- Step 3: Run -->
   <div class="step-card" id="step3" style="display:none">
     <h2 class="font-bold text-slate-800 mb-4 flex items-center gap-2 text-sm">
       <span class="step-num">3</span> Run Verification
     </h2>
+
+    <!-- Previous run info -->
+    <div id="prev-run-panel" class="hidden mb-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+      <p class="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+        <i class="fa-solid fa-history text-slate-400"></i> Previous Run Results
+        <span id="prev-run-at" class="font-normal text-slate-400 ml-1"></span>
+      </p>
+      <div class="grid grid-cols-3 sm:grid-cols-5 gap-2" id="prev-run-counts"></div>
+    </div>
+
+    <!-- Run mode selection -->
+    <div id="run-mode-section" class="hidden mb-4">
+      <p class="text-xs font-bold text-slate-600 mb-2 uppercase tracking-wider">Run Mode</p>
+      <div class="flex flex-wrap gap-2">
+        <button onclick="setMode('smart')" id="mode-smart"
+                class="run-mode-btn selected">
+          <i class="fa-solid fa-bolt mr-1"></i> Smart Re-run
+          <span class="ml-1 text-[10px] font-normal opacity-70">Only process new / unmatched ads</span>
+        </button>
+        <button onclick="setMode('reset')" id="mode-reset"
+                class="run-mode-btn unselected">
+          <i class="fa-solid fa-rotate mr-1"></i> Full Reset
+          <span class="ml-1 text-[10px] font-normal opacity-70">Clear all results and re-run from scratch</span>
+        </button>
+      </div>
+      <p id="mode-desc" class="mt-2 text-xs text-slate-500">
+        Previously matched ads will be kept. Only new or unmatched ads are processed.
+        Previously consumed LMRB rows remain locked.
+      </p>
+    </div>
+
     <div class="flex flex-wrap items-center gap-3">
       <button onclick="runVerification()" id="run-btn" class="btn-primary">
         <i class="fa-solid fa-play"></i> Run Verification
@@ -92,26 +122,22 @@
       </a>
       <p class="text-xs text-slate-400">
         <i class="fa-solid fa-circle-info mr-1"></i>
-        Brand mappings must be configured before running.
-        Programme validation uses planned time slots (Start_Time–End_Time).
+        Programme validation uses planned time slots (Start_Time–End_Time), not programme name text.
       </p>
     </div>
   </div>
 
-  <!-- ── Results ────────────────────────────────────────────── -->
+  <!-- Results -->
   <div id="results-section" style="display:none">
 
-    <!-- Summary cards -->
     <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-5" id="summary-cards"></div>
 
-    <!-- Export -->
     <div class="flex justify-end mb-3">
       <button onclick="exportExcel()" class="btn-secondary text-xs">
         <i class="fa-solid fa-file-excel text-emerald-600"></i> Export All to Excel
       </button>
     </div>
 
-    <!-- Tabs + table -->
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
       <div class="flex border-b border-slate-200 bg-slate-50 overflow-x-auto">
         <button onclick="showTab('matched')"       id="tab-matched"       class="tab-btn active">Matched</button>
@@ -120,22 +146,19 @@
         <button onclick="showTab('not_aired')"     id="tab-not_aired"     class="tab-btn">Not Aired</button>
         <button onclick="showTab('extra')"         id="tab-extra"         class="tab-btn">Extra Aired</button>
       </div>
-
-      <!-- Tab description bar -->
       <div id="tab-description" class="px-4 py-2 text-xs text-slate-500 bg-slate-50 border-b border-slate-100"></div>
-
       <div id="tab-content" class="overflow-x-auto"></div>
     </div>
   </div>
 
 </div>
 
-<!-- Hidden export form -->
 <form id="export-form" method="post" action="/verify/export/" style="display:none">
   {% csrf_token %}
   <input type="hidden" name="account_id" id="exp-account">
   <input type="hidden" name="channel"    id="exp-channel">
   <input type="hidden" name="month"      id="exp-month">
+  <input type="hidden" name="mode"       id="exp-mode" value="smart">
 </form>
 {% endblock %}
 
@@ -143,14 +166,30 @@
 <script>
   const CSRF = '{{ csrf_token }}';
   let results = {};
+  let currentMode = 'smart';
 
   const TAB_META = {
-    matched:       { icon: '✅', label: 'Matched',            color: 'emerald', desc: 'Ads that aired within the planned programme time slot (Brand + Theme + Duration + Date + Time window all matched).' },
-    prog_mismatch: { icon: '⚠️', label: 'Programme Mismatch', color: 'amber',   desc: 'Ad found in monitoring on the correct date with correct brand/theme/duration, but the aired time is outside the planned programme slot.' },
-    late_telecast: { icon: '🕐', label: 'Late Telecast',      color: 'violet',  desc: 'Ad aired on a different date than planned. Same brand/theme/duration found in monitoring, but not on the scheduled date.' },
-    not_aired:     { icon: '❌', label: 'Not Aired',          color: 'red',     desc: 'Ad was scheduled but could not be found in monitoring data at all.' },
-    extra:         { icon: '➕', label: 'Extra Aired',        color: 'slate',   desc: 'Monitoring entries not matched to any scheduled ad.' },
+    matched:       { desc: 'Ads that aired within the planned programme time slot. Brand + Theme + Duration + Date + Time window all matched.' },
+    prog_mismatch: { desc: 'Ad found in monitoring on the correct date with correct brand/theme/duration, but the aired time is OUTSIDE the planned programme slot (Start_Time–End_Time).' },
+    late_telecast: { desc: 'Ad aired on a different date than planned. Same brand/theme/duration found in monitoring, but not on the scheduled date.' },
+    not_aired:     { desc: 'Ad was scheduled but could not be found in monitoring data at all.' },
+    extra:         { desc: 'Monitoring entries not matched to any scheduled ad.' },
   };
+
+  const MODE_DESC = {
+    smart: 'Previously matched ads will be kept. Only new or unmatched ads are processed. Previously consumed LMRB rows remain locked.',
+    reset: 'All previous results for this scope will be deleted and matching starts fresh from scratch.',
+  };
+
+  function setMode(m) {
+    currentMode = m;
+    ['smart', 'reset'].forEach(id => {
+      const btn = document.getElementById('mode-' + id);
+      btn.classList.toggle('selected',   id === m);
+      btn.classList.toggle('unselected', id !== m);
+    });
+    document.getElementById('mode-desc').textContent = MODE_DESC[m];
+  }
 
   // ── Step 1 ────────────────────────────────────────────────────
   async function onAccountChange() {
@@ -158,9 +197,9 @@
     const chSel = document.getElementById('sel-channel');
     const moSel = document.getElementById('sel-month');
     chSel.innerHTML = '<option value="">Loading channels…</option>';
-    chSel.disabled  = true;
+    chSel.disabled = true;
     moSel.innerHTML = '<option value="">Select channel first…</option>';
-    moSel.disabled  = true;
+    moSel.disabled = true;
     hideBelow();
     if (!accountId) { chSel.innerHTML = '<option value="">Select account first…</option>'; return; }
     setLoading(true);
@@ -183,7 +222,7 @@
     const channel   = document.getElementById('sel-channel').value;
     const moSel     = document.getElementById('sel-month');
     moSel.innerHTML = '<option value="">Loading months…</option>';
-    moSel.disabled  = true;
+    moSel.disabled = true;
     hideBelow();
     if (!channel) return;
     setLoading(true);
@@ -201,6 +240,7 @@
     const month = document.getElementById('sel-month').value;
     if (!month) { hideBelow(); return; }
     await loadPreview();
+    await loadPreviousResults();
   }
 
   // ── Step 2 ────────────────────────────────────────────────────
@@ -221,15 +261,17 @@
     const schRows = data.schedules.length
       ? data.schedules.map(s =>
           `<div class="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
-            <span class="text-xs text-slate-600 truncate mr-2">#${s.schedule_number} · ${s.filename}</span>
+            <span class="text-xs text-slate-600 truncate mr-2">v${s.version} · #${s.schedule_number} · ${s.filename}</span>
             <span class="text-xs font-semibold text-slate-800 flex-shrink-0">${s.row_count.toLocaleString()} rows</span>
-          </div>`).join('')
+          </div>
+          ${s.start_date ? `<div class="text-[10px] text-slate-400 pb-1">${s.start_date} → ${s.end_date}</div>` : ''}`
+        ).join('')
       : '<p class="text-xs text-red-500">No schedule found for this month.</p>';
 
     const monRows = data.monitoring.length
       ? data.monitoring.map(m =>
           `<div class="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
-            <span class="text-xs text-slate-600">${m.data_type} · ${m.start_date} → ${m.end_date}</span>
+            <span class="text-xs text-slate-600">${m.data_type} · ${m.start_date || '?'} → ${m.end_date || '?'}</span>
             <span class="text-xs font-semibold text-slate-800 flex-shrink-0">${m.row_count.toLocaleString()} rows</span>
           </div>`).join('')
       : '<p class="text-xs text-red-500">No monitoring data found for this channel.</p>';
@@ -265,10 +307,44 @@
     document.getElementById('results-section').style.display = 'none';
   }
 
+  async function loadPreviousResults() {
+    const accountId = document.getElementById('sel-account').value;
+    const channel   = document.getElementById('sel-channel').value;
+    const month     = document.getElementById('sel-month').value;
+    const res  = await fetch(`/verify/previous/?account_id=${accountId}&channel=${encodeURIComponent(channel)}&month=${encodeURIComponent(month)}`);
+    const data = await res.json();
+    const panel   = document.getElementById('prev-run-panel');
+    const modeSection = document.getElementById('run-mode-section');
+    if (!data.ok || !data.has_results) {
+      panel.classList.add('hidden');
+      modeSection.classList.add('hidden');
+      setMode('smart');
+      return;
+    }
+    document.getElementById('prev-run-at').textContent = `— last run ${data.last_run_at}`;
+    const pills = [
+      { label: 'Matched',    n: data.matched,           color: 'emerald' },
+      { label: 'Prog. Miss', n: data.programme_mismatch, color: 'amber' },
+      { label: 'Late',       n: data.late_telecast,      color: 'violet' },
+      { label: 'Not Aired',  n: data.not_aired,          color: 'red' },
+      { label: 'No Mapping', n: data.no_mapping,         color: 'slate' },
+    ];
+    document.getElementById('prev-run-counts').innerHTML = pills.map(p =>
+      `<div class="bg-${p.color}-50 border border-${p.color}-200 rounded-lg px-2.5 py-1.5 text-center">
+        <p class="text-lg font-extrabold text-${p.color}-700">${p.n}</p>
+        <p class="text-[10px] text-${p.color}-600 font-medium">${p.label}</p>
+      </div>`
+    ).join('');
+    panel.classList.remove('hidden');
+    modeSection.classList.remove('hidden');
+  }
+
   function hideBelow() {
     document.getElementById('step2').style.display = 'none';
     document.getElementById('step3').style.display = 'none';
     document.getElementById('results-section').style.display = 'none';
+    document.getElementById('prev-run-panel').classList.add('hidden');
+    document.getElementById('run-mode-section').classList.add('hidden');
   }
 
   // ── Step 3: Run ───────────────────────────────────────────────
@@ -285,6 +361,7 @@
     fd.append('account_id', accountId);
     fd.append('channel',    channel);
     fd.append('month',      month);
+    fd.append('mode',       currentMode);
 
     try {
       const res  = await fetch('/verify/run/', {method: 'POST', body: fd});
@@ -292,6 +369,8 @@
       if (!data.ok) { alert('Verification failed:\n' + data.error); return; }
       results = data;
       renderResults(data);
+      // Refresh previous-run panel after a successful run
+      await loadPreviousResults();
     } finally {
       btn.innerHTML = '<i class="fa-solid fa-play"></i> Run Verification';
       btn.disabled  = false;
@@ -332,7 +411,6 @@
         <p class="text-xs text-slate-500 font-medium mt-1">Extra Aired</p>
       </div>`;
 
-    // Update tab labels with counts
     document.getElementById('tab-matched').textContent       = `✅ Matched (${s.matched})`;
     document.getElementById('tab-prog_mismatch').textContent = `⚠️ Prog. Mismatch (${s.prog_mismatch})`;
     document.getElementById('tab-late_telecast').textContent = `🕐 Late Telecast (${s.late_telecast})`;
@@ -347,10 +425,7 @@
     ['matched', 'prog_mismatch', 'late_telecast', 'not_aired', 'extra'].forEach(t => {
       document.getElementById('tab-' + t).classList.toggle('active', t === name);
     });
-
-    // Update description
-    const meta = TAB_META[name] || {};
-    document.getElementById('tab-description').textContent = meta.desc || '';
+    document.getElementById('tab-description').textContent = (TAB_META[name] || {}).desc || '';
 
     const rows    = results[name] || [];
     const content = document.getElementById('tab-content');
@@ -361,18 +436,14 @@
     const cols = Object.keys(rows[0]);
     content.innerHTML = `
       <table class="data-table">
-        <thead><tr>${cols.map(c => `<th>${c.replace(/_/g, ' ')}</th>`).join('')}</tr></thead>
+        <thead><tr>${cols.map(c => `<th>${c.replace(/_/g,' ')}</th>`).join('')}</tr></thead>
         <tbody>${rows.map(r =>
           `<tr>${cols.map(c => {
             const val = r[c] ?? '';
             if (c === 'Status') {
-              const cls = {
-                'Matched':            'badge-matched',
-                'Programme Mismatch': 'badge-mismatch',
-                'Late Telecast':      'badge-late',
-                'Not Aired':          'badge-not-aired',
-                'No Brand Mapping':   'badge-no-mapping',
-              }[val] || '';
+              const cls = { 'Matched':'badge-matched','Programme Mismatch':'badge-mismatch',
+                            'Late Telecast':'badge-late','Not Aired':'badge-not-aired',
+                            'No Brand Mapping':'badge-no-mapping' }[val] || '';
               return `<td><span class="${cls}">${val}</span></td>`;
             }
             return `<td>${val}</td>`;
@@ -385,6 +456,7 @@
     document.getElementById('exp-account').value = document.getElementById('sel-account').value;
     document.getElementById('exp-channel').value = document.getElementById('sel-channel').value;
     document.getElementById('exp-month').value   = document.getElementById('sel-month').value;
+    document.getElementById('exp-mode').value    = currentMode;
     document.getElementById('export-form').submit();
   }
 

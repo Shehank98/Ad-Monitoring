@@ -1,15 +1,20 @@
 {% extends 'base.html' %}
 {% block title %}Upload Schedule{% endblock %}
 {% block page_title %}Upload Schedule{% endblock %}
-{% block page_subtitle %}Add a new ad schedule to the system{% endblock %}
+{% block page_subtitle %}Add a new ad schedule — month and date range are detected automatically from the file{% endblock %}
 
 {% block content %}
 <div class="max-w-2xl">
   <div class="card">
     <div class="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
       <i class="fa-solid fa-circle-info mr-2"></i>
-      Upload the Excel schedule from your scheduling system. Expected columns:
+      Upload the Excel schedule file. Expected columns:
       <span class="font-semibold">Advertisement_Type, Programme, Date, Day, Start_Time, End_Time, Duration, Brand, Spot_Number</span>
+      <br>
+      <span class="text-blue-600 text-xs mt-1 block">
+        <i class="fa-solid fa-wand-magic-sparkles mr-1"></i>
+        Month, start date and end date are auto-detected from the Date column. Version is auto-incremented.
+      </span>
     </div>
 
     <form method="post" enctype="multipart/form-data" class="space-y-5" id="upload-form">
@@ -26,14 +31,18 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
-        <div>
-          <label class="block text-sm font-semibold text-slate-700 mb-1.5">Month *</label>
-          {{ form.month }}
-        </div>
-        <div>
-          <label class="block text-sm font-semibold text-slate-700 mb-1.5">Schedule Number *</label>
-          {{ form.schedule_number }}
+      <div>
+        <label class="block text-sm font-semibold text-slate-700 mb-1.5">Schedule Number *</label>
+        {{ form.schedule_number }}
+      </div>
+
+      <!-- Auto-detect preview -->
+      <div id="detect-preview" class="hidden">
+        <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl">
+          <p class="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+            <i class="fa-solid fa-magnifying-glass text-slate-400"></i> Detected from file:
+          </p>
+          <div id="detect-content" class="grid grid-cols-3 gap-3 text-xs"></div>
         </div>
       </div>
 
@@ -70,31 +79,63 @@
 
 {% block extra_js %}
 <script>
-  const fileInput  = document.getElementById('schedule-file');
-  const fileLabel  = document.getElementById('file-name');
-  const dropLabel  = document.getElementById('drop-label');
-  const submitBtn  = document.getElementById('submit-btn');
+  const CSRF   = '{{ csrf_token }}';
+  const fi     = document.getElementById('schedule-file');
+  const fn     = document.getElementById('file-name');
+  const dl     = document.getElementById('drop-label');
+  const prev   = document.getElementById('detect-preview');
+  const pcont  = document.getElementById('detect-content');
 
-  fileInput.addEventListener('change', function() {
+  fi.addEventListener('change', function() {
     if (this.files[0]) {
-      fileLabel.textContent = this.files[0].name;
-      fileLabel.classList.remove('hidden');
-      dropLabel.classList.add('border-blue-400', 'bg-blue-50');
+      fn.textContent = this.files[0].name;
+      fn.classList.remove('hidden');
+      dl.classList.add('border-blue-400', 'bg-blue-50');
+      detectSchedule(this.files[0]);
     }
   });
 
+  async function detectSchedule(file) {
+    const fd = new FormData();
+    fd.append('csrfmiddlewaretoken', CSRF);
+    fd.append('file', file);
+    pcont.innerHTML = '<p class="col-span-3 text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Scanning…</p>';
+    prev.classList.remove('hidden');
+    try {
+      const res  = await fetch('/dashboard/schedules/detect/', {method: 'POST', body: fd});
+      const data = await res.json();
+      if (!data.ok) {
+        pcont.innerHTML = `<p class="col-span-3 text-red-500">${data.error}</p>`;
+        return;
+      }
+      pcont.innerHTML = `
+        <div class="bg-white rounded-lg border border-slate-200 p-2.5">
+          <p class="text-slate-400 text-[10px] uppercase tracking-wider mb-0.5">Month</p>
+          <p class="font-semibold text-slate-800">${data.month || '—'}</p>
+        </div>
+        <div class="bg-white rounded-lg border border-slate-200 p-2.5">
+          <p class="text-slate-400 text-[10px] uppercase tracking-wider mb-0.5">Date Range</p>
+          <p class="font-semibold text-slate-800">${data.start_date || '?'} → ${data.end_date || '?'}</p>
+        </div>
+        <div class="bg-white rounded-lg border border-slate-200 p-2.5">
+          <p class="text-slate-400 text-[10px] uppercase tracking-wider mb-0.5">Total Rows</p>
+          <p class="font-semibold text-slate-800">${data.row_count.toLocaleString()}</p>
+        </div>`;
+    } catch (e) {
+      pcont.innerHTML = `<p class="col-span-3 text-red-500">Detection failed: ${e.message}</p>`;
+    }
+  }
+
   document.getElementById('upload-form').addEventListener('submit', function() {
-    submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
-    submitBtn.disabled = true;
+    const btn = document.getElementById('submit-btn');
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
+    btn.disabled = true;
   });
 
-  // Drag & drop
-  dropLabel.addEventListener('dragover', e => { e.preventDefault(); dropLabel.classList.add('border-blue-500'); });
-  dropLabel.addEventListener('dragleave', () => dropLabel.classList.remove('border-blue-500'));
-  dropLabel.addEventListener('drop', e => {
-    e.preventDefault();
-    fileInput.files = e.dataTransfer.files;
-    fileInput.dispatchEvent(new Event('change'));
+  dl.addEventListener('dragover', e => { e.preventDefault(); dl.classList.add('border-blue-500'); });
+  dl.addEventListener('dragleave', () => dl.classList.remove('border-blue-500'));
+  dl.addEventListener('drop', e => {
+    e.preventDefault(); fi.files = e.dataTransfer.files; fi.dispatchEvent(new Event('change'));
   });
 </script>
 {% endblock %}

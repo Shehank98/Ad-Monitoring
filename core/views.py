@@ -1,10 +1,14 @@
+import json
+import uuid
 import pandas as pd
 from datetime import date as date_cls
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Max, Min, Count
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
 from accounts.decorators import role_required
 from accounts.models import User
@@ -25,6 +29,71 @@ def _account_qs(user):
     if _is_admin(user):
         return Account.objects.all()
     return user.accounts.all()
+
+
+def _detect_schedule_meta(df):
+    """Auto-detect month, start_date, end_date from a schedule DataFrame."""
+    df = df.copy()
+    df.columns = df.columns.str.strip()
+    month = ''
+    start_date = end_date = None
+    if 'Date' in df.columns:
+        dates = pd.to_datetime(df['Date'], errors='coerce').dropna()
+        if not dates.empty:
+            start_date = dates.min().date()
+            end_date   = dates.max().date()
+            month      = dates.min().strftime('%B %Y')
+    return month, start_date, end_date
+
+
+def _detect_monitoring_meta(df, data_type):
+    """
+    Auto-detect channels, and per-channel date ranges from a monitoring DataFrame.
+
+    Returns:
+        list of dicts: [{channel, start_date, end_date, row_count}, ...]
+    """
+    df = df.copy()
+    df.columns = df.columns.str.strip()
+
+    # Build date column
+    if data_type == 'mediawatch':
+        if {'Dd', 'Mn', 'Yr'}.issubset(df.columns):
+            df['_date'] = pd.to_datetime(
+                df['Yr'].astype(str) + '-' +
+                df['Mn'].astype(str).str.zfill(2) + '-' +
+                df['Dd'].astype(str).str.zfill(2),
+                errors='coerce',
+            )
+        elif 'Date' in df.columns:
+            df['_date'] = pd.to_datetime(df['Date'], errors='coerce')
+        else:
+            df['_date'] = pd.NaT
+    else:  # maponline
+        date_col = 'Prg Date' if 'Prg Date' in df.columns else 'Date'
+        df['_date'] = pd.to_datetime(df.get(date_col, pd.Series(dtype='object')), errors='coerce')
+
+    # Detect unique channels
+    ch_col = 'Channel' if 'Channel' in df.columns else None
+    if ch_col:
+        channels = [str(c).strip() for c in df[ch_col].dropna().unique() if str(c).strip()]
+    else:
+        channels = ['Unknown']
+
+    result = []
+    for ch in channels:
+        if ch_col:
+            ch_df = df[df[ch_col].astype(str).str.strip() == ch]
+        else:
+            ch_df = df
+        dates = ch_df['_date'].dropna()
+        result.append({
+            'channel':    ch,
+            'start_date': dates.min().date() if not dates.empty else None,
+            'end_date':   dates.max().date() if not dates.empty else None,
+            'row_count':  len(ch_df),
+        })
+    return result
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -125,12 +194,10 @@ def channel_list(request):
 @login_required
 def schedule_list(request):
     user = request.user
-    # All account members see all schedules for their accounts
     qs = Schedule.objects.select_related('account', 'uploaded_by')
     if not _is_admin(user):
         qs = qs.filter(account__in=user.accounts.all())
 
-    # Filters
     account_id = request.GET.get('account')
     channel    = request.GET.get('channel', '').strip()
     month      = request.GET.get('month', '').strip()
@@ -167,30 +234,70 @@ def schedule_upload(request):
         if form.is_valid():
             excel_file = request.FILES['file']
             try:
-                df        = pd.read_excel(excel_file)
-                row_count = len(df)
+                df = pd.read_excel(excel_file)
             except Exception as e:
                 messages.error(request, f'Cannot read Excel file: {e}')
                 return render(request, 'schedules/upload.html', {'form': form})
 
+            row_count  = len(df)
+            account    = form.cleaned_data['account']
+            channel_obj = form.cleaned_data['channel']
+
+            # Auto-detect month and date range
+            month, start_date, end_date = _detect_schedule_meta(df)
+            if not month:
+                month = 'Unknown'
+
+            # Auto-increment version per (account, channel)
+            last_ver = (
+                Schedule.objects
+                .filter(account=account, channel=channel_obj.name)
+                .aggregate(Max('version'))['version__max'] or 0
+            )
+            version = last_ver + 1
+
             excel_file.seek(0)
             schedule = Schedule(
-                account           = form.cleaned_data['account'],
-                channel           = form.cleaned_data['channel'].name,
-                month             = form.cleaned_data['month'],
+                account           = account,
+                channel           = channel_obj.name,
+                month             = month,
                 schedule_number   = form.cleaned_data['schedule_number'],
                 original_filename = excel_file.name,
                 row_count         = row_count,
+                start_date        = start_date,
+                end_date          = end_date,
+                version           = version,
                 uploaded_by       = user,
             )
             schedule.file.save(excel_file.name, excel_file)
             schedule.save()
             messages.success(request,
-                f'Schedule #{schedule.schedule_number} for {schedule.account} '
-                f'uploaded successfully ({row_count:,} rows).')
+                f'Schedule #{schedule.schedule_number} v{version} for {account} '
+                f'({month}, {start_date} → {end_date}) uploaded — {row_count:,} rows.')
             return redirect('/dashboard/schedules/')
 
     return render(request, 'schedules/upload.html', {'form': form})
+
+
+@login_required
+@require_POST
+def schedule_detect(request):
+    """AJAX: parse an uploaded schedule file and return detected metadata."""
+    excel_file = request.FILES.get('file')
+    if not excel_file:
+        return JsonResponse({'ok': False, 'error': 'No file provided'})
+    try:
+        df = pd.read_excel(excel_file)
+        month, start_date, end_date = _detect_schedule_meta(df)
+        return JsonResponse({
+            'ok': True,
+            'month':      month,
+            'start_date': str(start_date) if start_date else '',
+            'end_date':   str(end_date)   if end_date   else '',
+            'row_count':  len(df),
+        })
+    except Exception as e:
+        return JsonResponse({'ok': False, 'error': str(e)})
 
 
 @login_required
@@ -217,7 +324,6 @@ def monitoring_list(request):
     if not _is_admin(user):
         qs = qs.filter(account__in=user.accounts.all())
 
-    # Filters
     dtype      = request.GET.get('type', '')
     channel    = request.GET.get('channel', '').strip()
     account_id = request.GET.get('account', '')
@@ -228,7 +334,6 @@ def monitoring_list(request):
     if account_id:
         qs = qs.filter(account_id=account_id)
 
-    # Coverage: per (account, channel, data_type) → full date range covered by all uploads
     cov_base = MonitoringData.objects.select_related('account')
     if not _is_admin(user):
         cov_base = cov_base.filter(account__in=user.accounts.all())
@@ -253,6 +358,13 @@ def monitoring_list(request):
 @login_required
 @role_required(['operations', 'super_admin', 'admin'])
 def monitoring_upload(request):
+    """
+    Upload a MapOnline or LMRB file.
+
+    Channels and date ranges are AUTO-DETECTED from the file — users no longer
+    need to specify them. One MonitoringData record is created per detected
+    channel, all sharing the same physical file (tracked via file_group_id).
+    """
     user       = request.user
     account_qs = _account_qs(user)
     form       = MonitoringUploadForm(account_queryset=account_qs)
@@ -261,40 +373,108 @@ def monitoring_upload(request):
         form = MonitoringUploadForm(request.POST, request.FILES, account_queryset=account_qs)
         if form.is_valid():
             excel_file = request.FILES['file']
+            data_type  = form.cleaned_data['data_type']
+            account    = form.cleaned_data['account']
             try:
-                df        = pd.read_excel(excel_file)
-                row_count = len(df)
+                df = pd.read_excel(excel_file)
+                df.columns = df.columns.str.strip()
             except Exception as e:
                 messages.error(request, f'Cannot read Excel file: {e}')
                 return render(request, 'monitoring/upload.html', {'form': form})
 
-            # Auto-create Channel records from the file's Channel column
-            if 'Channel' in df.columns:
-                for ch_val in df['Channel'].dropna().unique():
-                    ch_str = str(ch_val).strip()
-                    if ch_str:
-                        Channel.objects.get_or_create(name=ch_str)
+            # Detect channels and per-channel date ranges
+            channel_metas = _detect_monitoring_meta(df, data_type)
+            if not channel_metas:
+                messages.error(request, 'No channels detected in the file.')
+                return render(request, 'monitoring/upload.html', {'form': form})
 
+            # Ensure Channel records exist for all detected channels
+            for meta in channel_metas:
+                ch = meta['channel']
+                if ch and ch != 'Unknown':
+                    Channel.objects.get_or_create(name=ch)
+
+            group_id = str(uuid.uuid4())
             excel_file.seek(0)
-            mon = MonitoringData(
-                account           = form.cleaned_data['account'],
-                data_type         = form.cleaned_data['data_type'],
-                channel           = form.cleaned_data['channel'].name,
-                start_date        = form.cleaned_data['start_date'],
-                end_date          = form.cleaned_data['end_date'],
-                original_filename = excel_file.name,
-                row_count         = row_count,
-                uploaded_by       = user,
-            )
-            mon.file.save(excel_file.name, excel_file)
-            mon.save()
+            saved_path = None
+
+            for i, meta in enumerate(channel_metas):
+                mon = MonitoringData(
+                    account           = account,
+                    data_type         = data_type,
+                    channel           = meta['channel'],
+                    start_date        = meta['start_date'],
+                    end_date          = meta['end_date'],
+                    original_filename = excel_file.name,
+                    row_count         = meta['row_count'],
+                    file_group_id     = group_id,
+                    uploaded_by       = user,
+                )
+                if saved_path is None:
+                    # Save the file once for the first channel record
+                    excel_file.seek(0)
+                    mon.file.save(excel_file.name, excel_file, save=False)
+                    saved_path = mon.file.name
+                else:
+                    # Reuse the already-saved file path for subsequent channels
+                    mon.file = saved_path
+                mon.save()
+
+            ch_names = ', '.join(m['channel'] for m in channel_metas)
             messages.success(request,
-                f'{mon.get_data_type_display()} — {mon.account} / {mon.channel} '
-                f'({mon.start_date} → {mon.end_date}) uploaded ({row_count:,} rows).')
+                f'{MonitoringData.DATA_TYPES[0][1] if data_type == "maponline" else "MediaWatch (LMRB)"} — '
+                f'{account} — {len(channel_metas)} channel(s) detected: {ch_names}. '
+                f'Uploaded successfully.')
             return redirect('/dashboard/monitoring/')
 
     return render(request, 'monitoring/upload.html', {'form': form})
 
+
+@login_required
+@require_POST
+def monitoring_detect(request):
+    """AJAX: parse an uploaded monitoring file and return detected channels/dates."""
+    excel_file = request.FILES.get('file')
+    data_type  = request.POST.get('data_type', 'mediawatch')
+    if not excel_file:
+        return JsonResponse({'ok': False, 'error': 'No file provided'})
+    try:
+        df = pd.read_excel(excel_file)
+        df.columns = df.columns.str.strip()
+        metas = _detect_monitoring_meta(df, data_type)
+        return JsonResponse({
+            'ok':      True,
+            'channels': metas,
+            'total_rows': len(df),
+        })
+    except Exception as e:
+        return JsonResponse({'ok': False, 'error': str(e)})
+
+
+@login_required
+def monitoring_delete(request, pk):
+    mon   = get_object_or_404(MonitoringData, pk=pk)
+    user  = request.user
+    today = date_cls.today()
+
+    if not _is_admin(user) and mon.account and mon.account not in user.accounts.all():
+        messages.error(request, 'You do not have access to this data.')
+        return redirect('/dashboard/monitoring/')
+
+    if _is_admin(user) or (mon.uploaded_by == user and mon.uploaded_at.date() == today):
+        # Only delete the physical file if no other record in the same group uses it
+        file_path = mon.file.name
+        siblings  = MonitoringData.objects.filter(file_group_id=mon.file_group_id).exclude(pk=mon.pk)
+        if not siblings.exists():
+            mon.file.delete(save=False)
+        mon.delete()
+        messages.success(request, 'Dataset deleted.')
+    else:
+        messages.error(request, 'You can only delete datasets you uploaded today.')
+    return redirect('/dashboard/monitoring/')
+
+
+# ── Brand mappings ────────────────────────────────────────────────────────────
 
 @login_required
 def brand_mapping_list(request):
@@ -318,7 +498,6 @@ def brand_mapping_list(request):
                 if not _is_admin(user) and account not in account_qs:
                     messages.error(request, 'No access to that account.')
                 else:
-                    # Check for duplicate (application-level, handles NULL duration)
                     exists = BrandMapping.objects.filter(
                         account=account, brand=brand, theme=theme, duration=duration
                     ).exists()
@@ -351,23 +530,3 @@ def brand_mapping_list(request):
         'accounts': account_qs,
         'filters':  {'account': account_id},
     })
-
-
-@login_required
-def monitoring_delete(request, pk):
-    mon   = get_object_or_404(MonitoringData, pk=pk)
-    user  = request.user
-    today = date_cls.today()
-
-    # Account access check
-    if not _is_admin(user) and mon.account and mon.account not in user.accounts.all():
-        messages.error(request, 'You do not have access to this data.')
-        return redirect('/dashboard/monitoring/')
-
-    if _is_admin(user) or (mon.uploaded_by == user and mon.uploaded_at.date() == today):
-        mon.file.delete(save=False)
-        mon.delete()
-        messages.success(request, 'Dataset deleted.')
-    else:
-        messages.error(request, 'You can only delete datasets you uploaded today.')
-    return redirect('/dashboard/monitoring/')
