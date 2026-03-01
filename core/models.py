@@ -52,6 +52,8 @@ class MonitoringData(models.Model):
         ('maponline',  'MapOnline'),
         ('mediawatch', 'MediaWatch (LMRB)'),
     ]
+    account         = models.ForeignKey(Account, on_delete=models.SET_NULL,
+                                        null=True, blank=True, related_name='monitoring_data')
     data_type       = models.CharField(max_length=20, choices=DATA_TYPES)
     channel         = models.CharField(max_length=200)
     start_date      = models.DateField()

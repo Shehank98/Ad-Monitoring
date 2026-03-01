@@ -26,6 +26,9 @@ class ScheduleUploadForm(forms.Form):
 
 
 class MonitoringUploadForm(forms.Form):
+    account    = forms.ModelChoiceField(queryset=Account.objects.none(),
+                                        empty_label='Select account…',
+                                        widget=forms.Select(attrs={'class': 'select-field'}))
     data_type  = forms.ChoiceField(choices=MonitoringData.DATA_TYPES,
                                    widget=forms.RadioSelect(attrs={'class': 'radio-input'}))
     channel    = forms.ModelChoiceField(queryset=Channel.objects.all(),
@@ -37,6 +40,13 @@ class MonitoringUploadForm(forms.Form):
         'class': 'input-field', 'type': 'date'}))
     file       = forms.FileField(widget=forms.FileInput(attrs={
         'class': 'hidden', 'id': 'monitoring-file', 'accept': '.xlsx,.xls'}))
+
+    def __init__(self, *args, account_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if account_queryset is not None:
+            self.fields['account'].queryset = account_queryset
+        else:
+            self.fields['account'].queryset = Account.objects.all()
 
     def clean(self):
         cleaned = super().clean()
