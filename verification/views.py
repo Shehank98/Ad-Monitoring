@@ -1,131 +1,191 @@
 import io
 import json
 import pandas as pd
-from datetime import datetime
 
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_POST
 
-from core.models import MonitoringData, Schedule
-from .processing import match_ads, normalize, prepare_dataframes
+from core.models import Account, BrandMapping, MonitoringData, Schedule
+from .processing import match_ads, normalize, prepare_monitoring_pool, prepare_schedule
 
+
+def _is_admin(user):
+    return user.role in ('super_admin', 'admin')
+
+
+def _account_access(user, account_id):
+    if _is_admin(user):
+        return True
+    return user.accounts.filter(id=account_id).exists()
+
+
+# ── Main tool page ─────────────────────────────────────────────────────────────
 
 @login_required
 def tool(request):
     user = request.user
-    # Build schedule and monitoring lists based on role
-    sch_qs = Schedule.objects.select_related('account')
-    mon_qs = MonitoringData.objects.all()
-    if user.role == 'planner':
-        sch_qs = sch_qs.filter(uploaded_by=user)
-    elif user.role == 'team_head':
-        sch_qs = sch_qs.filter(account__in=user.accounts.all())
+    if _is_admin(user):
+        accounts = Account.objects.all().order_by('name')
+    else:
+        accounts = user.accounts.all().order_by('name')
+    return render(request, 'verification/tool.html', {'accounts': accounts})
 
-    return render(request, 'verification/tool.html', {
-        'schedules':       sch_qs,
-        'monitoring_data': mon_qs,
-    })
+
+# ── AJAX helpers ───────────────────────────────────────────────────────────────
+
+@login_required
+def get_channels(request):
+    """Return channels that have BOTH schedule AND monitoring data for an account."""
+    account_id = request.GET.get('account_id')
+    if not account_id:
+        return JsonResponse({'ok': False, 'error': 'No account specified'})
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied'})
+
+    sch_channels = set(
+        Schedule.objects.filter(account_id=account_id).values_list('channel', flat=True)
+    )
+    mon_channels = set(
+        MonitoringData.objects.filter(account_id=account_id).values_list('channel', flat=True)
+    )
+    channels = sorted(sch_channels & mon_channels)
+    return JsonResponse({'ok': True, 'channels': channels})
 
 
 @login_required
-@require_POST
-def get_columns(request):
-    """Return column names for a given uploaded file (called via AJAX)."""
-    file_type = request.POST.get('file_type')   # 'schedule' | 'monitoring'
-    obj_id    = request.POST.get('id')
+def get_months(request):
+    """Return schedule months for a given account + channel."""
+    account_id = request.GET.get('account_id')
+    channel    = request.GET.get('channel')
+    if not account_id or not channel:
+        return JsonResponse({'ok': False, 'error': 'Missing params'})
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied'})
 
-    try:
-        if file_type == 'schedule':
-            obj  = Schedule.objects.get(pk=obj_id)
-            file = obj.file
-        else:
-            obj  = MonitoringData.objects.get(pk=obj_id)
-            file = obj.file
+    months = list(
+        Schedule.objects.filter(account_id=account_id, channel=channel)
+        .values_list('month', flat=True)
+        .distinct()
+        .order_by('month')
+    )
+    return JsonResponse({'ok': True, 'months': months})
 
-        df   = pd.read_excel(file.path)
+
+@login_required
+def get_preview(request):
+    """Return schedule + monitoring info and brand mapping status for a selection."""
+    account_id = request.GET.get('account_id')
+    channel    = request.GET.get('channel')
+    month      = request.GET.get('month')
+    if not all([account_id, channel, month]):
+        return JsonResponse({'ok': False, 'error': 'Missing params'})
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied'})
+
+    schedules = Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+    mon_data  = MonitoringData.objects.filter(account_id=account_id, channel=channel)
+    mappings  = BrandMapping.objects.filter(account_id=account_id)
+
+    return JsonResponse({
+        'ok': True,
+        'schedules': [
+            {'schedule_number': s.schedule_number,
+             'row_count':       s.row_count,
+             'filename':        s.original_filename}
+            for s in schedules
+        ],
+        'monitoring': [
+            {'data_type':   m.get_data_type_display(),
+             'start_date':  str(m.start_date),
+             'end_date':    str(m.end_date),
+             'row_count':   m.row_count}
+            for m in mon_data
+        ],
+        'mapping_count': mappings.count(),
+        'brands':        sorted(set(mappings.values_list('brand', flat=True))),
+        'ready':         schedules.exists() and mon_data.exists(),
+    })
+
+
+# ── Verification engine ────────────────────────────────────────────────────────
+
+def _run_engine(account_id, channel, month):
+    """Load files, run matching, return (matched_df, not_aired_df, extra_df)."""
+    schedules = Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+    mon_qs    = MonitoringData.objects.filter(account_id=account_id, channel=channel)
+
+    if not schedules.exists():
+        raise ValueError(f'No schedule found for "{channel}" / "{month}".')
+    if not mon_qs.exists():
+        raise ValueError(f'No monitoring data found for channel "{channel}".')
+
+    # Load + combine schedule files
+    sch_frames = []
+    for s in schedules:
+        df = pd.read_excel(s.file.path)
         df.columns = df.columns.str.strip()
-        themes = df.iloc[:, 0].unique().tolist()  # placeholder
-        return JsonResponse({'columns': df.columns.tolist(), 'ok': True})
-    except Exception as e:
-        return JsonResponse({'ok': False, 'error': str(e)})
+        sch_frames.append(df)
+    sch_df = pd.concat(sch_frames, ignore_index=True)
+
+    # Load + combine monitoring files
+    mon_files = []
+    for m in mon_qs:
+        df = pd.read_excel(m.file.path)
+        df.columns = df.columns.str.strip()
+        mon_files.append((m.data_type, df))
+
+    sch_df   = prepare_schedule(sch_df)
+    mon_pool = prepare_monitoring_pool(mon_files)
+
+    # Brand → themes map from DB
+    brand_theme_map = {}
+    for bm in BrandMapping.objects.filter(account_id=account_id):
+        brand_theme_map.setdefault(normalize(bm.brand), []).append(normalize(bm.theme))
+
+    return match_ads(sch_df, mon_pool, brand_theme_map), len(sch_df)
+
+
+def _df_to_list(df):
+    if df is None or df.empty:
+        return []
+    df = df.copy()
+    for col in df.select_dtypes(include=['datetime64[ns]', 'datetime64[ns, UTC]']).columns:
+        df[col] = df[col].dt.strftime('%Y-%m-%d')
+    return df.fillna('').to_dict('records')
 
 
 @login_required
 @require_POST
 def run_verification(request):
-    """Run the matching engine. Returns JSON results."""
+    account_id = request.POST.get('account_id')
+    channel    = request.POST.get('channel')
+    month      = request.POST.get('month')
+
+    if not all([account_id, channel, month]):
+        return JsonResponse({'ok': False, 'error': 'Missing parameters.'})
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied.'})
+
     try:
-        sch_id         = request.POST.get('schedule_id')
-        mon_id         = request.POST.get('monitoring_id')
-        theme_mapping  = json.loads(request.POST.get('theme_mapping', '[]'))
-        date_tolerance = int(request.POST.get('date_tolerance', 0))
-        data_source    = request.POST.get('data_source', 'maponline')
+        (matched_df, not_aired_df, extra_df), total_sch = _run_engine(account_id, channel, month)
 
-        # Column selections from form
-        mon_date_col  = request.POST.get('mon_date_col', 'Date')
-        sch_date_col  = request.POST.get('sch_date_col', 'Date')
-        mon_theme_col = request.POST.get('mon_theme_col', 'Advt_Theme')
-        sch_theme_col = request.POST.get('sch_theme_col', 'Brand')
-        mon_prog_col  = request.POST.get('mon_prog_col', 'Program')
-        sch_prog_col  = request.POST.get('sch_prog_col', 'Programme')
-        mon_dur_col   = request.POST.get('mon_dur_col', 'Dur')
-        sch_dur_col   = request.POST.get('sch_dur_col', 'Duration')
-        channel       = request.POST.get('channel', '')
-        start_date    = request.POST.get('start_date', '')
-        end_date      = request.POST.get('end_date', '')
+        n_matched   = len(matched_df)   if matched_df   is not None and not matched_df.empty   else 0
+        n_not_aired = len(not_aired_df) if not_aired_df is not None and not not_aired_df.empty else 0
+        n_extra     = len(extra_df)     if extra_df     is not None and not extra_df.empty     else 0
 
-        sch_obj = Schedule.objects.get(pk=sch_id)
-        mon_obj = MonitoringData.objects.get(pk=mon_id)
-
-        sch_df = pd.read_excel(sch_obj.file.path)
-        mon_df = pd.read_excel(mon_obj.file.path)
-        sch_df.columns = sch_df.columns.str.strip()
-        mon_df.columns = mon_df.columns.str.strip()
-
-        mon_df, sch_df = prepare_dataframes(
-            mon_df, sch_df, data_source,
-            mon_date_col, sch_date_col,
-            mon_theme_col, sch_theme_col,
-            mon_prog_col,  sch_prog_col,
-            mon_dur_col,   sch_dur_col,
-        )
-
-        # Filter by channel and date range
-        if channel and 'Channel' in mon_df.columns:
-            mon_df = mon_df[mon_df['Channel'] == channel]
-        if start_date:
-            mon_df = mon_df[mon_df['Date'] >= pd.Timestamp(start_date)]
-            sch_df = sch_df[sch_df['Date'] >= pd.Timestamp(start_date)]
-        if end_date:
-            mon_df = mon_df[mon_df['Date'] <= pd.Timestamp(end_date)]
-            sch_df = sch_df[sch_df['Date'] <= pd.Timestamp(end_date)]
-
-        matched, shifted, unmatched, extra = match_ads(sch_df, mon_df, theme_mapping, date_tolerance)
-
-        def _to_list(df):
-            if df.empty:
-                return []
-            # Convert Timestamps to strings
-            for col in df.select_dtypes(include=['datetime64[ns]', 'datetime64[ns, UTC]']).columns:
-                df[col] = df[col].dt.strftime('%Y-%m-%d')
-            return df.fillna('').to_dict('records')
-
-        total = len(matched) + len(shifted) + len(unmatched)
         return JsonResponse({
-            'ok':         True,
-            'matched':    _to_list(matched),
-            'shifted':    _to_list(shifted),
-            'unmatched':  _to_list(unmatched),
-            'extra':      _to_list(extra),
+            'ok':       True,
+            'matched':  _df_to_list(matched_df),
+            'not_aired': _df_to_list(not_aired_df),
+            'extra':    _df_to_list(extra_df),
             'summary': {
-                'total':      total,
-                'aired':      len(matched),
-                'shifted':    len(shifted),
-                'not_aired':  len(unmatched),
-                'extra':      len(extra),
-                'compliance': round(len(matched) / total * 100, 1) if total else 0,
+                'total_scheduled': total_sch,
+                'matched':         n_matched,
+                'not_aired':       n_not_aired,
+                'extra':           n_extra,
+                'compliance':      round(n_matched / total_sch * 100, 1) if total_sch else 0,
             },
         })
     except Exception as e:
@@ -134,19 +194,38 @@ def run_verification(request):
 
 @login_required
 @require_POST
-def get_themes(request):
-    """Return unique themes for a schedule or monitoring dataset."""
-    file_type = request.POST.get('file_type')
-    obj_id    = request.POST.get('id')
-    theme_col = request.POST.get('theme_col', 'Advt_Theme')
+def export_excel(request):
+    account_id = request.POST.get('account_id')
+    channel    = request.POST.get('channel')
+    month      = request.POST.get('month')
+
+    if not _account_access(request.user, account_id):
+        return HttpResponse('Access denied', status=403)
+
     try:
-        if file_type == 'schedule':
-            path = Schedule.objects.get(pk=obj_id).file.path
-        else:
-            path = MonitoringData.objects.get(pk=obj_id).file.path
-        df     = pd.read_excel(path)
-        df.columns = df.columns.str.strip()
-        themes = sorted(df[theme_col].dropna().unique().tolist()) if theme_col in df.columns else []
-        return JsonResponse({'ok': True, 'themes': [str(t) for t in themes]})
+        (matched_df, not_aired_df, extra_df), _ = _run_engine(account_id, channel, month)
+
+        def _clean(df):
+            if df is None or df.empty:
+                return pd.DataFrame()
+            df = df.copy()
+            for col in df.select_dtypes(include=['datetime64[ns]', 'datetime64[ns, UTC]']).columns:
+                df[col] = df[col].dt.strftime('%Y-%m-%d')
+            return df.fillna('')
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            _clean(matched_df).to_excel(writer,   sheet_name='Matched',     index=False)
+            _clean(not_aired_df).to_excel(writer, sheet_name='Not Aired',   index=False)
+            _clean(extra_df).to_excel(writer,     sheet_name='Extra Aired', index=False)
+
+        output.seek(0)
+        filename = f'verification_{channel}_{month}.xlsx'.replace(' ', '_')
+        response = HttpResponse(
+            output.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
     except Exception as e:
-        return JsonResponse({'ok': False, 'error': str(e)})
+        return HttpResponse(f'Export failed: {e}', status=500)

@@ -1,28 +1,68 @@
 """
-Core ad-matching engine – ported from original Streamlit app.
-Pure Python / pandas, no Streamlit dependencies.
+Core ad-matching engine.
+
+Simplified 3-category output: Matched, Not Aired, Extra Aired.
+- Filters SPONSORSHIP BENEFITS from schedule (keeps COMMERCIAL BENEFITS only).
+- Time-window matching: Advt_time / Ad Start must fall within Start_Time → End_Time.
+- Duration: exact numeric match.
+- Combined LMRB + MapOnline pool.
+- BrandMapping supplied as {norm_brand: [norm_theme, ...]} dict from DB.
 """
 import pandas as pd
-from datetime import timedelta
 
 
 def normalize(text) -> str:
     return str(text).lower().strip() if not pd.isna(text) else ''
 
 
+def _parse_time_to_seconds(t):
+    """Convert a time value to seconds since midnight. Returns None on failure."""
+    if t is None:
+        return None
+    try:
+        if pd.isna(t):
+            return None
+    except (TypeError, ValueError):
+        pass
+    # datetime / time objects
+    if hasattr(t, 'hour'):
+        return t.hour * 3600 + t.minute * 60 + getattr(t, 'second', 0)
+    # Excel float (fraction of a day)
+    try:
+        f = float(t)
+        if 0.0 <= f < 1.0:
+            return round(f * 86400)
+    except (ValueError, TypeError):
+        pass
+    # String HH:MM or HH:MM:SS
+    s = str(t).strip()
+    parts = s.split(':')
+    try:
+        if len(parts) >= 2:
+            h   = int(parts[0])
+            m   = int(parts[1])
+            sec = int(float(parts[2])) if len(parts) >= 3 else 0
+            return h * 3600 + m * 60 + sec
+    except (ValueError, IndexError):
+        pass
+    return None
+
+
 def _prepare_maponline(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename MapOnline columns to internal standard names."""
     df = df.copy()
     df.columns = df.columns.str.strip()
     rename = {}
     if 'Theme'    in df.columns and 'Advt_Theme' not in df.columns: rename['Theme']    = 'Advt_Theme'
     if 'Prg Date' in df.columns and 'Date'       not in df.columns: rename['Prg Date'] = 'Date'
-    if 'Prg Name' in df.columns and 'Program'    not in df.columns: rename['Prg Name'] = 'Program'
     if 'Ad Dur'   in df.columns and 'Dur'         not in df.columns: rename['Ad Dur']   = 'Dur'
+    if 'Ad Start' in df.columns and 'Advt_time'   not in df.columns: rename['Ad Start'] = 'Advt_time'
     df.rename(columns=rename, inplace=True)
     return df
 
 
 def _prepare_mediawatch(df: pd.DataFrame) -> pd.DataFrame:
+    """Build a Date column from Dd/Mn/Yr for LMRB data."""
     df = df.copy()
     df.columns = df.columns.str.strip()
     if {'Dd', 'Mn', 'Yr'}.issubset(df.columns) and 'Date' not in df.columns:
@@ -35,112 +75,157 @@ def _prepare_mediawatch(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def prepare_dataframes(mon_df, sch_df, data_source,
-                       mon_date_col, sch_date_col,
-                       mon_theme_col, sch_theme_col,
-                       mon_prog_col,  sch_prog_col,
-                       mon_dur_col,   sch_dur_col):
-    """Rename columns to internal names and parse dates."""
-    if data_source == 'maponline':
-        mon_df = _prepare_maponline(mon_df)
-    else:
-        mon_df = _prepare_mediawatch(mon_df)
-
-    mon_df.rename(columns={mon_theme_col: 'Advt_Theme',
-                             mon_prog_col:  'Program',
-                             mon_dur_col:   'Dur'}, inplace=True, errors='ignore')
-    sch_df.rename(columns={sch_theme_col:  'Advt_Theme',
-                             sch_prog_col:   'Program',
-                             sch_dur_col:    'Dur'}, inplace=True, errors='ignore')
-
-    mon_df[mon_date_col] = pd.to_datetime(mon_df[mon_date_col], errors='coerce')
-    sch_df[sch_date_col] = pd.to_datetime(sch_df[sch_date_col], errors='coerce')
-    mon_df['Date']       = mon_df[mon_date_col]
-    sch_df['Date']       = sch_df[sch_date_col]
-
-    if 'Advt_Theme' in mon_df.columns:
-        mon_df['_norm_theme'] = mon_df['Advt_Theme'].apply(normalize)
-    if 'Advt_Theme' in sch_df.columns:
-        sch_df['_norm_theme'] = sch_df['Advt_Theme'].apply(normalize)
-
-    return mon_df, sch_df
-
-
-def match_ads(sch_df, mon_df, theme_mapping, date_tolerance=0):
+def prepare_monitoring_pool(mon_files) -> pd.DataFrame:
     """
-    Match schedule rows against monitoring data.
-    Returns four lists of dicts: matched, shifted, unmatched, extra.
+    Combine LMRB + MapOnline DataFrames into a single pool.
+
+    mon_files: list of (data_type, df) where data_type is 'maponline' or 'mediawatch'.
+    Returns a unified DataFrame with standardised columns.
     """
-    # Build lookup: (norm_sch_theme, sch_dur|None) → (norm_mon_theme, mon_dur|None)
-    lookup = {}
-    for m in theme_mapping:
-        k = (normalize(m['schedule_theme']), m.get('schedule_duration'))
-        lookup[k] = (normalize(m['map_online_theme']), m.get('map_duration'))
+    parts = []
+    for data_type, df in mon_files:
+        if data_type == 'maponline':
+            df = _prepare_maponline(df)
+        else:
+            df = _prepare_mediawatch(df)
+        df = df.copy()
+        df['_source'] = data_type
+        if 'Date' in df.columns:
+            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        if 'Dur' in df.columns:
+            df['Dur'] = pd.to_numeric(df['Dur'], errors='coerce')
+        if 'Advt_time' in df.columns:
+            df['_air_secs'] = df['Advt_time'].apply(_parse_time_to_seconds)
+        else:
+            df['_air_secs'] = None
+        if 'Advt_Theme' in df.columns:
+            df['_norm_theme'] = df['Advt_Theme'].apply(normalize)
+        else:
+            df['_norm_theme'] = ''
+        parts.append(df)
 
-    matched_idx = set()
-    matched, shifted, unmatched, extra = [], [], [], []
+    if not parts:
+        return pd.DataFrame(columns=['Date', 'Advt_Theme', 'Dur', '_norm_theme', '_source', '_air_secs'])
+    return pd.concat(parts, ignore_index=True)
 
-    for sch_row in sch_df.itertuples():
-        sch_date    = sch_row.Date
-        sch_theme   = normalize(getattr(sch_row, '_norm_theme', getattr(sch_row, 'Advt_Theme', '')))
-        sch_dur     = getattr(sch_row, 'Dur', None)
-        sch_program = getattr(sch_row, 'Program', '')
 
-        # Resolve theme mapping
-        key = (sch_theme, sch_dur)
-        if key not in lookup:
-            key = (sch_theme, None)
-        if key not in lookup:
-            unmatched.append({'Scheduled_Date': sch_date, 'Theme': getattr(sch_row, 'Advt_Theme', ''),
-                               'Program': sch_program, 'Duration': sch_dur, 'Reason': 'No Theme Mapping'})
+def prepare_schedule(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Prepare the schedule DataFrame:
+    - Keep only COMMERCIAL BENEFITS rows.
+    - Parse Date, Start_Time, End_Time, Duration.
+    """
+    df = df.copy()
+    df.columns = df.columns.str.strip()
+
+    # Keep only COMMERCIAL BENEFITS
+    if 'Advertisement_Type' in df.columns:
+        mask = df['Advertisement_Type'].astype(str).str.strip().str.upper() == 'COMMERCIAL BENEFITS'
+        df = df[mask].copy()
+
+    if 'Date' in df.columns:
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+
+    df['_start_secs'] = df['Start_Time'].apply(_parse_time_to_seconds) if 'Start_Time' in df.columns else None
+    df['_end_secs']   = df['End_Time'].apply(_parse_time_to_seconds)   if 'End_Time'   in df.columns else None
+    df['_dur']        = pd.to_numeric(df['Duration'], errors='coerce') if 'Duration'   in df.columns else None
+    df['_norm_brand'] = df['Brand'].apply(normalize)                   if 'Brand'      in df.columns else ''
+
+    return df.reset_index(drop=True)
+
+
+def match_ads(sch_df: pd.DataFrame, mon_pool: pd.DataFrame, brand_theme_map: dict):
+    """
+    Match schedule rows against monitoring pool using brand mapping.
+
+    brand_theme_map: {norm_brand: [norm_theme1, norm_theme2, ...]}
+
+    Matching criteria (all must pass):
+      1. Theme: monitoring _norm_theme in brand's mapped themes list.
+      2. Date:  exact calendar date match.
+      3. Duration: exact numeric match (if both sides have it).
+      4. Time window: monitoring _air_secs within [_start_secs, _end_secs] (if both sides have it).
+
+    Returns (matched_df, not_aired_df, extra_df).
+    """
+    matched_idx  = set()
+    matched_rows = []
+    not_aired_rows = []
+
+    for _, row in sch_df.iterrows():
+        sch_date       = row.get('Date')
+        sch_brand_norm = row.get('_norm_brand', '')
+        sch_brand      = row.get('Brand', sch_brand_norm)
+        sch_dur        = row.get('_dur')
+        sch_start      = row.get('_start_secs')
+        sch_end        = row.get('_end_secs')
+
+        themes = brand_theme_map.get(sch_brand_norm, [])
+        if not themes:
+            not_aired_rows.append({
+                'Brand':          sch_brand,
+                'Scheduled_Date': sch_date,
+                'Start_Time':     row.get('Start_Time', ''),
+                'End_Time':       row.get('End_Time', ''),
+                'Duration':       row.get('Duration', sch_dur),
+                'Reason':         'No Brand Mapping',
+            })
             continue
 
-        mon_theme, mon_dur = lookup[key]
-        date_min = sch_date - timedelta(days=date_tolerance)
-        date_max = sch_date + timedelta(days=date_tolerance)
+        # ── Build candidate set ───────────────────────────────────
+        theme_mask = mon_pool['_norm_theme'].isin(themes)
+        date_mask  = mon_pool['Date'] == sch_date
+        used_mask  = ~mon_pool.index.isin(matched_idx)
+        candidates = mon_pool[theme_mask & date_mask & used_mask]
 
-        # Filter by theme
-        theme_mask = mon_df['_norm_theme'] == mon_theme
-        tm = mon_df[theme_mask]
-        if mon_dur is not None and 'Dur' in tm.columns:
-            tm = tm[tm['Dur'] == mon_dur]
+        # Duration filter (exact)
+        if pd.notna(sch_dur) and 'Dur' in candidates.columns:
+            candidates = candidates[candidates['Dur'] == sch_dur]
 
-        # Match within date window
-        in_window = tm[(tm['Date'] >= date_min) & (tm['Date'] <= date_max)]
-        in_window = in_window[~in_window.index.isin(matched_idx)]
+        # Time-window filter
+        if (sch_start is not None and sch_end is not None
+                and '_air_secs' in candidates.columns
+                and candidates['_air_secs'].notna().any()):
+            time_ok    = (candidates['_air_secs'] >= sch_start) & (candidates['_air_secs'] <= sch_end)
+            candidates = candidates[time_ok]
 
-        if not in_window.empty:
-            best = in_window.index[0]
-            matched_idx.add(best)
-            row = mon_df.loc[best]
-            matched.append({'Scheduled_Date': sch_date, 'Aired_Date': row['Date'],
-                             'Program': row.get('Program', ''), 'Map_Theme': row.get('Advt_Theme', ''),
-                             'Duration': row.get('Dur', sch_dur), 'Status': 'Aired as Scheduled'})
+        if not candidates.empty:
+            best_idx = candidates.index[0]
+            matched_idx.add(best_idx)
+            mon_row = mon_pool.loc[best_idx]
+            matched_rows.append({
+                'Brand':          sch_brand,
+                'Theme':          mon_row.get('Advt_Theme', ''),
+                'Scheduled_Date': sch_date,
+                'Aired_Date':     mon_row.get('Date', ''),
+                'Air_Time':       mon_row.get('Advt_time', ''),
+                'Duration':       mon_row.get('Dur', sch_dur),
+                'Source':         mon_row.get('_source', ''),
+            })
         else:
-            # Check other dates (shifted)
-            other = tm[~tm.index.isin(matched_idx) &
-                       ~((tm['Date'] >= date_min) & (tm['Date'] <= date_max))]
-            if not other.empty:
-                best = other.index[0]
-                matched_idx.add(best)
-                row = mon_df.loc[best]
-                shifted.append({'Scheduled_Date': sch_date, 'Aired_Date': row['Date'],
-                                 'Program': row.get('Program', ''), 'Map_Theme': row.get('Advt_Theme', ''),
-                                 'Duration': row.get('Dur', sch_dur),
-                                 'Days_Difference': (row['Date'] - sch_date).days})
-            else:
-                unmatched.append({'Scheduled_Date': sch_date, 'Theme': getattr(sch_row, 'Advt_Theme', ''),
-                                   'Program': sch_program, 'Duration': sch_dur, 'Reason': 'Not Aired'})
+            not_aired_rows.append({
+                'Brand':          sch_brand,
+                'Scheduled_Date': sch_date,
+                'Start_Time':     row.get('Start_Time', ''),
+                'End_Time':       row.get('End_Time', ''),
+                'Duration':       row.get('Duration', sch_dur),
+                'Reason':         'Not Found in Monitoring',
+            })
 
-    # Extra aired
-    for idx, row in mon_df.iterrows():
+    # Extra aired: monitoring rows not consumed by any schedule row
+    extra_rows = []
+    for idx, mon_row in mon_pool.iterrows():
         if idx not in matched_idx:
-            extra.append({'Date': row['Date'], 'Program': row.get('Program', ''),
-                          'Map_Theme': row.get('Advt_Theme', ''), 'Duration': row.get('Dur', '')})
+            extra_rows.append({
+                'Theme':    mon_row.get('Advt_Theme', ''),
+                'Date':     mon_row.get('Date', ''),
+                'Air_Time': mon_row.get('Advt_time', ''),
+                'Duration': mon_row.get('Dur', ''),
+                'Source':   mon_row.get('_source', ''),
+            })
 
     return (
-        pd.DataFrame(matched),
-        pd.DataFrame(shifted),
-        pd.DataFrame(unmatched),
-        pd.DataFrame(extra),
+        pd.DataFrame(matched_rows)   if matched_rows   else pd.DataFrame(),
+        pd.DataFrame(not_aired_rows) if not_aired_rows else pd.DataFrame(),
+        pd.DataFrame(extra_rows)     if extra_rows     else pd.DataFrame(),
     )

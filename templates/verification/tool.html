@@ -1,398 +1,340 @@
 {% extends 'base.html' %}
 {% block title %}Verify Ads{% endblock %}
 {% block page_title %}Verify Ads{% endblock %}
-{% block page_subtitle %}Match ad schedules against monitoring data{% endblock %}
+{% block page_subtitle %}Match planned ad schedules against MapOnline and LMRB monitoring data{% endblock %}
+
+{% block extra_head %}
+<style>
+  .step-card { background:#fff; border-radius:1rem; border:1px solid #f1f5f9; box-shadow:0 1px 3px rgba(0,0,0,.05); padding:1.5rem; }
+  .step-num  { display:inline-flex; align-items:center; justify-content:center; width:1.5rem; height:1.5rem;
+               border-radius:9999px; background:#2563eb; color:#fff; font-size:.7rem; font-weight:700; flex-shrink:0; }
+  .tab-btn {
+    padding:.625rem 1.1rem; font-size:.8rem; font-weight:600; color:#64748b;
+    border-bottom:2px solid transparent; white-space:nowrap; transition:all .15s;
+  }
+  .tab-btn:hover { color:#1e40af; background:#f1f5f9; }
+  .tab-btn.active { color:#2563eb; border-bottom-color:#2563eb; background:white; }
+  .stat-card { background:#fff; border-radius:.875rem; border:1px solid #f1f5f9; box-shadow:0 1px 3px rgba(0,0,0,.05); padding:1rem 1.25rem; }
+</style>
+{% endblock %}
 
 {% block content %}
-<div id="app" class="space-y-5">
+<div class="space-y-5">
 
-  <!-- ── Step 1: Select data ────────────────────────────────── -->
-  <div class="card">
-    <h2 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
-      <span class="w-6 h-6 bg-blue-600 text-white rounded-full text-xs flex items-center justify-center font-bold">1</span>
-      Select Data
-    </h2>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-      <!-- Schedule -->
-      <div>
-        <label class="block text-sm font-semibold text-slate-700 mb-1.5">Schedule</label>
-        <select id="schedule-select" class="input-field" onchange="onScheduleChange()">
-          <option value="">-- Select a schedule --</option>
-          {% for s in schedules %}
-            <option value="{{ s.id }}" data-rows="{{ s.row_count }}">
-              {{ s.account.name }} | {{ s.channel }} | {{ s.month }} | #{{ s.schedule_number }}
-            </option>
-          {% endfor %}
-        </select>
-        <p id="sch-rows" class="mt-1 text-xs text-slate-400 hidden"></p>
-      </div>
-
-      <!-- Monitoring data -->
-      <div>
-        <label class="block text-sm font-semibold text-slate-700 mb-1.5">
-          Monitoring Data
-          <span class="font-normal text-slate-400">(MapOnline or MediaWatch)</span>
-        </label>
-        <select id="monitoring-select" class="input-field" onchange="onMonitoringChange()">
-          <option value="">-- Select a dataset --</option>
-          {% for d in monitoring_data %}
-            <option value="{{ d.id }}" data-type="{{ d.data_type }}" data-rows="{{ d.row_count }}">
-              {{ d.get_data_type_display }} | {{ d.channel }} | {{ d.start_date }} → {{ d.end_date }}
-            </option>
-          {% endfor %}
-        </select>
-        <p id="mon-rows" class="mt-1 text-xs text-slate-400 hidden"></p>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Step 2: Column mapping ─────────────────────────────── -->
-  <div class="card" id="step2" style="display:none">
-    <h2 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
-      <span class="w-6 h-6 bg-blue-600 text-white rounded-full text-xs flex items-center justify-center font-bold">2</span>
-      Column Mapping
-    </h2>
-    <div class="grid grid-cols-2 gap-6">
-      <div class="space-y-3">
-        <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">Schedule Columns</p>
-        <div><label class="label-sm">Theme / Brand column</label>
-          <select id="sch-theme-col" class="input-field text-sm" onchange="loadSchThemes()"></select></div>
-        <div><label class="label-sm">Programme column</label>
-          <select id="sch-prog-col" class="input-field text-sm"></select></div>
-        <div><label class="label-sm">Duration column</label>
-          <select id="sch-dur-col" class="input-field text-sm"></select></div>
-        <div><label class="label-sm">Date column</label>
-          <select id="sch-date-col" class="input-field text-sm"></select></div>
-      </div>
-      <div class="space-y-3">
-        <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">Monitoring Columns</p>
-        <div><label class="label-sm">Theme column</label>
-          <select id="mon-theme-col" class="input-field text-sm" onchange="loadMonThemes()"></select></div>
-        <div><label class="label-sm">Programme column</label>
-          <select id="mon-prog-col" class="input-field text-sm"></select></div>
-        <div><label class="label-sm">Duration column</label>
-          <select id="mon-dur-col" class="input-field text-sm"></select></div>
-        <div><label class="label-sm">Date column</label>
-          <select id="mon-date-col" class="input-field text-sm"></select></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Step 3: Channel + date filter ─────────────────────── -->
-  <div class="card" id="step3" style="display:none">
-    <h2 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
-      <span class="w-6 h-6 bg-blue-600 text-white rounded-full text-xs flex items-center justify-center font-bold">3</span>
-      Filters
+  <!-- ── Step 1: Select Account → Channel → Month ───────────── -->
+  <div class="step-card">
+    <h2 class="font-bold text-slate-800 mb-5 flex items-center gap-2 text-sm">
+      <span class="step-num">1</span> Select Dataset
     </h2>
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      <div><label class="label-sm">Channel (optional)</label>
-        <input id="filter-channel" type="text" placeholder="e.g. Sirasa TV" class="input-field"/></div>
-      <div><label class="label-sm">Start Date</label>
-        <input id="filter-start" type="date" class="input-field"/></div>
-      <div><label class="label-sm">End Date</label>
-        <input id="filter-end" type="date" class="input-field"/></div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+          <i class="fa-solid fa-building mr-1 text-slate-400"></i> Account
+        </label>
+        <select id="sel-account" class="select-field" onchange="onAccountChange()">
+          <option value="">Select account…</option>
+          {% for acc in accounts %}
+            <option value="{{ acc.id }}">{{ acc.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+          <i class="fa-solid fa-tv mr-1 text-slate-400"></i> Channel
+        </label>
+        <select id="sel-channel" class="select-field" onchange="onChannelChange()" disabled>
+          <option value="">Select account first…</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+          <i class="fa-regular fa-calendar mr-1 text-slate-400"></i> Month
+        </label>
+        <select id="sel-month" class="select-field" onchange="onMonthChange()" disabled>
+          <option value="">Select channel first…</option>
+        </select>
+      </div>
+    </div>
+    <div id="step1-loading" class="hidden mt-3 text-xs text-slate-400 flex items-center gap-2">
+      <i class="fa-solid fa-spinner fa-spin"></i> Loading…
     </div>
   </div>
 
-  <!-- ── Step 4: Theme mapping ──────────────────────────────── -->
-  <div class="card" id="step4" style="display:none">
-    <h2 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
-      <span class="w-6 h-6 bg-blue-600 text-white rounded-full text-xs flex items-center justify-center font-bold">4</span>
-      Theme Mapping
+  <!-- ── Step 2: Data Preview ───────────────────────────────── -->
+  <div class="step-card" id="step2" style="display:none">
+    <h2 class="font-bold text-slate-800 mb-5 flex items-center gap-2 text-sm">
+      <span class="step-num">2</span> Data Preview
     </h2>
-    <p class="text-sm text-slate-500 mb-4">
-      Map each schedule brand/theme to the corresponding theme in the monitoring data.
-      Themes often have different names across documents.
-    </p>
-
-    <div class="grid grid-cols-2 gap-4 mb-4">
-      <div>
-        <label class="label-sm">Schedule Theme</label>
-        <select id="sel-sch-theme" class="input-field text-sm"></select>
-      </div>
-      <div>
-        <label class="label-sm">Monitoring Theme</label>
-        <select id="sel-mon-theme" class="input-field text-sm"></select>
-      </div>
-    </div>
-
-    <button onclick="addMapping()" class="btn-secondary mb-4">
-      <i class="fa-solid fa-plus"></i> Add Mapping
-    </button>
-
-    <div id="mapping-table-wrap" class="hidden">
-      <table class="data-table border border-slate-200 rounded-xl overflow-hidden">
-        <thead><tr><th>Schedule Theme</th><th>Monitoring Theme</th><th></th></tr></thead>
-        <tbody id="mapping-body"></tbody>
-      </table>
-    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4" id="preview-grid"></div>
   </div>
 
-  <!-- ── Step 5: Run ────────────────────────────────────────── -->
-  <div class="card" id="step5" style="display:none">
-    <h2 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
-      <span class="w-6 h-6 bg-blue-600 text-white rounded-full text-xs flex items-center justify-center font-bold">5</span>
-      Run Verification
+  <!-- ── Step 3: Run ────────────────────────────────────────── -->
+  <div class="step-card" id="step3" style="display:none">
+    <h2 class="font-bold text-slate-800 mb-4 flex items-center gap-2 text-sm">
+      <span class="step-num">3</span> Run Verification
     </h2>
-    <div class="flex items-center gap-6 mb-4">
-      <div>
-        <label class="label-sm">Date Tolerance (days)</label>
-        <input id="date-tolerance" type="number" min="0" max="7" value="0" class="input-field w-24"/>
-        <p class="text-xs text-slate-400 mt-1">Allow ±N days difference for date matching</p>
-      </div>
+    <div class="flex flex-wrap items-center gap-3">
+      <button onclick="runVerification()" id="run-btn" class="btn-primary">
+        <i class="fa-solid fa-play"></i> Run Verification
+      </button>
+      <a href="/dashboard/brand-mappings/" target="_blank" class="btn-secondary text-xs">
+        <i class="fa-solid fa-map"></i> Manage Brand Mappings
+      </a>
+      <p class="text-xs text-slate-400">
+        <i class="fa-solid fa-circle-info mr-1"></i>
+        Brand mappings must be configured before running.
+      </p>
     </div>
-    <button onclick="runVerification()" id="run-btn" class="btn-primary">
-      <i class="fa-solid fa-play"></i> Run Verification
-    </button>
   </div>
 
   <!-- ── Results ────────────────────────────────────────────── -->
   <div id="results-section" style="display:none">
 
-    <!-- Summary cards -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5" id="summary-cards"></div>
 
-    <!-- Tabs -->
-    <div class="card overflow-hidden p-0">
+    <div class="flex justify-end mb-3">
+      <button onclick="exportExcel()" class="btn-secondary text-xs">
+        <i class="fa-solid fa-file-excel text-emerald-600"></i> Export to Excel
+      </button>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
       <div class="flex border-b border-slate-200 bg-slate-50 overflow-x-auto">
-        <button onclick="showTab('matched')"   id="tab-matched"   class="tab-btn active">✅ Aired</button>
-        <button onclick="showTab('shifted')"   id="tab-shifted"   class="tab-btn">⏰ Shifted</button>
-        <button onclick="showTab('unmatched')" id="tab-unmatched" class="tab-btn">❌ Not Aired</button>
-        <button onclick="showTab('extra')"     id="tab-extra"     class="tab-btn">➕ Extra Aired</button>
+        <button onclick="showTab('matched')"   id="tab-matched"   class="tab-btn active">Matched</button>
+        <button onclick="showTab('not_aired')" id="tab-not_aired" class="tab-btn">Not Aired</button>
+        <button onclick="showTab('extra')"     id="tab-extra"     class="tab-btn">Extra Aired</button>
       </div>
-      <div id="tab-content" class="overflow-x-auto p-0"></div>
+      <div id="tab-content" class="overflow-x-auto"></div>
     </div>
   </div>
 
-</div><!-- #app -->
-{% endblock %}
+</div>
 
-{% block extra_head %}
-<style>
-  .label-sm { display:block; font-size:.75rem; font-weight:600; color:#64748b; margin-bottom:.375rem; }
-  .tab-btn {
-    padding:.75rem 1.25rem; font-size:.8rem; font-weight:600; color:#64748b;
-    border-bottom:2px solid transparent; white-space:nowrap; transition:all .15s;
-  }
-  .tab-btn:hover { color:#1e40af; background:#f1f5f9; }
-  .tab-btn.active { color:#2563eb; border-bottom-color:#2563eb; background:white; }
-</style>
+<!-- Hidden export form -->
+<form id="export-form" method="post" action="/verify/export/" style="display:none">
+  {% csrf_token %}
+  <input type="hidden" name="account_id" id="exp-account">
+  <input type="hidden" name="channel"    id="exp-channel">
+  <input type="hidden" name="month"      id="exp-month">
+</form>
 {% endblock %}
 
 {% block extra_js %}
 <script>
   const CSRF = '{{ csrf_token }}';
-  let schCols=[], monCols=[], schThemes=[], monThemes=[], mappings=[], results={};
-  let currentDataType = 'maponline';
+  let results = {};
 
-  // ── Data selection ──────────────────────────────────────────
-  async function onScheduleChange() {
-    const id = document.getElementById('schedule-select').value;
-    if (!id) return;
-    const opt = document.querySelector(`#schedule-select option[value="${id}"]`);
-    document.getElementById('sch-rows').textContent = `${opt.dataset.rows} rows`;
-    document.getElementById('sch-rows').classList.remove('hidden');
-    await loadColumns('schedule', id, 'sch');
-    checkStep2();
+  // ── Step 1 ────────────────────────────────────────────────────
+  async function onAccountChange() {
+    const accountId = document.getElementById('sel-account').value;
+    const chSel = document.getElementById('sel-channel');
+    const moSel = document.getElementById('sel-month');
+    chSel.innerHTML = '<option value="">Loading channels…</option>';
+    chSel.disabled  = true;
+    moSel.innerHTML = '<option value="">Select channel first…</option>';
+    moSel.disabled  = true;
+    hideBelow();
+    if (!accountId) { chSel.innerHTML = '<option value="">Select account first…</option>'; return; }
+    setLoading(true);
+    try {
+      const res  = await fetch(`/verify/channels/?account_id=${accountId}`);
+      const data = await res.json();
+      if (!data.ok) { alert('Error: ' + data.error); return; }
+      if (!data.channels.length) {
+        chSel.innerHTML = '<option value="">No overlapping data — upload schedules and monitoring first</option>';
+        return;
+      }
+      chSel.innerHTML = '<option value="">Select channel…</option>' +
+        data.channels.map(c => `<option value="${c}">${c}</option>`).join('');
+      chSel.disabled = false;
+    } finally { setLoading(false); }
   }
 
-  async function onMonitoringChange() {
-    const id  = document.getElementById('monitoring-select').value;
-    if (!id) return;
-    const opt = document.querySelector(`#monitoring-select option[value="${id}"]`);
-    currentDataType = opt.dataset.type;
-    document.getElementById('mon-rows').textContent = `${opt.dataset.rows} rows`;
-    document.getElementById('mon-rows').classList.remove('hidden');
-    await loadColumns('monitoring', id, 'mon');
-    checkStep2();
+  async function onChannelChange() {
+    const accountId = document.getElementById('sel-account').value;
+    const channel   = document.getElementById('sel-channel').value;
+    const moSel     = document.getElementById('sel-month');
+    moSel.innerHTML = '<option value="">Loading months…</option>';
+    moSel.disabled  = true;
+    hideBelow();
+    if (!channel) return;
+    setLoading(true);
+    try {
+      const res  = await fetch(`/verify/months/?account_id=${accountId}&channel=${encodeURIComponent(channel)}`);
+      const data = await res.json();
+      if (!data.ok) { alert('Error: ' + data.error); return; }
+      moSel.innerHTML = '<option value="">Select month…</option>' +
+        data.months.map(m => `<option value="${m}">${m}</option>`).join('');
+      moSel.disabled = false;
+    } finally { setLoading(false); }
   }
 
-  async function loadColumns(fileType, id, prefix) {
-    const fd = new FormData();
-    fd.append('file_type', fileType); fd.append('id', id); fd.append('csrfmiddlewaretoken', CSRF);
-    const res = await fetch('/verify/columns/', {method:'POST', body:fd});
-    const data = await res.json();
-    if (!data.ok) { alert('Error loading columns: ' + data.error); return; }
-    const cols = data.columns;
-    if (prefix === 'sch') schCols = cols;
-    else monCols = cols;
-    fillSelects(prefix, cols);
+  async function onMonthChange() {
+    const month = document.getElementById('sel-month').value;
+    if (!month) { hideBelow(); return; }
+    await loadPreview();
   }
 
-  function fillSelects(prefix, cols) {
-    const guesses = {
-      'sch': { theme:['Brand','Advt_Theme','Theme','Product'], prog:['Programme','Program','Prg Name'],
-               dur:['Duration','Dur','Ad Dur'], date:['Date','Prg Date'] },
-      'mon': { theme:['Advt_Theme','Theme','Product'], prog:['Program','Prg Name','Programme'],
-               dur:['Dur','Ad Dur','Duration'], date:['Date','Prg Date'] }
-    };
-    const g = guesses[prefix];
-    ['theme','prog','dur','date'].forEach(type => {
-      const sel = document.getElementById(`${prefix}-${type}-col`);
-      sel.innerHTML = cols.map(c => `<option value="${c}">${c}</option>`).join('');
-      const best = g[type].find(h => cols.includes(h));
-      if (best) sel.value = best;
-    });
+  // ── Step 2 ────────────────────────────────────────────────────
+  async function loadPreview() {
+    const accountId = document.getElementById('sel-account').value;
+    const channel   = document.getElementById('sel-channel').value;
+    const month     = document.getElementById('sel-month').value;
+    setLoading(true);
+    try {
+      const res  = await fetch(`/verify/preview/?account_id=${accountId}&channel=${encodeURIComponent(channel)}&month=${encodeURIComponent(month)}`);
+      const data = await res.json();
+      if (!data.ok) { alert('Error: ' + data.error); return; }
+      renderPreview(data);
+    } finally { setLoading(false); }
   }
 
-  function checkStep2() {
-    if (document.getElementById('schedule-select').value &&
-        document.getElementById('monitoring-select').value) {
-      document.getElementById('step2').style.display = '';
-      document.getElementById('step3').style.display = '';
-      document.getElementById('step4').style.display = '';
-      document.getElementById('step5').style.display = '';
-      loadSchThemes(); loadMonThemes();
-    }
+  function renderPreview(data) {
+    const schRows = data.schedules.length
+      ? data.schedules.map(s =>
+          `<div class="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
+            <span class="text-xs text-slate-600 truncate mr-2">#${s.schedule_number} · ${s.filename}</span>
+            <span class="text-xs font-semibold text-slate-800 flex-shrink-0">${s.row_count.toLocaleString()} rows</span>
+          </div>`).join('')
+      : '<p class="text-xs text-red-500">No schedule found for this month.</p>';
+
+    const monRows = data.monitoring.length
+      ? data.monitoring.map(m =>
+          `<div class="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
+            <span class="text-xs text-slate-600">${m.data_type} · ${m.start_date} → ${m.end_date}</span>
+            <span class="text-xs font-semibold text-slate-800 flex-shrink-0">${m.row_count.toLocaleString()} rows</span>
+          </div>`).join('')
+      : '<p class="text-xs text-red-500">No monitoring data found for this channel.</p>';
+
+    const mapOk  = data.mapping_count > 0;
+    const mapClr = mapOk ? 'emerald' : 'amber';
+    const mapMsg = mapOk
+      ? `${data.mapping_count} mapping${data.mapping_count !== 1 ? 's' : ''} ready` +
+        (data.brands.length ? `<br><span class="opacity-75">${data.brands.join(', ')}</span>` : '')
+      : 'No brand mappings yet — <a href="/dashboard/brand-mappings/" target="_blank" class="underline font-semibold">add mappings →</a>';
+
+    document.getElementById('preview-grid').innerHTML = `
+      <div class="p-4 bg-slate-50 rounded-xl border border-slate-200">
+        <p class="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+          <i class="fa-solid fa-calendar-days text-blue-500"></i> Schedule Files
+        </p>${schRows}
+      </div>
+      <div class="p-4 bg-slate-50 rounded-xl border border-slate-200">
+        <p class="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+          <i class="fa-solid fa-chart-bar text-purple-500"></i> Monitoring Data
+        </p>${monRows}
+      </div>
+      <div class="p-4 bg-${mapClr}-50 rounded-xl border border-${mapClr}-200">
+        <p class="text-xs font-bold text-${mapClr}-700 mb-2 flex items-center gap-1.5">
+          <i class="fa-solid fa-${mapOk ? 'check-circle' : 'triangle-exclamation'} text-${mapClr}-500"></i>
+          Brand Mappings
+        </p>
+        <p class="text-xs text-${mapClr}-700">${mapMsg}</p>
+      </div>`;
+
+    document.getElementById('step2').style.display = '';
+    document.getElementById('step3').style.display = '';
+    document.getElementById('results-section').style.display = 'none';
   }
 
-  // ── Theme loading ───────────────────────────────────────────
-  async function loadSchThemes() {
-    const id = document.getElementById('schedule-select').value;
-    const col = document.getElementById('sch-theme-col').value;
-    if (!id || !col) return;
-    const fd = new FormData();
-    fd.append('file_type','schedule'); fd.append('id',id); fd.append('theme_col',col); fd.append('csrfmiddlewaretoken',CSRF);
-    const res = await fetch('/verify/themes/', {method:'POST', body:fd});
-    const data = await res.json();
-    if (data.ok) { schThemes = data.themes; fillThemeSelect('sel-sch-theme', schThemes); }
+  function hideBelow() {
+    document.getElementById('step2').style.display = 'none';
+    document.getElementById('step3').style.display = 'none';
+    document.getElementById('results-section').style.display = 'none';
   }
 
-  async function loadMonThemes() {
-    const id = document.getElementById('monitoring-select').value;
-    const col = document.getElementById('mon-theme-col').value;
-    if (!id || !col) return;
-    const fd = new FormData();
-    fd.append('file_type','monitoring'); fd.append('id',id); fd.append('theme_col',col); fd.append('csrfmiddlewaretoken',CSRF);
-    const res = await fetch('/verify/themes/', {method:'POST', body:fd});
-    const data = await res.json();
-    if (data.ok) { monThemes = data.themes; fillThemeSelect('sel-mon-theme', monThemes); }
-  }
-
-  function fillThemeSelect(id, themes) {
-    const sel = document.getElementById(id);
-    sel.innerHTML = '<option value="">-- Select theme --</option>' +
-      themes.map(t => `<option value="${t}">${t}</option>`).join('');
-  }
-
-  // ── Mapping ─────────────────────────────────────────────────
-  function addMapping() {
-    const st = document.getElementById('sel-sch-theme').value;
-    const mt = document.getElementById('sel-mon-theme').value;
-    if (!st || !mt) { alert('Select both themes.'); return; }
-    if (mappings.find(m => m.schedule_theme===st && m.map_online_theme===mt)) {
-      alert('Mapping already exists.'); return;
-    }
-    mappings.push({schedule_theme:st, map_online_theme:mt});
-    renderMappings();
-  }
-
-  function removeMapping(i) { mappings.splice(i,1); renderMappings(); }
-
-  function renderMappings() {
-    const body = document.getElementById('mapping-body');
-    const wrap = document.getElementById('mapping-table-wrap');
-    if (!mappings.length) { wrap.classList.add('hidden'); body.innerHTML=''; return; }
-    wrap.classList.remove('hidden');
-    body.innerHTML = mappings.map((m,i) => `
-      <tr>
-        <td class="font-medium">${m.schedule_theme}</td>
-        <td>${m.map_online_theme}</td>
-        <td><button onclick="removeMapping(${i})" class="text-red-500 hover:text-red-700 text-xs">
-          <i class="fa-solid fa-xmark"></i></button></td>
-      </tr>`).join('');
-  }
-
-  // ── Run verification ────────────────────────────────────────
+  // ── Step 3: Run ───────────────────────────────────────────────
   async function runVerification() {
-    if (!mappings.length) { alert('Add at least one theme mapping.'); return; }
-    const btn = document.getElementById('run-btn');
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing…';
-    btn.disabled = true;
+    const accountId = document.getElementById('sel-account').value;
+    const channel   = document.getElementById('sel-channel').value;
+    const month     = document.getElementById('sel-month').value;
+    const btn       = document.getElementById('run-btn');
+    btn.innerHTML   = '<i class="fa-solid fa-spinner fa-spin"></i> Running…';
+    btn.disabled    = true;
 
     const fd = new FormData();
     fd.append('csrfmiddlewaretoken', CSRF);
-    fd.append('schedule_id',    document.getElementById('schedule-select').value);
-    fd.append('monitoring_id',  document.getElementById('monitoring-select').value);
-    fd.append('theme_mapping',  JSON.stringify(mappings));
-    fd.append('date_tolerance', document.getElementById('date-tolerance').value);
-    fd.append('data_source',    currentDataType);
-    fd.append('mon_date_col',   document.getElementById('mon-date-col').value);
-    fd.append('sch_date_col',   document.getElementById('sch-date-col').value);
-    fd.append('mon_theme_col',  document.getElementById('mon-theme-col').value);
-    fd.append('sch_theme_col',  document.getElementById('sch-theme-col').value);
-    fd.append('mon_prog_col',   document.getElementById('mon-prog-col').value);
-    fd.append('sch_prog_col',   document.getElementById('sch-prog-col').value);
-    fd.append('mon_dur_col',    document.getElementById('mon-dur-col').value);
-    fd.append('sch_dur_col',    document.getElementById('sch-dur-col').value);
-    fd.append('channel',        document.getElementById('filter-channel').value);
-    fd.append('start_date',     document.getElementById('filter-start').value);
-    fd.append('end_date',       document.getElementById('filter-end').value);
+    fd.append('account_id', accountId);
+    fd.append('channel',    channel);
+    fd.append('month',      month);
 
     try {
-      const res  = await fetch('/verify/run/', {method:'POST', body:fd});
+      const res  = await fetch('/verify/run/', {method: 'POST', body: fd});
       const data = await res.json();
-      if (!data.ok) { alert('Error: ' + data.error); return; }
+      if (!data.ok) { alert('Verification failed:\n' + data.error); return; }
       results = data;
       renderResults(data);
     } finally {
       btn.innerHTML = '<i class="fa-solid fa-play"></i> Run Verification';
-      btn.disabled = false;
+      btn.disabled  = false;
     }
   }
 
+  // ── Results ───────────────────────────────────────────────────
   function renderResults(data) {
-    const s = data.summary;
-    document.getElementById('results-section').style.display = '';
+    const s   = data.summary;
+    const sec = document.getElementById('results-section');
+    sec.style.display = '';
+
     document.getElementById('summary-cards').innerHTML = `
-      <div class="card text-center border-l-4 border-blue-500">
-        <p class="text-3xl font-extrabold text-blue-600">${s.total}</p>
+      <div class="stat-card border-l-4 border-blue-500">
+        <p class="text-2xl font-extrabold text-blue-600">${s.total_scheduled.toLocaleString()}</p>
         <p class="text-xs text-slate-500 font-medium mt-1">Scheduled</p>
       </div>
-      <div class="card text-center border-l-4 border-emerald-500">
-        <p class="text-3xl font-extrabold text-emerald-600">${s.aired}</p>
-        <p class="text-xs text-slate-500 font-medium mt-1">Aired as Scheduled</p>
-      </div>
-      <div class="card text-center border-l-4 border-amber-500">
-        <p class="text-3xl font-extrabold text-amber-600">${s.shifted}</p>
-        <p class="text-xs text-slate-500 font-medium mt-1">Shifted Date</p>
-      </div>
-      <div class="card text-center border-l-4 border-red-500">
-        <p class="text-3xl font-extrabold text-red-600">${s.not_aired}</p>
-        <p class="text-xs text-slate-500 font-medium mt-1">Not Aired
-          <span class="block text-slate-400">${s.compliance}% compliance</span>
+      <div class="stat-card border-l-4 border-emerald-500">
+        <p class="text-2xl font-extrabold text-emerald-600">${s.matched.toLocaleString()}</p>
+        <p class="text-xs text-slate-500 font-medium mt-1">Matched
+          <span class="block text-emerald-500 font-bold text-sm mt-0.5">${s.compliance}% compliance</span>
         </p>
+      </div>
+      <div class="stat-card border-l-4 border-red-500">
+        <p class="text-2xl font-extrabold text-red-600">${s.not_aired.toLocaleString()}</p>
+        <p class="text-xs text-slate-500 font-medium mt-1">Not Aired</p>
+      </div>
+      <div class="stat-card border-l-4 border-amber-400">
+        <p class="text-2xl font-extrabold text-amber-500">${s.extra.toLocaleString()}</p>
+        <p class="text-xs text-slate-500 font-medium mt-1">Extra Aired</p>
       </div>`;
 
-    // Update tab labels
-    document.getElementById('tab-matched').textContent   = `✅ Aired (${s.aired})`;
-    document.getElementById('tab-shifted').textContent   = `⏰ Shifted (${s.shifted})`;
-    document.getElementById('tab-unmatched').textContent = `❌ Not Aired (${s.not_aired})`;
+    document.getElementById('tab-matched').textContent   = `✅ Matched (${s.matched})`;
+    document.getElementById('tab-not_aired').textContent = `❌ Not Aired (${s.not_aired})`;
     document.getElementById('tab-extra').textContent     = `➕ Extra (${s.extra})`;
     showTab('matched');
-
-    document.getElementById('results-section').scrollIntoView({behavior:'smooth'});
+    sec.scrollIntoView({behavior: 'smooth', block: 'start'});
   }
 
   function showTab(name) {
-    ['matched','shifted','unmatched','extra'].forEach(t => {
-      document.getElementById('tab-'+t).classList.toggle('active', t===name);
+    ['matched', 'not_aired', 'extra'].forEach(t => {
+      document.getElementById('tab-' + t).classList.toggle('active', t === name);
     });
-    const rows = results[name] || [];
+    const rows    = results[name] || [];
     const content = document.getElementById('tab-content');
     if (!rows.length) {
-      content.innerHTML = '<p class="text-center text-slate-400 py-12">No records in this category.</p>';
+      content.innerHTML = '<p class="text-center text-slate-400 py-14 text-sm">No records in this category.</p>';
       return;
     }
     const cols = Object.keys(rows[0]);
     content.innerHTML = `
       <table class="data-table">
-        <thead><tr>${cols.map(c=>`<th>${c.replace(/_/g,' ')}</th>`).join('')}</tr></thead>
-        <tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${r[c]??''}</td>`).join('')}</tr>`).join('')}</tbody>
+        <thead><tr>${cols.map(c => `<th>${c.replace(/_/g, ' ')}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map(r =>
+          `<tr>${cols.map(c => `<td>${r[c] ?? ''}</td>`).join('')}</tr>`
+        ).join('')}</tbody>
       </table>`;
   }
 
-  window.scrollTo = window.scrollTo; // keep existing
+  function exportExcel() {
+    document.getElementById('exp-account').value = document.getElementById('sel-account').value;
+    document.getElementById('exp-channel').value = document.getElementById('sel-channel').value;
+    document.getElementById('exp-month').value   = document.getElementById('sel-month').value;
+    document.getElementById('export-form').submit();
+  }
+
+  function setLoading(on) {
+    document.getElementById('step1-loading').classList.toggle('hidden', !on);
+  }
 </script>
 {% endblock %}

@@ -22,6 +22,9 @@ urlpatterns = [
     path('schedules/upload/',   views.schedule_upload,   name='schedule_upload'),
     path('schedules/<int:pk>/delete/', views.schedule_delete, name='schedule_delete'),
 
+    # Brand mappings
+    path('brand-mappings/',     views.brand_mapping_list, name='brand_mapping_list'),
+
     # Monitoring data
     path('monitoring/',         views.monitoring_list,   name='monitoring_list'),
     path('monitoring/upload/',  views.monitoring_upload, name='monitoring_upload'),

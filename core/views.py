@@ -11,7 +11,7 @@ from accounts.models import User
 from accounts.views import create_user, edit_user, user_list
 
 from .forms import AccountForm, ChannelForm, MonitoringUploadForm, ScheduleUploadForm
-from .models import Account, Channel, MonitoringData, Schedule
+from .models import Account, BrandMapping, Channel, MonitoringData, Schedule
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -268,6 +268,13 @@ def monitoring_upload(request):
                 messages.error(request, f'Cannot read Excel file: {e}')
                 return render(request, 'monitoring/upload.html', {'form': form})
 
+            # Auto-create Channel records from the file's Channel column
+            if 'Channel' in df.columns:
+                for ch_val in df['Channel'].dropna().unique():
+                    ch_str = str(ch_val).strip()
+                    if ch_str:
+                        Channel.objects.get_or_create(name=ch_str)
+
             excel_file.seek(0)
             mon = MonitoringData(
                 account           = form.cleaned_data['account'],
@@ -287,6 +294,55 @@ def monitoring_upload(request):
             return redirect('/dashboard/monitoring/')
 
     return render(request, 'monitoring/upload.html', {'form': form})
+
+
+@login_required
+def brand_mapping_list(request):
+    user       = request.user
+    account_qs = _account_qs(user)
+    account_id = request.GET.get('account', '')
+
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        if action == 'add':
+            acc_id = request.POST.get('account_id', '').strip()
+            brand  = request.POST.get('brand', '').strip()
+            theme  = request.POST.get('theme', '').strip()
+            if not (acc_id and brand and theme):
+                messages.error(request, 'Account, Brand, and Theme are all required.')
+            else:
+                account = get_object_or_404(Account, id=acc_id)
+                if not _is_admin(user) and account not in account_qs:
+                    messages.error(request, 'No access to that account.')
+                else:
+                    _, created = BrandMapping.objects.get_or_create(
+                        account=account, brand=brand, theme=theme)
+                    if created:
+                        messages.success(request, f'Mapping added: {brand} → {theme}')
+                    else:
+                        messages.warning(request, 'That mapping already exists.')
+            return redirect(f'/dashboard/brand-mappings/?account={acc_id}')
+
+        elif action == 'delete':
+            mapping_id = request.POST.get('mapping_id')
+            mapping    = get_object_or_404(BrandMapping, id=mapping_id)
+            saved_acc  = mapping.account_id
+            if not _is_admin(user) and mapping.account not in account_qs:
+                messages.error(request, 'No access to that mapping.')
+            else:
+                mapping.delete()
+                messages.success(request, 'Mapping deleted.')
+            return redirect(f'/dashboard/brand-mappings/?account={account_id or saved_acc}')
+
+    mappings = BrandMapping.objects.filter(account__in=account_qs).select_related('account')
+    if account_id:
+        mappings = mappings.filter(account_id=account_id)
+
+    return render(request, 'admin_panel/brand_mappings.html', {
+        'mappings': mappings,
+        'accounts': account_qs,
+        'filters':  {'account': account_id},
+    })
 
 
 @login_required

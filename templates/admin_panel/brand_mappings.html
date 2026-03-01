@@ -1,0 +1,164 @@
+{% extends 'base.html' %}
+{% block title %}Brand Mappings{% endblock %}
+{% block page_title %}Brand Mappings{% endblock %}
+{% block page_subtitle %}Map schedule brand names to monitoring theme names — per account{% endblock %}
+
+{% block content %}
+<div class="space-y-5">
+
+  <!-- ── Info banner ───────────────────────────────────────────── -->
+  <div class="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800">
+    <i class="fa-solid fa-circle-info text-blue-400 mt-0.5 flex-shrink-0"></i>
+    <div>
+      <p class="font-semibold mb-0.5">How brand mappings work</p>
+      <p class="text-blue-700 text-xs">The schedule uses <strong>Brand</strong> names; monitoring data uses <strong>Theme</strong> names.
+        One brand can map to multiple themes. These mappings are used by the Ad Verification tool to match planned ads against aired data.</p>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+    <!-- ── Left: Add form ────────────────────────────────────── -->
+    <div class="lg:col-span-1">
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
+          <div class="w-9 h-9 bg-emerald-100 rounded-xl flex items-center justify-center flex-shrink-0">
+            <i class="fa-solid fa-plus text-emerald-600 text-sm"></i>
+          </div>
+          <h2 class="font-bold text-slate-800 text-sm">Add New Mapping</h2>
+        </div>
+        <form method="post" class="px-5 py-5 space-y-4">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="add">
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+              <i class="fa-solid fa-building mr-1 text-slate-400"></i> Account <span class="text-red-400">*</span>
+            </label>
+            <select name="account_id" class="select-field" required>
+              <option value="">Select account…</option>
+              {% for acc in accounts %}
+                <option value="{{ acc.id }}" {% if filters.account == acc.id|stringformat:"s" %}selected{% endif %}>{{ acc.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+              <i class="fa-solid fa-tag mr-1 text-slate-400"></i> Brand <span class="text-red-400">*</span>
+            </label>
+            <input type="text" name="brand" placeholder="e.g. Maliban Biscuit" class="input-field" required>
+            <p class="mt-1 text-[10px] text-slate-400">As it appears in the Schedule file (Brand column)</p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+              <i class="fa-solid fa-arrow-right mr-1 text-slate-400"></i> Theme <span class="text-red-400">*</span>
+            </label>
+            <input type="text" name="theme" placeholder="e.g. MALIBAN BISCUITS" class="input-field" required>
+            <p class="mt-1 text-[10px] text-slate-400">As it appears in LMRB (Advt_Theme) or MapOnline (Theme)</p>
+          </div>
+
+          <button type="submit" class="btn-primary w-full justify-center">
+            <i class="fa-solid fa-plus"></i> Add Mapping
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- ── Right: Filter + table ─────────────────────────────── -->
+    <div class="lg:col-span-2 space-y-4">
+
+      <!-- Filter -->
+      <form method="get" class="bg-white rounded-xl border border-slate-100 shadow-sm px-4 py-3 flex flex-wrap gap-3 items-end">
+        <div class="flex-1 min-w-[150px]">
+          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Filter by Account</label>
+          <select name="account" class="select-field">
+            <option value="">All accounts</option>
+            {% for acc in accounts %}
+              <option value="{{ acc.id }}" {% if filters.account == acc.id|stringformat:"s" %}selected{% endif %}>{{ acc.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="flex gap-2">
+          <button type="submit" class="btn-primary"><i class="fa-solid fa-filter"></i> Filter</button>
+          <a href="/dashboard/brand-mappings/" class="btn-secondary">Clear</a>
+        </div>
+      </form>
+
+      <!-- Table -->
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="bg-slate-50 border-b border-slate-100">
+                <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Account</th>
+                <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Brand (Schedule)</th>
+                <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Theme (Monitoring)</th>
+                <th class="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              {% for m in mappings %}
+              <tr class="hover:bg-slate-50/70 transition-colors">
+                <td class="px-5 py-3">
+                  <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-100 text-slate-700 text-xs font-semibold">
+                    <i class="fa-solid fa-building text-slate-400 text-[9px]"></i>
+                    {{ m.account.name }}
+                  </span>
+                </td>
+                <td class="px-5 py-3">
+                  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold ring-1 ring-blue-200">
+                    <i class="fa-solid fa-tag text-[9px]"></i>
+                    {{ m.brand }}
+                  </span>
+                </td>
+                <td class="px-5 py-3">
+                  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold ring-1 ring-emerald-200">
+                    <i class="fa-solid fa-arrow-right text-[9px]"></i>
+                    {{ m.theme }}
+                  </span>
+                </td>
+                <td class="px-5 py-3 text-right">
+                  <form method="post" class="inline"
+                        onsubmit="return confirm('Delete mapping: {{ m.brand }} → {{ m.theme }}?')">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="mapping_id" value="{{ m.id }}">
+                    <button type="submit"
+                            class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200
+                                   text-xs font-semibold text-slate-500 hover:border-red-300 hover:text-red-600
+                                   hover:bg-red-50 transition-all">
+                      <i class="fa-solid fa-trash"></i>
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="4" class="px-5 py-14 text-center">
+                  <div class="flex flex-col items-center gap-3">
+                    <div class="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
+                      <i class="fa-solid fa-map text-slate-400 text-2xl"></i>
+                    </div>
+                    <p class="text-slate-500 font-medium">No brand mappings yet</p>
+                    <p class="text-slate-400 text-xs max-w-xs">Use the form on the left to map schedule brand names to monitoring theme names.</p>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        {% if mappings %}
+        <div class="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
+          <i class="fa-solid fa-layer-group text-slate-400 text-xs"></i>
+          <span class="text-xs text-slate-500 font-medium">{{ mappings|length }} mapping{{ mappings|length|pluralize }}</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
