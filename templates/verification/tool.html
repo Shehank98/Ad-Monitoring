@@ -15,6 +15,13 @@
   .tab-btn:hover { color:#1e40af; background:#f1f5f9; }
   .tab-btn.active { color:#2563eb; border-bottom-color:#2563eb; background:white; }
   .stat-card { background:#fff; border-radius:.875rem; border:1px solid #f1f5f9; box-shadow:0 1px 3px rgba(0,0,0,.05); padding:1rem 1.25rem; }
+
+  /* Status badges in results table */
+  td .badge-matched        { background:#dcfce7; color:#166534; padding:2px 7px; border-radius:4px; font-size:.7rem; font-weight:600; }
+  td .badge-mismatch       { background:#fef3c7; color:#92400e; padding:2px 7px; border-radius:4px; font-size:.7rem; font-weight:600; }
+  td .badge-late           { background:#ede9fe; color:#5b21b6; padding:2px 7px; border-radius:4px; font-size:.7rem; font-weight:600; }
+  td .badge-not-aired      { background:#fee2e2; color:#991b1b; padding:2px 7px; border-radius:4px; font-size:.7rem; font-weight:600; }
+  td .badge-no-mapping     { background:#f1f5f9; color:#475569; padding:2px 7px; border-radius:4px; font-size:.7rem; font-weight:600; }
 </style>
 {% endblock %}
 
@@ -86,6 +93,7 @@
       <p class="text-xs text-slate-400">
         <i class="fa-solid fa-circle-info mr-1"></i>
         Brand mappings must be configured before running.
+        Programme validation uses planned time slots (Start_Time–End_Time).
       </p>
     </div>
   </div>
@@ -93,20 +101,29 @@
   <!-- ── Results ────────────────────────────────────────────── -->
   <div id="results-section" style="display:none">
 
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5" id="summary-cards"></div>
+    <!-- Summary cards -->
+    <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-5" id="summary-cards"></div>
 
+    <!-- Export -->
     <div class="flex justify-end mb-3">
       <button onclick="exportExcel()" class="btn-secondary text-xs">
-        <i class="fa-solid fa-file-excel text-emerald-600"></i> Export to Excel
+        <i class="fa-solid fa-file-excel text-emerald-600"></i> Export All to Excel
       </button>
     </div>
 
+    <!-- Tabs + table -->
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
       <div class="flex border-b border-slate-200 bg-slate-50 overflow-x-auto">
-        <button onclick="showTab('matched')"   id="tab-matched"   class="tab-btn active">Matched</button>
-        <button onclick="showTab('not_aired')" id="tab-not_aired" class="tab-btn">Not Aired</button>
-        <button onclick="showTab('extra')"     id="tab-extra"     class="tab-btn">Extra Aired</button>
+        <button onclick="showTab('matched')"       id="tab-matched"       class="tab-btn active">Matched</button>
+        <button onclick="showTab('prog_mismatch')" id="tab-prog_mismatch" class="tab-btn">Programme Mismatch</button>
+        <button onclick="showTab('late_telecast')" id="tab-late_telecast" class="tab-btn">Late Telecast</button>
+        <button onclick="showTab('not_aired')"     id="tab-not_aired"     class="tab-btn">Not Aired</button>
+        <button onclick="showTab('extra')"         id="tab-extra"         class="tab-btn">Extra Aired</button>
       </div>
+
+      <!-- Tab description bar -->
+      <div id="tab-description" class="px-4 py-2 text-xs text-slate-500 bg-slate-50 border-b border-slate-100"></div>
+
       <div id="tab-content" class="overflow-x-auto"></div>
     </div>
   </div>
@@ -126,6 +143,14 @@
 <script>
   const CSRF = '{{ csrf_token }}';
   let results = {};
+
+  const TAB_META = {
+    matched:       { icon: '✅', label: 'Matched',            color: 'emerald', desc: 'Ads that aired within the planned programme time slot (Brand + Theme + Duration + Date + Time window all matched).' },
+    prog_mismatch: { icon: '⚠️', label: 'Programme Mismatch', color: 'amber',   desc: 'Ad found in monitoring on the correct date with correct brand/theme/duration, but the aired time is outside the planned programme slot.' },
+    late_telecast: { icon: '🕐', label: 'Late Telecast',      color: 'violet',  desc: 'Ad aired on a different date than planned. Same brand/theme/duration found in monitoring, but not on the scheduled date.' },
+    not_aired:     { icon: '❌', label: 'Not Aired',          color: 'red',     desc: 'Ad was scheduled but could not be found in monitoring data at all.' },
+    extra:         { icon: '➕', label: 'Extra Aired',        color: 'slate',   desc: 'Monitoring entries not matched to any scheduled ad.' },
+  };
 
   // ── Step 1 ────────────────────────────────────────────────────
   async function onAccountChange() {
@@ -287,29 +312,46 @@
       <div class="stat-card border-l-4 border-emerald-500">
         <p class="text-2xl font-extrabold text-emerald-600">${s.matched.toLocaleString()}</p>
         <p class="text-xs text-slate-500 font-medium mt-1">Matched
-          <span class="block text-emerald-500 font-bold text-sm mt-0.5">${s.compliance}% compliance</span>
+          <span class="block text-emerald-500 font-bold text-sm mt-0.5">${s.compliance}%</span>
         </p>
+      </div>
+      <div class="stat-card border-l-4 border-amber-400">
+        <p class="text-2xl font-extrabold text-amber-500">${s.prog_mismatch.toLocaleString()}</p>
+        <p class="text-xs text-slate-500 font-medium mt-1">Programme Mismatch</p>
+      </div>
+      <div class="stat-card border-l-4 border-violet-500">
+        <p class="text-2xl font-extrabold text-violet-600">${s.late_telecast.toLocaleString()}</p>
+        <p class="text-xs text-slate-500 font-medium mt-1">Late Telecast</p>
       </div>
       <div class="stat-card border-l-4 border-red-500">
         <p class="text-2xl font-extrabold text-red-600">${s.not_aired.toLocaleString()}</p>
         <p class="text-xs text-slate-500 font-medium mt-1">Not Aired</p>
       </div>
-      <div class="stat-card border-l-4 border-amber-400">
-        <p class="text-2xl font-extrabold text-amber-500">${s.extra.toLocaleString()}</p>
+      <div class="stat-card border-l-4 border-slate-400">
+        <p class="text-2xl font-extrabold text-slate-500">${s.extra.toLocaleString()}</p>
         <p class="text-xs text-slate-500 font-medium mt-1">Extra Aired</p>
       </div>`;
 
-    document.getElementById('tab-matched').textContent   = `✅ Matched (${s.matched})`;
-    document.getElementById('tab-not_aired').textContent = `❌ Not Aired (${s.not_aired})`;
-    document.getElementById('tab-extra').textContent     = `➕ Extra (${s.extra})`;
+    // Update tab labels with counts
+    document.getElementById('tab-matched').textContent       = `✅ Matched (${s.matched})`;
+    document.getElementById('tab-prog_mismatch').textContent = `⚠️ Prog. Mismatch (${s.prog_mismatch})`;
+    document.getElementById('tab-late_telecast').textContent = `🕐 Late Telecast (${s.late_telecast})`;
+    document.getElementById('tab-not_aired').textContent     = `❌ Not Aired (${s.not_aired})`;
+    document.getElementById('tab-extra').textContent         = `➕ Extra (${s.extra})`;
+
     showTab('matched');
     sec.scrollIntoView({behavior: 'smooth', block: 'start'});
   }
 
   function showTab(name) {
-    ['matched', 'not_aired', 'extra'].forEach(t => {
+    ['matched', 'prog_mismatch', 'late_telecast', 'not_aired', 'extra'].forEach(t => {
       document.getElementById('tab-' + t).classList.toggle('active', t === name);
     });
+
+    // Update description
+    const meta = TAB_META[name] || {};
+    document.getElementById('tab-description').textContent = meta.desc || '';
+
     const rows    = results[name] || [];
     const content = document.getElementById('tab-content');
     if (!rows.length) {
@@ -321,7 +363,20 @@
       <table class="data-table">
         <thead><tr>${cols.map(c => `<th>${c.replace(/_/g, ' ')}</th>`).join('')}</tr></thead>
         <tbody>${rows.map(r =>
-          `<tr>${cols.map(c => `<td>${r[c] ?? ''}</td>`).join('')}</tr>`
+          `<tr>${cols.map(c => {
+            const val = r[c] ?? '';
+            if (c === 'Status') {
+              const cls = {
+                'Matched':            'badge-matched',
+                'Programme Mismatch': 'badge-mismatch',
+                'Late Telecast':      'badge-late',
+                'Not Aired':          'badge-not-aired',
+                'No Brand Mapping':   'badge-no-mapping',
+              }[val] || '';
+              return `<td><span class="${cls}">${val}</span></td>`;
+            }
+            return `<td>${val}</td>`;
+          }).join('')}</tr>`
         ).join('')}</tbody>
       </table>`;
   }

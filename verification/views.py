@@ -111,8 +111,22 @@ def get_preview(request):
 
 # ── Verification engine ────────────────────────────────────────────────────────
 
+def _build_brand_theme_map(account_id):
+    """
+    Build the brand→[(theme, duration)] map from DB.
+    duration is None when the mapping applies to any duration.
+    """
+    brand_theme_map = {}
+    for bm in BrandMapping.objects.filter(account_id=account_id):
+        norm_brand = normalize(bm.brand)
+        norm_theme = normalize(bm.theme)
+        mapping_dur = int(bm.duration) if bm.duration is not None else None
+        brand_theme_map.setdefault(norm_brand, []).append((norm_theme, mapping_dur))
+    return brand_theme_map
+
+
 def _run_engine(account_id, channel, month):
-    """Load files, run matching, return (matched_df, not_aired_df, extra_df)."""
+    """Load files, run matching, return (matched, prog_mismatch, late_telecast, not_aired, extra), total_sch."""
     schedules = Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
     mon_qs    = MonitoringData.objects.filter(account_id=account_id, channel=channel)
 
@@ -139,12 +153,10 @@ def _run_engine(account_id, channel, month):
     sch_df   = prepare_schedule(sch_df)
     mon_pool = prepare_monitoring_pool(mon_files)
 
-    # Brand → themes map from DB
-    brand_theme_map = {}
-    for bm in BrandMapping.objects.filter(account_id=account_id):
-        brand_theme_map.setdefault(normalize(bm.brand), []).append(normalize(bm.theme))
+    brand_theme_map = _build_brand_theme_map(account_id)
 
-    return match_ads(sch_df, mon_pool, brand_theme_map), len(sch_df)
+    results = match_ads(sch_df, mon_pool, brand_theme_map)
+    return results, len(sch_df)
 
 
 def _df_to_list(df):
@@ -169,23 +181,35 @@ def run_verification(request):
         return JsonResponse({'ok': False, 'error': 'Access denied.'})
 
     try:
-        (matched_df, not_aired_df, extra_df), total_sch = _run_engine(account_id, channel, month)
+        (matched_df, prog_mis_df, late_df, not_aired_df, extra_df), total_sch = \
+            _run_engine(account_id, channel, month)
 
-        n_matched   = len(matched_df)   if matched_df   is not None and not matched_df.empty   else 0
-        n_not_aired = len(not_aired_df) if not_aired_df is not None and not not_aired_df.empty else 0
-        n_extra     = len(extra_df)     if extra_df     is not None and not extra_df.empty     else 0
+        n_matched   = len(matched_df)   if not matched_df.empty   else 0
+        n_prog_mis  = len(prog_mis_df)  if not prog_mis_df.empty  else 0
+        n_late      = len(late_df)      if not late_df.empty      else 0
+        n_not_aired = len(not_aired_df) if not not_aired_df.empty else 0
+        n_extra     = len(extra_df)     if not extra_df.empty     else 0
+
+        # Ads that were aired in some form (matched + mismatch + late)
+        n_aired     = n_matched + n_prog_mis + n_late
+        compliance  = round(n_matched / total_sch * 100, 1) if total_sch else 0
 
         return JsonResponse({
-            'ok':       True,
-            'matched':  _df_to_list(matched_df),
-            'not_aired': _df_to_list(not_aired_df),
-            'extra':    _df_to_list(extra_df),
+            'ok':            True,
+            'matched':       _df_to_list(matched_df),
+            'prog_mismatch': _df_to_list(prog_mis_df),
+            'late_telecast': _df_to_list(late_df),
+            'not_aired':     _df_to_list(not_aired_df),
+            'extra':         _df_to_list(extra_df),
             'summary': {
-                'total_scheduled': total_sch,
-                'matched':         n_matched,
-                'not_aired':       n_not_aired,
-                'extra':           n_extra,
-                'compliance':      round(n_matched / total_sch * 100, 1) if total_sch else 0,
+                'total_scheduled':   total_sch,
+                'matched':           n_matched,
+                'prog_mismatch':     n_prog_mis,
+                'late_telecast':     n_late,
+                'not_aired':         n_not_aired,
+                'extra':             n_extra,
+                'total_aired':       n_aired,
+                'compliance':        compliance,
             },
         })
     except Exception as e:
@@ -203,7 +227,8 @@ def export_excel(request):
         return HttpResponse('Access denied', status=403)
 
     try:
-        (matched_df, not_aired_df, extra_df), _ = _run_engine(account_id, channel, month)
+        (matched_df, prog_mis_df, late_df, not_aired_df, extra_df), _ = \
+            _run_engine(account_id, channel, month)
 
         def _clean(df):
             if df is None or df.empty:
@@ -215,9 +240,11 @@ def export_excel(request):
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            _clean(matched_df).to_excel(writer,   sheet_name='Matched',     index=False)
-            _clean(not_aired_df).to_excel(writer, sheet_name='Not Aired',   index=False)
-            _clean(extra_df).to_excel(writer,     sheet_name='Extra Aired', index=False)
+            _clean(matched_df).to_excel(writer,   sheet_name='Matched',            index=False)
+            _clean(prog_mis_df).to_excel(writer,  sheet_name='Programme Mismatch', index=False)
+            _clean(late_df).to_excel(writer,      sheet_name='Late Telecast',      index=False)
+            _clean(not_aired_df).to_excel(writer, sheet_name='Not Aired',          index=False)
+            _clean(extra_df).to_excel(writer,     sheet_name='Extra Aired',        index=False)
 
         output.seek(0)
         filename = f'verification_{channel}_{month}.xlsx'.replace(' ', '_')

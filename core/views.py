@@ -305,9 +305,12 @@ def brand_mapping_list(request):
     if request.method == 'POST':
         action = request.POST.get('action')
         if action == 'add':
-            acc_id = request.POST.get('account_id', '').strip()
-            brand  = request.POST.get('brand', '').strip()
-            theme  = request.POST.get('theme', '').strip()
+            acc_id   = request.POST.get('account_id', '').strip()
+            brand    = request.POST.get('brand', '').strip()
+            theme    = request.POST.get('theme', '').strip()
+            dur_raw  = request.POST.get('duration', '').strip()
+            duration = int(dur_raw) if dur_raw.isdigit() else None
+
             if not (acc_id and brand and theme):
                 messages.error(request, 'Account, Brand, and Theme are all required.')
             else:
@@ -315,12 +318,17 @@ def brand_mapping_list(request):
                 if not _is_admin(user) and account not in account_qs:
                     messages.error(request, 'No access to that account.')
                 else:
-                    _, created = BrandMapping.objects.get_or_create(
-                        account=account, brand=brand, theme=theme)
-                    if created:
-                        messages.success(request, f'Mapping added: {brand} → {theme}')
-                    else:
+                    # Check for duplicate (application-level, handles NULL duration)
+                    exists = BrandMapping.objects.filter(
+                        account=account, brand=brand, theme=theme, duration=duration
+                    ).exists()
+                    if exists:
                         messages.warning(request, 'That mapping already exists.')
+                    else:
+                        BrandMapping.objects.create(
+                            account=account, brand=brand, theme=theme, duration=duration)
+                        dur_str = f' ({duration}s)' if duration else ''
+                        messages.success(request, f'Mapping added: {brand} → {theme}{dur_str}')
             return redirect(f'/dashboard/brand-mappings/?account={acc_id}')
 
         elif action == 'delete':

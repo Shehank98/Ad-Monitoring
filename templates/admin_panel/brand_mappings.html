@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Brand Mappings{% endblock %}
 {% block page_title %}Brand Mappings{% endblock %}
-{% block page_subtitle %}Map schedule brand names to monitoring theme names — per account{% endblock %}
+{% block page_subtitle %}Map schedule brand names to monitoring theme names — optionally restrict by duration{% endblock %}
 
 {% block content %}
 <div class="space-y-5">
@@ -11,8 +11,12 @@
     <i class="fa-solid fa-circle-info text-blue-400 mt-0.5 flex-shrink-0"></i>
     <div>
       <p class="font-semibold mb-0.5">How brand mappings work</p>
-      <p class="text-blue-700 text-xs">The schedule uses <strong>Brand</strong> names; monitoring data uses <strong>Theme</strong> names.
-        One brand can map to multiple themes. These mappings are used by the Ad Verification tool to match planned ads against aired data.</p>
+      <p class="text-blue-700 text-xs">
+        The schedule uses <strong>Brand</strong> names; monitoring data uses <strong>Theme</strong> names.
+        One brand can map to multiple themes. <strong>Duration</strong> is optional — if set, the mapping
+        only applies when the ad duration matches (e.g. Brand "555 COMBO" + Theme "Combo Pack…" + Duration 15
+        will only match 15-second spots). Leave Duration blank to match any duration.
+      </p>
     </div>
   </div>
 
@@ -47,7 +51,7 @@
             <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
               <i class="fa-solid fa-tag mr-1 text-slate-400"></i> Brand <span class="text-red-400">*</span>
             </label>
-            <input type="text" name="brand" placeholder="e.g. Maliban Biscuit" class="input-field" required>
+            <input type="text" name="brand" placeholder="e.g. 555 COMBO PACKAGE" class="input-field" required>
             <p class="mt-1 text-[10px] text-slate-400">As it appears in the Schedule file (Brand column)</p>
           </div>
 
@@ -55,8 +59,17 @@
             <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
               <i class="fa-solid fa-arrow-right mr-1 text-slate-400"></i> Theme <span class="text-red-400">*</span>
             </label>
-            <input type="text" name="theme" placeholder="e.g. MALIBAN BISCUITS" class="input-field" required>
+            <input type="text" name="theme" placeholder="e.g. Combo Pack_Data_Talk_Text_Rs555_2 (15)(Sin)" class="input-field" required>
             <p class="mt-1 text-[10px] text-slate-400">As it appears in LMRB (Advt_Theme) or MapOnline (Theme)</p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+              <i class="fa-solid fa-clock mr-1 text-slate-400"></i> Duration (seconds)
+              <span class="text-slate-400 font-normal normal-case ml-1">optional</span>
+            </label>
+            <input type="number" name="duration" min="1" placeholder="e.g. 15" class="input-field">
+            <p class="mt-1 text-[10px] text-slate-400">Leave blank to match any duration. Set to restrict this mapping to one duration only.</p>
           </div>
 
           <button type="submit" class="btn-primary w-full justify-center">
@@ -92,36 +105,46 @@
           <table class="w-full text-sm">
             <thead>
               <tr class="bg-slate-50 border-b border-slate-100">
-                <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Account</th>
-                <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Brand (Schedule)</th>
-                <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Theme (Monitoring)</th>
-                <th class="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Action</th>
+                <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Account</th>
+                <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Brand (Schedule)</th>
+                <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Theme (Monitoring)</th>
+                <th class="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">Duration</th>
+                <th class="px-4 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Action</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
               {% for m in mappings %}
               <tr class="hover:bg-slate-50/70 transition-colors">
-                <td class="px-5 py-3">
+                <td class="px-4 py-3">
                   <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-100 text-slate-700 text-xs font-semibold">
                     <i class="fa-solid fa-building text-slate-400 text-[9px]"></i>
                     {{ m.account.name }}
                   </span>
                 </td>
-                <td class="px-5 py-3">
+                <td class="px-4 py-3">
                   <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold ring-1 ring-blue-200">
                     <i class="fa-solid fa-tag text-[9px]"></i>
                     {{ m.brand }}
                   </span>
                 </td>
-                <td class="px-5 py-3">
+                <td class="px-4 py-3">
                   <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold ring-1 ring-emerald-200">
                     <i class="fa-solid fa-arrow-right text-[9px]"></i>
                     {{ m.theme }}
                   </span>
                 </td>
-                <td class="px-5 py-3 text-right">
+                <td class="px-4 py-3 text-center">
+                  {% if m.duration %}
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-xs font-bold ring-1 ring-violet-200">
+                      {{ m.duration }}s
+                    </span>
+                  {% else %}
+                    <span class="text-xs text-slate-400 italic">any</span>
+                  {% endif %}
+                </td>
+                <td class="px-4 py-3 text-right">
                   <form method="post" class="inline"
-                        onsubmit="return confirm('Delete mapping: {{ m.brand }} → {{ m.theme }}?')">
+                        onsubmit="return confirm('Delete mapping: {{ m.brand }} → {{ m.theme }}{% if m.duration %} ({{ m.duration }}s){% endif %}?')">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="mapping_id" value="{{ m.id }}">
@@ -136,7 +159,7 @@
               </tr>
               {% empty %}
               <tr>
-                <td colspan="4" class="px-5 py-14 text-center">
+                <td colspan="5" class="px-5 py-14 text-center">
                   <div class="flex flex-col items-center gap-3">
                     <div class="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
                       <i class="fa-solid fa-map text-slate-400 text-2xl"></i>

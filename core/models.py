@@ -75,14 +75,19 @@ class MonitoringData(models.Model):
 class BrandMapping(models.Model):
     """Maps a schedule Brand name to a monitoring Advt_Theme/Theme name, per account.
     One brand can map to many themes (one row per brand-theme pair).
+    Duration is optional: when set, the mapping only applies to ads with that duration.
     """
-    account = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='brand_mappings')
-    brand   = models.CharField(max_length=200, help_text='Brand name as it appears in the Schedule file')
-    theme   = models.CharField(max_length=200, help_text='Theme name as it appears in LMRB (Advt_Theme) or MapOnline (Theme)')
+    account  = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='brand_mappings')
+    brand    = models.CharField(max_length=200, help_text='Brand name as it appears in the Schedule file')
+    theme    = models.CharField(max_length=200, help_text='Theme name as it appears in LMRB (Advt_Theme) or MapOnline (Theme)')
+    duration = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Duration in seconds (optional — leave blank to match any duration)',
+    )
 
     class Meta:
-        unique_together = [('account', 'brand', 'theme')]
-        ordering = ['brand', 'theme']
+        ordering = ['brand', 'theme', 'duration']
 
     def __str__(self):
-        return f'{self.account.name}: {self.brand} → {self.theme}'
+        dur_str = f' ({self.duration}s)' if self.duration is not None else ''
+        return f'{self.account.name}: {self.brand} → {self.theme}{dur_str}'

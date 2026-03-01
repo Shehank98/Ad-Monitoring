@@ -1,12 +1,30 @@
 """
 Core ad-matching engine.
 
-Simplified 3-category output: Matched, Not Aired, Extra Aired.
-- Filters SPONSORSHIP BENEFITS from schedule (keeps COMMERCIAL BENEFITS only).
-- Time-window matching: Advt_time / Ad Start must fall within Start_Time → End_Time.
-- Duration: exact numeric match.
-- Combined LMRB + MapOnline pool.
-- BrandMapping supplied as {norm_brand: [norm_theme, ...]} dict from DB.
+Five-category output: Matched, Programme Mismatch, Late Telecast, Not Aired, Extra Aired.
+
+Matching algorithm (two passes):
+  Pass 1 — for each schedule row, find LMRB candidates by:
+    1. Brand → Theme lookup (respecting optional duration on the mapping)
+    2. Exact calendar date match
+    3. Exact duration match (if both sides have it)
+    4a. Time-window match (aired time within planned Start_Time–End_Time) → MATCHED
+    4b. Candidates exist but none in time window → PROGRAMME MISMATCH
+       (Programme matching is done by time-window: instead of comparing programme
+        names — which often differ in text — we check that the aired time falls
+        within the planned slot's start/end time.)
+  Pass 2 — for schedule rows still unmatched after Pass 1:
+    5. Same brand+theme+duration but on a different date → LATE TELECAST
+    6. No candidate anywhere → NOT AIRED
+
+Locking: any LMRB row consumed by Matched/Programme Mismatch/Late Telecast is
+locked (cannot be reused), preventing double-counting.
+Extra Aired: LMRB rows not consumed by any schedule row.
+
+brand_theme_map format supplied by the caller:
+  {norm_brand: [(norm_theme, duration_or_None), ...]}
+  - duration_or_None: if set, the mapping only applies to schedule rows whose
+    duration equals this value; if None, the mapping applies to any duration.
 """
 import pandas as pd
 
@@ -57,6 +75,7 @@ def _prepare_maponline(df: pd.DataFrame) -> pd.DataFrame:
     if 'Prg Date' in df.columns and 'Date'       not in df.columns: rename['Prg Date'] = 'Date'
     if 'Ad Dur'   in df.columns and 'Dur'         not in df.columns: rename['Ad Dur']   = 'Dur'
     if 'Ad Start' in df.columns and 'Advt_time'   not in df.columns: rename['Ad Start'] = 'Advt_time'
+    if 'Prg Name' in df.columns and 'Programme'   not in df.columns: rename['Prg Name'] = 'Programme'
     df.rename(columns=rename, inplace=True)
     return df
 
@@ -134,24 +153,48 @@ def prepare_schedule(df: pd.DataFrame) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+def _get_themes_for_dur(brand_theme_map, norm_brand, sch_dur):
+    """
+    Return the list of monitoring themes relevant for this brand + duration.
+
+    brand_theme_map: {norm_brand: [(norm_theme, mapping_dur_or_None), ...]}
+    mapping_dur_or_None: if set, only applies when sch_dur matches; if None, applies to any duration.
+    """
+    entries = brand_theme_map.get(norm_brand, [])
+    themes = []
+    for norm_theme, map_dur in entries:
+        if map_dur is None:
+            themes.append(norm_theme)
+        elif sch_dur is not None and int(sch_dur) == int(map_dur):
+            themes.append(norm_theme)
+    return list(dict.fromkeys(themes))  # deduplicate, preserve order
+
+
 def match_ads(sch_df: pd.DataFrame, mon_pool: pd.DataFrame, brand_theme_map: dict):
     """
     Match schedule rows against monitoring pool using brand mapping.
 
-    brand_theme_map: {norm_brand: [norm_theme1, norm_theme2, ...]}
+    brand_theme_map: {norm_brand: [(norm_theme, duration_or_None), ...]}
 
-    Matching criteria (all must pass):
-      1. Theme: monitoring _norm_theme in brand's mapped themes list.
-      2. Date:  exact calendar date match.
-      3. Duration: exact numeric match (if both sides have it).
-      4. Time window: monitoring _air_secs within [_start_secs, _end_secs] (if both sides have it).
+    Two-pass algorithm:
+      Pass 1: exact date + theme + duration, then time-window → Matched / Programme Mismatch
+      Pass 2: same theme + duration, different date → Late Telecast / Not Aired
 
-    Returns (matched_df, not_aired_df, extra_df).
+    Programme validation is done via time-window (Start_Time–End_Time):
+      - If aired time falls within planned slot → programme OK (Matched)
+      - If aired on correct date with correct theme/duration but OUTSIDE the planned
+        time slot → Programme Mismatch (still locks that LMRB row)
+
+    Returns (matched_df, prog_mismatch_df, late_telecast_df, not_aired_df, extra_df).
     """
-    matched_idx  = set()
-    matched_rows = []
-    not_aired_rows = []
+    matched_idx      = set()   # Locked LMRB row indices
+    matched_rows     = []
+    prog_mis_rows    = []
+    late_rows        = []
+    not_aired_rows   = []
+    unmatched_sched  = []      # Schedule rows that need pass-2 checking
 
+    # ── PASS 1 ────────────────────────────────────────────────────────────────
     for _, row in sch_df.iterrows():
         sch_date       = row.get('Date')
         sch_brand_norm = row.get('_norm_brand', '')
@@ -159,20 +202,22 @@ def match_ads(sch_df: pd.DataFrame, mon_pool: pd.DataFrame, brand_theme_map: dic
         sch_dur        = row.get('_dur')
         sch_start      = row.get('_start_secs')
         sch_end        = row.get('_end_secs')
+        sch_programme  = row.get('Programme', '')
 
-        themes = brand_theme_map.get(sch_brand_norm, [])
+        themes = _get_themes_for_dur(brand_theme_map, sch_brand_norm, sch_dur)
         if not themes:
             not_aired_rows.append({
                 'Brand':          sch_brand,
+                'Programme':      sch_programme,
                 'Scheduled_Date': sch_date,
                 'Start_Time':     row.get('Start_Time', ''),
                 'End_Time':       row.get('End_Time', ''),
                 'Duration':       row.get('Duration', sch_dur),
-                'Reason':         'No Brand Mapping',
+                'Status':         'No Brand Mapping',
             })
             continue
 
-        # ── Build candidate set ───────────────────────────────────
+        # Candidates: theme match + exact date + not yet used
         theme_mask = mon_pool['_norm_theme'].isin(themes)
         date_mask  = mon_pool['Date'] == sch_date
         used_mask  = ~mon_pool.index.isin(matched_idx)
@@ -182,37 +227,115 @@ def match_ads(sch_df: pd.DataFrame, mon_pool: pd.DataFrame, brand_theme_map: dic
         if pd.notna(sch_dur) and 'Dur' in candidates.columns:
             candidates = candidates[candidates['Dur'] == sch_dur]
 
-        # Time-window filter
+        if candidates.empty:
+            # Nothing on this date — will try late telecast in pass 2
+            unmatched_sched.append(row)
+            continue
+
+        # Time-window split: aired time within planned Start_Time–End_Time?
         if (sch_start is not None and sch_end is not None
                 and '_air_secs' in candidates.columns
                 and candidates['_air_secs'].notna().any()):
-            time_ok    = (candidates['_air_secs'] >= sch_start) & (candidates['_air_secs'] <= sch_end)
-            candidates = candidates[time_ok]
+            in_window  = (candidates['_air_secs'] >= sch_start) & (candidates['_air_secs'] <= sch_end)
+            cands_in   = candidates[in_window]
+            cands_out  = candidates[~in_window]
+        else:
+            cands_in  = candidates
+            cands_out = pd.DataFrame()
 
-        if not candidates.empty:
-            best_idx = candidates.index[0]
+        if not cands_in.empty:
+            # ── MATCHED ───────────────────────────────────────────────────────
+            best_idx = cands_in.index[0]
             matched_idx.add(best_idx)
             mon_row = mon_pool.loc[best_idx]
             matched_rows.append({
                 'Brand':          sch_brand,
                 'Theme':          mon_row.get('Advt_Theme', ''),
+                'Programme':      sch_programme,
                 'Scheduled_Date': sch_date,
                 'Aired_Date':     mon_row.get('Date', ''),
+                'Planned_Start':  row.get('Start_Time', ''),
+                'Planned_End':    row.get('End_Time', ''),
                 'Air_Time':       mon_row.get('Advt_time', ''),
                 'Duration':       mon_row.get('Dur', sch_dur),
                 'Source':         mon_row.get('_source', ''),
+                'Status':         'Matched',
+            })
+
+        elif not cands_out.empty:
+            # ── PROGRAMME MISMATCH ────────────────────────────────────────────
+            # Ad found on correct date with correct theme/duration, but the aired
+            # time is outside the planned programme slot.  Lock it to prevent it
+            # appearing as "Extra Aired".
+            best_idx = cands_out.index[0]
+            matched_idx.add(best_idx)
+            mon_row = mon_pool.loc[best_idx]
+            prog_mis_rows.append({
+                'Brand':          sch_brand,
+                'Theme':          mon_row.get('Advt_Theme', ''),
+                'Programme':      sch_programme,
+                'Scheduled_Date': sch_date,
+                'Aired_Date':     mon_row.get('Date', ''),
+                'Planned_Start':  row.get('Start_Time', ''),
+                'Planned_End':    row.get('End_Time', ''),
+                'Air_Time':       mon_row.get('Advt_time', ''),
+                'Duration':       mon_row.get('Dur', sch_dur),
+                'Source':         mon_row.get('_source', ''),
+                'Status':         'Programme Mismatch',
+            })
+
+    # ── PASS 2: Late Telecast / Not Aired ──────────────────────────────────────
+    for row in unmatched_sched:
+        sch_date       = row.get('Date')
+        sch_brand_norm = row.get('_norm_brand', '')
+        sch_brand      = row.get('Brand', sch_brand_norm)
+        sch_dur        = row.get('_dur')
+        sch_programme  = row.get('Programme', '')
+
+        themes = _get_themes_for_dur(brand_theme_map, sch_brand_norm, sch_dur)
+
+        theme_mask = mon_pool['_norm_theme'].isin(themes)
+        used_mask  = ~mon_pool.index.isin(matched_idx)
+        candidates = mon_pool[theme_mask & used_mask]
+
+        # Duration filter
+        if pd.notna(sch_dur) and 'Dur' in candidates.columns:
+            candidates = candidates[candidates['Dur'] == sch_dur]
+
+        # Exclude the original planned date (already checked in pass 1)
+        candidates = candidates[candidates['Date'] != sch_date]
+
+        if not candidates.empty:
+            # ── LATE TELECAST ─────────────────────────────────────────────────
+            best_idx = candidates.index[0]
+            matched_idx.add(best_idx)
+            mon_row = mon_pool.loc[best_idx]
+            late_rows.append({
+                'Brand':          sch_brand,
+                'Theme':          mon_row.get('Advt_Theme', ''),
+                'Programme':      sch_programme,
+                'Scheduled_Date': sch_date,
+                'Aired_Date':     mon_row.get('Date', ''),
+                'Planned_Start':  row.get('Start_Time', ''),
+                'Planned_End':    row.get('End_Time', ''),
+                'Air_Time':       mon_row.get('Advt_time', ''),
+                'Duration':       mon_row.get('Dur', sch_dur),
+                'Source':         mon_row.get('_source', ''),
+                'Status':         'Late Telecast',
             })
         else:
+            # ── NOT AIRED ─────────────────────────────────────────────────────
             not_aired_rows.append({
                 'Brand':          sch_brand,
+                'Programme':      sch_programme,
                 'Scheduled_Date': sch_date,
                 'Start_Time':     row.get('Start_Time', ''),
                 'End_Time':       row.get('End_Time', ''),
                 'Duration':       row.get('Duration', sch_dur),
-                'Reason':         'Not Found in Monitoring',
+                'Status':         'Not Aired',
             })
 
-    # Extra aired: monitoring rows not consumed by any schedule row
+    # ── Extra aired: LMRB rows not consumed by any schedule row ───────────────
     extra_rows = []
     for idx, mon_row in mon_pool.iterrows():
         if idx not in matched_idx:
@@ -224,8 +347,13 @@ def match_ads(sch_df: pd.DataFrame, mon_pool: pd.DataFrame, brand_theme_map: dic
                 'Source':   mon_row.get('_source', ''),
             })
 
+    def _to_df(rows):
+        return pd.DataFrame(rows) if rows else pd.DataFrame()
+
     return (
-        pd.DataFrame(matched_rows)   if matched_rows   else pd.DataFrame(),
-        pd.DataFrame(not_aired_rows) if not_aired_rows else pd.DataFrame(),
-        pd.DataFrame(extra_rows)     if extra_rows     else pd.DataFrame(),
+        _to_df(matched_rows),
+        _to_df(prog_mis_rows),
+        _to_df(late_rows),
+        _to_df(not_aired_rows),
+        _to_df(extra_rows),
     )
