@@ -2,6 +2,18 @@ from django.db import models
 from django.conf import settings
 
 
+class Channel(models.Model):
+    """A TV/radio channel that admins can manage and planners select from."""
+    name       = models.CharField(max_length=200, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
 class Account(models.Model):
     """A brand/client account (e.g. Maliban, Dialog)."""
     name       = models.CharField(max_length=200, unique=True)

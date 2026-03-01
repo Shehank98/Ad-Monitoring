@@ -1,5 +1,5 @@
 from django import forms
-from .models import Account, MonitoringData
+from .models import Account, Channel, MonitoringData
 from datetime import date
 
 MONTHS = [
@@ -12,12 +12,12 @@ MONTHS = [
 class ScheduleUploadForm(forms.Form):
     account         = forms.ModelChoiceField(queryset=Account.objects.all(),
                                               empty_label='Select account…',
-                                              widget=forms.Select(attrs={'class': 'input-field'}))
-    channel         = forms.CharField(max_length=200,
-                                      widget=forms.TextInput(attrs={
-                                          'class': 'input-field', 'placeholder': 'e.g. Sirasa TV'}))
+                                              widget=forms.Select(attrs={'class': 'select-field'}))
+    channel         = forms.ModelChoiceField(queryset=Channel.objects.all(),
+                                              empty_label='Select channel…',
+                                              widget=forms.Select(attrs={'class': 'select-field'}))
     month           = forms.ChoiceField(choices=[(m, m) for m in MONTHS],
-                                        widget=forms.Select(attrs={'class': 'input-field'}))
+                                        widget=forms.Select(attrs={'class': 'select-field'}))
     schedule_number = forms.CharField(max_length=50,
                                       widget=forms.TextInput(attrs={
                                           'class': 'input-field', 'placeholder': 'e.g. SCH-001'}))
@@ -28,9 +28,9 @@ class ScheduleUploadForm(forms.Form):
 class MonitoringUploadForm(forms.Form):
     data_type  = forms.ChoiceField(choices=MonitoringData.DATA_TYPES,
                                    widget=forms.RadioSelect(attrs={'class': 'radio-input'}))
-    channel    = forms.CharField(max_length=200,
-                                 widget=forms.TextInput(attrs={
-                                     'class': 'input-field', 'placeholder': 'e.g. Sirasa TV'}))
+    channel    = forms.ModelChoiceField(queryset=Channel.objects.all(),
+                                        empty_label='Select channel…',
+                                        widget=forms.Select(attrs={'class': 'select-field'}))
     start_date = forms.DateField(widget=forms.DateInput(attrs={
         'class': 'input-field', 'type': 'date'}))
     end_date   = forms.DateField(widget=forms.DateInput(attrs={
@@ -52,3 +52,11 @@ class AccountForm(forms.ModelForm):
         fields = ['name']
         widgets = {'name': forms.TextInput(attrs={
             'class': 'input-field', 'placeholder': 'e.g. Maliban'})}
+
+
+class ChannelForm(forms.ModelForm):
+    class Meta:
+        model  = Channel
+        fields = ['name']
+        widgets = {'name': forms.TextInput(attrs={
+            'class': 'input-field', 'placeholder': 'e.g. Sirasa TV'})}

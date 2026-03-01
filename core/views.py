@@ -7,8 +7,8 @@ from accounts.decorators import role_required
 from accounts.models import User
 from accounts.views import create_user, edit_user, user_list
 
-from .forms import AccountForm, MonitoringUploadForm, ScheduleUploadForm
-from .models import Account, MonitoringData, Schedule
+from .forms import AccountForm, ChannelForm, MonitoringUploadForm, ScheduleUploadForm
+from .models import Account, Channel, MonitoringData, Schedule
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -77,6 +77,32 @@ def account_list(request):
     return render(request, 'admin_panel/accounts.html', {'accounts': accounts, 'form': form})
 
 
+# ── Channel management (super_admin / admin) ──────────────────────────────────
+
+@login_required
+@role_required(['super_admin', 'admin'])
+def channel_list(request):
+    channels = Channel.objects.all()
+    form     = ChannelForm()
+
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        if action == 'add':
+            form = ChannelForm(request.POST)
+            if form.is_valid():
+                form.save()
+                messages.success(request, f'Channel "{form.cleaned_data["name"]}" added.')
+                return redirect('/dashboard/channels/')
+        elif action == 'delete':
+            ch_id = request.POST.get('channel_id')
+            ch    = get_object_or_404(Channel, id=ch_id)
+            ch.delete()
+            messages.success(request, f'Channel "{ch.name}" deleted.')
+            return redirect('/dashboard/channels/')
+
+    return render(request, 'admin_panel/channels.html', {'channels': channels, 'form': form})
+
+
 # ── Schedules ──────────────────────────────────────────────────────────────────
 
 @login_required
@@ -136,7 +162,7 @@ def schedule_upload(request):
             excel_file.seek(0)
             schedule = Schedule(
                 account         = form.cleaned_data['account'],
-                channel         = form.cleaned_data['channel'],
+                channel         = form.cleaned_data['channel'].name,
                 month           = form.cleaned_data['month'],
                 schedule_number = form.cleaned_data['schedule_number'],
                 original_filename = excel_file.name,
@@ -202,7 +228,7 @@ def monitoring_upload(request):
             excel_file.seek(0)
             mon = MonitoringData(
                 data_type       = form.cleaned_data['data_type'],
-                channel         = form.cleaned_data['channel'],
+                channel         = form.cleaned_data['channel'].name,
                 start_date      = form.cleaned_data['start_date'],
                 end_date        = form.cleaned_data['end_date'],
                 original_filename = excel_file.name,

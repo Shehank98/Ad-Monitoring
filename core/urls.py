@@ -14,6 +14,9 @@ urlpatterns = [
     # Account management
     path('accounts/',           views.account_list,      name='account_list'),
 
+    # Channel management
+    path('channels/',           views.channel_list,      name='channel_list'),
+
     # Schedules
     path('schedules/',          views.schedule_list,     name='schedule_list'),
     path('schedules/upload/',   views.schedule_upload,   name='schedule_upload'),
