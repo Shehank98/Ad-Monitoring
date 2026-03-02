@@ -14,8 +14,8 @@ def show():
             """
             <div class="login-container">
               <div class="login-logo">
-                <h1>📺 Ad Monitor</h1>
-                <p>Ogilvy Lanka – Ad Airing Verification Platform</p>
+                <h1>📺 Operation Dashboard</h1>
+                <p>Ogilvy Media – Ad Airing Verification Platform</p>
               </div>
             </div>
             """,
