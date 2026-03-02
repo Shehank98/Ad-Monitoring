@@ -30,6 +30,12 @@ def _is_admin(user):
     return user.role in ('super_admin', 'admin')
 
 
+def _account_access(user, account_id):
+    if _is_admin(user):
+        return True
+    return user.accounts.filter(id=account_id).exists()
+
+
 def _account_qs(user):
     if _is_admin(user):
         return Account.objects.all()
@@ -785,9 +791,11 @@ def monitoring_dashboard(request):
     months   = []
     stats    = {}
     tab_data = {}
-    ch_summary   = []
-    brand_summary = []
+    ch_summary     = []
+    brand_summary  = []
     sponsorship_rows = []
+    schedule_chart = []
+    lmrb_chart     = []
 
     if account_id:
         try:
@@ -865,6 +873,31 @@ def monitoring_dashboard(request):
             account_id=account_id, channel=channel, month=month, ad_type='SPONSORSHIP',
         ).order_by('date', 'start_time'))
 
+        # ── Chart data 1: Schedule spots grouped by Brand × Duration ─────────
+        sch_rows = (
+            ScheduleRow.objects
+            .filter(account_id=account_id, channel=channel, month=month)
+            .values('brand', 'duration')
+            .annotate(count=Count('id'))
+            .order_by('brand', 'duration')
+        )
+        schedule_chart = list(sch_rows)
+
+        # ── Chart data 2: LMRB rows grouped by Theme × Duration ──────────────
+        sch_dates = ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month
+        ).aggregate(d_min=Min('date'), d_max=Max('date'))
+        lmrb_qs = LMRBRow.objects.filter(account_id=account_id, channel=channel)
+        if sch_dates['d_min']:
+            lmrb_qs = lmrb_qs.filter(date__gte=sch_dates['d_min'])
+        if sch_dates['d_max']:
+            lmrb_qs = lmrb_qs.filter(date__lte=sch_dates['d_max'])
+        lmrb_chart = list(
+            lmrb_qs.values('advt_theme', 'duration')
+            .annotate(count=Count('id'))
+            .order_by('advt_theme', 'duration')
+        )
+
     return render(request, 'monitoring/dashboard.html', {
         'accounts':         account_qs,
         'selected_account': selected_account,
@@ -878,6 +911,8 @@ def monitoring_dashboard(request):
         'ch_summary':       ch_summary,
         'brand_summary':    brand_summary,
         'sponsorship_rows': sponsorship_rows,
+        'schedule_chart':   schedule_chart,
+        'lmrb_chart':       lmrb_chart,
     })
 
 

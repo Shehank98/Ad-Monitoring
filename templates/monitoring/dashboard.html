@@ -121,10 +121,87 @@
 
 </div>
 
+<!-- ── Charts Row ─────────────────────────────────────────────── -->
+{% if schedule_chart or lmrb_chart %}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+
+  <!-- Schedule: Spots by Brand & Duration -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+    <h3 class="text-sm font-bold text-slate-700 mb-3">
+      <i class="fa-solid fa-calendar-days text-blue-500 mr-1"></i>
+      Schedule Spots — Brand × Duration
+    </h3>
+    {% if schedule_chart %}
+    <div style="max-height:300px;overflow-y:auto;">
+      <canvas id="scheduleChart" style="max-height:280px;"></canvas>
+    </div>
+    <div class="mt-3 overflow-x-auto">
+      <table class="data-table w-full text-xs">
+        <thead>
+          <tr>
+            <th>Brand</th>
+            <th class="text-right">Duration (s)</th>
+            <th class="text-right">Spots</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in schedule_chart %}
+          <tr>
+            <td class="font-medium text-slate-800">{{ row.brand }}</td>
+            <td class="text-right text-slate-600">{{ row.duration|default:"—" }}</td>
+            <td class="text-right font-bold text-blue-700">{{ row.count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-slate-400 text-sm text-center py-6">No schedule data for this scope.</p>
+    {% endif %}
+  </div>
+
+  <!-- LMRB: Aired spots by Theme & Duration -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+    <h3 class="text-sm font-bold text-slate-700 mb-3">
+      <i class="fa-solid fa-chart-bar text-indigo-500 mr-1"></i>
+      LMRB Aired — Theme × Duration (Schedule Period)
+    </h3>
+    {% if lmrb_chart %}
+    <div style="max-height:300px;overflow-y:auto;">
+      <canvas id="lmrbChart" style="max-height:280px;"></canvas>
+    </div>
+    <div class="mt-3 overflow-x-auto">
+      <table class="data-table w-full text-xs">
+        <thead>
+          <tr>
+            <th>Theme</th>
+            <th class="text-right">Duration (s)</th>
+            <th class="text-right">Aired Count</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in lmrb_chart %}
+          <tr>
+            <td class="font-medium text-slate-800">{{ row.advt_theme }}</td>
+            <td class="text-right text-slate-600">{{ row.duration|default:"—" }}</td>
+            <td class="text-right font-bold text-indigo-700">{{ row.count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-slate-400 text-sm text-center py-6">No LMRB data for this schedule period.</p>
+    {% endif %}
+  </div>
+
+</div>
+{% endif %}
+
 <!-- ── Export Buttons ─────────────────────────────────────────── -->
 <div class="flex flex-wrap gap-2 mb-5 items-center">
   <span class="text-xs font-bold text-slate-400 uppercase tracking-wider mr-1">Export:</span>
-  <a href="/verify/export-all/?account={{ account_id }}&channel={{ channel }}&month={{ month }}"
+  <a href="/verify/export-all/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
      class="btn-secondary text-xs">
     <i class="fa-solid fa-file-excel text-emerald-600"></i> Full Report (XLSX)
   </a>
@@ -343,6 +420,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
 function showTab(name, btn) {
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
@@ -351,5 +429,78 @@ function showTab(name, btn) {
   if (pane) pane.classList.add('active');
   btn.classList.add('active');
 }
+
+{% if schedule_chart %}
+(function() {
+  const raw = {{ schedule_chart|safe }};
+  // Build label = "Brand (Dur s)" and aggregate by that key
+  const labels = raw.map(r => r.brand + (r.duration ? ' (' + r.duration + 's)' : ''));
+  const data   = raw.map(r => r.count);
+  const COLORS = [
+    '#2563eb','#7c3aed','#0891b2','#059669','#d97706',
+    '#dc2626','#db2777','#65a30d','#ea580c','#0284c7',
+  ];
+  new Chart(document.getElementById('scheduleChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Spots',
+        data,
+        backgroundColor: labels.map((_, i) => COLORS[i % COLORS.length] + 'cc'),
+        borderColor:     labels.map((_, i) => COLORS[i % COLORS.length]),
+        borderWidth: 1,
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { font: { size: 10 } }, grid: { color: '#f1f5f9' } },
+        y: { ticks: { font: { size: 10 } } },
+      },
+    },
+  });
+})();
+{% endif %}
+
+{% if lmrb_chart %}
+(function() {
+  const raw = {{ lmrb_chart|safe }};
+  const labels = raw.map(r => r.advt_theme + (r.duration ? ' (' + r.duration + 's)' : ''));
+  const data   = raw.map(r => r.count);
+  const COLORS = [
+    '#7c3aed','#2563eb','#059669','#d97706','#dc2626',
+    '#0891b2','#db2777','#65a30d','#ea580c','#0284c7',
+  ];
+  new Chart(document.getElementById('lmrbChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Aired',
+        data,
+        backgroundColor: labels.map((_, i) => COLORS[i % COLORS.length] + 'cc'),
+        borderColor:     labels.map((_, i) => COLORS[i % COLORS.length]),
+        borderWidth: 1,
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { font: { size: 10 } }, grid: { color: '#f1f5f9' } },
+        y: { ticks: { font: { size: 10 } } },
+      },
+    },
+  });
+})();
+{% endif %}
 </script>
 {% endblock %}
