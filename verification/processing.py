@@ -328,6 +328,8 @@ def match_ads(
                 'Status':         'Matched',
                 '_lmrb_fp':       fp,
                 '_sch_key':       sch_key,
+                '_sch_row_id':    row.get('_sch_db_id'),
+                '_lmrb_row_id':   mon_row.get('_lmrb_db_id'),
             })
 
         elif not cands_out.empty:
@@ -349,6 +351,8 @@ def match_ads(
                 'Status':         'Programme Mismatch',
                 '_lmrb_fp':       fp,
                 '_sch_key':       sch_key,
+                '_sch_row_id':    row.get('_sch_db_id'),
+                '_lmrb_row_id':   mon_row.get('_lmrb_db_id'),
             })
 
     # ── PASS 2: Late Telecast / Not Aired ─────────────────────────────────────
@@ -394,6 +398,8 @@ def match_ads(
                 'Status':         'Late Telecast',
                 '_lmrb_fp':       fp,
                 '_sch_key':       sch_key,
+                '_sch_row_id':    row.get('_sch_db_id'),
+                '_lmrb_row_id':   mon_row.get('_lmrb_db_id'),
             })
         else:
             not_aired_rows.append({

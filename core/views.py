@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 import pandas as pd
 from datetime import date as date_cls
@@ -6,7 +7,7 @@ from datetime import date as date_cls
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Max, Min, Count
-from django.http import JsonResponse
+from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
@@ -15,7 +16,10 @@ from accounts.models import User
 from accounts.views import create_user, edit_user, user_list
 
 from .forms import AccountForm, ChannelForm, MonitoringUploadForm, ScheduleUploadForm
-from .models import Account, BrandMapping, Channel, MonitoringData, Schedule
+from .models import (
+    Account, BrandMapping, Channel,
+    LMRBRow, MonitoringData, Schedule, ScheduleRow,
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -25,7 +29,6 @@ def _is_admin(user):
 
 
 def _account_qs(user):
-    """Return the Account queryset this user may see/act on."""
     if _is_admin(user):
         return Account.objects.all()
     return user.accounts.all()
@@ -48,15 +51,13 @@ def _detect_schedule_meta(df):
 
 def _detect_monitoring_meta(df, data_type):
     """
-    Auto-detect channels, and per-channel date ranges from a monitoring DataFrame.
+    Auto-detect channels and per-channel date ranges from a monitoring DataFrame.
 
-    Returns:
-        list of dicts: [{channel, start_date, end_date, row_count}, ...]
+    Returns list of dicts: [{channel, start_date, end_date, row_count}, ...]
     """
     df = df.copy()
     df.columns = df.columns.str.strip()
 
-    # Build date column
     if data_type == 'mediawatch':
         if {'Dd', 'Mn', 'Yr'}.issubset(df.columns):
             df['_date'] = pd.to_datetime(
@@ -73,20 +74,14 @@ def _detect_monitoring_meta(df, data_type):
         date_col = 'Prg Date' if 'Prg Date' in df.columns else 'Date'
         df['_date'] = pd.to_datetime(df.get(date_col, pd.Series(dtype='object')), errors='coerce')
 
-    # Detect unique channels
     ch_col = 'Channel' if 'Channel' in df.columns else None
-    if ch_col:
-        channels = [str(c).strip() for c in df[ch_col].dropna().unique() if str(c).strip()]
-    else:
-        channels = ['Unknown']
+    channels = [str(c).strip() for c in df[ch_col].dropna().unique() if str(c).strip()] \
+               if ch_col else ['Unknown']
 
     result = []
     for ch in channels:
-        if ch_col:
-            ch_df = df[df[ch_col].astype(str).str.strip() == ch]
-        else:
-            ch_df = df
-        dates = ch_df['_date'].dropna()
+        ch_df  = df[df[ch_col].astype(str).str.strip() == ch] if ch_col else df
+        dates  = ch_df['_date'].dropna()
         result.append({
             'channel':    ch,
             'start_date': dates.min().date() if not dates.empty else None,
@@ -94,6 +89,29 @@ def _detect_monitoring_meta(df, data_type):
             'row_count':  len(ch_df),
         })
     return result
+
+
+def _safe_int(val):
+    try:
+        if val is not None and not (isinstance(val, float) and pd.isna(val)):
+            return int(float(val))
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def _safe_str(val):
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ''
+    return str(val).strip()
+
+
+def _safe_date(val):
+    try:
+        ts = pd.to_datetime(val, errors='coerce')
+        return ts.date() if not pd.isna(ts) else None
+    except Exception:
+        return None
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -127,7 +145,7 @@ def dashboard(request):
         ctx['my_schedules']   = sch[:5]
         ctx['schedule_count'] = sch.count()
 
-    elif role == 'operations':
+    elif role in ('operations', 'team_head'):
         my_accounts = user.accounts.all()
         mon = MonitoringData.objects.filter(account__in=my_accounts)
         ctx['my_uploads']   = mon[:5]
@@ -194,7 +212,7 @@ def channel_list(request):
 @login_required
 def schedule_list(request):
     user = request.user
-    qs = Schedule.objects.select_related('account', 'uploaded_by')
+    qs   = Schedule.objects.select_related('account', 'uploaded_by')
     if not _is_admin(user):
         qs = qs.filter(account__in=user.accounts.all())
 
@@ -235,20 +253,19 @@ def schedule_upload(request):
             excel_file = request.FILES['file']
             try:
                 df = pd.read_excel(excel_file)
+                df.columns = df.columns.str.strip()
             except Exception as e:
                 messages.error(request, f'Cannot read Excel file: {e}')
                 return render(request, 'schedules/upload.html', {'form': form})
 
-            row_count  = len(df)
-            account    = form.cleaned_data['account']
+            row_count   = len(df)
+            account     = form.cleaned_data['account']
             channel_obj = form.cleaned_data['channel']
 
-            # Auto-detect month and date range
             month, start_date, end_date = _detect_schedule_meta(df)
             if not month:
                 month = 'Unknown'
 
-            # Auto-increment version per (account, channel)
             last_ver = (
                 Schedule.objects
                 .filter(account=account, channel=channel_obj.name)
@@ -271,20 +288,49 @@ def schedule_upload(request):
             )
             schedule.file.save(excel_file.name, excel_file)
             schedule.save()
+
+            # ── Parse Schedule rows into DB ────────────────────────────────────
+            _parse_schedule_rows(df, schedule, account, channel_obj.name, month)
+
             messages.success(request,
                 f'Schedule #{schedule.schedule_number} v{version} for {account} '
                 f'({month}, {start_date} → {end_date}) uploaded — {row_count:,} rows.')
 
-            # Auto-run verification for all available scopes of this account
+            # Auto-run verification for all available scopes
             try:
                 from verification.engine import auto_run_all_for_account
                 auto_run_all_for_account(account.id)
             except Exception:
-                pass  # Never fail the upload due to auto-run issues
+                pass
 
             return redirect('/dashboard/schedules/')
 
     return render(request, 'schedules/upload.html', {'form': form})
+
+
+def _parse_schedule_rows(df, schedule, account, channel, month):
+    """Parse a schedule DataFrame and bulk-create ScheduleRow records."""
+    VALID_TYPES = {'COMMERCIAL BENEFITS', 'SPONSORSHIP'}
+    rows = []
+    for _, r in df.iterrows():
+        ad_type = _safe_str(r.get('Advertisement_Type', '')).upper()
+        if ad_type not in VALID_TYPES:
+            continue
+        rows.append(ScheduleRow(
+            schedule   = schedule,
+            account    = account,
+            channel    = channel,
+            month      = month,
+            brand      = _safe_str(r.get('Brand', '')),
+            programme  = _safe_str(r.get('Programme', '')),
+            date       = _safe_date(r.get('Date')),
+            start_time = _safe_str(r.get('Start_Time', '')),
+            end_time   = _safe_str(r.get('End_Time', '')),
+            duration   = _safe_int(r.get('Duration')),
+            ad_type    = ad_type,
+        ))
+    if rows:
+        ScheduleRow.objects.bulk_create(rows, batch_size=500)
 
 
 @login_required
@@ -306,6 +352,25 @@ def schedule_detect(request):
         })
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)})
+
+
+@login_required
+def schedule_download(request, pk):
+    """Serve the original schedule Excel file as a download."""
+    schedule = get_object_or_404(Schedule, pk=pk)
+    if not _is_admin(request.user) and schedule.account not in _account_qs(request.user):
+        return HttpResponse('Access denied', status=403)
+    try:
+        file_path = schedule.file.path
+        if not os.path.exists(file_path):
+            return HttpResponse('File not found on server.', status=404)
+        return FileResponse(
+            open(file_path, 'rb'),
+            as_attachment=True,
+            filename=schedule.original_filename or os.path.basename(file_path),
+        )
+    except Exception as e:
+        return HttpResponse(f'Download failed: {e}', status=500)
 
 
 @login_required
@@ -369,9 +434,9 @@ def monitoring_upload(request):
     """
     Upload a MapOnline or LMRB file.
 
-    Channels and date ranges are AUTO-DETECTED from the file — users no longer
-    need to specify them. One MonitoringData record is created per detected
-    channel, all sharing the same physical file (tracked via file_group_id).
+    Channels and date ranges are AUTO-DETECTED from the file.
+    One MonitoringData record is created per detected channel.
+    Individual rows are parsed into LMRBRow (master table) with deduplication.
     """
     user       = request.user
     account_qs = _account_qs(user)
@@ -390,21 +455,19 @@ def monitoring_upload(request):
                 messages.error(request, f'Cannot read Excel file: {e}')
                 return render(request, 'monitoring/upload.html', {'form': form})
 
-            # Detect channels and per-channel date ranges
             channel_metas = _detect_monitoring_meta(df, data_type)
             if not channel_metas:
                 messages.error(request, 'No channels detected in the file.')
                 return render(request, 'monitoring/upload.html', {'form': form})
 
-            # Ensure Channel records exist for all detected channels
             for meta in channel_metas:
                 ch = meta['channel']
                 if ch and ch != 'Unknown':
                     Channel.objects.get_or_create(name=ch)
 
-            group_id = str(uuid.uuid4())
-            excel_file.seek(0)
+            group_id   = str(uuid.uuid4())
             saved_path = None
+            excel_file.seek(0)
 
             for i, meta in enumerate(channel_metas):
                 mon = MonitoringData(
@@ -419,31 +482,121 @@ def monitoring_upload(request):
                     uploaded_by       = user,
                 )
                 if saved_path is None:
-                    # Save the file once for the first channel record
                     excel_file.seek(0)
                     mon.file.save(excel_file.name, excel_file, save=False)
                     saved_path = mon.file.name
                 else:
-                    # Reuse the already-saved file path for subsequent channels
                     mon.file = saved_path
                 mon.save()
 
+            # ── Parse LMRB rows into master DB table ───────────────────────────
+            _parse_lmrb_rows(df, data_type, account)
+
             ch_names = ', '.join(m['channel'] for m in channel_metas)
             messages.success(request,
-                f'{MonitoringData.DATA_TYPES[0][1] if data_type == "maponline" else "MediaWatch (LMRB)"} — '
-                f'{account} — {len(channel_metas)} channel(s) detected: {ch_names}. '
-                f'Uploaded successfully.')
+                f'{"MapOnline" if data_type == "maponline" else "MediaWatch (LMRB)"} — '
+                f'{account} — {len(channel_metas)} channel(s): {ch_names}. Uploaded successfully.')
 
-            # Auto-run verification for all available scopes of this account
+            # Auto-run verification
             try:
                 from verification.engine import auto_run_all_for_account
                 auto_run_all_for_account(account.id)
             except Exception:
-                pass  # Never fail the upload due to auto-run issues
+                pass
 
             return redirect('/dashboard/monitoring/')
 
     return render(request, 'monitoring/upload.html', {'form': form})
+
+
+def _parse_lmrb_rows(df, data_type, account):
+    """
+    Parse monitoring DataFrame and upsert into LMRBRow master table.
+
+    Dedup key = sha256(account|channel|date|advt_time|advt_theme|duration)[:32].
+    If an existing row matches the key:
+      - Reset its linked ScheduleRow (unlock it)
+      - Delete the old LMRBRow
+    Then insert the new row with is_matched=False.
+    """
+    df = df.copy()
+
+    # ── Normalise to standard column names ─────────────────────────────────────
+    if data_type == 'maponline':
+        rename = {}
+        if 'Theme'    in df.columns: rename['Theme']    = 'Advt_Theme'
+        if 'Prg Date' in df.columns: rename['Prg Date'] = 'Date'
+        if 'Ad Dur'   in df.columns: rename['Ad Dur']   = 'Dur'
+        if 'Ad Start' in df.columns: rename['Ad Start'] = 'Advt_time'
+        df.rename(columns=rename, inplace=True)
+        if 'Date' in df.columns:
+            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+    else:  # mediawatch
+        if {'Dd', 'Mn', 'Yr'}.issubset(df.columns) and 'Date' not in df.columns:
+            df['Date'] = pd.to_datetime(
+                df['Yr'].astype(str) + '-' +
+                df['Mn'].astype(str).str.zfill(2) + '-' +
+                df['Dd'].astype(str).str.zfill(2),
+                errors='coerce',
+            )
+        elif 'Date' in df.columns:
+            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+
+    if 'Dur' in df.columns:
+        df['Dur'] = pd.to_numeric(df['Dur'], errors='coerce')
+
+    ch_col = 'Channel' if 'Channel' in df.columns else None
+
+    # ── Build rows to upsert ──────────────────────────────────────────────────
+    rows_by_key = {}   # dedup_key → LMRBRow instance (to create)
+
+    for _, r in df.iterrows():
+        channel   = _safe_str(r.get(ch_col, 'Unknown')) if ch_col else 'Unknown'
+        theme     = _safe_str(r.get('Advt_Theme', ''))
+        advt_time = _safe_str(r.get('Advt_time', ''))
+        dur       = _safe_int(r.get('Dur'))
+        date_val  = _safe_date(r.get('Date'))
+
+        if not (theme and advt_time and date_val and channel):
+            continue  # skip rows with missing key fields
+
+        dedup_key = LMRBRow.make_dedup_key(account.id, channel, date_val, advt_time, theme, dur)
+
+        # Latest row wins if multiple rows in the same upload share the same key
+        rows_by_key[dedup_key] = LMRBRow(
+            account    = account,
+            channel    = channel,
+            date       = date_val,
+            advt_theme = theme,
+            advt_time  = advt_time,
+            duration   = dur,
+            source     = data_type,
+            dedup_key  = dedup_key,
+        )
+
+    if not rows_by_key:
+        return
+
+    # ── Handle existing duplicates (unlock linked ScheduleRows first) ──────────
+    existing = LMRBRow.objects.filter(dedup_key__in=rows_by_key.keys())
+    sch_row_ids_to_unlock = []
+    for old in existing:
+        if old.is_matched and old.matched_schedule_id:
+            sch_row_ids_to_unlock.append(old.matched_schedule_id)
+
+    if sch_row_ids_to_unlock:
+        from django.utils import timezone
+        ScheduleRow.objects.filter(id__in=sch_row_ids_to_unlock).update(
+            is_matched=False,
+            matched_lmrb=None,
+            matched_at=None,
+        )
+
+    # Delete old rows (new ones will be inserted below)
+    existing.delete()
+
+    # ── Bulk-create new rows ──────────────────────────────────────────────────
+    LMRBRow.objects.bulk_create(list(rows_by_key.values()), batch_size=500)
 
 
 @login_required
@@ -458,13 +611,29 @@ def monitoring_detect(request):
         df = pd.read_excel(excel_file)
         df.columns = df.columns.str.strip()
         metas = _detect_monitoring_meta(df, data_type)
-        return JsonResponse({
-            'ok':      True,
-            'channels': metas,
-            'total_rows': len(df),
-        })
+        return JsonResponse({'ok': True, 'channels': metas, 'total_rows': len(df)})
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)})
+
+
+@login_required
+def monitoring_download(request, pk):
+    """Serve the original monitoring Excel file as a download."""
+    mon  = get_object_or_404(MonitoringData, pk=pk)
+    user = request.user
+    if not _is_admin(user) and mon.account not in _account_qs(user):
+        return HttpResponse('Access denied', status=403)
+    try:
+        file_path = mon.file.path
+        if not os.path.exists(file_path):
+            return HttpResponse('File not found on server.', status=404)
+        return FileResponse(
+            open(file_path, 'rb'),
+            as_attachment=True,
+            filename=mon.original_filename or os.path.basename(file_path),
+        )
+    except Exception as e:
+        return HttpResponse(f'Download failed: {e}', status=500)
 
 
 @login_required
@@ -473,14 +642,12 @@ def monitoring_delete(request, pk):
     user  = request.user
     today = date_cls.today()
 
-    if not _is_admin(user) and mon.account and mon.account not in user.accounts.all():
+    if not _is_admin(user) and mon.account and mon.account not in _account_qs(user):
         messages.error(request, 'You do not have access to this data.')
         return redirect('/dashboard/monitoring/')
 
     if _is_admin(user) or (mon.uploaded_by == user and mon.uploaded_at.date() == today):
-        # Only delete the physical file if no other record in the same group uses it
-        file_path = mon.file.name
-        siblings  = MonitoringData.objects.filter(file_group_id=mon.file_group_id).exclude(pk=mon.pk)
+        siblings = MonitoringData.objects.filter(file_group_id=mon.file_group_id).exclude(pk=mon.pk)
         if not siblings.exists():
             mon.file.delete(save=False)
         mon.delete()

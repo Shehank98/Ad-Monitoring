@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+import hashlib
 import uuid
 
 
@@ -91,6 +92,92 @@ class MonitoringData(models.Model):
         return f'{self.get_data_type_display()} | {self.channel} | {self.start_date}–{self.end_date}'
 
 
+class ScheduleRow(models.Model):
+    """
+    Individual row parsed from a Schedule Excel file.
+
+    Stored in DB on upload so the matching engine can work with DB queries
+    instead of reading Excel files.  is_matched / matched_lmrb implement the
+    row-level locking that prevents double-counting across re-runs.
+    """
+    schedule    = models.ForeignKey(Schedule, on_delete=models.CASCADE, related_name='rows')
+    account     = models.ForeignKey(Account, on_delete=models.CASCADE)
+    channel     = models.CharField(max_length=200)
+    month       = models.CharField(max_length=50)
+
+    brand       = models.CharField(max_length=200)
+    programme   = models.CharField(max_length=200, blank=True)
+    date        = models.DateField(null=True, blank=True)
+    start_time  = models.CharField(max_length=30, blank=True)
+    end_time    = models.CharField(max_length=30, blank=True)
+    duration    = models.IntegerField(null=True, blank=True)
+    ad_type     = models.CharField(max_length=100, blank=True)   # 'COMMERCIAL BENEFITS' | 'SPONSORSHIP'
+
+    # Row-level locking
+    is_matched   = models.BooleanField(default=False, db_index=True)
+    matched_lmrb = models.ForeignKey(
+        'LMRBRow', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='schedule_matches',
+    )
+    matched_at   = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['date', 'start_time']
+        indexes = [
+            models.Index(fields=['account', 'channel', 'month', 'is_matched']),
+            models.Index(fields=['account', 'channel', 'month', 'ad_type']),
+        ]
+
+    def __str__(self):
+        return f'{self.brand} | {self.date} | {self.start_time}–{self.end_time}'
+
+
+class LMRBRow(models.Model):
+    """
+    Individual row from a monitoring (LMRB / MapOnline) file.
+
+    All monitoring data lives in a single master table per account, deduplicated
+    by (account, channel, date, advt_time, advt_theme, duration).  Uploading a
+    new file whose rows match existing entries replaces those entries (the old
+    record and its matched state are cleared first).
+    """
+    account     = models.ForeignKey(Account, on_delete=models.CASCADE)
+    channel     = models.CharField(max_length=200)
+    date        = models.DateField()
+    advt_theme  = models.CharField(max_length=500)
+    advt_time   = models.CharField(max_length=30)
+    duration    = models.IntegerField(null=True, blank=True)
+    source      = models.CharField(max_length=20)   # 'maponline' | 'mediawatch'
+
+    # Dedup key = sha256(account_id|channel|date|advt_time|advt_theme|dur)[:32]
+    # Unique so duplicate uploads just replace the row.
+    dedup_key   = models.CharField(max_length=64, unique=True)
+
+    # Row-level locking
+    is_matched       = models.BooleanField(default=False, db_index=True)
+    matched_schedule = models.ForeignKey(
+        ScheduleRow, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='lmrb_matches',
+    )
+    matched_at       = models.DateTimeField(null=True, blank=True)
+
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['date', 'advt_time']
+        indexes = [
+            models.Index(fields=['account', 'channel', 'date', 'is_matched']),
+        ]
+
+    def __str__(self):
+        return f'{self.channel} | {self.advt_theme} | {self.date} | {self.advt_time}'
+
+    @staticmethod
+    def make_dedup_key(account_id, channel, date, advt_time, advt_theme, dur):
+        raw = f'{account_id}|{channel}|{date}|{advt_time}|{advt_theme}|{dur}'
+        return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
 class BrandMapping(models.Model):
     """Maps a schedule Brand name to a monitoring Advt_Theme/Theme name, per account.
     One brand can map to many themes (one row per brand-theme pair).
@@ -148,9 +235,14 @@ class MatchResult(models.Model):
     # ── Result ──────────────────────────────────────────────────────────────
     status           = models.CharField(max_length=30, choices=STATUS_CHOICES)
 
-    # Fingerprint of the consumed LMRB row — prevents the same LMRB entry
-    # from being re-matched in a subsequent smart re-run.
+    # Fingerprint of the consumed LMRB row — kept for backward compatibility.
     lmrb_fingerprint = models.CharField(max_length=64, blank=True)
+
+    # Optional FK links to row-level records (populated by the DB-based engine).
+    schedule_row = models.ForeignKey(ScheduleRow, on_delete=models.SET_NULL,
+                                     null=True, blank=True, related_name='match_results')
+    lmrb_row     = models.ForeignKey(LMRBRow, on_delete=models.SET_NULL,
+                                     null=True, blank=True, related_name='match_results')
 
     run_at           = models.DateTimeField(auto_now_add=True)
 
