@@ -169,4 +169,46 @@
   </div>
 </div>
 
+<!-- ── LMRB Controlled Deletion (Item 7) ──────────────────────── -->
+{% if request.user.role in "super_admin,admin" %}
+<div class="mt-6 bg-white rounded-2xl border border-red-100 shadow-sm overflow-hidden">
+  <div class="px-5 py-3 bg-red-50 border-b border-red-100 flex items-center gap-2">
+    <i class="fa-solid fa-trash-can text-red-500 text-sm"></i>
+    <h3 class="text-xs font-bold text-red-700 uppercase tracking-wider">Delete LMRB Records by Channel &amp; Date Range</h3>
+    <span class="text-xs text-red-400 ml-2">— matched schedule rows will be automatically unlocked</span>
+  </div>
+  <form method="post" action="/dashboard/monitoring/lmrb-delete/"
+        class="px-5 py-4 flex flex-wrap gap-3 items-end"
+        onsubmit="return confirm('This will permanently delete the selected LMRB records and unlock any matched schedule rows. Continue?');">
+    {% csrf_token %}
+    <div class="flex-1 min-w-[140px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Account</label>
+      <select name="account_id" class="select-field" required>
+        <option value="">Select account</option>
+        {% for acc in accounts %}
+          <option value="{{ acc.id }}">{{ acc.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex-1 min-w-[130px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel</label>
+      <input type="text" name="channel" placeholder="e.g. Sirasa TV" class="input-field" required />
+    </div>
+    <div class="flex-1 min-w-[130px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">From Date</label>
+      <input type="date" name="date_from" class="input-field" />
+    </div>
+    <div class="flex-1 min-w-[130px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">To Date</label>
+      <input type="date" name="date_to" class="input-field" />
+    </div>
+    <div>
+      <button type="submit" class="btn-danger">
+        <i class="fa-solid fa-trash-can"></i> Delete Records
+      </button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
 {% endblock %}

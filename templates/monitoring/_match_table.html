@@ -1,0 +1,58 @@
+{% comment %}
+  Shared partial: renders a MatchResult table.
+  Context vars:
+    rows        — list of MatchResult objects
+    show_status — bool, show Status column
+{% endcomment %}
+<div class="tab-table-wrap">
+  <table class="data-table w-full">
+    <thead>
+      <tr>
+        <th>Brand</th>
+        <th>Programme</th>
+        <th>Planned Date</th>
+        <th>Planned Start</th>
+        <th>Planned End</th>
+        <th class="text-right">Duration (s)</th>
+        <th>Aired Date</th>
+        <th>Aired Time</th>
+        {% if show_status %}<th>Status</th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for mr in rows %}
+      <tr>
+        <td class="font-medium text-slate-800">{{ mr.brand|default:"—" }}</td>
+        <td class="text-slate-600 max-w-[160px] truncate" title="{{ mr.programme }}">{{ mr.programme|default:"—" }}</td>
+        <td class="text-slate-600 whitespace-nowrap">{{ mr.scheduled_date|date:"d M Y"|default:"—" }}</td>
+        <td class="text-slate-600">{{ mr.planned_start|default:"—" }}</td>
+        <td class="text-slate-600">{{ mr.planned_end|default:"—" }}</td>
+        <td class="text-right text-slate-700">{{ mr.duration|default:"—" }}</td>
+        <td class="text-slate-600 whitespace-nowrap">{{ mr.aired_date|date:"d M Y"|default:"—" }}</td>
+        <td class="text-slate-600">{{ mr.air_time|default:"—" }}</td>
+        {% if show_status %}
+        <td>
+          {% if mr.status == 'matched' %}
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">Matched</span>
+          {% elif mr.status == 'programme_mismatch' %}
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">Prog Mismatch</span>
+          {% elif mr.status == 'late_telecast' %}
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-700">Late Telecast</span>
+          {% elif mr.status == 'no_mapping' %}
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">No Mapping</span>
+          {% else %}
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">Not Aired</span>
+          {% endif %}
+        </td>
+        {% endif %}
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="{% if show_status %}9{% else %}8{% endif %}" class="text-center text-slate-400 py-10">
+          No records in this category.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

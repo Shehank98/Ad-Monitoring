@@ -33,4 +33,9 @@ urlpatterns = [
     path('monitoring/detect/',                  views.monitoring_detect,   name='monitoring_detect'),
     path('monitoring/<int:pk>/download/',       views.monitoring_download, name='monitoring_download'),
     path('monitoring/<int:pk>/delete/',         views.monitoring_delete,   name='monitoring_delete'),
+    path('monitoring/lmrb-delete/',             views.lmrb_delete_range,   name='lmrb_delete_range'),
+
+    # Monitoring Dashboard (analytics + 7 tabs + PDF)
+    path('monitor/',                            views.monitoring_dashboard, name='monitoring_dashboard'),
+    path('monitor/pdf/',                        views.monitoring_pdf,       name='monitoring_pdf'),
 ]

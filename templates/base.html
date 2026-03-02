@@ -230,7 +230,7 @@
       {% endif %}
 
       <p class="nav-label">Monitoring</p>
-      <a href="/dashboard/monitoring/" class="nav-item {% if '/monitoring/' in path and 'upload' not in path %}active{% endif %}">
+      <a href="/dashboard/monitoring/" class="nav-item {% if '/monitoring/' in path and 'upload' not in path and '/monitor/' not in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-chart-bar"></i> View Data
       </a>
       {% if request.user.role in 'operations,super_admin,admin' %}
@@ -238,16 +238,17 @@
           <i class="nav-icon fa-solid fa-cloud-arrow-up"></i> Upload Data
         </a>
       {% endif %}
+      <a href="/dashboard/monitor/" class="nav-item {% if '/monitor/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-gauge-high"></i> Dashboard
+      </a>
 
-      {% if request.user.role != 'operations' %}
-        <p class="nav-label">Tools</p>
-        <a href="/verify/" class="nav-item {% if '/verify/' in path %}active{% endif %}">
-          <i class="nav-icon fa-solid fa-magnifying-glass-chart"></i> Verify Ads
-        </a>
-        <a href="/dashboard/brand-mappings/" class="nav-item {% if '/brand-mappings/' in path %}active{% endif %}">
-          <i class="nav-icon fa-solid fa-map"></i> Brand Mappings
-        </a>
-      {% endif %}
+      <p class="nav-label">Tools</p>
+      <a href="/verify/" class="nav-item {% if '/verify/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-magnifying-glass-chart"></i> Verify Ads
+      </a>
+      <a href="/dashboard/brand-mappings/" class="nav-item {% if '/brand-mappings/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-map"></i> Brand Mappings
+      </a>
 
       {% endwith %}
     </nav>

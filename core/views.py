@@ -1,14 +1,16 @@
+import io
 import json
 import os
 import uuid
 import pandas as pd
-from datetime import date as date_cls
+from datetime import date as date_cls, datetime
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Max, Min, Count
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from accounts.decorators import role_required
@@ -713,3 +715,316 @@ def brand_mapping_list(request):
         'accounts': account_qs,
         'filters':  {'account': account_id},
     })
+
+
+# ── LMRB controlled deletion (Item 7) ────────────────────────────────────────
+
+@login_required
+@require_POST
+def lmrb_delete_range(request):
+    """
+    Delete LMRBRow records for a specific account + channel + date range.
+    Any linked ScheduleRows are automatically unlocked (is_matched → False).
+    """
+    account_id = request.POST.get('account_id', '').strip()
+    channel    = request.POST.get('channel', '').strip()
+    date_from  = request.POST.get('date_from', '').strip()
+    date_to    = request.POST.get('date_to', '').strip()
+
+    if not account_id or not channel:
+        messages.error(request, 'Account and Channel are required.')
+        return redirect('/dashboard/monitoring/')
+
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return redirect('/dashboard/monitoring/')
+
+    qs = LMRBRow.objects.filter(account_id=account_id, channel=channel)
+    if date_from:
+        qs = qs.filter(date__gte=date_from)
+    if date_to:
+        qs = qs.filter(date__lte=date_to)
+
+    # Unlock any ScheduleRows that were linked to these LMRB rows
+    matched_sch_ids = list(
+        qs.filter(is_matched=True).values_list('matched_schedule_id', flat=True)
+    )
+    if matched_sch_ids:
+        ScheduleRow.objects.filter(id__in=matched_sch_ids).update(
+            is_matched=False, matched_lmrb=None, matched_at=None,
+        )
+
+    count = qs.count()
+    qs.delete()
+    date_desc = f' ({date_from} → {date_to})' if (date_from or date_to) else ''
+    messages.success(request,
+        f'Deleted {count:,} LMRB records for {channel}{date_desc}. '
+        f'Linked schedule rows have been unlocked for re-matching.')
+    return redirect('/dashboard/monitoring/')
+
+
+# ── Monitoring Dashboard (Items 3 + 4) ───────────────────────────────────────
+
+@login_required
+def monitoring_dashboard(request):
+    """
+    Analytics dashboard: per-scope summary, 7 report tabs, export + PDF links.
+    Accessible by operations, team_head, planner, admin, super_admin.
+    """
+    from core.models import MatchResult, ScheduleRow
+
+    user       = request.user
+    account_qs = _account_qs(user)
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+
+    selected_account = None
+    channels = []
+    months   = []
+    stats    = {}
+    tab_data = {}
+    ch_summary   = []
+    brand_summary = []
+    sponsorship_rows = []
+
+    if account_id:
+        try:
+            selected_account = account_qs.get(pk=account_id)
+        except Account.DoesNotExist:
+            pass
+
+    if selected_account:
+        channels = sorted(set(
+            MatchResult.objects.filter(account_id=account_id)
+            .values_list('channel', flat=True)
+        ))
+        if channel:
+            months = sorted(set(
+                MatchResult.objects.filter(account_id=account_id, channel=channel)
+                .values_list('month', flat=True)
+            ))
+
+    if selected_account and channel and month:
+        qs    = MatchResult.objects.filter(account_id=account_id, channel=channel, month=month)
+        total = qs.count()
+
+        n_matched    = qs.filter(status='matched').count()
+        n_prog_mis   = qs.filter(status='programme_mismatch').count()
+        n_late       = qs.filter(status='late_telecast').count()
+        n_not_aired  = qs.filter(status__in=['not_aired', 'no_mapping']).count()
+        n_no_map     = qs.filter(status='no_mapping').count()
+        n_aired      = n_matched + n_prog_mis + n_late
+        compliance   = round(n_matched / total * 100, 1) if total else 0
+
+        n_sponsorship = ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month, ad_type='SPONSORSHIP',
+        ).count()
+
+        stats = {
+            'total':      total,
+            'matched':    n_matched,
+            'prog_mis':   n_prog_mis,
+            'late':       n_late,
+            'not_aired':  n_not_aired,
+            'no_map':     n_no_map,
+            'aired':      n_aired,
+            'compliance': compliance,
+            'sponsorship': n_sponsorship,
+        }
+
+        tab_data = {
+            'full':     list(qs.order_by('scheduled_date', 'brand')),
+            'matched':  list(qs.filter(status='matched').order_by('scheduled_date', 'brand')),
+            'not_aired': list(qs.filter(status__in=['not_aired', 'no_mapping']).order_by('scheduled_date', 'brand')),
+            'prog_mis': list(qs.filter(status='programme_mismatch').order_by('scheduled_date', 'brand')),
+            'late':     list(qs.filter(status='late_telecast').order_by('scheduled_date', 'brand')),
+        }
+
+        # Channel summary (only one channel in this scope)
+        ch_summary = [{'channel': channel, **stats}]
+
+        # Brand summary
+        for br in qs.values_list('brand', flat=True).distinct().order_by('brand'):
+            bq       = qs.filter(brand=br)
+            bt       = bq.count()
+            bm       = bq.filter(status='matched').count()
+            brand_summary.append({
+                'brand':      br,
+                'total':      bt,
+                'matched':    bm,
+                'prog_mis':   bq.filter(status='programme_mismatch').count(),
+                'late':       bq.filter(status='late_telecast').count(),
+                'not_aired':  bq.filter(status__in=['not_aired', 'no_mapping']).count(),
+                'compliance': round(bm / bt * 100, 1) if bt else 0,
+            })
+
+        # Sponsorship rows for the separate sponsorship tab
+        sponsorship_rows = list(ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month, ad_type='SPONSORSHIP',
+        ).order_by('date', 'start_time'))
+
+    return render(request, 'monitoring/dashboard.html', {
+        'accounts':         account_qs,
+        'selected_account': selected_account,
+        'account_id':       account_id,
+        'channels':         channels,
+        'months':           months,
+        'channel':          channel,
+        'month':            month,
+        'stats':            stats,
+        'tab_data':         tab_data,
+        'ch_summary':       ch_summary,
+        'brand_summary':    brand_summary,
+        'sponsorship_rows': sponsorship_rows,
+    })
+
+
+# ── PDF Missed-Ad Report (Item 5) ─────────────────────────────────────────────
+
+@login_required
+def monitoring_pdf(request):
+    """
+    Generate a professional ReportLab PDF of Not-Aired / Programme-Mismatch
+    rows for a given scope (account + channel + month).
+    """
+    from core.models import MatchResult
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+
+    if not (account_id and channel and month):
+        return HttpResponse('Missing parameters: account_id, channel, month', status=400)
+    if not _account_access(request.user, account_id):
+        return HttpResponse('Access denied', status=403)
+
+    try:
+        account = Account.objects.get(pk=account_id)
+    except Account.DoesNotExist:
+        return HttpResponse('Account not found', status=404)
+
+    missed_qs = MatchResult.objects.filter(
+        account_id=account_id, channel=channel, month=month,
+        status__in=['not_aired', 'no_mapping', 'programme_mismatch', 'late_telecast'],
+    ).order_by('scheduled_date', 'brand')
+
+    try:
+        pdf_bytes = _build_missed_ad_pdf(account.name, channel, month, list(missed_qs))
+    except Exception as e:
+        return HttpResponse(f'PDF generation failed: {e}', status=500)
+
+    fname = f'missed_ads_{channel}_{month}.pdf'.replace(' ', '_')
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{fname}"'
+    return response
+
+
+def _build_missed_ad_pdf(account_name, channel, month, rows):
+    """Build a professional PDF bytes object using ReportLab."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
+    )
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+
+    buf    = io.BytesIO()
+    doc    = SimpleDocTemplate(
+        buf, pagesize=landscape(A4),
+        leftMargin=1.5*cm, rightMargin=1.5*cm,
+        topMargin=1.5*cm, bottomMargin=1.5*cm,
+    )
+
+    styles = getSampleStyleSheet()
+    NAVY   = colors.HexColor('#0b1726')
+    BLUE   = colors.HexColor('#2563eb')
+    LGRAY  = colors.HexColor('#f8fafc')
+    MGRAY  = colors.HexColor('#e2e8f0')
+    RED    = colors.HexColor('#dc2626')
+    AMBER  = colors.HexColor('#d97706')
+    VIOLET = colors.HexColor('#7c3aed')
+
+    STATUS_COLOR = {
+        'Not Aired':           RED,
+        'No Brand Mapping':    colors.HexColor('#64748b'),
+        'Programme Mismatch':  AMBER,
+        'Late Telecast':       VIOLET,
+    }
+
+    h_title = ParagraphStyle('title', fontSize=16, textColor=NAVY,
+                              fontName='Helvetica-Bold', spaceAfter=4)
+    h_sub   = ParagraphStyle('sub',   fontSize=9,  textColor=colors.HexColor('#475569'),
+                              fontName='Helvetica', spaceAfter=2)
+    h_cell  = ParagraphStyle('cell',  fontSize=7.5, fontName='Helvetica')
+    h_hdr   = ParagraphStyle('hdr',   fontSize=7.5, fontName='Helvetica-Bold',
+                              textColor=colors.white)
+
+    story = []
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    story.append(Paragraph(f'Missed Ad Report — {channel}', h_title))
+    story.append(Paragraph(f'Account: {account_name}  |  Month: {month}', h_sub))
+    story.append(Paragraph(
+        f'Generated: {datetime.now().strftime("%d %B %Y %H:%M")}  |  '
+        f'Total missed rows: {len(rows)}',
+        h_sub,
+    ))
+    story.append(HRFlowable(width='100%', thickness=1, color=BLUE, spaceAfter=10))
+
+    if not rows:
+        story.append(Paragraph('No missed ads found for this scope.', styles['Normal']))
+        doc.build(story)
+        return buf.getvalue()
+
+    # ── Table ─────────────────────────────────────────────────────────────────
+    col_headers = [
+        'Brand', 'Duration (s)', 'Programme',
+        'Planned Date', 'Planned Start', 'Planned End',
+        'Aired Date', 'Aired Time', 'Status',
+    ]
+    table_data = [[Paragraph(h, h_hdr) for h in col_headers]]
+
+    for mr in rows:
+        status_label = dict(mr.STATUS_CHOICES).get(mr.status, mr.status)
+        table_data.append([
+            Paragraph(mr.brand or '—', h_cell),
+            Paragraph(str(mr.duration or '—'), h_cell),
+            Paragraph(mr.programme or '—', h_cell),
+            Paragraph(str(mr.scheduled_date or '—'), h_cell),
+            Paragraph(mr.planned_start or '—', h_cell),
+            Paragraph(mr.planned_end or '—', h_cell),
+            Paragraph(str(mr.aired_date or '—'), h_cell),
+            Paragraph(mr.air_time or '—', h_cell),
+            Paragraph(status_label, ParagraphStyle(
+                'st', fontSize=7.5, fontName='Helvetica-Bold',
+                textColor=STATUS_COLOR.get(status_label, colors.black),
+            )),
+        ])
+
+    # Column widths for landscape A4 (≈ 25 cm usable)
+    col_widths = [4*cm, 1.8*cm, 4*cm, 2.2*cm, 2*cm, 2*cm, 2.2*cm, 2*cm, 3*cm]
+    t = Table(table_data, colWidths=col_widths, repeatRows=1)
+    t.setStyle(TableStyle([
+        # Header row
+        ('BACKGROUND',  (0, 0), (-1, 0),  NAVY),
+        ('TEXTCOLOR',   (0, 0), (-1, 0),  colors.white),
+        ('FONTNAME',    (0, 0), (-1, 0),  'Helvetica-Bold'),
+        ('FONTSIZE',    (0, 0), (-1, 0),  7.5),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [LGRAY, colors.white]),
+        ('FONTSIZE',    (0, 1), (-1, -1), 7.5),
+        ('VALIGN',      (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING',  (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('GRID',        (0, 0), (-1, -1), 0.4, MGRAY),
+        ('LINEBELOW',   (0, 0), (-1, 0),  1,   BLUE),
+    ]))
+
+    story.append(t)
+    doc.build(story)
+    return buf.getvalue()
