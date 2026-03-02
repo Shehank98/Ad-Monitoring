@@ -1,31 +1,26 @@
 """
-Verification engine views.
+Verification views.
 
-Supports two run modes:
-  smart  (default) — check existing MatchResult records for this scope:
-                      • skip schedule rows already marked 'matched'
-                      • pre-lock LMRB rows consumed by any previous run
-                      • process only new / previously unmatched rows
-  reset             — delete all MatchResults for the scope first, then run fresh
+Run modes (used by run_verification):
+  smart  (default) — skip already-matched schedule rows; pre-lock consumed LMRB rows.
+  reset             — delete all MatchResults for the scope, then run from scratch.
 
-After every run, results are persisted to MatchResult.
+Exports are DB-based: they read persisted MatchResult records and never re-run
+the matching engine.  This makes downloads instant regardless of file size.
 """
 import io
+
 import pandas as pd
-from datetime import date as date_cls
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Max, Min
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
-from django.views.decorators.http import require_POST
 
-from core.models import Account, BrandMapping, MatchResult, MonitoringData, Schedule
-from .processing import (
-    lmrb_fingerprint, match_ads, normalize,
-    prepare_monitoring_pool, prepare_schedule,
-)
+from core.models import Account, MatchResult, MonitoringData, Schedule
+from .engine import run_scope
 
+
+# ── Auth helpers ───────────────────────────────────────────────────────────────
 
 def _is_admin(user):
     return user.role in ('super_admin', 'admin')
@@ -35,6 +30,109 @@ def _account_access(user, account_id):
     if _is_admin(user):
         return True
     return user.accounts.filter(id=account_id).exists()
+
+
+# ── Export helpers ─────────────────────────────────────────────────────────────
+
+def _qs_to_df(qs):
+    """Convert a MatchResult queryset to a DataFrame with human-readable columns."""
+    STATUS_LABELS = dict(MatchResult.STATUS_CHOICES)
+    rows = []
+    for mr in qs:
+        rows.append({
+            'Channel':       mr.channel,
+            'Month':         mr.month,
+            'Brand':         mr.brand,
+            'Theme':         mr.theme,
+            'Duration (s)':  mr.duration,
+            'Programme':     mr.programme,
+            'Planned Date':  mr.scheduled_date,
+            'Planned Start': mr.planned_start,
+            'Planned End':   mr.planned_end,
+            'Aired Date':    mr.aired_date,
+            'Aired Time':    mr.air_time,
+            'Source':        mr.source,
+            'Status':        STATUS_LABELS.get(mr.status, mr.status),
+        })
+    if not rows:
+        return pd.DataFrame(columns=[
+            'Channel', 'Month', 'Brand', 'Theme', 'Duration (s)', 'Programme',
+            'Planned Date', 'Planned Start', 'Planned End',
+            'Aired Date', 'Aired Time', 'Source', 'Status',
+        ])
+    return pd.DataFrame(rows)
+
+
+def _summary_df(full_df, group_col):
+    """Build a summary DataFrame grouped by group_col."""
+    if full_df.empty or group_col not in full_df.columns:
+        return pd.DataFrame(columns=[
+            group_col, 'Total Scheduled', 'Matched', 'Programme Mismatch',
+            'Late Telecast', 'Not Aired', 'No Mapping', 'Compliance %',
+        ])
+    rows = []
+    for val, grp in full_df.groupby(group_col):
+        total      = len(grp)
+        n_matched  = (grp['Status'] == 'Matched').sum()
+        rows.append({
+            group_col:             val,
+            'Total Scheduled':     total,
+            'Matched':             n_matched,
+            'Programme Mismatch':  (grp['Status'] == 'Programme Mismatch').sum(),
+            'Late Telecast':       (grp['Status'] == 'Late Telecast').sum(),
+            'Not Aired':           (grp['Status'] == 'Not Aired').sum(),
+            'No Mapping':          (grp['Status'] == 'No Brand Mapping').sum(),
+            'Compliance %':        round(n_matched / total * 100, 1) if total else 0,
+        })
+    return pd.DataFrame(rows)
+
+
+def _build_excel_response(qs, filename_base):
+    """
+    Build a multi-sheet Excel HttpResponse from a MatchResult queryset.
+
+    Sheets: Full Report, Matched, Not Aired, Programme Mismatch, Late Telecast,
+            Channel Summary, Brand Summary.
+    """
+    full_df = _qs_to_df(qs)
+
+    def _sheet(status_label):
+        if full_df.empty:
+            return pd.DataFrame()
+        return full_df[full_df['Status'] == status_label].copy()
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        full_df.to_excel(writer, sheet_name='Full Report', index=False)
+        _sheet('Matched').to_excel(writer, sheet_name='Matched', index=False)
+        _sheet('Not Aired').to_excel(writer, sheet_name='Not Aired', index=False)
+        _sheet('Programme Mismatch').to_excel(writer, sheet_name='Programme Mismatch', index=False)
+        _sheet('Late Telecast').to_excel(writer, sheet_name='Late Telecast', index=False)
+        _summary_df(full_df, 'Channel').to_excel(writer, sheet_name='Channel Summary', index=False)
+        _summary_df(full_df, 'Brand').to_excel(writer, sheet_name='Brand Summary', index=False)
+
+    output.seek(0)
+    fname = f'{filename_base}.xlsx'.replace(' ', '_')
+    resp  = HttpResponse(
+        output.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    resp['Content-Disposition'] = f'attachment; filename="{fname}"'
+    return resp
+
+
+# ── Internal df → JSON helper ──────────────────────────────────────────────────
+
+def _df_to_list(df):
+    if df is None or df.empty:
+        return []
+    df = df.copy()
+    for col in ['_lmrb_fp', '_sch_key']:
+        if col in df.columns:
+            df.drop(columns=[col], inplace=True)
+    for col in df.select_dtypes(include=['datetime64[ns]', 'datetime64[ns, UTC]']).columns:
+        df[col] = df[col].dt.strftime('%Y-%m-%d')
+    return df.fillna('').to_dict('records')
 
 
 # ── Main tool page ─────────────────────────────────────────────────────────────
@@ -92,6 +190,7 @@ def get_months(request):
 @login_required
 def get_preview(request):
     """Return schedule + monitoring info and brand mapping status for a selection."""
+    from core.models import BrandMapping
     account_id = request.GET.get('account_id')
     channel    = request.GET.get('channel')
     month      = request.GET.get('month')
@@ -103,12 +202,6 @@ def get_preview(request):
     schedules = Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
     mon_data  = MonitoringData.objects.filter(account_id=account_id, channel=channel)
     mappings  = BrandMapping.objects.filter(account_id=account_id)
-
-    # Version info
-    versions = list(
-        schedules.values_list('version', 'uploaded_at', 'row_count', 'schedule_number')
-                 .order_by('version')
-    )
 
     return JsonResponse({
         'ok': True,
@@ -136,7 +229,7 @@ def get_preview(request):
 
 @login_required
 def get_previous_results(request):
-    """Return summary of existing MatchResults for a scope (for smart-run info panel)."""
+    """Return summary of existing MatchResults for a scope (smart-run info panel)."""
     account_id = request.GET.get('account_id')
     channel    = request.GET.get('channel')
     month      = request.GET.get('month')
@@ -155,192 +248,29 @@ def get_previous_results(request):
         counts[r['status']] = counts.get(r['status'], 0) + 1
 
     return JsonResponse({
-        'ok':              True,
-        'has_results':     True,
-        'last_run_at':     last_run.run_at.strftime('%d %b %Y %H:%M'),
-        'total':           qs.count(),
-        'matched':         counts.get('matched', 0),
+        'ok':                 True,
+        'has_results':        True,
+        'last_run_at':        last_run.run_at.strftime('%d %b %Y %H:%M'),
+        'total':              qs.count(),
+        'matched':            counts.get('matched', 0),
         'programme_mismatch': counts.get('programme_mismatch', 0),
-        'late_telecast':   counts.get('late_telecast', 0),
-        'not_aired':       counts.get('not_aired', 0),
-        'no_mapping':      counts.get('no_mapping', 0),
+        'late_telecast':      counts.get('late_telecast', 0),
+        'not_aired':          counts.get('not_aired', 0),
+        'no_mapping':         counts.get('no_mapping', 0),
     })
 
 
-# ── Verification engine ────────────────────────────────────────────────────────
-
-def _build_brand_theme_map(account_id):
-    """Build the brand→[(theme, duration)] map from DB."""
-    brand_theme_map = {}
-    for bm in BrandMapping.objects.filter(account_id=account_id):
-        norm_brand = normalize(bm.brand)
-        norm_theme = normalize(bm.theme)
-        mapping_dur = int(bm.duration) if bm.duration is not None else None
-        brand_theme_map.setdefault(norm_brand, []).append((norm_theme, mapping_dur))
-    return brand_theme_map
-
-
-def _run_engine(account_id, channel, month, mode='smart'):
-    """
-    Load files, run matching, persist results.
-
-    mode='smart': existing Matched results are kept; only new/unmatched rows are processed.
-    mode='reset': all prior MatchResults for this scope are deleted; full re-run.
-
-    Returns (matched_df, prog_mismatch_df, late_telecast_df, not_aired_df, extra_df), total_sch.
-    """
-    schedules = Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
-    mon_qs    = MonitoringData.objects.filter(account_id=account_id, channel=channel)
-
-    if not schedules.exists():
-        raise ValueError(f'No schedule found for "{channel}" / "{month}".')
-    if not mon_qs.exists():
-        raise ValueError(f'No monitoring data found for channel "{channel}".')
-
-    # ── Load schedule ──────────────────────────────────────────────────────────
-    sch_frames = []
-    for s in schedules:
-        df = pd.read_excel(s.file.path)
-        df.columns = df.columns.str.strip()
-        sch_frames.append(df)
-    sch_df = pd.concat(sch_frames, ignore_index=True)
-    sch_df = prepare_schedule(sch_df)
-
-    # Schedule date range (for LMRB filtering)
-    sch_dates = schedules.aggregate(min=Min('start_date'), max=Max('end_date'))
-    date_start = sch_dates['min']
-    date_end   = sch_dates['max']
-
-    # ── Load monitoring ────────────────────────────────────────────────────────
-    mon_files = []
-    for m in mon_qs:
-        df = pd.read_excel(m.file.path)
-        df.columns = df.columns.str.strip()
-        mon_files.append((m.data_type, df))
-
-    mon_pool = prepare_monitoring_pool(
-        mon_files,
-        channel_filter=channel,
-        date_start=date_start,
-        date_end=date_end,
-    )
-
-    brand_theme_map = _build_brand_theme_map(account_id)
-
-    # ── Smart re-run: load previous results ───────────────────────────────────
-    pre_matched_fp  = set()
-    skip_sch_keys   = set()
-
-    scope_qs = MatchResult.objects.filter(account_id=account_id, channel=channel, month=month)
-
-    if mode == 'reset':
-        scope_qs.delete()
-    else:  # smart
-        for mr in scope_qs:
-            if mr.lmrb_fingerprint:
-                pre_matched_fp.add(mr.lmrb_fingerprint)
-            if mr.status == 'matched':
-                skip_sch_keys.add((
-                    normalize(mr.brand),
-                    str(mr.scheduled_date),
-                    mr.planned_start,
-                    mr.planned_end,
-                    str(mr.duration),
-                ))
-
-    # ── Run matching ──────────────────────────────────────────────────────────
-    matched_df, prog_mis_df, late_df, not_aired_df, extra_df = match_ads(
-        sch_df, mon_pool, brand_theme_map,
-        pre_matched_fp=pre_matched_fp,
-        skip_sch_keys=skip_sch_keys,
-    )
-
-    # ── Persist new results ───────────────────────────────────────────────────
-    def _to_date(val):
-        if val is None or (isinstance(val, float) and pd.isna(val)):
-            return None
-        try:
-            ts = pd.Timestamp(val)
-            return ts.date() if not pd.isna(ts) else None
-        except Exception:
-            return None
-
-    def _str(val):
-        return '' if (val is None or (isinstance(val, float) and pd.isna(val))) else str(val)
-
-    def _int(val):
-        try:
-            return int(val) if val is not None and not pd.isna(val) else None
-        except Exception:
-            return None
-
-    to_save = []
-    account_obj = Account.objects.get(pk=account_id)
-
-    for df, status_field in [
-        (matched_df,   'matched'),
-        (prog_mis_df,  'programme_mismatch'),
-        (late_df,      'late_telecast'),
-        (not_aired_df, 'not_aired'),
-    ]:
-        if df is None or df.empty:
-            continue
-        for _, r in df.iterrows():
-            raw_status = _str(r.get('Status', status_field))
-            # Normalise status string to DB choice key
-            status_map = {
-                'matched':            'matched',
-                'programme mismatch': 'programme_mismatch',
-                'late telecast':      'late_telecast',
-                'not aired':          'not_aired',
-                'no brand mapping':   'no_mapping',
-            }
-            db_status = status_map.get(raw_status.lower(), status_field)
-
-            to_save.append(MatchResult(
-                account         = account_obj,
-                channel         = channel,
-                month           = month,
-                brand           = _str(r.get('Brand', '')),
-                programme       = _str(r.get('Programme', '')),
-                scheduled_date  = _to_date(r.get('Scheduled_Date')),
-                planned_start   = _str(r.get('Planned_Start', r.get('Start_Time', ''))),
-                planned_end     = _str(r.get('Planned_End', r.get('End_Time', ''))),
-                duration        = _int(r.get('Duration')),
-                theme           = _str(r.get('Theme', '')),
-                aired_date      = _to_date(r.get('Aired_Date')),
-                air_time        = _str(r.get('Air_Time', '')),
-                source          = _str(r.get('Source', '')),
-                status          = db_status,
-                lmrb_fingerprint = _str(r.get('_lmrb_fp', '')),
-            ))
-
-    if to_save:
-        MatchResult.objects.bulk_create(to_save, batch_size=500)
-
-    return (matched_df, prog_mis_df, late_df, not_aired_df, extra_df), len(sch_df)
-
-
-def _df_to_list(df):
-    if df is None or df.empty:
-        return []
-    df = df.copy()
-    # Drop internal helper columns before sending to client
-    for col in ['_lmrb_fp', '_sch_key']:
-        if col in df.columns:
-            df.drop(columns=[col], inplace=True)
-    for col in df.select_dtypes(include=['datetime64[ns]', 'datetime64[ns, UTC]']).columns:
-        df[col] = df[col].dt.strftime('%Y-%m-%d')
-    return df.fillna('').to_dict('records')
-
+# ── Run verification ───────────────────────────────────────────────────────────
 
 @login_required
-@require_POST
 def run_verification(request):
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
     account_id = request.POST.get('account_id')
     channel    = request.POST.get('channel')
     month      = request.POST.get('month')
-    mode       = request.POST.get('mode', 'smart')  # 'smart' or 'reset'
+    mode       = request.POST.get('mode', 'smart')
 
     if not all([account_id, channel, month]):
         return JsonResponse({'ok': False, 'error': 'Missing parameters.'})
@@ -349,13 +279,13 @@ def run_verification(request):
 
     try:
         (matched_df, prog_mis_df, late_df, not_aired_df, extra_df), total_sch = \
-            _run_engine(account_id, channel, month, mode=mode)
+            run_scope(account_id, channel, month, mode=mode)
 
-        n_matched   = len(matched_df)   if not matched_df.empty   else 0
-        n_prog_mis  = len(prog_mis_df)  if not prog_mis_df.empty  else 0
-        n_late      = len(late_df)      if not late_df.empty      else 0
-        n_not_aired = len(not_aired_df) if not not_aired_df.empty else 0
-        n_extra     = len(extra_df)     if not extra_df.empty     else 0
+        n_matched   = len(matched_df)   if matched_df is not None and not matched_df.empty   else 0
+        n_prog_mis  = len(prog_mis_df)  if prog_mis_df is not None and not prog_mis_df.empty  else 0
+        n_late      = len(late_df)      if late_df is not None and not late_df.empty      else 0
+        n_not_aired = len(not_aired_df) if not_aired_df is not None and not not_aired_df.empty else 0
+        n_extra     = len(extra_df)     if extra_df is not None and not extra_df.empty     else 0
 
         n_aired    = n_matched + n_prog_mis + n_late
         compliance = round(n_matched / total_sch * 100, 1) if total_sch else 0
@@ -369,61 +299,148 @@ def run_verification(request):
             'not_aired':     _df_to_list(not_aired_df),
             'extra':         _df_to_list(extra_df),
             'summary': {
-                'total_scheduled':   total_sch,
-                'matched':           n_matched,
-                'prog_mismatch':     n_prog_mis,
-                'late_telecast':     n_late,
-                'not_aired':         n_not_aired,
-                'extra':             n_extra,
-                'total_aired':       n_aired,
-                'compliance':        compliance,
+                'total_scheduled': total_sch,
+                'matched':         n_matched,
+                'prog_mismatch':   n_prog_mis,
+                'late_telecast':   n_late,
+                'not_aired':       n_not_aired,
+                'extra':           n_extra,
+                'total_aired':     n_aired,
+                'compliance':      compliance,
             },
         })
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)})
 
 
+# ── Exports ────────────────────────────────────────────────────────────────────
+
 @login_required
-@require_POST
 def export_excel(request):
-    account_id = request.POST.get('account_id')
-    channel    = request.POST.get('channel')
-    month      = request.POST.get('month')
-    mode       = request.POST.get('mode', 'smart')
+    """
+    DB-based export for a specific (account, channel, month) scope.
+    Reads MatchResult records — no engine re-run required.
+    """
+    account_id = request.POST.get('account_id') or request.GET.get('account_id')
+    channel    = request.POST.get('channel')    or request.GET.get('channel')
+    month      = request.POST.get('month')      or request.GET.get('month')
 
     if not _account_access(request.user, account_id):
         return HttpResponse('Access denied', status=403)
 
-    try:
-        (matched_df, prog_mis_df, late_df, not_aired_df, extra_df), _ = \
-            _run_engine(account_id, channel, month, mode=mode)
-
-        def _clean(df):
-            if df is None or df.empty:
-                return pd.DataFrame()
-            df = df.copy()
-            for col in ['_lmrb_fp', '_sch_key']:
-                if col in df.columns:
-                    df.drop(columns=[col], inplace=True)
-            for col in df.select_dtypes(include=['datetime64[ns]', 'datetime64[ns, UTC]']).columns:
-                df[col] = df[col].dt.strftime('%Y-%m-%d')
-            return df.fillna('')
-
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            _clean(matched_df).to_excel(writer,   sheet_name='Matched',            index=False)
-            _clean(prog_mis_df).to_excel(writer,  sheet_name='Programme Mismatch', index=False)
-            _clean(late_df).to_excel(writer,      sheet_name='Late Telecast',      index=False)
-            _clean(not_aired_df).to_excel(writer, sheet_name='Not Aired',          index=False)
-            _clean(extra_df).to_excel(writer,     sheet_name='Extra Aired',        index=False)
-
-        output.seek(0)
-        filename = f'verification_{channel}_{month}.xlsx'.replace(' ', '_')
-        response = HttpResponse(
-            output.read(),
-            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    qs = MatchResult.objects.filter(account_id=account_id, channel=channel, month=month)
+    if not qs.exists():
+        return HttpResponse(
+            'No results found for this scope. Run verification first.',
+            status=404,
         )
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        return response
-    except Exception as e:
-        return HttpResponse(f'Export failed: {e}', status=500)
+
+    filename = f'verification_{channel}_{month}'
+    return _build_excel_response(qs, filename)
+
+
+@login_required
+def export_all(request):
+    """
+    DB-based export of ALL MatchResults for an account (all channels & months).
+    Generates a single workbook with Full Report, status sheets, and summaries.
+    """
+    account_id = request.GET.get('account_id')
+    if not account_id:
+        return HttpResponse('Missing account_id', status=400)
+    if not _account_access(request.user, account_id):
+        return HttpResponse('Access denied', status=403)
+
+    try:
+        account = Account.objects.get(pk=account_id)
+    except Account.DoesNotExist:
+        return HttpResponse('Account not found', status=404)
+
+    qs = MatchResult.objects.filter(account_id=account_id)
+    if not qs.exists():
+        return HttpResponse(
+            'No results found for this account. Run verification first.',
+            status=404,
+        )
+
+    filename = f'verification_all_{account.name}'
+    return _build_excel_response(qs, filename)
+
+
+# ── Report page ────────────────────────────────────────────────────────────────
+
+@login_required
+def report(request):
+    """
+    Global report page — per-scope (channel × month) summary from MatchResult.
+
+    Query param: ?account_id=<id>
+    """
+    user = request.user
+    if _is_admin(user):
+        accounts = Account.objects.all().order_by('name')
+    else:
+        accounts = user.accounts.all().order_by('name')
+
+    account_id       = request.GET.get('account_id')
+    selected_account = None
+    scopes           = []
+    totals           = {}
+
+    if account_id and _account_access(user, account_id):
+        try:
+            selected_account = Account.objects.get(pk=account_id)
+        except Account.DoesNotExist:
+            pass
+
+    if selected_account:
+        scope_combos = (
+            MatchResult.objects.filter(account_id=account_id)
+            .values('channel', 'month')
+            .distinct()
+            .order_by('channel', 'month')
+        )
+        for s in scope_combos:
+            ch, mo = s['channel'], s['month']
+            qs     = MatchResult.objects.filter(account_id=account_id, channel=ch, month=mo)
+            total  = qs.count()
+            counts = {k: 0 for k, _ in MatchResult.STATUS_CHOICES}
+            for r in qs.values('status'):
+                counts[r['status']] = counts.get(r['status'], 0) + 1
+            last_run   = qs.order_by('-run_at').values_list('run_at', flat=True).first()
+            n_matched  = counts.get('matched', 0)
+            compliance = round(n_matched / total * 100, 1) if total else 0
+            scopes.append({
+                'channel':    ch,
+                'month':      mo,
+                'total':      total,
+                'matched':    n_matched,
+                'prog_mis':   counts.get('programme_mismatch', 0),
+                'late':       counts.get('late_telecast', 0),
+                'not_aired':  counts.get('not_aired', 0),
+                'no_map':     counts.get('no_mapping', 0),
+                'compliance': compliance,
+                'last_run':   last_run,
+            })
+
+        # Account-level totals
+        if scopes:
+            totals = {
+                'scopes':     len(scopes),
+                'total':      sum(s['total']     for s in scopes),
+                'matched':    sum(s['matched']   for s in scopes),
+                'prog_mis':   sum(s['prog_mis']  for s in scopes),
+                'late':       sum(s['late']      for s in scopes),
+                'not_aired':  sum(s['not_aired'] for s in scopes),
+                'no_map':     sum(s['no_map']    for s in scopes),
+            }
+            t = totals['total']
+            totals['compliance'] = round(totals['matched'] / t * 100, 1) if t else 0
+
+    return render(request, 'verification/report.html', {
+        'accounts':         accounts,
+        'selected_account': selected_account,
+        'account_id':       account_id,
+        'scopes':           scopes,
+        'totals':           totals,
+    })

@@ -1,0 +1,203 @@
+{% extends 'base.html' %}
+{% block title %}Verification Report{% endblock %}
+{% block page_title %}Verification Report{% endblock %}
+{% block page_subtitle %}Account-level summary of all verification results by channel and month{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+  <!-- Account selector -->
+  <div class="card">
+    <form method="get" class="flex flex-wrap items-end gap-4">
+      <div class="flex-1 min-w-48">
+        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+          <i class="fa-solid fa-building mr-1 text-slate-400"></i> Account
+        </label>
+        <select name="account_id" onchange="this.form.submit()"
+                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="">— Select an account —</option>
+          {% for acc in accounts %}
+            <option value="{{ acc.id }}" {% if acc.id|stringformat:"s" == account_id %}selected{% endif %}>
+              {{ acc.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      {% if selected_account %}
+        <a href="/verify/export-all/?account_id={{ account_id }}"
+           class="btn-primary whitespace-nowrap">
+          <i class="fa-solid fa-download"></i> Export All
+        </a>
+      {% endif %}
+    </form>
+  </div>
+
+  {% if selected_account %}
+
+    {% if not scopes %}
+      <!-- No results yet -->
+      <div class="card text-center py-12">
+        <i class="fa-solid fa-magnifying-glass text-4xl text-slate-300 mb-3"></i>
+        <p class="text-slate-500 font-semibold">No verification results yet for <strong>{{ selected_account }}</strong>.</p>
+        <p class="text-slate-400 text-sm mt-1">
+          Upload a schedule and monitoring data, or run verification from the
+          <a href="/verify/" class="text-blue-600 hover:underline">Verify Ads tool</a>.
+        </p>
+      </div>
+
+    {% else %}
+
+      <!-- Account-level summary cards -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div class="stat-card">
+          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Scopes</p>
+          <p class="text-2xl font-bold text-slate-800">{{ totals.scopes }}</p>
+        </div>
+        <div class="stat-card">
+          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Scheduled</p>
+          <p class="text-2xl font-bold text-slate-800">{{ totals.total }}</p>
+        </div>
+        <div class="stat-card">
+          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Matched</p>
+          <p class="text-2xl font-bold text-emerald-600">{{ totals.matched }}</p>
+        </div>
+        <div class="stat-card">
+          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Compliance</p>
+          <p class="text-2xl font-bold {% if totals.compliance >= 90 %}text-emerald-600{% elif totals.compliance >= 70 %}text-amber-600{% else %}text-red-600{% endif %}">
+            {{ totals.compliance }}%
+          </p>
+        </div>
+        <div class="stat-card">
+          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Prog Mismatch</p>
+          <p class="text-2xl font-bold text-amber-600">{{ totals.prog_mis }}</p>
+        </div>
+        <div class="stat-card">
+          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Late Telecast</p>
+          <p class="text-2xl font-bold text-violet-600">{{ totals.late }}</p>
+        </div>
+        <div class="stat-card">
+          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Not Aired</p>
+          <p class="text-2xl font-bold text-red-600">{{ totals.not_aired }}</p>
+        </div>
+      </div>
+
+      <!-- Scope table -->
+      <div class="card overflow-hidden p-0">
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <h3 class="font-bold text-slate-800 text-sm">
+            <i class="fa-solid fa-table-list text-slate-400 mr-1.5"></i>
+            Results by Channel &amp; Month
+          </h3>
+          <span class="text-xs text-slate-400">{{ scopes|length }} scope{{ scopes|length|pluralize }}</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="bg-slate-50 border-b border-slate-100 text-left">
+                <th class="px-4 py-3 font-semibold text-slate-600">Channel</th>
+                <th class="px-4 py-3 font-semibold text-slate-600">Month</th>
+                <th class="px-4 py-3 font-semibold text-slate-600 text-right">Scheduled</th>
+                <th class="px-4 py-3 font-semibold text-emerald-700 text-right">Matched</th>
+                <th class="px-4 py-3 font-semibold text-amber-700 text-right">Prog Mismatch</th>
+                <th class="px-4 py-3 font-semibold text-violet-700 text-right">Late Telecast</th>
+                <th class="px-4 py-3 font-semibold text-red-700 text-right">Not Aired</th>
+                <th class="px-4 py-3 font-semibold text-slate-600 text-right">Compliance</th>
+                <th class="px-4 py-3 font-semibold text-slate-600">Last Run</th>
+                <th class="px-4 py-3 font-semibold text-slate-600 text-center">Export</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              {% for scope in scopes %}
+              <tr class="hover:bg-slate-50 transition-colors">
+                <td class="px-4 py-3 font-semibold text-slate-800">
+                  <i class="fa-solid fa-tv text-slate-400 mr-1 text-[10px]"></i>
+                  {{ scope.channel }}
+                </td>
+                <td class="px-4 py-3 text-slate-600">{{ scope.month }}</td>
+                <td class="px-4 py-3 text-right font-mono text-slate-700">{{ scope.total }}</td>
+                <td class="px-4 py-3 text-right">
+                  <span class="font-semibold text-emerald-700">{{ scope.matched }}</span>
+                </td>
+                <td class="px-4 py-3 text-right">
+                  {% if scope.prog_mis %}
+                    <span class="text-amber-700">{{ scope.prog_mis }}</span>
+                  {% else %}
+                    <span class="text-slate-300">—</span>
+                  {% endif %}
+                </td>
+                <td class="px-4 py-3 text-right">
+                  {% if scope.late %}
+                    <span class="text-violet-700">{{ scope.late }}</span>
+                  {% else %}
+                    <span class="text-slate-300">—</span>
+                  {% endif %}
+                </td>
+                <td class="px-4 py-3 text-right">
+                  {% if scope.not_aired %}
+                    <span class="text-red-700">{{ scope.not_aired }}</span>
+                  {% else %}
+                    <span class="text-slate-300">—</span>
+                  {% endif %}
+                </td>
+                <td class="px-4 py-3 text-right">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold
+                    {% if scope.compliance >= 90 %}bg-emerald-100 text-emerald-700
+                    {% elif scope.compliance >= 70 %}bg-amber-100 text-amber-700
+                    {% else %}bg-red-100 text-red-700{% endif %}">
+                    {{ scope.compliance }}%
+                  </span>
+                </td>
+                <td class="px-4 py-3 text-slate-400 whitespace-nowrap">
+                  {% if scope.last_run %}
+                    {{ scope.last_run|date:"d M Y H:i" }}
+                  {% else %}
+                    <span class="text-slate-300">—</span>
+                  {% endif %}
+                </td>
+                <td class="px-4 py-3 text-center">
+                  <form method="post" action="/verify/export/">
+                    {% csrf_token %}
+                    <input type="hidden" name="account_id" value="{{ account_id }}">
+                    <input type="hidden" name="channel"    value="{{ scope.channel }}">
+                    <input type="hidden" name="month"      value="{{ scope.month }}">
+                    <button type="submit"
+                            class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg
+                                   bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold
+                                   text-[11px] transition-colors border border-blue-200">
+                      <i class="fa-solid fa-download text-[10px]"></i> .xlsx
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    {% endif %}
+
+  {% else %}
+
+    <!-- No account selected placeholder -->
+    <div class="card text-center py-16">
+      <i class="fa-solid fa-chart-bar text-5xl text-slate-200 mb-4"></i>
+      <p class="text-slate-500 font-semibold">Select an account above to view the verification report.</p>
+    </div>
+
+  {% endif %}
+
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+  .stat-card {
+    background: white;
+    border-radius: .875rem;
+    border: 1px solid #f1f5f9;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05);
+    padding: 1rem 1.25rem;
+  }
+</style>
+{% endblock %}

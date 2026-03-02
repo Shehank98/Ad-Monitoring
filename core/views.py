@@ -274,6 +274,14 @@ def schedule_upload(request):
             messages.success(request,
                 f'Schedule #{schedule.schedule_number} v{version} for {account} '
                 f'({month}, {start_date} → {end_date}) uploaded — {row_count:,} rows.')
+
+            # Auto-run verification for all available scopes of this account
+            try:
+                from verification.engine import auto_run_all_for_account
+                auto_run_all_for_account(account.id)
+            except Exception:
+                pass  # Never fail the upload due to auto-run issues
+
             return redirect('/dashboard/schedules/')
 
     return render(request, 'schedules/upload.html', {'form': form})
@@ -425,6 +433,14 @@ def monitoring_upload(request):
                 f'{MonitoringData.DATA_TYPES[0][1] if data_type == "maponline" else "MediaWatch (LMRB)"} — '
                 f'{account} — {len(channel_metas)} channel(s) detected: {ch_names}. '
                 f'Uploaded successfully.')
+
+            # Auto-run verification for all available scopes of this account
+            try:
+                from verification.engine import auto_run_all_for_account
+                auto_run_all_for_account(account.id)
+            except Exception:
+                pass  # Never fail the upload due to auto-run issues
+
             return redirect('/dashboard/monitoring/')
 
     return render(request, 'monitoring/upload.html', {'form': form})
