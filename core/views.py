@@ -21,7 +21,8 @@ from .forms import AccountForm, ChannelForm, MonitoringUploadForm, ScheduleUploa
 from .models import (
     Account, BrandMapping, Channel,
     LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow,
-    SummaryReportMeta, TCRow, TransmissionReport,
+    SummaryReportMeta, SystemSetting, TCRow, TransmissionReport,
+    _ensure_defaults, get_setting_list,
 )
 
 
@@ -615,13 +616,18 @@ def _parse_lmrb_rows(df, data_type, account):
     # ── Normalise to standard column names ─────────────────────────────────────
     if data_type == 'maponline':
         rename = {}
-        th_col = _find_col(df, 'Advt_Theme', 'Theme')
+        # Load super-admin configurable extra aliases
+        _lmrb_ex_theme = get_setting_list('lmrb_extra_theme_aliases')
+        _lmrb_ex_time  = get_setting_list('lmrb_extra_time_aliases')
+        _lmrb_ex_dur   = get_setting_list('lmrb_extra_duration_aliases')
+        _lmrb_ex_date  = get_setting_list('lmrb_extra_date_aliases')
+        th_col = _find_col(df, 'Advt_Theme', 'Theme', *_lmrb_ex_theme)
         if th_col and th_col != 'Advt_Theme': rename[th_col] = 'Advt_Theme'
-        dt_col = _find_col(df, 'Date', 'Prg Date')
+        dt_col = _find_col(df, 'Date', 'Prg Date', *_lmrb_ex_date)
         if dt_col and dt_col != 'Date': rename[dt_col] = 'Date'
-        du_col = _find_col(df, 'Dur', 'Ad Dur')
+        du_col = _find_col(df, 'Dur', 'Ad Dur', *_lmrb_ex_dur)
         if du_col and du_col != 'Dur': rename[du_col] = 'Dur'
-        tm_col = _find_col(df, 'Advt_time', 'Ad Start', 'Advt_Time')
+        tm_col = _find_col(df, 'Advt_time', 'Ad Start', 'Advt_Time', *_lmrb_ex_time)
         if tm_col and tm_col != 'Advt_time': rename[tm_col] = 'Advt_time'
         pg_col = _find_col(df, 'Programme', 'Prg Name', 'Program')
         if pg_col and pg_col != 'Programme': rename[pg_col] = 'Programme'
@@ -1349,14 +1355,23 @@ def _parse_tc_rows(df, account, tc_report):
         if actual is not None:
             rename[actual] = standard
 
+    # Super-admin can add extra column aliases via Settings page
+    _tc_ex_theme = get_setting_list('tc_extra_theme_aliases')
+    _tc_ex_time  = get_setting_list('tc_extra_time_aliases')
+    _tc_ex_date  = get_setting_list('tc_extra_date_aliases')
+    _tc_ex_dur   = get_setting_list('tc_extra_duration_aliases')
+    _tc_ex_prog  = get_setting_list('tc_extra_programme_aliases')
+
     _ci_rename('Channel',   ['Station', 'CHANNEL', 'channel'])
-    _ci_rename('Date',      ['Aired Date', 'Prg Date', 'aired_date', 'AiredDate', 'Prg_Date'])
-    _ci_rename('Programme', ['Program', 'Prg Name', 'PrgName', 'programme'])
+    _ci_rename('Date',      ['Aired Date', 'Prg Date', 'aired_date', 'AiredDate', 'Prg_Date',
+                              *_tc_ex_date])
+    _ci_rename('Programme', ['Program', 'Prg Name', 'PrgName', 'programme', *_tc_ex_prog])
     _ci_rename('TC_Theme',  ['Advt_Theme', 'Advt_theme', 'Theme', 'theme',
-                              'Product', 'Description', 'Ad Name', 'AdName', 'Ad_Name'])
-    _ci_rename('Duration',  ['Dur', 'Seconds', 'Ad Dur', 'Duration_Sec'])
+                              'Product', 'Description', 'Ad Name', 'AdName', 'Ad_Name',
+                              *_tc_ex_theme])
+    _ci_rename('Duration',  ['Dur', 'Seconds', 'Ad Dur', 'Duration_Sec', *_tc_ex_dur])
     _ci_rename('Aired_Time',['Advt_Time', 'Advt_time', 'advt_Time', 'Time',
-                              'Aired Time', 'Ad Start', 'AdTime', 'AiredTime'])
+                              'Aired Time', 'Ad Start', 'AdTime', 'AiredTime', *_tc_ex_time])
 
     if rename:
         df = df.rename(columns=rename)
@@ -2314,3 +2329,52 @@ def summary_pdf(request):
     response = HttpResponse(buf.read(), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{fname}"'
     return response
+
+
+# ── System Settings (super_admin only) ────────────────────────────────────────
+
+@login_required
+@role_required(['super_admin'])
+def system_settings(request):
+    """
+    Site-wide configuration page — super_admin only.
+
+    On first visit, any missing settings are auto-created from SETTING_DEFAULTS
+    so the page always shows the full list even on a fresh installation.
+    """
+    # Ensure all default settings exist in DB
+    _ensure_defaults()
+
+    if request.method == 'POST':
+        updated = 0
+        for s in SystemSetting.objects.all():
+            new_val = request.POST.get(s.key, '').strip()
+            if s.value != new_val:
+                s.value = new_val
+                s.save()
+                updated += 1
+        if updated:
+            messages.success(request, f'Settings saved — {updated} value(s) updated.')
+        else:
+            messages.success(request, 'Settings saved (no changes).')
+        return redirect('system_settings')
+
+    # Group settings by their category display label
+    from collections import OrderedDict
+    CATEGORY_ORDER = ['reconciliation', 'tc_parsing', 'lmrb_parsing']
+    CATEGORY_LABELS = {
+        'reconciliation': 'Reconciliation',
+        'tc_parsing':     'TC File Parsing',
+        'lmrb_parsing':   'LMRB / MapOnline File Parsing',
+    }
+    all_settings = list(SystemSetting.objects.all())
+    categories = OrderedDict()
+    for cat_key in CATEGORY_ORDER:
+        cat_settings = [s for s in all_settings if s.category == cat_key]
+        if cat_settings:
+            categories[CATEGORY_LABELS.get(cat_key, cat_key)] = cat_settings
+
+    return render(request, 'admin_panel/settings.html', {
+        'categories': categories,
+    })
+

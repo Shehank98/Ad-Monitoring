@@ -36,6 +36,7 @@ from django.utils import timezone
 from core.models import (
     Account, BrandMapping, LMRBRow, Schedule, ScheduleRow,
     SummaryReportMeta, TCRow, TransmissionReport,
+    get_setting_int,
 )
 
 # ── LMRB theme helpers ────────────────────────────────────────────────────────
@@ -254,6 +255,10 @@ def reconcile_tc(account_id, channel, month, mode='smart'):
     tc_lmrb_updates = []
     used_lmrb_ids = set()
 
+    # Time tolerance is configurable by super_admin via /dashboard/settings/
+    time_tolerance = get_setting_int('tc_lmrb_time_tolerance', 5)
+    print(f"[reconcile_tc] TC-LMRB time tolerance: ±{time_tolerance}s")
+
     for tcrow in all_tc:
         tc_secs = _time_to_secs(tcrow.aired_time)
         if tc_secs is None:
@@ -263,14 +268,14 @@ def reconcile_tc(account_id, channel, month, mode='smart'):
         key = (_normalize(tcrow.channel), tcrow.date, dur)
         candidates = lmrb_index.get(key, [])
         best = None
-        best_diff = 6  # anything > 5 sec means no match
+        best_diff = time_tolerance + 1  # anything > tolerance means no match
         for lmrb_id, lmrb_secs, lr_obj in candidates:
             if lmrb_id in used_lmrb_ids:
                 continue
             if lmrb_secs is None:
                 continue
             diff = abs(tc_secs - lmrb_secs)
-            if diff <= 5 and diff < best_diff:
+            if diff <= time_tolerance and diff < best_diff:
                 best_diff = diff
                 best = (lmrb_id, lr_obj)
 

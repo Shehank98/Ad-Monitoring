@@ -215,6 +215,11 @@
         <a href="/dashboard/channels/" class="nav-item {% if '/channels/' in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-tv"></i> Channels
         </a>
+        {% if request.user.role == 'super_admin' %}
+        <a href="/dashboard/settings/" class="nav-item {% if '/settings/' in path %}active{% endif %}">
+          <i class="nav-icon fa-solid fa-sliders"></i> Settings
+        </a>
+        {% endif %}
       {% endif %}
 
       {% if request.user.role != 'operations' %}

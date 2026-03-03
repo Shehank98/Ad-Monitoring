@@ -52,4 +52,7 @@ urlpatterns = [
     path('summary/',                            views.summary_report, name='summary_report'),
     path('summary/excel/',                      views.summary_excel,  name='summary_excel'),
     path('summary/pdf/',                        views.summary_pdf,    name='summary_pdf'),
+
+    # System Settings (super_admin only)
+    path('settings/',                           views.system_settings, name='system_settings'),
 ]

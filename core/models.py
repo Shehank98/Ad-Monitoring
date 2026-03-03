@@ -374,3 +374,193 @@ class MatchResult(models.Model):
 
     def __str__(self):
         return f'{self.account} | {self.channel} | {self.brand} | {self.scheduled_date} | {self.status}'
+
+
+# ── System Settings ───────────────────────────────────────────────────────────
+
+SETTING_DEFAULTS = [
+    # ── Reconciliation ────────────────────────────────────────────────────────
+    {
+        'key': 'tc_lmrb_time_tolerance',
+        'value': '5',
+        'label': 'TC–LMRB Time Tolerance (seconds)',
+        'description': (
+            'Maximum time difference (±seconds) allowed between the TC aired time and the LMRB '
+            'advt time for a cross-check match. Increase this value if TC and LMRB timestamps '
+            'differ by more than 5 seconds (e.g. set to 30 if your previous system used 30 s). '
+            'Default: 5.'
+        ),
+        'category': 'reconciliation',
+    },
+    # ── TC file column aliases ─────────────────────────────────────────────────
+    {
+        'key': 'tc_extra_theme_aliases',
+        'value': '',
+        'label': 'TC Theme — Extra Column Aliases',
+        'description': (
+            'Extra column names to try when detecting the ad-theme column in TC files. '
+            'Comma-separated. '
+            'Built-in: TC_Theme, Advt_Theme, Advt_theme, Theme, theme, Product, '
+            'Description, Ad Name, AdName, Ad_Name'
+        ),
+        'category': 'tc_parsing',
+    },
+    {
+        'key': 'tc_extra_time_aliases',
+        'value': '',
+        'label': 'TC Aired Time — Extra Column Aliases',
+        'description': (
+            'Extra column names to try for the aired/broadcast time column in TC files. '
+            'Comma-separated. '
+            'Built-in: Aired_Time, Advt_Time, Advt_time, advt_Time, Time, Aired Time, '
+            'Ad Start, AdTime, AiredTime'
+        ),
+        'category': 'tc_parsing',
+    },
+    {
+        'key': 'tc_extra_date_aliases',
+        'value': '',
+        'label': 'TC Date — Extra Column Aliases',
+        'description': (
+            'Extra column names to try for the broadcast date column in TC files. '
+            'Comma-separated. '
+            'Built-in: Date, Aired Date, Prg Date, aired_date, AiredDate, Prg_Date'
+        ),
+        'category': 'tc_parsing',
+    },
+    {
+        'key': 'tc_extra_duration_aliases',
+        'value': '',
+        'label': 'TC Duration — Extra Column Aliases',
+        'description': (
+            'Extra column names to try for the ad-duration column in TC files. '
+            'Comma-separated. '
+            'Built-in: Duration, Dur, Seconds, Ad Dur, Duration_Sec'
+        ),
+        'category': 'tc_parsing',
+    },
+    {
+        'key': 'tc_extra_programme_aliases',
+        'value': '',
+        'label': 'TC Programme — Extra Column Aliases',
+        'description': (
+            'Extra column names to try for the programme/show-name column in TC files. '
+            'Comma-separated. '
+            'Built-in: Programme, Program, Prg Name, PrgName, programme'
+        ),
+        'category': 'tc_parsing',
+    },
+    # ── LMRB file column aliases ───────────────────────────────────────────────
+    {
+        'key': 'lmrb_extra_theme_aliases',
+        'value': '',
+        'label': 'LMRB Theme — Extra Column Aliases',
+        'description': (
+            'Extra column names to try for the ad-theme column in LMRB/MapOnline files. '
+            'Comma-separated. '
+            'Built-in: Advt_Theme, Theme'
+        ),
+        'category': 'lmrb_parsing',
+    },
+    {
+        'key': 'lmrb_extra_time_aliases',
+        'value': '',
+        'label': 'LMRB Advt Time — Extra Column Aliases',
+        'description': (
+            'Extra column names to try for the broadcast time column in LMRB/MapOnline files. '
+            'Comma-separated. '
+            'Built-in: Advt_time, Ad Start, Advt_Time'
+        ),
+        'category': 'lmrb_parsing',
+    },
+    {
+        'key': 'lmrb_extra_duration_aliases',
+        'value': '',
+        'label': 'LMRB Duration — Extra Column Aliases',
+        'description': (
+            'Extra column names to try for the duration column in LMRB/MapOnline files. '
+            'Comma-separated. '
+            'Built-in: Dur, Ad Dur'
+        ),
+        'category': 'lmrb_parsing',
+    },
+    {
+        'key': 'lmrb_extra_date_aliases',
+        'value': '',
+        'label': 'LMRB Date — Extra Column Aliases',
+        'description': (
+            'Extra column names to try for the date column in LMRB/MapOnline files. '
+            'Comma-separated. '
+            'Built-in: Date, Prg Date'
+        ),
+        'category': 'lmrb_parsing',
+    },
+]
+
+
+class SystemSetting(models.Model):
+    """
+    Site-wide configuration editable by super_admin at /dashboard/settings/.
+
+    Use the module-level helpers (get_setting / get_setting_int / get_setting_list)
+    to read values from views, parsers, and engines — never query this model directly.
+    Settings are auto-created with defaults when the settings page is first visited.
+    """
+    CATEGORY_CHOICES = [
+        ('reconciliation', 'Reconciliation'),
+        ('tc_parsing',     'TC File Parsing'),
+        ('lmrb_parsing',   'LMRB / MapOnline File Parsing'),
+    ]
+
+    key         = models.CharField(max_length=100, unique=True)
+    value       = models.TextField(blank=True, default='')
+    label       = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    category    = models.CharField(max_length=50, choices=CATEGORY_CHOICES,
+                                   default='reconciliation')
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['category', 'key']
+
+    def __str__(self):
+        return self.key
+
+
+# ── Setting helpers ───────────────────────────────────────────────────────────
+
+def _ensure_defaults():
+    """Create any missing SystemSetting rows from SETTING_DEFAULTS."""
+    for d in SETTING_DEFAULTS:
+        SystemSetting.objects.get_or_create(
+            key=d['key'],
+            defaults={
+                'value':       d.get('value', ''),
+                'label':       d['label'],
+                'description': d.get('description', ''),
+                'category':    d.get('category', 'reconciliation'),
+            },
+        )
+
+
+def get_setting(key: str, default: str = '') -> str:
+    """Return a SystemSetting value by key. Falls back to *default* if missing or blank."""
+    try:
+        val = SystemSetting.objects.get(key=key).value.strip()
+        return val if val else default
+    except SystemSetting.DoesNotExist:
+        return default
+
+
+def get_setting_int(key: str, default: int = 0) -> int:
+    """Return a SystemSetting value parsed as int."""
+    try:
+        return int(get_setting(key, str(default)))
+    except (ValueError, TypeError):
+        return default
+
+
+def get_setting_list(key: str) -> list:
+    """Return a SystemSetting value as a list of stripped strings, split by comma."""
+    val = get_setting(key, '')
+    return [v.strip() for v in val.split(',') if v.strip()]
