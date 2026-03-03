@@ -581,8 +581,36 @@ def _parse_lmrb_rows(df, data_type, account):
     _ch_canonical = {c.lower(): c for c in Channel.objects.values_list('name', flat=True)}
 
     def _canon_channel(raw: str) -> str:
+        """
+        Return the canonical Channel name for an LMRB channel string.
+
+        LMRB (MapOnline / MediaWatch) files prefix channel names with the medium,
+        e.g. "Tv - Sirasa TV" or "Radio - Sirasa FM".  Strip that prefix before
+        doing the canonical lookup so the stored LMRBRow.channel matches exactly
+        the channel name used in Schedule / TC records.
+
+        Lookup order:
+          1. Direct case-insensitive match (handles plain "SIRASA TV" → "Sirasa TV")
+          2. Strip "Tv - " / "Radio - " prefix then case-insensitive match
+          3. Return the stripped form even when not in Channel model
+             (keeps DB clean; avoids storing verbose prefix format)
+        """
         raw = str(raw).strip()
-        return _ch_canonical.get(raw.lower(), raw)
+        # 1. Direct lookup
+        canonical = _ch_canonical.get(raw.lower())
+        if canonical:
+            return canonical
+        # 2. Strip LMRB medium prefix and look up again
+        for prefix in ('tv - ', 'radio - '):
+            if raw.lower().startswith(prefix):
+                stripped = raw[len(prefix):]          # preserve original casing of rest
+                canonical = _ch_canonical.get(stripped.lower())
+                if canonical:
+                    return canonical
+                # Not in Channel model yet — store stripped form so it can still
+                # match a future schedule that uses the same bare channel name.
+                return stripped
+        return raw
 
     # ── Normalise to standard column names ─────────────────────────────────────
     if data_type == 'maponline':
