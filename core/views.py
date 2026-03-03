@@ -1427,6 +1427,123 @@ def tc_reconcile(request):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# TC Three-Way Comparison  (Plan vs LMRB vs TC)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@login_required
+def tc_three_way(request):
+    """
+    Three-way evidence view for each planned ad in a scope:
+      PLAN  — what was scheduled  (ScheduleRow)
+      LMRB  — what 3rd-party monitoring observed  (matched LMRBRow)
+      TC    — what the channel's own certificate says  (matched TCRow)
+
+    Matching priority applied by the engines (already in DB):
+      1. Theme  (via BrandMapping)
+      2. Duration
+      3. Date   (LMRB within schedule date range; TC late-aired rule: date >= schedule date)
+      4. Advt_Time / Aired_Time (±5 sec tolerance for TC-LMRB cross-check)
+    """
+    user       = request.user
+    account_qs = _account_qs(user)
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+
+    selected_account = None
+    channels = []
+    months   = []
+    rows     = []
+
+    if account_id:
+        try:
+            selected_account = account_qs.get(pk=account_id)
+        except Account.DoesNotExist:
+            pass
+
+    if selected_account:
+        channels = sorted(set(
+            ScheduleRow.objects.filter(account_id=account_id)
+            .values_list('channel', flat=True)
+        ))
+        if channel:
+            months = sorted(set(
+                ScheduleRow.objects.filter(account_id=account_id, channel=channel)
+                .values_list('month', flat=True)
+            ))
+
+    if selected_account and channel and month:
+        if not _account_access(user, account_id):
+            messages.error(request, 'Access denied.')
+            return redirect('/dashboard/tc/detail/')
+
+        sch_qs = (
+            ScheduleRow.objects
+            .filter(account_id=account_id, channel=channel, month=month)
+            .select_related('matched_lmrb')
+            .prefetch_related('tc_matches')
+            .order_by('date', 'start_time', 'brand')
+        )
+
+        for sr in sch_qs:
+            lmrb = sr.matched_lmrb
+            tc   = sr.tc_matches.filter(is_schedule_matched=True).first()
+
+            # Determine row status for colour-coding
+            if tc and tc.is_lmrb_confirmed:
+                status = 'aired'          # confirmed by both TC and LMRB
+            elif tc and not tc.is_lmrb_confirmed:
+                status = 'tc_only'        # TC says aired but LMRB doesn't confirm
+            elif lmrb:
+                status = 'lmrb_only'      # LMRB found a match but no TC record
+            else:
+                status = 'not_aired'      # neither source confirms it
+
+            rows.append({
+                'brand':          sr.brand,
+                'ad_type':        sr.ad_type,
+                'duration':       sr.duration,
+                # Plan (Schedule)
+                'plan_date':      sr.date,
+                'plan_programme': sr.programme,
+                'plan_start':     sr.start_time,
+                'plan_end':       sr.end_time,
+                # LMRB (3rd-party monitoring)
+                'lmrb_date':      lmrb.date       if lmrb else None,
+                'lmrb_programme': lmrb.program    if lmrb else '',
+                'lmrb_time':      lmrb.advt_time  if lmrb else '',
+                'lmrb_theme':     lmrb.advt_theme if lmrb else '',
+                # TC (channel certificate)
+                'tc_date':        tc.date          if tc else None,
+                'tc_programme':   tc.programme     if tc else '',
+                'tc_time':        tc.aired_time    if tc else '',
+                'tc_theme':       tc.tc_theme      if tc else '',
+                # Status flags
+                'has_lmrb':            lmrb is not None,
+                'has_tc':              tc is not None,
+                'tc_lmrb_confirmed':   tc.is_lmrb_confirmed if tc else False,
+                'status':              status,
+            })
+
+    return render(request, 'tc/detail.html', {
+        'accounts':          account_qs,
+        'selected_account':  selected_account,
+        'account_id':        account_id,
+        'channels':          channels,
+        'months':            months,
+        'channel':           channel,
+        'month':             month,
+        'rows':              rows,
+        'total':             len(rows),
+        'n_aired':           sum(1 for r in rows if r['status'] == 'aired'),
+        'n_tc_only':         sum(1 for r in rows if r['status'] == 'tc_only'),
+        'n_lmrb_only':       sum(1 for r in rows if r['status'] == 'lmrb_only'),
+        'n_not_aired':       sum(1 for r in rows if r['status'] == 'not_aired'),
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Summary Sheet Report
 # ═══════════════════════════════════════════════════════════════════════════════
 

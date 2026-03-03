@@ -213,6 +213,15 @@ def run_scope(account_id, channel, month, mode='smart'):
     sch_dates  = schedules.aggregate(min=Min('start_date'), max=Max('end_date'))
     date_start = sch_dates['min']
     date_end   = sch_dates['max']
+    # Fallback: if Schedule header has no dates, derive range from actual ScheduleRow dates.
+    # This guarantees the LMRB pool is always restricted to the schedule period, preventing
+    # LMRB data from other months (e.g. September) contaminating a March schedule run.
+    if not date_start or not date_end:
+        row_dates  = ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+        ).aggregate(min=Min('date'), max=Max('date'))
+        date_start = date_start or row_dates['min']
+        date_end   = date_end   or row_dates['max']
 
     # ── Reset mode: unlock all rows for this scope ─────────────────────────────
     if mode == 'reset':

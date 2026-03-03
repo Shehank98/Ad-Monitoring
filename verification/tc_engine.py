@@ -127,11 +127,18 @@ def reconcile_tc(account_id, channel, month, mode='smart'):
     """
     # Get schedule date range for LMRB date filtering
     schedules = Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
-    sch_dates  = schedules.aggregate(
-        d_min=Min('start_date'),
-        d_max=Max('end_date'),
-    )
-    sch_end = sch_dates.get('d_max')
+    sch_dates  = schedules.aggregate(d_min=Min('start_date'), d_max=Max('end_date'))
+    sch_start  = sch_dates.get('d_min')
+    sch_end    = sch_dates.get('d_max')
+    # Fallback: derive date range from ScheduleRow dates if Schedule header dates are missing.
+    # Ensures the LMRB pool is always restricted to the same period as the schedule,
+    # preventing LMRB data from other months contaminating TC-LMRB cross-checking.
+    if not sch_start or not sch_end:
+        row_dates = ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+        ).aggregate(d_min=Min('date'), d_max=Max('date'))
+        sch_start = sch_start or row_dates.get('d_min')
+        sch_end   = sch_end   or row_dates.get('d_max')
 
     # ── Reset mode ────────────────────────────────────────────────────────────
     if mode == 'reset':
@@ -219,13 +226,13 @@ def reconcile_tc(account_id, channel, month, mode='smart'):
         all_tc = list(TCRow.objects.filter(id__in=tc_ids))
 
     # Build LMRBRow index: {(channel, date, duration): [(lmrb_id, time_secs), ...]}
+    # Use the schedule date range so only LMRB data from the same period is used.
+    # This prevents LMRB rows from other months contaminating the cross-check.
     lmrb_index: dict = {}
-    date_min = min((r.date for r in all_tc), default=None)
-    date_max = max((r.date for r in all_tc), default=None)
-    if date_min and date_max:
+    if sch_start and sch_end:
         for lr in LMRBRow.objects.filter(
             account_id=account_id, channel=channel,
-            date__range=(date_min, date_max),
+            date__range=(sch_start, sch_end),
         ):
             k = (lr.channel, lr.date, int(lr.duration) if lr.duration else None)
             lmrb_index.setdefault(k, []).append((lr.id, _time_to_secs(lr.advt_time), lr))

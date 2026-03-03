@@ -43,8 +43,9 @@ urlpatterns = [
     path('tc/',                                 views.tc_list,      name='tc_list'),
     path('tc/upload/',                          views.tc_upload,    name='tc_upload'),
     path('tc/detect/',                          views.tc_detect,    name='tc_detect'),
-    path('tc/<int:pk>/delete/',                 views.tc_delete,    name='tc_delete'),
-    path('tc/reconcile/',                       views.tc_reconcile, name='tc_reconcile'),
+    path('tc/<int:pk>/delete/',                 views.tc_delete,      name='tc_delete'),
+    path('tc/reconcile/',                       views.tc_reconcile,   name='tc_reconcile'),
+    path('tc/detail/',                          views.tc_three_way,   name='tc_three_way'),
 
     # Summary Sheet Report
     path('summary/',                            views.summary_report, name='summary_report'),
