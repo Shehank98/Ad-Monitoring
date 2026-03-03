@@ -1145,24 +1145,25 @@ def _build_missed_ad_pdf(account_name, channel, month, rows):
 # TC (Transmission Certificate) Upload & Management
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _find_col(df, *names):
+    """Case-insensitive column finder. Returns the actual column name in df, or None."""
+    lower_map = {c.lower().strip(): c for c in df.columns}
+    for n in names:
+        actual = lower_map.get(n.lower().strip())
+        if actual is not None:
+            return actual
+    return None
+
+
 def _detect_tc_meta(df):
     """
     Auto-detect channel, date range and row count from a TC DataFrame.
     Returns {'channel': str, 'start_date': date, 'end_date': date, 'row_count': int}
     """
-    channel_col = None
-    for c in ['Channel', 'channel', 'CHANNEL', 'Station']:
-        if c in df.columns:
-            channel_col = c
-            break
-
+    channel_col = _find_col(df, 'Channel', 'Station', 'CHANNEL')
     channel = _safe_str(df[channel_col].dropna().iloc[0]) if channel_col else ''
 
-    date_col = None
-    for c in ['Date', 'Aired Date', 'Prg Date', 'date']:
-        if c in df.columns:
-            date_col = c
-            break
+    date_col = _find_col(df, 'Date', 'Aired Date', 'Prg Date', 'AiredDate')
 
     dates = []
     if date_col:
@@ -1184,55 +1185,43 @@ def _detect_tc_meta(df):
 def _parse_tc_rows(df, account, tc_report):
     """
     Parse TC DataFrame and upsert TCRow records.
-    Handles various column naming conventions.
+    Handles various column naming conventions (case-insensitive).
     Returns count of rows inserted.
     """
-    # ── Column normalisation ──────────────────────────────────────────────────
+    # ── Case-insensitive column normalisation ─────────────────────────────────
+    # Build a rename map: actual_col → standard_name (only when needed)
     rename = {}
 
-    # Channel
-    for c in ['Station', 'CHANNEL', 'channel']:
-        if c in df.columns and 'Channel' not in df.columns:
-            rename[c] = 'Channel'
+    def _ci_rename(standard, alts):
+        """Map first found alt (case-insensitive) to standard name."""
+        if _find_col(df, standard) is not None:
+            return  # already present
+        actual = _find_col(df, *alts)
+        if actual is not None:
+            rename[actual] = standard
 
-    # Date
-    for c in ['Aired Date', 'Prg Date', 'aired_date', 'AiredDate']:
-        if c in df.columns and 'Date' not in df.columns:
-            rename[c] = 'Date'
-
-    # Programme
-    for c in ['Program', 'Prg Name', 'PrgName', 'programme']:
-        if c in df.columns and 'Programme' not in df.columns:
-            rename[c] = 'Programme'
-
-    # TC Theme (product/ad name)
-    for c in ['Theme', 'Advt_Theme', 'Product', 'Description', 'Ad Name', 'AdName', 'Ad_Name']:
-        if c in df.columns and 'TC_Theme' not in df.columns:
-            rename[c] = 'TC_Theme'
-
-    # Duration
-    for c in ['Dur', 'Seconds', 'Ad Dur', 'Duration_Sec']:
-        if c in df.columns and 'Duration' not in df.columns:
-            rename[c] = 'Duration'
-
-    # Aired time
-    for c in ['Time', 'Aired Time', 'Advt_time', 'Ad Start', 'AdTime', 'AiredTime']:
-        if c in df.columns and 'Aired_Time' not in df.columns:
-            rename[c] = 'Aired_Time'
+    _ci_rename('Channel',   ['Station', 'CHANNEL', 'channel'])
+    _ci_rename('Date',      ['Aired Date', 'Prg Date', 'aired_date', 'AiredDate', 'Prg_Date'])
+    _ci_rename('Programme', ['Program', 'Prg Name', 'PrgName', 'programme'])
+    _ci_rename('TC_Theme',  ['Advt_Theme', 'Advt_theme', 'Theme', 'theme',
+                              'Product', 'Description', 'Ad Name', 'AdName', 'Ad_Name'])
+    _ci_rename('Duration',  ['Dur', 'Seconds', 'Ad Dur', 'Duration_Sec'])
+    _ci_rename('Aired_Time',['Advt_Time', 'Advt_time', 'advt_Time', 'Time',
+                              'Aired Time', 'Ad Start', 'AdTime', 'AiredTime'])
 
     if rename:
         df = df.rename(columns=rename)
 
-    # Required: TC_Theme and Aired_Time
-    if 'TC_Theme' not in df.columns:
+    # ── Fallback defaults ─────────────────────────────────────────────────────
+    if _find_col(df, 'TC_Theme') is None:
         df['TC_Theme'] = ''
-    if 'Aired_Time' not in df.columns:
+    if _find_col(df, 'Aired_Time') is None:
         df['Aired_Time'] = ''
-    if 'Duration' not in df.columns:
+    if _find_col(df, 'Duration') is None:
         df['Duration'] = None
-    if 'Programme' not in df.columns:
+    if _find_col(df, 'Programme') is None:
         df['Programme'] = ''
-    if 'Channel' not in df.columns:
+    if _find_col(df, 'Channel') is None:
         df['Channel'] = tc_report.channel
 
     channel = tc_report.channel

@@ -85,15 +85,18 @@
           <i class="fa-solid fa-link mr-1 text-slate-400"></i> Link to Schedule
           <span class="text-slate-400 font-normal normal-case ml-1">optional</span>
         </label>
-        <select name="schedule_id" id="selSchedule" class="select-field">
+        <select name="schedule_id" id="selSchedule" class="select-field" onchange="scheduleSelected(this)">
           <option value="">Not linked</option>
           {% for sch in schedules %}
-            <option value="{{ sch.id }}" data-account="{{ sch.account_id }}">
+            <option value="{{ sch.id }}"
+                    data-account="{{ sch.account_id }}"
+                    data-channel="{{ sch.channel }}"
+                    data-month="{{ sch.month }}">
               {{ sch.account.name }} | {{ sch.channel }} | {{ sch.month }} | #{{ sch.schedule_number }}
             </option>
           {% endfor %}
         </select>
-        <p class="mt-1 text-[10px] text-slate-400">Linking helps identify the correct schedule during reconciliation</p>
+        <p class="mt-1 text-[10px] text-slate-400">Linking helps identify the correct schedule — channel &amp; month will be auto-filled</p>
       </div>
 
       <!-- File upload -->
@@ -165,12 +168,23 @@ function detectFile(input) {
     .catch(() => {});
 }
 
+function scheduleSelected(sel) {
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt.value) return;
+  const ch    = opt.dataset.channel || '';
+  const month = opt.dataset.month   || '';
+  if (ch)    document.getElementById('inpChannel').value = ch;
+  if (month) document.getElementById('inpMonth').value   = month;
+}
+
 function loadSchedules() {
   const accId = document.getElementById('selAccount').value;
   const sel   = document.getElementById('selSchedule');
   Array.from(sel.options).forEach(opt => {
     opt.style.display = (!accId || opt.dataset.account === accId || !opt.value) ? '' : 'none';
   });
+  // Reset selection when account changes to avoid stale pre-fill
+  sel.value = '';
 }
 loadSchedules();
 </script>
