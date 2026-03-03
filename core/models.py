@@ -195,14 +195,19 @@ class LMRBRow(models.Model):
 
 
 class BrandMapping(models.Model):
-    """Maps a schedule Brand name to a monitoring Advt_Theme/Theme name, per account.
+    """Maps a schedule Brand name to monitoring/TC Theme names, per account.
     One brand can map to many themes (one row per brand-theme pair).
     Duration is optional: when set, the mapping only applies to ads with that duration.
+    tc_theme maps the brand to how it appears in Transmission Certificate (TC) files.
     """
-    account  = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='brand_mappings')
-    brand    = models.CharField(max_length=200, help_text='Brand name as it appears in the Schedule file')
-    theme    = models.CharField(max_length=200, help_text='Theme name as it appears in LMRB (Advt_Theme) or MapOnline (Theme)')
-    duration = models.PositiveIntegerField(
+    account   = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='brand_mappings')
+    brand     = models.CharField(max_length=200, help_text='Brand name as it appears in the Schedule file')
+    theme     = models.CharField(max_length=200, help_text='Theme name as it appears in LMRB (Advt_Theme) or MapOnline (Theme)')
+    tc_theme  = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Theme/Product name as it appears in the Transmission Certificate (TC) file',
+    )
+    duration  = models.PositiveIntegerField(
         null=True, blank=True,
         help_text='Duration in seconds (optional — leave blank to match any duration)',
     )
@@ -213,6 +218,108 @@ class BrandMapping(models.Model):
     def __str__(self):
         dur_str = f' ({self.duration}s)' if self.duration is not None else ''
         return f'{self.account.name}: {self.brand} → {self.theme}{dur_str}'
+
+
+class TransmissionReport(models.Model):
+    """A Transmission Certificate (TC) file received from the channel after a schedule period ends.
+    Contains the channel's own record of every ad spot that actually aired.
+    """
+    account           = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='tc_reports')
+    channel           = models.CharField(max_length=200)
+    month             = models.CharField(max_length=50)
+    schedule          = models.ForeignKey(
+        'Schedule', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='tc_reports',
+    )
+    file              = models.FileField(upload_to='tc/')
+    original_filename = models.CharField(max_length=255)
+    row_count         = models.PositiveIntegerField(default=0)
+    start_date        = models.DateField(null=True, blank=True)
+    end_date          = models.DateField(null=True, blank=True)
+    uploaded_by       = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                          null=True, related_name='uploaded_tc')
+    uploaded_at       = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f'TC | {self.account} | {self.channel} | {self.month}'
+
+
+class TCRow(models.Model):
+    """Individual row from a Transmission Certificate file.
+
+    Stores every aired spot the channel reported. Reconciliation matches these
+    against ScheduleRows (planned) and LMRBRows (3rd-party confirmation).
+
+    Late-aired rule: a TCRow can only match a ScheduleRow if tcrow.date >= schedulerow.date.
+    Extra spots: TCRows not matched to any ScheduleRow (is_schedule_matched=False).
+    3rd-party confirmation: TCRow cross-referenced with LMRBRow within ±5 sec tolerance.
+    """
+    account         = models.ForeignKey(Account, on_delete=models.CASCADE)
+    tc_report       = models.ForeignKey(TransmissionReport, on_delete=models.CASCADE, related_name='rows')
+    channel         = models.CharField(max_length=200)
+    date            = models.DateField()
+    programme       = models.CharField(max_length=500, blank=True, default='')
+    tc_theme        = models.CharField(max_length=500)
+    duration        = models.IntegerField(null=True, blank=True)
+    aired_time      = models.CharField(max_length=30)
+
+    dedup_key       = models.CharField(max_length=64, unique=True)
+
+    # Reconciliation results (populated by tc_engine.reconcile_tc)
+    is_schedule_matched = models.BooleanField(default=False, db_index=True)
+    matched_schedule    = models.ForeignKey(
+        ScheduleRow, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='tc_matches',
+    )
+    is_lmrb_confirmed   = models.BooleanField(default=False, db_index=True)
+    matched_lmrb        = models.ForeignKey(
+        LMRBRow, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='tc_confirmations',
+    )
+    is_extra            = models.BooleanField(default=False, db_index=True)
+
+    class Meta:
+        ordering = ['date', 'aired_time']
+        indexes = [
+            models.Index(fields=['account', 'channel', 'date']),
+            models.Index(fields=['account', 'channel', 'is_schedule_matched']),
+        ]
+
+    def __str__(self):
+        return f'{self.channel} | {self.tc_theme} | {self.date} | {self.aired_time}'
+
+    @staticmethod
+    def make_dedup_key(account_id, channel, date, aired_time, tc_theme, dur):
+        raw = f'tc|{account_id}|{channel}|{date}|{aired_time}|{tc_theme}|{dur}'
+        return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
+class SummaryReportMeta(models.Model):
+    """User-fillable metadata for the Summary Sheet report.
+    One record per (account, channel, month) scope.
+    """
+    account              = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='summary_metas')
+    channel              = models.CharField(max_length=200)
+    month                = models.CharField(max_length=50)
+    supplier_invoice_no  = models.CharField(max_length=500, blank=True, default='')
+    po_no                = models.CharField(max_length=200, blank=True, default='')
+    invoice_no           = models.CharField(max_length=200, blank=True, default='')
+    notes                = models.TextField(blank=True, default='')
+    prepared_by          = models.CharField(max_length=200, blank=True, default='')
+    checked_by           = models.CharField(max_length=200, blank=True, default='')
+    authorised_by        = models.CharField(max_length=200, blank=True, default='')
+    created_at           = models.DateTimeField(auto_now_add=True)
+    updated_at           = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['account', 'channel', 'month']
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f'Summary | {self.account} | {self.channel} | {self.month}'
 
 
 class MatchResult(models.Model):

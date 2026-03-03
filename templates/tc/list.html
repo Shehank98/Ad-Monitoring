@@ -1,0 +1,129 @@
+{% extends 'base.html' %}
+{% block title %}Transmission Reports{% endblock %}
+{% block page_title %}Transmission Reports (TC){% endblock %}
+{% block page_subtitle %}Manage uploaded channel transmission certificates — reconcile with schedule and LMRB{% endblock %}
+
+{% block content %}
+<div class="space-y-4">
+
+  <!-- ── Action bar ───────────────────────────────────────────── -->
+  <div class="flex flex-wrap gap-3 items-end">
+    <form method="get" class="flex flex-wrap gap-3 items-end flex-1">
+      <div class="min-w-[160px]">
+        <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Account</label>
+        <select name="account_id" class="select-field" onchange="this.form.submit()">
+          <option value="">All accounts</option>
+          {% for acc in accounts %}
+            <option value="{{ acc.id }}" {% if acc.id|stringformat:"s" == account_id %}selected{% endif %}>{{ acc.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="min-w-[140px]">
+        <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel</label>
+        <select name="channel" class="select-field" onchange="this.form.submit()">
+          <option value="">All channels</option>
+          {% for ch in channels %}
+            <option value="{{ ch }}" {% if ch == channel %}selected{% endif %}>{{ ch }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+    <a href="/dashboard/tc/upload/" class="btn-primary">
+      <i class="fa-solid fa-cloud-arrow-up"></i> Upload New TC
+    </a>
+  </div>
+
+  <!-- ── Reports table ───────────────────────────────────────── -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-slate-50 border-b border-slate-100">
+            <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Account</th>
+            <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Channel</th>
+            <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Month</th>
+            <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Date Range</th>
+            <th class="px-4 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Rows</th>
+            <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Uploaded</th>
+            <th class="px-4 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          {% for rep in reports %}
+          <tr class="hover:bg-slate-50/60 transition-colors">
+            <td class="px-4 py-3">
+              <span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs font-semibold">{{ rep.account.name }}</span>
+            </td>
+            <td class="px-4 py-3 font-medium text-slate-800">{{ rep.channel }}</td>
+            <td class="px-4 py-3 text-slate-600">{{ rep.month }}</td>
+            <td class="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">
+              {{ rep.start_date|date:"d M Y"|default:"—" }} → {{ rep.end_date|date:"d M Y"|default:"—" }}
+            </td>
+            <td class="px-4 py-3 text-right font-bold text-slate-700">{{ rep.row_count }}</td>
+            <td class="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">
+              {{ rep.uploaded_at|date:"d M Y H:i" }}
+              {% if rep.uploaded_by %}<span class="text-slate-400">by {{ rep.uploaded_by.name|default:rep.uploaded_by.email }}</span>{% endif %}
+            </td>
+            <td class="px-4 py-3 text-right">
+              <div class="flex gap-2 justify-end">
+                <!-- Reconcile -->
+                <form method="post" action="/dashboard/tc/reconcile/">
+                  {% csrf_token %}
+                  <input type="hidden" name="account_id" value="{{ rep.account_id }}">
+                  <input type="hidden" name="channel"    value="{{ rep.channel }}">
+                  <input type="hidden" name="month"      value="{{ rep.month }}">
+                  <input type="hidden" name="mode"       value="smart">
+                  <button type="submit"
+                          class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-emerald-300
+                                 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 transition-all"
+                          title="Run reconciliation">
+                    <i class="fa-solid fa-rotate"></i> Reconcile
+                  </button>
+                </form>
+                <!-- Summary -->
+                <a href="/dashboard/summary/?account_id={{ rep.account_id }}&channel={{ rep.channel }}&month={{ rep.month }}"
+                   class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-blue-300
+                          text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-all"
+                   title="View Summary Sheet">
+                  <i class="fa-solid fa-file-contract"></i> Summary
+                </a>
+                <!-- Delete -->
+                <form method="post" action="/dashboard/tc/{{ rep.pk }}/delete/"
+                      onsubmit="return confirm('Delete TC report for {{ rep.channel }} / {{ rep.month }}?')">
+                  {% csrf_token %}
+                  <button type="submit"
+                          class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200
+                                 text-xs font-semibold text-slate-500 hover:border-red-300 hover:text-red-600
+                                 hover:bg-red-50 transition-all">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="7" class="px-5 py-16 text-center">
+              <div class="flex flex-col items-center gap-3">
+                <div class="w-16 h-16 bg-slate-100 rounded-3xl flex items-center justify-center">
+                  <i class="fa-solid fa-file-invoice text-slate-400 text-3xl"></i>
+                </div>
+                <p class="text-slate-500 font-semibold">No TC reports uploaded yet</p>
+                <a href="/dashboard/tc/upload/" class="btn-primary text-sm">
+                  <i class="fa-solid fa-cloud-arrow-up"></i> Upload First TC
+                </a>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if reports %}
+    <div class="px-5 py-3 bg-slate-50 border-t border-slate-100 text-xs text-slate-500 font-medium">
+      {{ reports|length }} TC report{{ reports|length|pluralize }}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

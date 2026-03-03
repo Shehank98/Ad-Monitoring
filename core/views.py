@@ -20,7 +20,8 @@ from accounts.views import create_user, edit_user, user_list
 from .forms import AccountForm, ChannelForm, MonitoringUploadForm, ScheduleUploadForm
 from .models import (
     Account, BrandMapping, Channel,
-    LMRBRow, MonitoringData, Schedule, ScheduleRow,
+    LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow,
+    SummaryReportMeta, TCRow, TransmissionReport,
 )
 
 
@@ -707,11 +708,12 @@ def brand_mapping_list(request):
             acc_id   = request.POST.get('account_id', '').strip()
             brand    = request.POST.get('brand', '').strip()
             theme    = request.POST.get('theme', '').strip()
+            tc_theme = request.POST.get('tc_theme', '').strip()
             dur_raw  = request.POST.get('duration', '').strip()
             duration = int(dur_raw) if dur_raw.isdigit() else None
 
             if not (acc_id and brand and theme):
-                messages.error(request, 'Account, Brand, and Theme are all required.')
+                messages.error(request, 'Account, Brand, and LMRB Theme are all required.')
             else:
                 account = get_object_or_404(Account, id=acc_id)
                 if not _is_admin(user) and account not in account_qs:
@@ -724,10 +726,23 @@ def brand_mapping_list(request):
                         messages.warning(request, 'That mapping already exists.')
                     else:
                         BrandMapping.objects.create(
-                            account=account, brand=brand, theme=theme, duration=duration)
+                            account=account, brand=brand, theme=theme,
+                            tc_theme=tc_theme, duration=duration)
                         dur_str = f' ({duration}s)' if duration else ''
                         messages.success(request, f'Mapping added: {brand} → {theme}{dur_str}')
             return redirect(f'/dashboard/brand-mappings/?account={acc_id}')
+
+        elif action == 'edit_tc_theme':
+            mapping_id = request.POST.get('mapping_id')
+            tc_theme   = request.POST.get('tc_theme', '').strip()
+            mapping    = get_object_or_404(BrandMapping, id=mapping_id)
+            if not _is_admin(user) and mapping.account not in account_qs:
+                messages.error(request, 'No access to that mapping.')
+            else:
+                mapping.tc_theme = tc_theme
+                mapping.save(update_fields=['tc_theme'])
+                messages.success(request, f'TC Theme updated for {mapping.brand}.')
+            return redirect(f'/dashboard/brand-mappings/?account={account_id or mapping.account_id}')
 
         elif action == 'delete':
             mapping_id = request.POST.get('mapping_id')
@@ -805,7 +820,7 @@ def monitoring_dashboard(request):
     Analytics dashboard: per-scope summary, 7 report tabs, export + PDF links.
     Accessible by operations, team_head, planner, admin, super_admin.
     """
-    from core.models import MatchResult, ScheduleRow
+    # MatchResult and ScheduleRow already imported at top level
 
     user       = request.user
     account_qs = _account_qs(user)
@@ -985,7 +1000,7 @@ def monitoring_pdf(request):
     Generate a professional ReportLab PDF of Not-Aired / Programme-Mismatch
     rows for a given scope (account + channel + month).
     """
-    from core.models import MatchResult
+    # MatchResult already imported at top level
 
     account_id = request.GET.get('account_id', '')
     channel    = request.GET.get('channel', '')
@@ -1124,3 +1139,652 @@ def _build_missed_ad_pdf(account_name, channel, month, rows):
     story.append(t)
     doc.build(story)
     return buf.getvalue()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TC (Transmission Certificate) Upload & Management
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _detect_tc_meta(df):
+    """
+    Auto-detect channel, date range and row count from a TC DataFrame.
+    Returns {'channel': str, 'start_date': date, 'end_date': date, 'row_count': int}
+    """
+    channel_col = None
+    for c in ['Channel', 'channel', 'CHANNEL', 'Station']:
+        if c in df.columns:
+            channel_col = c
+            break
+
+    channel = _safe_str(df[channel_col].dropna().iloc[0]) if channel_col else ''
+
+    date_col = None
+    for c in ['Date', 'Aired Date', 'Prg Date', 'date']:
+        if c in df.columns:
+            date_col = c
+            break
+
+    dates = []
+    if date_col:
+        for v in df[date_col].dropna():
+            d = _safe_date(v)
+            if d:
+                dates.append(d)
+
+    start_date = min(dates) if dates else None
+    end_date   = max(dates) if dates else None
+    return {
+        'channel':    channel,
+        'start_date': start_date,
+        'end_date':   end_date,
+        'row_count':  len(df),
+    }
+
+
+def _parse_tc_rows(df, account, tc_report):
+    """
+    Parse TC DataFrame and upsert TCRow records.
+    Handles various column naming conventions.
+    Returns count of rows inserted.
+    """
+    # ── Column normalisation ──────────────────────────────────────────────────
+    rename = {}
+
+    # Channel
+    for c in ['Station', 'CHANNEL', 'channel']:
+        if c in df.columns and 'Channel' not in df.columns:
+            rename[c] = 'Channel'
+
+    # Date
+    for c in ['Aired Date', 'Prg Date', 'aired_date', 'AiredDate']:
+        if c in df.columns and 'Date' not in df.columns:
+            rename[c] = 'Date'
+
+    # Programme
+    for c in ['Program', 'Prg Name', 'PrgName', 'programme']:
+        if c in df.columns and 'Programme' not in df.columns:
+            rename[c] = 'Programme'
+
+    # TC Theme (product/ad name)
+    for c in ['Theme', 'Advt_Theme', 'Product', 'Description', 'Ad Name', 'AdName', 'Ad_Name']:
+        if c in df.columns and 'TC_Theme' not in df.columns:
+            rename[c] = 'TC_Theme'
+
+    # Duration
+    for c in ['Dur', 'Seconds', 'Ad Dur', 'Duration_Sec']:
+        if c in df.columns and 'Duration' not in df.columns:
+            rename[c] = 'Duration'
+
+    # Aired time
+    for c in ['Time', 'Aired Time', 'Advt_time', 'Ad Start', 'AdTime', 'AiredTime']:
+        if c in df.columns and 'Aired_Time' not in df.columns:
+            rename[c] = 'Aired_Time'
+
+    if rename:
+        df = df.rename(columns=rename)
+
+    # Required: TC_Theme and Aired_Time
+    if 'TC_Theme' not in df.columns:
+        df['TC_Theme'] = ''
+    if 'Aired_Time' not in df.columns:
+        df['Aired_Time'] = ''
+    if 'Duration' not in df.columns:
+        df['Duration'] = None
+    if 'Programme' not in df.columns:
+        df['Programme'] = ''
+    if 'Channel' not in df.columns:
+        df['Channel'] = tc_report.channel
+
+    channel = tc_report.channel
+
+    rows_by_key = {}
+    for _, r in df.iterrows():
+        theme      = _safe_str(r.get('TC_Theme', ''))
+        aired_time = _safe_str(r.get('Aired_Time', ''))
+        dur        = _safe_int(r.get('Duration'))
+        date_val   = _safe_date(r.get('Date'))
+
+        if not (theme and aired_time and date_val):
+            continue
+
+        dedup_key = TCRow.make_dedup_key(account.id, channel, date_val, aired_time, theme, dur)
+        rows_by_key[dedup_key] = TCRow(
+            account    = account,
+            tc_report  = tc_report,
+            channel    = channel,
+            date       = date_val,
+            programme  = _safe_str(r.get('Programme', '')),
+            tc_theme   = theme,
+            duration   = dur,
+            aired_time = aired_time,
+            dedup_key  = dedup_key,
+        )
+
+    if not rows_by_key:
+        return 0
+
+    # Delete any existing rows with same dedup keys (re-upload replaces)
+    existing_keys = list(rows_by_key.keys())
+    TCRow.objects.filter(dedup_key__in=existing_keys).delete()
+
+    new_rows = list(rows_by_key.values())
+    TCRow.objects.bulk_create(new_rows, batch_size=500)
+    return len(new_rows)
+
+
+@login_required
+def tc_list(request):
+    user       = request.user
+    account_qs = _account_qs(user)
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+
+    reports = TransmissionReport.objects.filter(
+        account__in=account_qs
+    ).select_related('account', 'uploaded_by').order_by('-uploaded_at')
+
+    if account_id:
+        reports = reports.filter(account_id=account_id)
+    if channel:
+        reports = reports.filter(channel=channel)
+
+    channels = sorted(set(
+        TransmissionReport.objects.filter(account__in=account_qs)
+        .values_list('channel', flat=True)
+    ))
+
+    return render(request, 'tc/list.html', {
+        'reports':    reports,
+        'accounts':   account_qs,
+        'channels':   channels,
+        'account_id': account_id,
+        'channel':    channel,
+    })
+
+
+@login_required
+def tc_upload(request):
+    user       = request.user
+    account_qs = _account_qs(user)
+
+    if request.method == 'POST':
+        account_id = request.POST.get('account_id', '').strip()
+        channel    = request.POST.get('channel', '').strip()
+        month      = request.POST.get('month', '').strip()
+        tc_file    = request.FILES.get('tc_file')
+        schedule_id = request.POST.get('schedule_id', '').strip()
+
+        if not (account_id and channel and month and tc_file):
+            messages.error(request, 'Account, Channel, Month and TC file are required.')
+            return redirect('/dashboard/tc/upload/')
+
+        if not _account_access(user, account_id):
+            messages.error(request, 'Access denied.')
+            return redirect('/dashboard/tc/upload/')
+
+        account = get_object_or_404(Account, id=account_id)
+
+        try:
+            df = pd.read_excel(tc_file, header=0)
+        except Exception as e:
+            messages.error(request, f'Could not read TC file: {e}')
+            return redirect('/dashboard/tc/upload/')
+
+        schedule_obj = None
+        if schedule_id:
+            try:
+                schedule_obj = Schedule.objects.get(id=schedule_id, account=account)
+            except Schedule.DoesNotExist:
+                pass
+
+        meta = _detect_tc_meta(df)
+
+        tc_report = TransmissionReport.objects.create(
+            account           = account,
+            channel           = channel,
+            month             = month,
+            schedule          = schedule_obj,
+            file              = tc_file,
+            original_filename = tc_file.name,
+            row_count         = 0,
+            start_date        = meta['start_date'],
+            end_date          = meta['end_date'],
+            uploaded_by       = user,
+        )
+
+        count = _parse_tc_rows(df, account, tc_report)
+        tc_report.row_count = count
+        tc_report.save(update_fields=['row_count'])
+
+        messages.success(request, f'TC uploaded: {count} rows for {channel} / {month}.')
+        return redirect('/dashboard/tc/')
+
+    # GET — show upload form
+    schedules = Schedule.objects.filter(account__in=account_qs).select_related('account').order_by('-uploaded_at')
+    return render(request, 'tc/upload.html', {
+        'accounts':  account_qs,
+        'schedules': schedules,
+    })
+
+
+@login_required
+def tc_detect(request):
+    """AJAX: Detect channel + dates from an uploaded TC file."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    tc_file = request.FILES.get('tc_file')
+    if not tc_file:
+        return JsonResponse({'ok': False, 'error': 'No file'})
+
+    try:
+        df   = pd.read_excel(tc_file, header=0)
+        meta = _detect_tc_meta(df)
+        return JsonResponse({
+            'ok':         True,
+            'channel':    meta['channel'],
+            'start_date': str(meta['start_date']) if meta['start_date'] else '',
+            'end_date':   str(meta['end_date'])   if meta['end_date']   else '',
+            'row_count':  meta['row_count'],
+            'columns':    list(df.columns[:20]),
+        })
+    except Exception as e:
+        return JsonResponse({'ok': False, 'error': str(e)})
+
+
+@login_required
+@require_POST
+def tc_delete(request, pk):
+    report = get_object_or_404(TransmissionReport, pk=pk)
+    if not _account_access(request.user, report.account_id):
+        messages.error(request, 'Access denied.')
+        return redirect('/dashboard/tc/')
+    channel = report.channel
+    month   = report.month
+    report.delete()
+    messages.success(request, f'TC report for {channel} / {month} deleted.')
+    return redirect('/dashboard/tc/')
+
+
+@login_required
+def tc_reconcile(request):
+    """Run TC-Schedule + TC-LMRB reconciliation for a scope."""
+    from verification.tc_engine import reconcile_tc
+
+    account_id = request.POST.get('account_id') or request.GET.get('account_id', '')
+    channel    = request.POST.get('channel')    or request.GET.get('channel', '')
+    month      = request.POST.get('month')      or request.GET.get('month', '')
+    mode       = request.POST.get('mode', 'smart')
+
+    if not (account_id and channel and month):
+        messages.error(request, 'Account, channel and month are required.')
+        return redirect('/dashboard/tc/')
+
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return redirect('/dashboard/tc/')
+
+    try:
+        result = reconcile_tc(account_id, channel, month, mode=mode)
+        messages.success(
+            request,
+            f'Reconciliation complete: {result["matched"]} matched, '
+            f'{result["extra"]} extra, {result["lmrb_confirmed"]} LMRB-confirmed.'
+        )
+    except Exception as e:
+        messages.error(request, f'Reconciliation failed: {e}')
+
+    return redirect(f'/dashboard/summary/?account_id={account_id}&channel={channel}&month={month}')
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Summary Sheet Report
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@login_required
+def summary_report(request):
+    """View + edit Summary Sheet metadata; preview the reconciliation results."""
+    from verification.tc_engine import build_summary_data
+
+    user       = request.user
+    account_qs = _account_qs(user)
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+
+    # Save metadata if POST
+    if request.method == 'POST':
+        account_id = request.POST.get('account_id', '').strip()
+        channel    = request.POST.get('channel', '').strip()
+        month      = request.POST.get('month', '').strip()
+
+        if account_id and channel and month and _account_access(user, account_id):
+            account = get_object_or_404(Account, id=account_id)
+            meta, _ = SummaryReportMeta.objects.get_or_create(
+                account=account, channel=channel, month=month
+            )
+            meta.supplier_invoice_no = request.POST.get('supplier_invoice_no', '').strip()
+            meta.po_no               = request.POST.get('po_no', '').strip()
+            meta.invoice_no          = request.POST.get('invoice_no', '').strip()
+            meta.notes               = request.POST.get('notes', '').strip()
+            meta.prepared_by         = request.POST.get('prepared_by', '').strip()
+            meta.checked_by          = request.POST.get('checked_by', '').strip()
+            meta.authorised_by       = request.POST.get('authorised_by', '').strip()
+            meta.save()
+            messages.success(request, 'Summary metadata saved.')
+        return redirect(f'/dashboard/summary/?account_id={account_id}&channel={channel}&month={month}')
+
+    # Dropdown data
+    channels = []
+    months   = []
+    selected_account = None
+    summary_data = None
+    meta         = None
+    schedule_obj = None
+    tc_report    = None
+
+    if account_id:
+        try:
+            selected_account = account_qs.get(pk=account_id)
+        except Account.DoesNotExist:
+            pass
+
+    if selected_account:
+        channels = sorted(set(
+            ScheduleRow.objects.filter(account_id=account_id)
+            .values_list('channel', flat=True)
+        ))
+        if channel:
+            months = sorted(set(
+                ScheduleRow.objects.filter(account_id=account_id, channel=channel)
+                .values_list('month', flat=True)
+            ))
+
+    if selected_account and channel and month:
+        if not _account_access(user, account_id):
+            messages.error(request, 'Access denied.')
+            return redirect('/dashboard/summary/')
+
+        try:
+            summary_data = build_summary_data(account_id, channel, month)
+        except Exception as e:
+            messages.warning(request, f'Could not build summary: {e}')
+
+        meta = SummaryReportMeta.objects.filter(
+            account_id=account_id, channel=channel, month=month
+        ).first()
+
+        schedule_obj = Schedule.objects.filter(
+            account_id=account_id, channel=channel, month=month
+        ).order_by('-uploaded_at').first()
+
+        tc_report = TransmissionReport.objects.filter(
+            account_id=account_id, channel=channel, month=month
+        ).order_by('-uploaded_at').first()
+
+    return render(request, 'summary/report.html', {
+        'accounts':        account_qs,
+        'selected_account': selected_account,
+        'account_id':      account_id,
+        'channels':        channels,
+        'months':          months,
+        'channel':         channel,
+        'month':           month,
+        'summary_data':    summary_data,
+        'meta':            meta,
+        'schedule_obj':    schedule_obj,
+        'tc_report':       tc_report,
+    })
+
+
+@login_required
+def summary_excel(request):
+    """Download Summary Sheet as a formatted Excel workbook."""
+    import openpyxl
+    from openpyxl.styles import (
+        Alignment, Border, Font, PatternFill, Side,
+    )
+    from openpyxl.utils import get_column_letter
+    from verification.tc_engine import build_summary_data
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+
+    if not (account_id and channel and month):
+        messages.error(request, 'Incomplete parameters.')
+        return redirect('/dashboard/summary/')
+
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return redirect('/dashboard/summary/')
+
+    account  = get_object_or_404(Account, id=account_id)
+    data     = build_summary_data(account_id, channel, month)
+    meta     = SummaryReportMeta.objects.filter(
+        account_id=account_id, channel=channel, month=month
+    ).first()
+    sched    = Schedule.objects.filter(
+        account_id=account_id, channel=channel, month=month
+    ).order_by('-uploaded_at').first()
+
+    estimate_no = sched.schedule_number if sched else ''
+
+    # ── Workbook setup ────────────────────────────────────────────────────────
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Summary'
+
+    # Styles
+    NAVY  = PatternFill('solid', fgColor='0F2340')
+    LBLUE = PatternFill('solid', fgColor='DBEAFE')
+    LGRAY = PatternFill('solid', fgColor='F8FAFC')
+    DGRAY = PatternFill('solid', fgColor='E2E8F0')
+    GOLD  = PatternFill('solid', fgColor='FEF9C3')
+    GRNFILL = PatternFill('solid', fgColor='DCFCE7')
+    REDFILL  = PatternFill('solid', fgColor='FEE2E2')
+
+    hdr_font  = Font(bold=True, color='FFFFFF', size=11)
+    bold11    = Font(bold=True, size=11)
+    bold10    = Font(bold=True, size=10)
+    norm10    = Font(size=10)
+    title_font = Font(bold=True, size=14, color='0F2340')
+
+    thin = Side(style='thin', color='CBD5E1')
+    thick_side = Side(style='medium', color='2563EB')
+    def border(left=True, right=True, top=True, bottom=True):
+        return Border(
+            left=Side(style='thin', color='CBD5E1') if left else Side(),
+            right=Side(style='thin', color='CBD5E1') if right else Side(),
+            top=Side(style='thin', color='CBD5E1') if top else Side(),
+            bottom=Side(style='thin', color='CBD5E1') if bottom else Side(),
+        )
+
+    centre = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left   = Alignment(horizontal='left',   vertical='center', wrap_text=True)
+    right  = Alignment(horizontal='right',  vertical='center')
+
+    # Column widths
+    ws.column_dimensions['A'].width = 36
+    ws.column_dimensions['B'].width = 8
+    ws.column_dimensions['C'].width = 10
+    ws.column_dimensions['D'].width = 10
+    ws.column_dimensions['E'].width = 10
+    ws.column_dimensions['F'].width = 10
+    ws.column_dimensions['G'].width = 12
+    ws.column_dimensions['H'].width = 14
+
+    row = 1
+
+    # ── Title ─────────────────────────────────────────────────────────────────
+    ws.merge_cells(f'A{row}:H{row}')
+    c = ws.cell(row, 1, 'SUMMARY SHEET REPORT')
+    c.font = title_font; c.alignment = centre; c.fill = LGRAY
+    ws.row_dimensions[row].height = 28
+    row += 1
+
+    # ── Company info rows ─────────────────────────────────────────────────────
+    company_info = [
+        ('Phoenix O & M (Pvt) Ltd', 'MONTH',                month),
+        ('No 16, Barnes Place',     'CHANNEL',               channel),
+        ('Colombo 7',               'ESTIMATE NO',           estimate_no),
+        ('',                        'SUPPLIER INVOICE NO',   meta.supplier_invoice_no if meta else ''),
+        ('',                        'PO NO',                 meta.po_no if meta else ''),
+        ('',                        'INVOICE NO',            meta.invoice_no if meta else ''),
+    ]
+    for addr, label, value in company_info:
+        ws.merge_cells(f'A{row}:D{row}')
+        c = ws.cell(row, 1, addr); c.font = norm10; c.alignment = left
+        ws.merge_cells(f'E{row}:F{row}')
+        c = ws.cell(row, 5, label + '  :'); c.font = bold10; c.alignment = right
+        ws.merge_cells(f'G{row}:H{row}')
+        c = ws.cell(row, 7, value); c.font = norm10; c.alignment = left
+        row += 1
+
+    row += 1  # blank
+
+    # ── Column headers ────────────────────────────────────────────────────────
+    headers = ['PRODUCT', 'DUR', 'PLANNED', 'AIRED', 'MISSED', 'EXTRA', '3RD PARTY', 'Avg 30s']
+    for col_i, h in enumerate(headers, start=1):
+        c = ws.cell(row, col_i, h)
+        c.font = hdr_font; c.fill = NAVY; c.alignment = centre
+        c.border = border()
+    ws.row_dimensions[row].height = 20
+    row += 1
+
+    # ── Commercial Benefits section ───────────────────────────────────────────
+    if data['commercial']:
+        ws.merge_cells(f'A{row}:H{row}')
+        c = ws.cell(row, 1, 'Commercial Benefits'); c.font = bold10; c.fill = LBLUE
+        c.alignment = left
+        row += 1
+
+        for item in data['commercial']:
+            vals = [item['product'], item['dur'], item['planned'], item['aired'],
+                    item['missed'], item['extra'], item['third_party'], item['avg_30']]
+            fill = REDFILL if item['missed'] > 0 else None
+            for col_i, v in enumerate(vals, start=1):
+                c = ws.cell(row, col_i, v)
+                c.font = norm10
+                c.alignment = centre if col_i > 1 else left
+                c.border = border()
+                if fill:
+                    c.fill = fill
+            row += 1
+
+        # Grand Total
+        t = data['commercial_total']
+        total_vals = ['Grand Total', '', t['planned'], t['aired'], t['missed'],
+                      t['extra'], t['third_party'], t['avg_30']]
+        for col_i, v in enumerate(total_vals, start=1):
+            c = ws.cell(row, col_i, v)
+            c.font = bold10; c.fill = DGRAY; c.alignment = centre if col_i > 1 else left
+            c.border = border()
+        row += 1
+
+        # Total avg 30s (whole row)
+        ws.merge_cells(f'A{row}:G{row}')
+        ws.cell(row, 1, '').fill = LGRAY
+        c = ws.cell(row, 8, round(t['avg_30'] * 2, 2))
+        c.font = bold11; c.fill = GOLD; c.alignment = centre; c.border = border()
+        row += 1
+
+    row += 1  # blank
+
+    # ── Sponsorship Benefits section ──────────────────────────────────────────
+    if data['sponsorship']:
+        ws.merge_cells(f'A{row}:H{row}')
+        c = ws.cell(row, 1, 'Sponsorship Benefits'); c.font = bold11; c.fill = GOLD
+        c.alignment = left
+        row += 1
+
+        for section in data['sponsorship']:
+            # Programme heading
+            ws.merge_cells(f'A{row}:H{row}')
+            c = ws.cell(row, 1, section['programme'].upper())
+            c.font = bold10; c.fill = LBLUE; c.alignment = left
+            row += 1
+
+            for item in section['rows']:
+                vals = [item['product'], item['dur'], item['planned'], item['aired'],
+                        item['missed'], item['extra'], item['third_party'], item['avg_30']]
+                for col_i, v in enumerate(vals, start=1):
+                    c = ws.cell(row, col_i, v)
+                    c.font = norm10
+                    c.alignment = centre if col_i > 1 else left
+                    c.border = border()
+                row += 1
+
+            # Subtotal
+            st = section['subtotal']
+            st_vals = ['Grand Total', '', st['planned'], st['aired'], st['missed'],
+                       st['extra'], st['third_party'], st['avg_30']]
+            for col_i, v in enumerate(st_vals, start=1):
+                c = ws.cell(row, col_i, v)
+                c.font = bold10; c.fill = DGRAY; c.alignment = centre if col_i > 1 else left
+                c.border = border()
+            row += 1
+            row += 1  # blank between programmes
+
+        # Sponsorship Grand Total
+        st = data['sponsorship_total']
+        ws.merge_cells(f'A{row}:H{row}')
+        c = ws.cell(row, 1, 'SPONSORSHIP GRAND TOTAL'); c.font = bold11; c.fill = GOLD
+        c.alignment = left
+        row += 1
+        total_vals = ['Grand Total', '', st['planned'], st['aired'], st['missed'],
+                      st['extra'], st['third_party'], st['avg_30']]
+        for col_i, v in enumerate(total_vals, start=1):
+            c = ws.cell(row, col_i, v)
+            c.font = bold10; c.fill = DGRAY; c.alignment = centre if col_i > 1 else left
+            c.border = border()
+        row += 1
+
+    row += 1  # blank
+
+    # ── Notes ─────────────────────────────────────────────────────────────────
+    ws.merge_cells(f'A{row}:H{row}')
+    ws.cell(row, 1, 'NOTE:').font = bold10
+    row += 1
+    notes_text = meta.notes if meta and meta.notes else 'Channel transmission attached\nSponsorship Benefits confirmation email attached'
+    for line in notes_text.split('\n'):
+        ws.merge_cells(f'A{row}:H{row}')
+        c = ws.cell(row, 1, line.strip()); c.font = norm10
+        row += 1
+
+    row += 2  # blank
+
+    # ── Signatures ────────────────────────────────────────────────────────────
+    sig_labels = ['PREPARED BY', 'CHECKED BY', 'AUTHORISED BY']
+    sig_values = [
+        meta.prepared_by if meta else '',
+        meta.checked_by  if meta else '',
+        meta.authorised_by if meta else '',
+    ]
+    for col_i, (lbl, val) in enumerate(zip(sig_labels, sig_values)):
+        start_col = col_i * 3 + 1
+        end_col   = start_col + 2
+        ws.merge_cells(
+            start_row=row, start_column=start_col,
+            end_row=row,   end_column=end_col,
+        )
+        c = ws.cell(row, start_col, '………………………………………………')
+        c.font = norm10; c.alignment = centre
+        ws.merge_cells(
+            start_row=row+1, start_column=start_col,
+            end_row=row+1,   end_column=end_col,
+        )
+        c = ws.cell(row+1, start_col, lbl); c.font = bold10; c.alignment = centre
+
+    # ── Build response ────────────────────────────────────────────────────────
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f'Summary_{account.name}_{channel}_{month}.xlsx'.replace(' ', '_')
+    resp  = HttpResponse(
+        buf.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    resp['Content-Disposition'] = f'attachment; filename="{fname}"'
+    return resp

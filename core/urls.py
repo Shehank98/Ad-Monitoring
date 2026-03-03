@@ -38,4 +38,15 @@ urlpatterns = [
     # Monitoring Dashboard (analytics + 7 tabs + PDF)
     path('monitor/',                            views.monitoring_dashboard, name='monitoring_dashboard'),
     path('monitor/pdf/',                        views.monitoring_pdf,       name='monitoring_pdf'),
+
+    # Transmission Certificate (TC)
+    path('tc/',                                 views.tc_list,      name='tc_list'),
+    path('tc/upload/',                          views.tc_upload,    name='tc_upload'),
+    path('tc/detect/',                          views.tc_detect,    name='tc_detect'),
+    path('tc/<int:pk>/delete/',                 views.tc_delete,    name='tc_delete'),
+    path('tc/reconcile/',                       views.tc_reconcile, name='tc_reconcile'),
+
+    # Summary Sheet Report
+    path('summary/',                            views.summary_report, name='summary_report'),
+    path('summary/excel/',                      views.summary_excel,  name='summary_excel'),
 ]

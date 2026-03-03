@@ -1,0 +1,164 @@
+{% extends 'base.html' %}
+{% block title %}Upload TC Report{% endblock %}
+{% block page_title %}Upload Transmission Certificate{% endblock %}
+{% block page_subtitle %}Upload the channel's TC file received after schedule completion — aired spots are auto-parsed{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl">
+
+  <a href="/dashboard/tc/"
+     class="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 mb-5 transition-colors">
+    <i class="fa-solid fa-arrow-left text-xs"></i> Back to TC Reports
+  </a>
+
+  <!-- Expected columns info -->
+  <div class="grid grid-cols-2 gap-3 mb-5">
+    <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl">
+      <p class="text-xs font-bold text-amber-700 mb-1.5"><i class="fa-solid fa-file-invoice mr-1"></i> TC File Columns Detected</p>
+      <ul class="text-[11px] text-amber-700 space-y-0.5">
+        <li><strong>Date</strong> — Aired date (Date / Aired Date)</li>
+        <li><strong>Programme</strong> — Programme / Program / Prg Name</li>
+        <li><strong>TC Theme</strong> — Theme / Product / Description / Ad Name</li>
+        <li><strong>Duration</strong> — Duration / Dur / Seconds / Ad Dur</li>
+        <li><strong>Aired Time</strong> — Time / Aired Time / Advt_time / Ad Start</li>
+      </ul>
+    </div>
+    <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl">
+      <p class="text-xs font-bold text-blue-700 mb-1.5"><i class="fa-solid fa-circle-info mr-1"></i> How TC Reconciliation Works</p>
+      <ul class="text-[11px] text-blue-700 space-y-0.5">
+        <li>TC rows matched to Schedule using <strong>TC Theme</strong> (from Brand Mappings)</li>
+        <li><strong>Late-aired rule:</strong> TC date must be ≥ planned date</li>
+        <li>TC vs LMRB cross-check within <strong>±5 seconds</strong> tolerance</li>
+        <li>Unmatched TC rows → <strong>EXTRA</strong> spots</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+
+    <div class="px-6 py-5 border-b border-slate-100 flex items-center gap-3">
+      <div class="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center">
+        <i class="fa-solid fa-file-invoice text-amber-600"></i>
+      </div>
+      <div>
+        <h2 class="font-bold text-slate-800">Upload TC File</h2>
+        <p class="text-xs text-slate-400">Excel format (.xlsx or .xls) — columns detected automatically</p>
+      </div>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" class="px-6 py-6 space-y-5" id="tc-upload-form">
+      {% csrf_token %}
+
+      <!-- Account -->
+      <div>
+        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+          <i class="fa-solid fa-building mr-1 text-slate-400"></i> Account <span class="text-red-400">*</span>
+        </label>
+        <select name="account_id" id="selAccount" class="select-field" required onchange="loadSchedules()">
+          <option value="">Select account…</option>
+          {% for acc in accounts %}
+            <option value="{{ acc.id }}">{{ acc.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Channel -->
+      <div>
+        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+          <i class="fa-solid fa-tv mr-1 text-slate-400"></i> Channel <span class="text-red-400">*</span>
+        </label>
+        <input type="text" name="channel" id="inpChannel" placeholder="e.g. Sirasa TV - Voice" class="input-field" required>
+        <p class="mt-1 text-[10px] text-slate-400">Will be auto-populated from file if Channel column is detected</p>
+      </div>
+
+      <!-- Month -->
+      <div>
+        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+          <i class="fa-solid fa-calendar mr-1 text-slate-400"></i> Month <span class="text-red-400">*</span>
+        </label>
+        <input type="text" name="month" id="inpMonth" placeholder="e.g. June 2025" class="input-field" required>
+      </div>
+
+      <!-- Linked Schedule (optional) -->
+      <div>
+        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+          <i class="fa-solid fa-link mr-1 text-slate-400"></i> Link to Schedule
+          <span class="text-slate-400 font-normal normal-case ml-1">optional</span>
+        </label>
+        <select name="schedule_id" id="selSchedule" class="select-field">
+          <option value="">Not linked</option>
+          {% for sch in schedules %}
+            <option value="{{ sch.id }}" data-account="{{ sch.account_id }}">
+              {{ sch.account.name }} | {{ sch.channel }} | {{ sch.month }} | v{{ sch.version }}
+            </option>
+          {% endfor %}
+        </select>
+        <p class="mt-1 text-[10px] text-slate-400">Linking helps identify the correct schedule during reconciliation</p>
+      </div>
+
+      <!-- File upload -->
+      <div>
+        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+          <i class="fa-solid fa-file-excel mr-1 text-slate-400"></i> TC File <span class="text-red-400">*</span>
+        </label>
+        <input type="file" name="tc_file" id="tcFile" accept=".xlsx,.xls"
+               class="block w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-4
+                      file:rounded-lg file:border-0 file:bg-amber-50 file:text-amber-700
+                      file:font-semibold file:text-xs hover:file:bg-amber-100 cursor-pointer"
+               onchange="detectFile(this)" required>
+        <p class="mt-1 text-[10px] text-slate-400">Excel file (.xlsx or .xls)</p>
+      </div>
+
+      <!-- Detection result -->
+      <div id="detectResult" class="hidden p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800">
+        <p class="font-semibold mb-1"><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> File detected</p>
+        <p id="detectText"></p>
+      </div>
+
+      <button type="submit" class="btn-primary w-full justify-center">
+        <i class="fa-solid fa-cloud-arrow-up"></i> Upload TC Report
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const csrfToken = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+
+function detectFile(input) {
+  if (!input.files.length) return;
+  const fd = new FormData();
+  fd.append('tc_file', input.files[0]);
+  fd.append('csrfmiddlewaretoken', csrfToken);
+
+  fetch('/dashboard/tc/detect/', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        if (data.channel && !document.getElementById('inpChannel').value) {
+          document.getElementById('inpChannel').value = data.channel;
+        }
+        const el = document.getElementById('detectResult');
+        el.classList.remove('hidden');
+        document.getElementById('detectText').textContent =
+          `Channel: ${data.channel || '(not detected)'} | ` +
+          `Dates: ${data.start_date} → ${data.end_date} | ` +
+          `${data.row_count} rows | ` +
+          `Columns: ${data.columns.join(', ')}`;
+      }
+    })
+    .catch(() => {});
+}
+
+function loadSchedules() {
+  const accId = document.getElementById('selAccount').value;
+  const sel   = document.getElementById('selSchedule');
+  Array.from(sel.options).forEach(opt => {
+    opt.style.display = (!accId || opt.dataset.account === accId || !opt.value) ? '' : 'none';
+  });
+}
+loadSchedules();
+</script>
+{% endblock %}
