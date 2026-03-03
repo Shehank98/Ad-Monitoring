@@ -154,12 +154,14 @@ def reconcile_tc(account_id, channel, month, mode='smart'):
 
     # ── Load ScheduleRows for scope ───────────────────────────────────────────
     sch_qs = ScheduleRow.objects.filter(
-        account_id=account_id, channel=channel, month=month,
+        account_id=account_id, channel__iexact=channel, month=month,
     ).order_by('date', 'start_time')
 
     # ── Load unmatched TCRows for scope ───────────────────────────────────────
+    # channel__iexact: handles case differences between the TC upload form and
+    # the Schedule record (e.g. "Sirasa TV" vs "SIRASA TV").
     tc_qs = TCRow.objects.filter(
-        account_id=account_id, channel=channel,
+        account_id=account_id, channel__iexact=channel,
         tc_report__month=month,
     )
     if mode == 'smart':
@@ -231,7 +233,7 @@ def reconcile_tc(account_id, channel, month, mode='smart'):
     lmrb_index: dict = {}
     if sch_start and sch_end:
         for lr in LMRBRow.objects.filter(
-            account_id=account_id, channel=channel,
+            account_id=account_id, channel__iexact=channel,
             date__range=(sch_start, sch_end),
         ):
             k = (lr.channel, lr.date, int(lr.duration) if lr.duration else None)

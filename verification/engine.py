@@ -266,7 +266,10 @@ def run_scope(account_id, channel, month, mode='smart'):
         return (empty, empty, empty, empty, empty), total_sch
 
     # ── Query LMRBRows ─────────────────────────────────────────────────────────
-    lmrb_qs = LMRBRow.objects.filter(account_id=account_id, channel=channel)
+    # Use case-insensitive channel match so "Sirasa TV" / "SIRASA TV" / "sirasa tv"
+    # all resolve to the same pool.  The LMRB file's Channel column value may differ
+    # in case from the canonical Channel name stored in Schedule records.
+    lmrb_qs = LMRBRow.objects.filter(account_id=account_id, channel__iexact=channel)
     if mode == 'smart':
         lmrb_qs = lmrb_qs.filter(is_matched=False)
     if date_start:
@@ -306,18 +309,21 @@ def auto_run_all_for_account(account_id):
     Per-scope errors are caught — a single failure never blocks other scopes.
     Returns list of {'channel', 'month', 'ok', 'error'} dicts.
     """
-    sch_channels = set(
+    sch_channels = list(
         ScheduleRow.objects.filter(account_id=account_id)
         .values_list('channel', flat=True).distinct()
     )
-    lmrb_channels = set(
-        LMRBRow.objects.filter(account_id=account_id)
-        .values_list('channel', flat=True).distinct()
-    )
-    overlap = sch_channels & lmrb_channels
+    lmrb_channels_lower = {
+        c.lower(): c
+        for c in LMRBRow.objects.filter(account_id=account_id)
+                                 .values_list('channel', flat=True).distinct()
+    }
+    # Case-insensitive channel overlap: use the Schedule's canonical channel name
+    # so downstream queries (which filter by channel string) always work.
+    overlap = [ch for ch in sch_channels if ch.lower() in lmrb_channels_lower]
 
     results = []
-    for channel in sorted(overlap):
+    for channel in sorted(set(overlap)):
         months = list(
             ScheduleRow.objects.filter(account_id=account_id, channel=channel)
             .values_list('month', flat=True).distinct()

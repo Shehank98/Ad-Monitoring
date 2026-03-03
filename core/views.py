@@ -482,7 +482,10 @@ def monitoring_upload(request):
             for meta in channel_metas:
                 ch = meta['channel']
                 if ch and ch != 'Unknown':
-                    Channel.objects.get_or_create(name=ch)
+                    # Case-insensitive lookup first to avoid creating duplicates
+                    # when LMRB file uses "SIRASA TV" but Channel model has "Sirasa TV".
+                    if not Channel.objects.filter(name__iexact=ch).exists():
+                        Channel.objects.create(name=ch)
 
             group_id   = str(uuid.uuid4())
             saved_path = None
@@ -539,38 +542,59 @@ def _parse_lmrb_rows(df, data_type, account):
     Then insert the new row with is_matched=False.
     """
     df = df.copy()
+    df.columns = df.columns.str.strip()  # ensure columns are stripped
+
+    # ── Build a case-insensitive channel name lookup from the Channel model ─────
+    # When the LMRB file has "SIRASA TV" but the schedule uses "Sirasa TV", the
+    # engine query (channel__iexact) will still work, but storing the canonical
+    # name avoids creating duplicate Channel records and keeps the DB consistent.
+    _ch_canonical = {c.lower(): c for c in Channel.objects.values_list('name', flat=True)}
+
+    def _canon_channel(raw: str) -> str:
+        raw = str(raw).strip()
+        return _ch_canonical.get(raw.lower(), raw)
 
     # ── Normalise to standard column names ─────────────────────────────────────
     if data_type == 'maponline':
         rename = {}
-        if 'Theme'    in df.columns: rename['Theme']    = 'Advt_Theme'
-        if 'Prg Date' in df.columns: rename['Prg Date'] = 'Date'
-        if 'Ad Dur'   in df.columns: rename['Ad Dur']   = 'Dur'
-        if 'Ad Start' in df.columns: rename['Ad Start'] = 'Advt_time'
-        df.rename(columns=rename, inplace=True)
-        if 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        th_col = _find_col(df, 'Advt_Theme', 'Theme')
+        if th_col and th_col != 'Advt_Theme': rename[th_col] = 'Advt_Theme'
+        dt_col = _find_col(df, 'Date', 'Prg Date')
+        if dt_col and dt_col != 'Date': rename[dt_col] = 'Date'
+        du_col = _find_col(df, 'Dur', 'Ad Dur')
+        if du_col and du_col != 'Dur': rename[du_col] = 'Dur'
+        tm_col = _find_col(df, 'Advt_time', 'Ad Start', 'Advt_Time')
+        if tm_col and tm_col != 'Advt_time': rename[tm_col] = 'Advt_time'
+        pg_col = _find_col(df, 'Programme', 'Prg Name', 'Program')
+        if pg_col and pg_col != 'Programme': rename[pg_col] = 'Programme'
+        if rename:
+            df.rename(columns=rename, inplace=True)
+        if _find_col(df, 'Date') is not None:
+            df['Date'] = pd.to_datetime(df[_find_col(df, 'Date')], errors='coerce')
     else:  # mediawatch
-        if {'Dd', 'Mn', 'Yr'}.issubset(df.columns) and 'Date' not in df.columns:
+        if {'Dd', 'Mn', 'Yr'}.issubset(df.columns) and _find_col(df, 'Date') is None:
             df['Date'] = pd.to_datetime(
                 df['Yr'].astype(str) + '-' +
                 df['Mn'].astype(str).str.zfill(2) + '-' +
                 df['Dd'].astype(str).str.zfill(2),
                 errors='coerce',
             )
-        elif 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        elif _find_col(df, 'Date') is not None:
+            df['Date'] = pd.to_datetime(df[_find_col(df, 'Date')], errors='coerce')
 
-    if 'Dur' in df.columns:
-        df['Dur'] = pd.to_numeric(df['Dur'], errors='coerce')
+    dur_col = _find_col(df, 'Dur', 'Ad Dur', 'Duration')
+    if dur_col is not None:
+        df[dur_col] = pd.to_numeric(df[dur_col], errors='coerce')
+        if dur_col != 'Dur':
+            df.rename(columns={dur_col: 'Dur'}, inplace=True)
 
-    ch_col = 'Channel' if 'Channel' in df.columns else None
+    ch_col = _find_col(df, 'Channel', 'Station')
 
     # ── Build rows to upsert ──────────────────────────────────────────────────
     rows_by_key = {}   # dedup_key → LMRBRow instance (to create)
 
     for _, r in df.iterrows():
-        channel   = _safe_str(r.get(ch_col, 'Unknown')) if ch_col else 'Unknown'
+        channel   = _canon_channel(_safe_str(r.get(ch_col, 'Unknown')) if ch_col else 'Unknown')
         theme     = _safe_str(r.get('Advt_Theme', ''))
         advt_time = _safe_str(r.get('Advt_time', ''))
         dur       = _safe_int(r.get('Dur'))
@@ -1415,11 +1439,34 @@ def tc_reconcile(request):
 
     try:
         result = reconcile_tc(account_id, channel, month, mode=mode)
-        messages.success(
-            request,
+        msg = (
             f'Reconciliation complete: {result["matched"]} matched, '
             f'{result["extra"]} extra, {result["lmrb_confirmed"]} LMRB-confirmed.'
         )
+        messages.success(request, msg)
+
+        # ── Diagnostic: if 0 TC-Schedule matches, show the unique TC themes so
+        # the user knows what to enter in BrandMapping → tc_theme field.
+        if result['matched'] == 0 and result['extra'] > 0:
+            unique_themes = list(
+                TCRow.objects.filter(
+                    account_id=account_id, channel=channel, tc_report__month=month,
+                ).values_list('tc_theme', flat=True).distinct().order_by('tc_theme')
+            )
+            # Also check if BrandMappings exist with tc_theme set
+            mapped_themes = list(
+                BrandMapping.objects.filter(account_id=account_id)
+                .exclude(tc_theme='').values_list('tc_theme', flat=True).distinct()
+            )
+            if not mapped_themes:
+                themes_str = ', '.join(f'"{t}"' for t in unique_themes[:10])
+                messages.warning(
+                    request,
+                    f'No BrandMapping tc_theme values are configured. '
+                    f'The TC file contains these themes: {themes_str}. '
+                    f'Go to Brand Mappings and set the "TC Theme" field for each brand '
+                    f'to match exactly what appears in the TC file.'
+                )
     except Exception as e:
         messages.error(request, f'Reconciliation failed: {e}')
 
