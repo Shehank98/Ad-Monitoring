@@ -49,4 +49,5 @@ urlpatterns = [
     # Summary Sheet Report
     path('summary/',                            views.summary_report, name='summary_report'),
     path('summary/excel/',                      views.summary_excel,  name='summary_excel'),
+    path('summary/pdf/',                        views.summary_pdf,    name='summary_pdf'),
 ]

@@ -89,7 +89,7 @@
           <option value="">Not linked</option>
           {% for sch in schedules %}
             <option value="{{ sch.id }}" data-account="{{ sch.account_id }}">
-              {{ sch.account.name }} | {{ sch.channel }} | {{ sch.month }} | v{{ sch.version }}
+              {{ sch.account.name }} | {{ sch.channel }} | {{ sch.month }} | #{{ sch.schedule_number }}
             </option>
           {% endfor %}
         </select>
@@ -127,6 +127,14 @@
 <script>
 const csrfToken = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
 
+function dateToMonthStr(dateStr) {
+  // Convert 'YYYY-MM-DD' → 'January 2025'
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}
+
 function detectFile(input) {
   if (!input.files.length) return;
   const fd = new FormData();
@@ -139,6 +147,11 @@ function detectFile(input) {
       if (data.ok) {
         if (data.channel && !document.getElementById('inpChannel').value) {
           document.getElementById('inpChannel').value = data.channel;
+        }
+        // Auto-populate month from detected start_date
+        const monthEl = document.getElementById('inpMonth');
+        if (data.start_date && (!monthEl.value || monthEl.value.trim() === '')) {
+          monthEl.value = dateToMonthStr(data.start_date);
         }
         const el = document.getElementById('detectResult');
         el.classList.remove('hidden');

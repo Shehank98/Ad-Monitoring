@@ -38,6 +38,33 @@ from core.models import (
     SummaryReportMeta, TCRow, TransmissionReport,
 )
 
+# ── LMRB theme helpers ────────────────────────────────────────────────────────
+
+def _build_lmrb_theme_map(account_id):
+    """
+    Returns {norm_brand: [(norm_theme, duration_or_None), ...]}
+    Uses BrandMapping.theme (the LMRB/MapOnline theme field).
+    """
+    mapping = {}
+    for bm in BrandMapping.objects.filter(account_id=account_id).exclude(theme=''):
+        norm_brand = _normalize(bm.brand)
+        norm_theme = _normalize(bm.theme)
+        dur        = int(bm.duration) if bm.duration is not None else None
+        mapping.setdefault(norm_brand, []).append((norm_theme, dur))
+    return mapping
+
+
+def _lmrb_themes_for_brand(brand: str, duration, lmrb_theme_map: dict) -> list[str]:
+    """Return list of normalised LMRB themes for a brand + optional duration."""
+    nb = _normalize(brand)
+    candidates = lmrb_theme_map.get(nb, [])
+    dur = int(duration) if duration is not None else None
+    themes = []
+    for theme, map_dur in candidates:
+        if map_dur is None or map_dur == dur:
+            themes.append(theme)
+    return themes
+
 logger = logging.getLogger(__name__)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -249,6 +276,12 @@ def build_summary_data(account_id, channel, month):
     """
     Build structured summary data for the Summary Sheet report.
 
+    Column definitions:
+    - Aired       : TC rows that are schedule-matched AND LMRB-confirmed (TC ∩ LMRB)
+    - 3rd Party   : Total LMRB row count for this brand/theme (independent 3rd-party count)
+    - Extra       : max(0, LMRB_count - Planned)  — LMRB found more than planned
+    - Missed      : max(0, Planned - LMRB_count)  — LMRB found fewer than planned
+
     Returns:
     {
       'commercial': [
@@ -274,7 +307,29 @@ def build_summary_data(account_id, channel, month):
       'sponsorship_total': {...},
     }
     """
-    tc_theme_map = _build_tc_theme_map(account_id)
+    tc_theme_map   = _build_tc_theme_map(account_id)
+    lmrb_theme_map = _build_lmrb_theme_map(account_id)
+
+    # Date range for LMRB filtering (derived from the schedule)
+    sch_dates = Schedule.objects.filter(
+        account_id=account_id, channel=channel, month=month
+    ).aggregate(d_min=Min('start_date'), d_max=Max('end_date'))
+    date_min = sch_dates.get('d_min')
+    date_max = sch_dates.get('d_max')
+
+    def _lmrb_row_count(lmrb_themes, dur_int):
+        """Count LMRBRows for this brand in the scope."""
+        q = LMRBRow.objects.filter(account_id=account_id, channel=channel)
+        if date_min and date_max:
+            q = q.filter(date__range=(date_min, date_max))
+        if lmrb_themes:
+            tq = Q()
+            for t in lmrb_themes:
+                tq |= Q(advt_theme__iexact=t)
+            q = q.filter(tq)
+        if dur_int is not None:
+            q = q.filter(duration=dur_int)
+        return q.count()
 
     # ── Commercial Benefits ───────────────────────────────────────────────────
     commercial_rows = []
@@ -288,44 +343,38 @@ def build_summary_data(account_id, channel, month):
     )
 
     for group in sch_commercial:
-        brand = group['brand']
-        dur   = group['duration']
+        brand   = group['brand']
+        dur     = group['duration']
         planned = group['cnt']
 
-        tc_themes = _tc_themes_for_brand(brand, dur, tc_theme_map)
-        dur_int = int(dur) if dur is not None else None
+        tc_themes   = _tc_themes_for_brand(brand, dur, tc_theme_map)
+        lmrb_themes = _lmrb_themes_for_brand(brand, dur, lmrb_theme_map)
+        dur_int     = int(dur) if dur is not None else None
 
+        # Aired = TC schedule-matched AND LMRB-confirmed
         aired_q = TCRow.objects.filter(
             account_id=account_id, channel=channel,
             tc_report__month=month,
             is_schedule_matched=True,
+            is_lmrb_confirmed=True,
         )
         if tc_themes:
             theme_q = Q()
             for t in tc_themes:
-                # Case-insensitive contains match for theme
                 theme_q |= Q(tc_theme__iexact=t)
             aired_q = aired_q.filter(theme_q)
         if dur_int is not None:
             aired_q = aired_q.filter(duration=dur_int)
-
         aired = aired_q.count()
 
-        extra_q = TCRow.objects.filter(
-            account_id=account_id, channel=channel,
-            tc_report__month=month,
-            is_extra=True,
-        )
-        if tc_themes:
-            extra_q = extra_q.filter(theme_q)
-        if dur_int is not None:
-            extra_q = extra_q.filter(duration=dur_int)
-        extra = extra_q.count()
+        # 3rd Party = total LMRB count (independent monitoring)
+        third_party = _lmrb_row_count(lmrb_themes, dur_int)
 
-        third_party = aired_q.filter(is_lmrb_confirmed=True).count()
+        # Extra / Missed based on LMRB vs Planned
+        extra  = max(0, third_party - planned)
+        missed = max(0, planned - third_party)
 
-        missed  = max(planned - aired, 0)
-        avg_30  = round(aired * (dur_int or 0) / 30, 2) if dur_int else 0
+        avg_30 = round(aired * (dur_int or 0) / 30, 2) if dur_int else 0
 
         commercial_rows.append({
             'product':     brand,
@@ -374,12 +423,16 @@ def build_summary_data(account_id, channel, month):
             dur     = group['duration']
             planned = group['cnt']
 
-            tc_themes = _tc_themes_for_brand(brand, dur, tc_theme_map)
-            dur_int   = int(dur) if dur is not None else None
+            tc_themes   = _tc_themes_for_brand(brand, dur, tc_theme_map)
+            lmrb_themes = _lmrb_themes_for_brand(brand, dur, lmrb_theme_map)
+            dur_int     = int(dur) if dur is not None else None
 
+            # Aired = TC schedule-matched AND LMRB-confirmed
             aired_q = TCRow.objects.filter(
                 account_id=account_id, channel=channel,
-                tc_report__month=month, is_schedule_matched=True,
+                tc_report__month=month,
+                is_schedule_matched=True,
+                is_lmrb_confirmed=True,
             )
             if tc_themes:
                 theme_q = Q()
@@ -388,20 +441,15 @@ def build_summary_data(account_id, channel, month):
                 aired_q = aired_q.filter(theme_q)
             if dur_int is not None:
                 aired_q = aired_q.filter(duration=dur_int)
+            aired = aired_q.count()
 
-            aired       = aired_q.count()
-            extra_q     = TCRow.objects.filter(
-                account_id=account_id, channel=channel,
-                tc_report__month=month, is_extra=True,
-            )
-            if tc_themes:
-                extra_q = extra_q.filter(theme_q)
-            if dur_int is not None:
-                extra_q = extra_q.filter(duration=dur_int)
-            extra       = extra_q.count()
-            third_party = aired_q.filter(is_lmrb_confirmed=True).count()
-            missed      = max(planned - aired, 0)
-            avg_30      = round(aired * (dur_int or 0) / 30, 2) if dur_int else 0
+            # 3rd Party = total LMRB count
+            third_party = _lmrb_row_count(lmrb_themes, dur_int)
+
+            # Extra / Missed based on LMRB vs Planned
+            extra  = max(0, third_party - planned)
+            missed = max(0, planned - third_party)
+            avg_30 = round(aired * (dur_int or 0) / 30, 2) if dur_int else 0
 
             prog_rows.append({
                 'product':     brand,
