@@ -426,6 +426,24 @@ def monitoring_list(request):
     if account_id:
         qs = qs.filter(account_id=account_id)
 
+    # Group records by file_group_id (newest first) so multi-channel uploads
+    # appear together and can be deleted as one unit.
+    sorted_data = list(qs.order_by('-uploaded_at'))
+    groups_dict  = {}
+    groups_order = []
+    for d in sorted_data:
+        fgid = d.file_group_id
+        if fgid not in groups_dict:
+            groups_dict[fgid]  = []
+            groups_order.append(fgid)
+        groups_dict[fgid].append(d)
+    data_groups = [groups_dict[fgid] for fgid in groups_order]
+
+    print(f"[monitoring_list] total_records={len(sorted_data)}  groups={len(data_groups)}")
+    for i, grp in enumerate(data_groups):
+        chs = [d.channel for d in grp]
+        print(f"  group {i+1}: file_group_id={grp[0].file_group_id}  channels={chs}  uploaded_at={grp[0].uploaded_at}")
+
     cov_base = MonitoringData.objects.select_related('account')
     if not _is_admin(user):
         cov_base = cov_base.filter(account__in=user.accounts.all())
@@ -439,11 +457,12 @@ def monitoring_list(request):
     today    = date_cls.today()
     accounts = _account_qs(user)
     return render(request, 'monitoring/list.html', {
-        'data_list': qs,
-        'coverage':  coverage,
-        'filters':   {'type': dtype, 'channel': channel, 'account': account_id},
-        'accounts':  accounts,
-        'today':     today,
+        'data_list':   qs,
+        'data_groups': data_groups,
+        'coverage':    coverage,
+        'filters':     {'type': dtype, 'channel': channel, 'account': account_id},
+        'accounts':    accounts,
+        'today':       today,
     })
 
 
@@ -467,15 +486,20 @@ def monitoring_upload(request):
             excel_file = request.FILES['file']
             data_type  = form.cleaned_data['data_type']
             account    = form.cleaned_data['account']
+            print(f"[monitoring_upload] file={excel_file.name}  data_type={data_type}  account={account}")
             try:
                 df = pd.read_excel(excel_file)
                 df.columns = df.columns.str.strip()
+                print(f"[monitoring_upload] Excel loaded: {len(df)} rows  columns={list(df.columns)}")
             except Exception as e:
+                print(f"[monitoring_upload] ERROR reading Excel: {e}")
                 messages.error(request, f'Cannot read Excel file: {e}')
                 return render(request, 'monitoring/upload.html', {'form': form})
 
             channel_metas = _detect_monitoring_meta(df, data_type)
+            print(f"[monitoring_upload] detected {len(channel_metas)} channel(s): {channel_metas}")
             if not channel_metas:
+                print("[monitoring_upload] ERROR: no channels detected")
                 messages.error(request, 'No channels detected in the file.')
                 return render(request, 'monitoring/upload.html', {'form': form})
 
@@ -490,6 +514,7 @@ def monitoring_upload(request):
             group_id   = str(uuid.uuid4())
             saved_path = None
             excel_file.seek(0)
+            print(f"[monitoring_upload] file_group_id={group_id}")
 
             for i, meta in enumerate(channel_metas):
                 mon = MonitoringData(
@@ -507,14 +532,18 @@ def monitoring_upload(request):
                     excel_file.seek(0)
                     mon.file.save(excel_file.name, excel_file, save=False)
                     saved_path = mon.file.name
+                    print(f"[monitoring_upload] file saved → {saved_path}")
                 else:
                     mon.file = saved_path
                 mon.save()
+                print(f"[monitoring_upload]   saved MonitoringData pk={mon.pk}  channel={meta['channel']}  rows={meta['row_count']}")
 
             # ── Parse LMRB rows into master DB table ───────────────────────────
+            print(f"[monitoring_upload] parsing LMRB rows …")
             _parse_lmrb_rows(df, data_type, account)
 
             ch_names = ', '.join(m['channel'] for m in channel_metas)
+            print(f"[monitoring_upload] DONE — {len(channel_metas)} channel(s): {ch_names}")
             messages.success(request,
                 f'{"MapOnline" if data_type == "maponline" else "MediaWatch (LMRB)"} — '
                 f'{account} — {len(channel_metas)} channel(s): {ch_names}. Uploaded successfully.')
@@ -522,9 +551,10 @@ def monitoring_upload(request):
             # Auto-run verification
             try:
                 from verification.engine import auto_run_all_for_account
+                print(f"[monitoring_upload] auto-running verification for account {account.id}")
                 auto_run_all_for_account(account.id)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[monitoring_upload] auto-verification error (non-fatal): {e}")
 
             return redirect('/dashboard/monitoring/')
 
@@ -635,16 +665,21 @@ def _parse_lmrb_rows(df, data_type, account):
             day           = _safe_str(r.get('Day', '')),
         )
 
+    print(f"[_parse_lmrb_rows] df rows={len(df)}  unique dedup_keys={len(rows_by_key)}")
     if not rows_by_key:
+        print("[_parse_lmrb_rows] WARNING: no valid rows to insert (check column names and key fields)")
         return
 
     # ── Handle existing duplicates (unlock linked ScheduleRows first) ──────────
     existing = LMRBRow.objects.filter(dedup_key__in=rows_by_key.keys())
+    existing_count = existing.count()
+    print(f"[_parse_lmrb_rows] existing duplicate rows found={existing_count}")
     sch_row_ids_to_unlock = []
     for old in existing:
         if old.is_matched and old.matched_schedule_id:
             sch_row_ids_to_unlock.append(old.matched_schedule_id)
 
+    print(f"[_parse_lmrb_rows] ScheduleRows to unlock={len(sch_row_ids_to_unlock)}")
     if sch_row_ids_to_unlock:
         from django.utils import timezone
         ScheduleRow.objects.filter(id__in=sch_row_ids_to_unlock).update(
@@ -652,12 +687,17 @@ def _parse_lmrb_rows(df, data_type, account):
             matched_lmrb=None,
             matched_at=None,
         )
+        print(f"[_parse_lmrb_rows] unlocked {len(sch_row_ids_to_unlock)} ScheduleRow(s)")
 
     # Delete old rows (new ones will be inserted below)
+    deleted_count = existing.count()
     existing.delete()
+    print(f"[_parse_lmrb_rows] deleted {deleted_count} old LMRBRow(s)")
 
     # ── Bulk-create new rows ──────────────────────────────────────────────────
-    LMRBRow.objects.bulk_create(list(rows_by_key.values()), batch_size=500)
+    new_rows = list(rows_by_key.values())
+    LMRBRow.objects.bulk_create(new_rows, batch_size=500)
+    print(f"[_parse_lmrb_rows] inserted {len(new_rows)} new LMRBRow(s)")
 
 
 @login_required
@@ -702,19 +742,69 @@ def monitoring_delete(request, pk):
     mon   = get_object_or_404(MonitoringData, pk=pk)
     user  = request.user
     today = date_cls.today()
+    print(f"[monitoring_delete] pk={pk}  channel={mon.channel}  file_group_id={mon.file_group_id}  user={user}")
 
     if not _is_admin(user) and mon.account and mon.account not in _account_qs(user):
+        print(f"[monitoring_delete] ACCESS DENIED — user has no access to account {mon.account}")
         messages.error(request, 'You do not have access to this data.')
         return redirect('/dashboard/monitoring/')
 
     if _is_admin(user) or (mon.uploaded_by == user and mon.uploaded_at.date() == today):
         siblings = MonitoringData.objects.filter(file_group_id=mon.file_group_id).exclude(pk=mon.pk)
+        sibling_count = siblings.count()
+        print(f"[monitoring_delete] siblings in same group={sibling_count}")
         if not siblings.exists():
+            print(f"[monitoring_delete] no siblings — deleting shared file {mon.file.name}")
             mon.file.delete(save=False)
         mon.delete()
+        print(f"[monitoring_delete] deleted MonitoringData pk={pk}")
         messages.success(request, 'Dataset deleted.')
     else:
+        print(f"[monitoring_delete] DENIED — not admin and not uploaded today by this user")
         messages.error(request, 'You can only delete datasets you uploaded today.')
+    return redirect('/dashboard/monitoring/')
+
+
+@login_required
+def monitoring_delete_group(request, group_id):
+    """
+    Delete ALL MonitoringData records that share the same file_group_id.
+    This lets users remove an entire multi-channel upload in one click.
+    """
+    user  = request.user
+    today = date_cls.today()
+    print(f"[monitoring_delete_group] group_id={group_id}  user={user}")
+
+    group_qs = MonitoringData.objects.filter(file_group_id=group_id).select_related('account', 'uploaded_by')
+    if not group_qs.exists():
+        print(f"[monitoring_delete_group] ERROR: no records found for group_id={group_id}")
+        messages.error(request, 'No records found for this upload group.')
+        return redirect('/dashboard/monitoring/')
+
+    first    = group_qs.first()
+    channels = list(group_qs.values_list('channel', flat=True))
+    count    = group_qs.count()
+    print(f"[monitoring_delete_group] found {count} record(s): channels={channels}")
+    print(f"[monitoring_delete_group] first.account={first.account}  first.uploaded_by={first.uploaded_by}  first.uploaded_at={first.uploaded_at}")
+
+    if not _is_admin(user) and first.account and first.account not in _account_qs(user):
+        print(f"[monitoring_delete_group] ACCESS DENIED — user has no access to account {first.account}")
+        messages.error(request, 'You do not have access to this data.')
+        return redirect('/dashboard/monitoring/')
+
+    if not _is_admin(user) and not (first.uploaded_by == user and first.uploaded_at.date() == today):
+        print(f"[monitoring_delete_group] DENIED — not admin and not uploaded today by this user")
+        messages.error(request, 'You can only delete datasets you uploaded today.')
+        return redirect('/dashboard/monitoring/')
+
+    # Delete the shared file once (all records in the group share the same file)
+    if first.file:
+        print(f"[monitoring_delete_group] deleting shared file: {first.file.name}")
+        first.file.delete(save=False)
+
+    group_qs.delete()
+    print(f"[monitoring_delete_group] deleted {count} MonitoringData record(s) successfully")
+    messages.success(request, f'Deleted {count} channel record(s): {", ".join(channels)}.')
     return redirect('/dashboard/monitoring/')
 
 

@@ -110,6 +110,8 @@
 
 {% block extra_js %}
 <script>
+  console.log('[monitoring-upload] page loaded');
+
   const CSRF  = '{{ csrf_token }}';
   const fi    = document.getElementById('monitoring-file');
   const fn    = document.getElementById('file-name');
@@ -119,6 +121,7 @@
 
   fi.addEventListener('change', function () {
     if (this.files[0]) {
+      console.log('[monitoring-upload] file selected:', this.files[0].name, 'size:', this.files[0].size);
       fn.textContent = this.files[0].name;
       fn.classList.remove('hidden');
       dl.classList.add('border-blue-400', 'bg-blue-50');
@@ -128,16 +131,32 @@
 
   async function detectChannels(file) {
     const dtype = document.querySelector('[name=data_type]:checked');
+    const dtypeVal = dtype ? dtype.value : 'mediawatch';
+    console.log('[monitoring-upload] detectChannels — file:', file.name, 'data_type:', dtypeVal);
+
     const fd = new FormData();
     fd.append('csrfmiddlewaretoken', CSRF);
     fd.append('file', file);
-    fd.append('data_type', dtype ? dtype.value : 'mediawatch');
+    fd.append('data_type', dtypeVal);
+
     pcont.innerHTML = '<p class="text-xs text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Scanning file…</p>';
     prev.classList.remove('hidden');
+
     try {
+      console.log('[monitoring-upload] POSTing to /dashboard/monitoring/detect/ …');
       const res  = await fetch('/dashboard/monitoring/detect/', {method: 'POST', body: fd});
+      console.log('[monitoring-upload] detect response status:', res.status);
       const data = await res.json();
-      if (!data.ok) { pcont.innerHTML = `<p class="text-xs text-red-500">${data.error}</p>`; return; }
+      console.log('[monitoring-upload] detect response JSON:', data);
+
+      if (!data.ok) {
+        console.error('[monitoring-upload] detect error:', data.error);
+        pcont.innerHTML = `<p class="text-xs text-red-500">${data.error}</p>`;
+        return;
+      }
+
+      console.log('[monitoring-upload] detected', data.channels.length, 'channel(s):', data.channels.map(c => c.channel));
+
       const rows = data.channels.map(ch =>
         `<div class="flex items-center justify-between text-xs py-1 border-b border-slate-100 last:border-0">
           <span class="font-semibold text-slate-700 flex items-center gap-1.5">
@@ -150,16 +169,28 @@
         </div>`
       ).join('');
       pcont.innerHTML = rows || '<p class="text-xs text-amber-600">No channels detected. Check the file format.</p>';
+
+      if (!rows) {
+        console.warn('[monitoring-upload] WARNING: 0 channels detected — check column names in the file');
+      }
     } catch (e) {
+      console.error('[monitoring-upload] detectChannels exception:', e);
       pcont.innerHTML = `<p class="text-xs text-red-500">Detection failed: ${e.message}</p>`;
     }
   }
 
   document.querySelectorAll('[name=data_type]').forEach(r =>
-    r.addEventListener('change', () => { if (fi.files[0]) detectChannels(fi.files[0]); })
+    r.addEventListener('change', () => {
+      console.log('[monitoring-upload] data_type changed to:', r.value);
+      if (fi.files[0]) detectChannels(fi.files[0]);
+    })
   );
 
   document.getElementById('upload-form').addEventListener('submit', function () {
+    const account  = document.querySelector('[name=account]')?.value;
+    const dtype    = document.querySelector('[name=data_type]:checked')?.value;
+    const fileName = fi.files[0]?.name;
+    console.log('[monitoring-upload] SUBMIT — account:', account, 'data_type:', dtype, 'file:', fileName);
     const btn = document.getElementById('submit-btn');
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
     btn.disabled = true;
@@ -168,6 +199,7 @@
   dl.addEventListener('dragover', e => { e.preventDefault(); dl.classList.add('border-blue-500'); });
   dl.addEventListener('dragleave', () => dl.classList.remove('border-blue-500'));
   dl.addEventListener('drop', e => {
+    console.log('[monitoring-upload] file dropped');
     e.preventDefault(); fi.files = e.dataTransfer.files; fi.dispatchEvent(new Event('change'));
   });
 </script>
