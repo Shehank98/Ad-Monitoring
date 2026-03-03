@@ -1065,11 +1065,17 @@ def monitoring_dashboard(request):
         sch_dates = ScheduleRow.objects.filter(
             account_id=account_id, channel=channel, month=month
         ).aggregate(d_min=Min('date'), d_max=Max('date'))
-        lmrb_qs = LMRBRow.objects.filter(account_id=account_id, channel=channel)
+        # channel__iexact: LMRB file may store channel name in different case
+        # (e.g. "SIRASA TV" vs "Sirasa TV"). Use case-insensitive filter so data
+        # is never silently missed.
+        lmrb_qs = LMRBRow.objects.filter(account_id=account_id, channel__iexact=channel)
         if sch_dates['d_min']:
             lmrb_qs = lmrb_qs.filter(date__gte=sch_dates['d_min'])
         if sch_dates['d_max']:
             lmrb_qs = lmrb_qs.filter(date__lte=sch_dates['d_max'])
+        print(f"[monitoring_dashboard] lmrb_qs count={lmrb_qs.count()} "
+              f"(account={account_id}, channel='{channel}', "
+              f"date_range={sch_dates['d_min']} → {sch_dates['d_max']})")
         lmrb_chart = list(
             lmrb_qs.values('advt_theme', 'duration')
             .annotate(count=Count('id'))
@@ -1080,6 +1086,7 @@ def monitoring_dashboard(request):
         lmrb_matched_rows = list(
             lmrb_qs.filter(is_matched=True).order_by('date', 'advt_time')
         )
+        print(f"[monitoring_dashboard] lmrb_matched={len(lmrb_matched_rows)}  lmrb_unmatched={lmrb_qs.filter(is_matched=False).count()}")
         # ── Unmatched LMRB rows (for LMRB Unmatched tab) ─────────────────────
         lmrb_unmatched_rows = list(
             lmrb_qs.filter(is_matched=False).order_by('date', 'advt_time')

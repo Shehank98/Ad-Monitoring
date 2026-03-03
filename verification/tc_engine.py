@@ -227,17 +227,28 @@ def reconcile_tc(account_id, channel, month, mode='smart'):
     if tc_ids:
         all_tc = list(TCRow.objects.filter(id__in=tc_ids))
 
-    # Build LMRBRow index: {(channel, date, duration): [(lmrb_id, time_secs), ...]}
+    # Build LMRBRow index: {(norm_channel, date, duration): [(lmrb_id, time_secs, lr), ...]}
     # Use the schedule date range so only LMRB data from the same period is used.
     # This prevents LMRB rows from other months contaminating the cross-check.
+    # IMPORTANT: channel key is normalised (_normalize) so case differences between
+    # the TC file and the LMRB upload (e.g. "Sirasa TV" vs "SIRASA TV") never break
+    # the dict lookup.
     lmrb_index: dict = {}
+    lmrb_loaded = 0
     if sch_start and sch_end:
         for lr in LMRBRow.objects.filter(
             account_id=account_id, channel__iexact=channel,
             date__range=(sch_start, sch_end),
         ):
-            k = (lr.channel, lr.date, int(lr.duration) if lr.duration else None)
+            k = (_normalize(lr.channel), lr.date, int(lr.duration) if lr.duration else None)
             lmrb_index.setdefault(k, []).append((lr.id, _time_to_secs(lr.advt_time), lr))
+            lmrb_loaded += 1
+    logger.debug("TC-LMRB cross-check: loaded %d LMRB rows into index (date %s–%s)",
+                 lmrb_loaded, sch_start, sch_end)
+    print(f"[reconcile_tc] TC-LMRB cross-check: "
+          f"{lmrb_loaded} LMRB rows loaded (account={account_id}, channel='{channel}', "
+          f"date={sch_start}→{sch_end})  "
+          f"TC rows to check: {len(all_tc)}")
 
     lmrb_updates = []
     tc_lmrb_updates = []
@@ -248,7 +259,8 @@ def reconcile_tc(account_id, channel, month, mode='smart'):
         if tc_secs is None:
             continue
         dur = int(tcrow.duration) if tcrow.duration else None
-        key = (tcrow.channel, tcrow.date, dur)
+        # Normalise channel so it matches the normalised index key
+        key = (_normalize(tcrow.channel), tcrow.date, dur)
         candidates = lmrb_index.get(key, [])
         best = None
         best_diff = 6  # anything > 5 sec means no match
@@ -328,7 +340,9 @@ def build_summary_data(account_id, channel, month):
 
     def _lmrb_row_count(lmrb_themes, dur_int):
         """Count LMRBRows for this brand in the scope."""
-        q = LMRBRow.objects.filter(account_id=account_id, channel=channel)
+        # channel__iexact: LMRB file may store the channel name in a different case
+        # (e.g. "SIRASA TV" in the Excel vs "Sirasa TV" in the schedule/TC form).
+        q = LMRBRow.objects.filter(account_id=account_id, channel__iexact=channel)
         if date_min and date_max:
             q = q.filter(date__range=(date_min, date_max))
         if lmrb_themes:
