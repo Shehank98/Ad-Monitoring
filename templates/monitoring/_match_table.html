@@ -1,15 +1,17 @@
 {% comment %}
   Shared partial: renders a MatchResult table.
   Context vars:
-    rows        — list of MatchResult objects
-    show_status — bool, show Status column
+    rows                — list of MatchResult objects
+    show_status         — bool, show Status column
+    show_aired_programme — bool, show Aired Programme column (for mismatch/late tabs)
 {% endcomment %}
 <div class="tab-table-wrap">
   <table class="data-table w-full">
     <thead>
       <tr>
         <th>Brand</th>
-        <th>Programme</th>
+        <th>Planned Programme</th>
+        {% if show_aired_programme %}<th>Aired Programme</th>{% endif %}
         <th>Planned Date</th>
         <th>Planned Start</th>
         <th>Planned End</th>
@@ -24,6 +26,12 @@
       <tr>
         <td class="font-medium text-slate-800">{{ mr.brand|default:"—" }}</td>
         <td class="text-slate-600 max-w-[160px] truncate" title="{{ mr.programme }}">{{ mr.programme|default:"—" }}</td>
+        {% if show_aired_programme %}
+        <td class="text-violet-700 font-medium max-w-[160px] truncate"
+            title="{% if mr.lmrb_row and mr.lmrb_row.program %}{{ mr.lmrb_row.program }}{% endif %}">
+          {% if mr.lmrb_row and mr.lmrb_row.program %}{{ mr.lmrb_row.program }}{% else %}—{% endif %}
+        </td>
+        {% endif %}
         <td class="text-slate-600 whitespace-nowrap">{{ mr.scheduled_date|date:"d M Y"|default:"—" }}</td>
         <td class="text-slate-600">{{ mr.planned_start|default:"—" }}</td>
         <td class="text-slate-600">{{ mr.planned_end|default:"—" }}</td>
@@ -48,7 +56,8 @@
       </tr>
       {% empty %}
       <tr>
-        <td colspan="{% if show_status %}9{% else %}8{% endif %}" class="text-center text-slate-400 py-10">
+        <td colspan="{% if show_status and show_aired_programme %}10{% elif show_status or show_aired_programme %}9{% else %}8{% endif %}"
+            class="text-center text-slate-400 py-10">
           No records in this category.
         </td>
       </tr>

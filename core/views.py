@@ -122,6 +122,16 @@ def _safe_date(val):
         return None
 
 
+def _safe_decimal(val):
+    from decimal import Decimal, InvalidOperation
+    try:
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return None
+        return Decimal(str(val))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
 @login_required
@@ -570,16 +580,34 @@ def _parse_lmrb_rows(df, data_type, account):
 
         dedup_key = LMRBRow.make_dedup_key(account.id, channel, date_val, advt_time, theme, dur)
 
+        # Map programme from either mediawatch (Program) or maponline (Prg Name)
+        program_val = _safe_str(r.get('Program', r.get('Prg Name', '')))
+
         # Latest row wins if multiple rows in the same upload share the same key
         rows_by_key[dedup_key] = LMRBRow(
-            account    = account,
-            channel    = channel,
-            date       = date_val,
-            advt_theme = theme,
-            advt_time  = advt_time,
-            duration   = dur,
-            source     = data_type,
-            dedup_key  = dedup_key,
+            account       = account,
+            channel       = channel,
+            date          = date_val,
+            advt_theme    = theme,
+            advt_time     = advt_time,
+            duration      = dur,
+            source        = data_type,
+            dedup_key     = dedup_key,
+            # Extended columns
+            product_group = _safe_str(r.get('Product_Group', '')),
+            advertiser    = _safe_str(r.get('Advertiser', '')),
+            product       = _safe_str(r.get('Product', '')),
+            ads           = _safe_str(r.get('Ads', '')),
+            program       = program_val,
+            prog_time     = _safe_str(r.get('Prog_time', '')),
+            ad_pos        = _safe_int(r.get('AdPos')),
+            tot_ads       = _safe_int(r.get('TotAds')),
+            brk_no        = _safe_int(r.get('BrkNo')),
+            pos_in_brk    = _safe_int(r.get('PosinBrk')),
+            ads_in_brk    = _safe_int(r.get('AdsinBrk')),
+            lng           = _safe_str(r.get('Lng', '')),
+            cost          = _safe_decimal(r.get('Cost')),
+            day           = _safe_str(r.get('Day', '')),
         )
 
     if not rows_by_key:
@@ -794,8 +822,11 @@ def monitoring_dashboard(request):
     ch_summary     = []
     brand_summary  = []
     sponsorship_rows = []
+    sponsorship_brand_summary = []
     schedule_chart = []
     lmrb_chart     = []
+    lmrb_matched_rows   = []
+    lmrb_unmatched_rows = []
 
     if account_id:
         try:
@@ -843,11 +874,11 @@ def monitoring_dashboard(request):
         }
 
         tab_data = {
-            'full':     list(qs.order_by('scheduled_date', 'brand')),
-            'matched':  list(qs.filter(status='matched').order_by('scheduled_date', 'brand')),
+            'full':     list(qs.select_related('lmrb_row').order_by('scheduled_date', 'brand')),
+            'matched':  list(qs.filter(status='matched').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
             'not_aired': list(qs.filter(status__in=['not_aired', 'no_mapping']).order_by('scheduled_date', 'brand')),
-            'prog_mis': list(qs.filter(status='programme_mismatch').order_by('scheduled_date', 'brand')),
-            'late':     list(qs.filter(status='late_telecast').order_by('scheduled_date', 'brand')),
+            'prog_mis': list(qs.filter(status='programme_mismatch').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
+            'late':     list(qs.filter(status='late_telecast').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
         }
 
         # Channel summary (only one channel in this scope)
@@ -872,6 +903,24 @@ def monitoring_dashboard(request):
         sponsorship_rows = list(ScheduleRow.objects.filter(
             account_id=account_id, channel=channel, month=month, ad_type='SPONSORSHIP',
         ).order_by('date', 'start_time'))
+
+        # Sponsorship brand breakdown
+        sponsorship_brand_summary = []
+        for br in ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month, ad_type='SPONSORSHIP',
+        ).values_list('brand', flat=True).distinct().order_by('brand'):
+            sq = ScheduleRow.objects.filter(
+                account_id=account_id, channel=channel, month=month,
+                ad_type='SPONSORSHIP', brand=br,
+            )
+            st = sq.count()
+            sm = sq.filter(is_matched=True).count()
+            sponsorship_brand_summary.append({
+                'brand': br,
+                'total': st,
+                'matched': sm,
+                'not_matched': st - sm,
+            })
 
         # ── Chart data 1: Schedule spots grouped by Brand × Duration ─────────
         sch_rows = (
@@ -898,21 +947,33 @@ def monitoring_dashboard(request):
             .order_by('advt_theme', 'duration')
         )
 
+        # ── Matched LMRB rows (for LMRB Matched tab) ─────────────────────────
+        lmrb_matched_rows = list(
+            lmrb_qs.filter(is_matched=True).order_by('date', 'advt_time')
+        )
+        # ── Unmatched LMRB rows (for LMRB Unmatched tab) ─────────────────────
+        lmrb_unmatched_rows = list(
+            lmrb_qs.filter(is_matched=False).order_by('date', 'advt_time')
+        )
+
     return render(request, 'monitoring/dashboard.html', {
-        'accounts':         account_qs,
-        'selected_account': selected_account,
-        'account_id':       account_id,
-        'channels':         channels,
-        'months':           months,
-        'channel':          channel,
-        'month':            month,
-        'stats':            stats,
-        'tab_data':         tab_data,
-        'ch_summary':       ch_summary,
-        'brand_summary':    brand_summary,
-        'sponsorship_rows': sponsorship_rows,
-        'schedule_chart':   schedule_chart,
-        'lmrb_chart':       lmrb_chart,
+        'accounts':                  account_qs,
+        'selected_account':          selected_account,
+        'account_id':                account_id,
+        'channels':                  channels,
+        'months':                    months,
+        'channel':                   channel,
+        'month':                     month,
+        'stats':                     stats,
+        'tab_data':                  tab_data,
+        'ch_summary':                ch_summary,
+        'brand_summary':             brand_summary,
+        'sponsorship_rows':          sponsorship_rows,
+        'sponsorship_brand_summary': sponsorship_brand_summary,
+        'schedule_chart':            schedule_chart,
+        'lmrb_chart':                lmrb_chart,
+        'lmrb_matched_rows':         lmrb_matched_rows,
+        'lmrb_unmatched_rows':       lmrb_unmatched_rows,
     })
 
 

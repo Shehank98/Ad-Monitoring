@@ -149,6 +149,22 @@ class LMRBRow(models.Model):
     duration    = models.IntegerField(null=True, blank=True)
     source      = models.CharField(max_length=20)   # 'maponline' | 'mediawatch'
 
+    # ── Extended LMRB columns ─────────────────────────────────────────────────
+    product_group = models.CharField(max_length=500, blank=True, default='')
+    advertiser    = models.CharField(max_length=500, blank=True, default='')
+    product       = models.CharField(max_length=500, blank=True, default='')
+    ads           = models.CharField(max_length=500, blank=True, default='')
+    program       = models.CharField(max_length=500, blank=True, default='')   # aired programme
+    prog_time     = models.CharField(max_length=30,  blank=True, default='')
+    ad_pos        = models.IntegerField(null=True, blank=True)
+    tot_ads       = models.IntegerField(null=True, blank=True)
+    brk_no        = models.IntegerField(null=True, blank=True)
+    pos_in_brk    = models.IntegerField(null=True, blank=True)
+    ads_in_brk    = models.IntegerField(null=True, blank=True)
+    lng           = models.CharField(max_length=100, blank=True, default='')
+    cost          = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    day           = models.CharField(max_length=20, blank=True, default='')
+
     # Dedup key = sha256(account_id|channel|date|advt_time|advt_theme|dur)[:32]
     # Unique so duplicate uploads just replace the row.
     dedup_key   = models.CharField(max_length=64, unique=True)

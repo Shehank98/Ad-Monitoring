@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Monitoring Dashboard{% endblock %}
 {% block page_title %}Monitoring Dashboard{% endblock %}
-{% block page_subtitle %}Comprehensive ad-airing analytics — matched, missed, programme mismatches, sponsorship{% endblock %}
+{% block page_subtitle %}Comprehensive ad-airing analytics — matched, missed, programme mismatches, sponsorship & full LMRB data{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -28,6 +28,42 @@
 
   /* ── Table scroll ────────────────────────────────────────── */
   .tab-table-wrap { overflow-x: auto; max-height: 55vh; overflow-y: auto; border-radius: .75rem; border: 1px solid #f1f5f9; }
+
+  /* ── Dashboard cards for Prog Mismatch / Late Telecast ───── */
+  .mismatch-card {
+    background: #fff; border-radius: .875rem; border: 1px solid #fef3c7;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06); padding: 1rem 1.25rem;
+    display: grid; grid-template-columns: 1fr 1fr; gap: .75rem 1.5rem;
+  }
+  .mismatch-card.late { border-color: #ede9fe; }
+  .mismatch-section-label {
+    font-size: .65rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .08em; color: #94a3b8; margin-bottom: .25rem;
+  }
+  .mismatch-value { font-size: .875rem; font-weight: 600; color: #1e293b; }
+  .mismatch-sub   { font-size: .75rem; color: #64748b; }
+  .vs-badge {
+    display: flex; align-items: center; justify-content: center;
+    grid-column: 1 / -1; gap: .5rem; margin: .25rem 0;
+  }
+  .vs-line { flex: 1; height: 1px; background: #e2e8f0; }
+  .vs-text { font-size: .7rem; font-weight: 700; color: #94a3b8;
+             background: #f8fafc; padding: .2rem .5rem; border-radius: .3rem;
+             border: 1px solid #e2e8f0; }
+  .prog-planned { border-left: 3px solid #f59e0b; padding-left: .75rem; }
+  .prog-aired   { border-left: 3px solid #8b5cf6; padding-left: .75rem; }
+  .prog-aired-late { border-left: 3px solid #7c3aed; padding-left: .75rem; }
+
+  /* ── Sponsorship brand cards ─────────────────────────────── */
+  .spon-brand-card {
+    background: linear-gradient(135deg, #fef9ee 0%, #fef3c7 100%);
+    border: 1px solid #fde68a; border-radius: .75rem; padding: .875rem 1rem;
+  }
+
+  /* ── LMRB table condensed ────────────────────────────────── */
+  .lmrb-table th, .lmrb-table td {
+    font-size: .7rem; padding: .3rem .5rem; white-space: nowrap;
+  }
 </style>
 {% endblock %}
 
@@ -211,7 +247,7 @@
   </a>
 </div>
 
-<!-- ── 7-Tab Report ───────────────────────────────────────────── -->
+<!-- ── Tab Report ─────────────────────────────────────────────── -->
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
 
   <!-- Tab bar -->
@@ -248,6 +284,14 @@
       <span class="ml-1 px-1.5 py-0.5 rounded bg-yellow-50 text-yellow-700 text-[10px] font-bold">{{ sponsorship_rows|length }}</span>
     </button>
     {% endif %}
+    <button class="tab-btn" onclick="showTab('lmrb_matched',this)">
+      <i class="fa-solid fa-database mr-1 text-teal-500"></i> LMRB Matched
+      <span class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 text-[10px] font-bold">{{ lmrb_matched_rows|length }}</span>
+    </button>
+    <button class="tab-btn" onclick="showTab('lmrb_unmatched',this)">
+      <i class="fa-solid fa-database mr-1 text-rose-500"></i> LMRB Unmatched
+      <span class="ml-1 px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 text-[10px] font-bold">{{ lmrb_unmatched_rows|length }}</span>
+    </button>
   </div>
 
   <div class="p-4">
@@ -267,14 +311,140 @@
       {% include "monitoring/_match_table.html" with rows=tab_data.not_aired show_status=True %}
     </div>
 
-    <!-- ── Programme Mismatch Tab ────────────────────────── -->
+    <!-- ── Programme Mismatch Tab — Dashboard view ───────── -->
     <div id="tab-prog_mis" class="tab-pane">
-      {% include "monitoring/_match_table.html" with rows=tab_data.prog_mis show_status=True %}
+      {% if tab_data.prog_mis %}
+      <!-- Mini summary row -->
+      <div class="grid grid-cols-3 gap-3 mb-4">
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
+          <p class="text-2xl font-black text-amber-700">{{ tab_data.prog_mis|length }}</p>
+          <p class="text-xs font-semibold text-amber-600 uppercase tracking-wide mt-0.5">Total Mismatches</p>
+        </div>
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+          <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">What Happened?</p>
+          <p class="text-xs text-slate-600">Ad aired on the <strong>correct date</strong> but <strong>outside the planned time window</strong> — in a different programme slot.</p>
+        </div>
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+          <p class="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-1">Impact</p>
+          <p class="text-xs text-blue-700">Brand exposure delivered — but in a <strong>different programme</strong> than planned. Verify with client.</p>
+        </div>
+      </div>
+
+      <!-- Detail cards: Planned vs Aired side-by-side -->
+      <div class="space-y-3 mb-4" style="max-height:50vh;overflow-y:auto;">
+        {% for mr in tab_data.prog_mis %}
+        <div class="mismatch-card">
+          <!-- Left: Planned -->
+          <div class="prog-planned">
+            <p class="mismatch-section-label"><i class="fa-solid fa-calendar-days text-amber-500 mr-1"></i>Planned</p>
+            <p class="mismatch-value">{{ mr.brand }}</p>
+            <p class="mismatch-sub">Programme: <strong>{{ mr.programme|default:"—" }}</strong></p>
+            <p class="mismatch-sub">Date: {{ mr.scheduled_date|date:"d M Y"|default:"—" }}</p>
+            <p class="mismatch-sub">Time Window: {{ mr.planned_start|default:"—" }} – {{ mr.planned_end|default:"—" }}</p>
+            <p class="mismatch-sub">Duration: {{ mr.duration|default:"—" }}s</p>
+          </div>
+          <!-- Right: Aired -->
+          <div class="prog-aired">
+            <p class="mismatch-section-label"><i class="fa-solid fa-tv text-violet-500 mr-1"></i>Actually Aired</p>
+            <p class="mismatch-value">{{ mr.theme|default:mr.brand }}</p>
+            <p class="mismatch-sub">Programme: <strong>{% if mr.lmrb_row and mr.lmrb_row.program %}{{ mr.lmrb_row.program }}{% else %}—{% endif %}</strong></p>
+            <p class="mismatch-sub">Date: {{ mr.aired_date|date:"d M Y"|default:"—" }}</p>
+            <p class="mismatch-sub">Aired Time: {{ mr.air_time|default:"—" }}</p>
+            <p class="mismatch-sub">Source: {{ mr.source|upper|default:"—" }}</p>
+          </div>
+          <div class="vs-badge col-span-2">
+            <span class="vs-line"></span>
+            <span class="vs-text"><i class="fa-solid fa-triangle-exclamation text-amber-500 mr-1"></i>PROGRAMME MISMATCH — Same date, different time slot</span>
+            <span class="vs-line"></span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Full data table below -->
+      <details class="mt-2">
+        <summary class="text-xs font-semibold text-slate-500 cursor-pointer hover:text-slate-700 select-none py-2">
+          <i class="fa-solid fa-table mr-1"></i> Show full table view
+        </summary>
+        <div class="mt-2">
+          {% include "monitoring/_match_table.html" with rows=tab_data.prog_mis show_status=True show_aired_programme=True %}
+        </div>
+      </details>
+      {% else %}
+      <div class="text-center py-12">
+        <i class="fa-solid fa-circle-check text-emerald-400 text-4xl mb-3"></i>
+        <p class="text-slate-500 font-semibold">No Programme Mismatches</p>
+        <p class="text-slate-400 text-sm">All ads aired within their planned time windows.</p>
+      </div>
+      {% endif %}
     </div>
 
-    <!-- ── Late Telecast Tab ─────────────────────────────── -->
+    <!-- ── Late Telecast Tab — Dashboard view ────────────── -->
     <div id="tab-late" class="tab-pane">
-      {% include "monitoring/_match_table.html" with rows=tab_data.late show_status=True %}
+      {% if tab_data.late %}
+      <!-- Mini summary row -->
+      <div class="grid grid-cols-3 gap-3 mb-4">
+        <div class="bg-violet-50 border border-violet-200 rounded-xl p-3 text-center">
+          <p class="text-2xl font-black text-violet-700">{{ tab_data.late|length }}</p>
+          <p class="text-xs font-semibold text-violet-600 uppercase tracking-wide mt-0.5">Late Telecasts</p>
+        </div>
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+          <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">What Happened?</p>
+          <p class="text-xs text-slate-600">Ad was <strong>not aired on the planned date</strong> but found on a <strong>different date</strong> — delivered late.</p>
+        </div>
+        <div class="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center">
+          <p class="text-xs font-semibold text-orange-500 uppercase tracking-wide mb-1">Impact</p>
+          <p class="text-xs text-orange-700">Campaign delivery delayed. Check if client approval needed for the makeup date.</p>
+        </div>
+      </div>
+
+      <!-- Detail cards: Planned vs Aired side-by-side -->
+      <div class="space-y-3 mb-4" style="max-height:50vh;overflow-y:auto;">
+        {% for mr in tab_data.late %}
+        <div class="mismatch-card late">
+          <!-- Left: Planned -->
+          <div class="prog-planned">
+            <p class="mismatch-section-label"><i class="fa-solid fa-calendar-days text-amber-500 mr-1"></i>Planned</p>
+            <p class="mismatch-value">{{ mr.brand }}</p>
+            <p class="mismatch-sub">Programme: <strong>{{ mr.programme|default:"—" }}</strong></p>
+            <p class="mismatch-sub">Planned Date: {{ mr.scheduled_date|date:"d M Y"|default:"—" }}</p>
+            <p class="mismatch-sub">Time Window: {{ mr.planned_start|default:"—" }} – {{ mr.planned_end|default:"—" }}</p>
+            <p class="mismatch-sub">Duration: {{ mr.duration|default:"—" }}s</p>
+          </div>
+          <!-- Right: Actually Aired -->
+          <div class="prog-aired-late">
+            <p class="mismatch-section-label"><i class="fa-solid fa-clock text-violet-500 mr-1"></i>Actually Aired (Late)</p>
+            <p class="mismatch-value">{{ mr.theme|default:mr.brand }}</p>
+            <p class="mismatch-sub">Programme: <strong>{% if mr.lmrb_row and mr.lmrb_row.program %}{{ mr.lmrb_row.program }}{% else %}—{% endif %}</strong></p>
+            <p class="mismatch-sub">Aired Date: {{ mr.aired_date|date:"d M Y"|default:"—" }}</p>
+            <p class="mismatch-sub">Aired Time: {{ mr.air_time|default:"—" }}</p>
+            <p class="mismatch-sub">Source: {{ mr.source|upper|default:"—" }}</p>
+          </div>
+          <div class="vs-badge col-span-2">
+            <span class="vs-line"></span>
+            <span class="vs-text"><i class="fa-solid fa-clock text-violet-500 mr-1"></i>LATE TELECAST — Aired on a different date than planned</span>
+            <span class="vs-line"></span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Full data table below -->
+      <details class="mt-2">
+        <summary class="text-xs font-semibold text-slate-500 cursor-pointer hover:text-slate-700 select-none py-2">
+          <i class="fa-solid fa-table mr-1"></i> Show full table view
+        </summary>
+        <div class="mt-2">
+          {% include "monitoring/_match_table.html" with rows=tab_data.late show_status=True show_aired_programme=True %}
+        </div>
+      </details>
+      {% else %}
+      <div class="text-center py-12">
+        <i class="fa-solid fa-circle-check text-emerald-400 text-4xl mb-3"></i>
+        <p class="text-slate-500 font-semibold">No Late Telecasts</p>
+        <p class="text-slate-400 text-sm">All ads aired on their planned dates.</p>
+      </div>
+      {% endif %}
     </div>
 
     <!-- ── Channel Summary Tab ───────────────────────────── -->
@@ -359,9 +529,68 @@
       </div>
     </div>
 
-    <!-- ── Sponsorship Tab ───────────────────────────────── -->
+    <!-- ── Sponsorship Tab — Dashboard view ──────────────── -->
     {% if sponsorship_rows %}
     <div id="tab-sponsorship" class="tab-pane">
+
+      <!-- Sponsorship summary stats -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-center">
+          <p class="text-2xl font-black text-yellow-700">{{ sponsorship_rows|length }}</p>
+          <p class="text-xs font-semibold text-yellow-600 uppercase tracking-wide mt-0.5">Total Sponsorship Spots</p>
+        </div>
+        <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
+          {% with matched_count=0 %}
+          <p class="text-2xl font-black text-emerald-700">
+            {% for sr in sponsorship_rows %}{% if sr.is_matched %}+{% endif %}{% endfor %}
+          </p>
+          {% endwith %}
+          <p class="text-2xl font-black text-emerald-700">
+            {% with ns=0 %}
+            {% for sr in sponsorship_rows %}{% if sr.is_matched %}{% with ns=ns|add:1 %}{% endwith %}{% endif %}{% endfor %}
+            {{ sponsorship_rows|length }}
+            {% endwith %}
+          </p>
+          <p class="text-xs font-semibold text-emerald-600 uppercase tracking-wide mt-0.5">Spots Airing</p>
+        </div>
+        <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-center">
+          <p class="text-2xl font-black text-indigo-700">{{ sponsorship_brand_summary|length }}</p>
+          <p class="text-xs font-semibold text-indigo-600 uppercase tracking-wide mt-0.5">Brands</p>
+        </div>
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+          <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Type</p>
+          <p class="text-sm font-bold text-slate-700">Sponsorship</p>
+          <p class="text-xs text-slate-500">Programme tie-in</p>
+        </div>
+      </div>
+
+      <!-- Sponsorship by Brand cards -->
+      {% if sponsorship_brand_summary %}
+      <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+        <i class="fa-solid fa-star text-yellow-500 mr-1"></i> By Brand
+      </h4>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
+        {% for bs in sponsorship_brand_summary %}
+        <div class="spon-brand-card">
+          <p class="text-sm font-bold text-amber-900 mb-2">{{ bs.brand }}</p>
+          <div class="flex justify-between text-xs">
+            <span class="text-amber-700">Total:</span>
+            <span class="font-bold text-amber-900">{{ bs.total }}</span>
+          </div>
+          <div class="flex justify-between text-xs">
+            <span class="text-emerald-700">Matched:</span>
+            <span class="font-bold text-emerald-700">{{ bs.matched }}</span>
+          </div>
+          <div class="flex justify-between text-xs">
+            <span class="text-red-600">Unmatched:</span>
+            <span class="font-bold text-red-600">{{ bs.not_matched }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- Sponsorship detail table -->
       <div class="tab-table-wrap">
         <table class="data-table w-full">
           <thead>
@@ -401,6 +630,146 @@
     </div>
     {% endif %}
 
+    <!-- ── LMRB Matched Tab ───────────────────────────────── -->
+    <div id="tab-lmrb_matched" class="tab-pane">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="px-2 py-1 rounded-lg bg-teal-100 text-teal-700 text-xs font-bold">
+          <i class="fa-solid fa-database mr-1"></i> {{ lmrb_matched_rows|length }} Matched LMRB rows
+        </span>
+        <span class="text-xs text-slate-400">All columns from the monitoring file for ads that were matched to the schedule</span>
+      </div>
+      <div class="tab-table-wrap">
+        <table class="data-table lmrb-table w-full">
+          <thead>
+            <tr>
+              <th>Product Group</th>
+              <th>Advertiser</th>
+              <th>Product</th>
+              <th>Advt Theme</th>
+              <th>Ads</th>
+              <th>Channel</th>
+              <th>Program</th>
+              <th>Dd</th>
+              <th>Mn</th>
+              <th>Yr</th>
+              <th>Day</th>
+              <th>Prog Time</th>
+              <th>Advt Time</th>
+              <th class="text-right">AdPos</th>
+              <th class="text-right">TotAds</th>
+              <th class="text-right">BrkNo</th>
+              <th class="text-right">PosinBrk</th>
+              <th class="text-right">AdsinBrk</th>
+              <th>Lng</th>
+              <th class="text-right">Dur</th>
+              <th class="text-right">Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for lr in lmrb_matched_rows %}
+            <tr>
+              <td>{{ lr.product_group|default:"—" }}</td>
+              <td>{{ lr.advertiser|default:"—" }}</td>
+              <td>{{ lr.product|default:"—" }}</td>
+              <td class="font-medium text-slate-800">{{ lr.advt_theme }}</td>
+              <td>{{ lr.ads|default:"—" }}</td>
+              <td>{{ lr.channel }}</td>
+              <td>{{ lr.program|default:"—" }}</td>
+              <td>{{ lr.date|date:"d" }}</td>
+              <td>{{ lr.date|date:"n" }}</td>
+              <td>{{ lr.date|date:"Y" }}</td>
+              <td>{{ lr.day|default:lr.date|date:"D" }}</td>
+              <td>{{ lr.prog_time|default:"—" }}</td>
+              <td>{{ lr.advt_time }}</td>
+              <td class="text-right">{{ lr.ad_pos|default:"—" }}</td>
+              <td class="text-right">{{ lr.tot_ads|default:"—" }}</td>
+              <td class="text-right">{{ lr.brk_no|default:"—" }}</td>
+              <td class="text-right">{{ lr.pos_in_brk|default:"—" }}</td>
+              <td class="text-right">{{ lr.ads_in_brk|default:"—" }}</td>
+              <td>{{ lr.lng|default:"—" }}</td>
+              <td class="text-right font-semibold">{{ lr.duration|default:"—" }}</td>
+              <td class="text-right">{{ lr.cost|default:"—" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="21" class="text-center text-slate-400 py-10">No matched LMRB data for this scope.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── LMRB Unmatched Tab ─────────────────────────────── -->
+    <div id="tab-lmrb_unmatched" class="tab-pane">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="px-2 py-1 rounded-lg bg-rose-100 text-rose-700 text-xs font-bold">
+          <i class="fa-solid fa-database mr-1"></i> {{ lmrb_unmatched_rows|length }} Unmatched LMRB rows
+        </span>
+        <span class="text-xs text-slate-400">All columns from the monitoring file for ads that did NOT match any schedule entry</span>
+      </div>
+      <div class="tab-table-wrap">
+        <table class="data-table lmrb-table w-full">
+          <thead>
+            <tr>
+              <th>Product Group</th>
+              <th>Advertiser</th>
+              <th>Product</th>
+              <th>Advt Theme</th>
+              <th>Ads</th>
+              <th>Channel</th>
+              <th>Program</th>
+              <th>Dd</th>
+              <th>Mn</th>
+              <th>Yr</th>
+              <th>Day</th>
+              <th>Prog Time</th>
+              <th>Advt Time</th>
+              <th class="text-right">AdPos</th>
+              <th class="text-right">TotAds</th>
+              <th class="text-right">BrkNo</th>
+              <th class="text-right">PosinBrk</th>
+              <th class="text-right">AdsinBrk</th>
+              <th>Lng</th>
+              <th class="text-right">Dur</th>
+              <th class="text-right">Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for lr in lmrb_unmatched_rows %}
+            <tr>
+              <td>{{ lr.product_group|default:"—" }}</td>
+              <td>{{ lr.advertiser|default:"—" }}</td>
+              <td>{{ lr.product|default:"—" }}</td>
+              <td class="font-medium text-slate-800">{{ lr.advt_theme }}</td>
+              <td>{{ lr.ads|default:"—" }}</td>
+              <td>{{ lr.channel }}</td>
+              <td>{{ lr.program|default:"—" }}</td>
+              <td>{{ lr.date|date:"d" }}</td>
+              <td>{{ lr.date|date:"n" }}</td>
+              <td>{{ lr.date|date:"Y" }}</td>
+              <td>{{ lr.day|default:lr.date|date:"D" }}</td>
+              <td>{{ lr.prog_time|default:"—" }}</td>
+              <td>{{ lr.advt_time }}</td>
+              <td class="text-right">{{ lr.ad_pos|default:"—" }}</td>
+              <td class="text-right">{{ lr.tot_ads|default:"—" }}</td>
+              <td class="text-right">{{ lr.brk_no|default:"—" }}</td>
+              <td class="text-right">{{ lr.pos_in_brk|default:"—" }}</td>
+              <td class="text-right">{{ lr.ads_in_brk|default:"—" }}</td>
+              <td>{{ lr.lng|default:"—" }}</td>
+              <td class="text-right font-semibold">{{ lr.duration|default:"—" }}</td>
+              <td class="text-right">{{ lr.cost|default:"—" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="21" class="text-center text-slate-400 py-10">No unmatched LMRB data for this scope.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
   </div><!-- /p-4 -->
 </div><!-- /card -->
 
@@ -433,7 +802,6 @@ function showTab(name, btn) {
 {% if schedule_chart %}
 (function() {
   const raw = {{ schedule_chart|safe }};
-  // Build label = "Brand (Dur s)" and aggregate by that key
   const labels = raw.map(r => r.brand + (r.duration ? ' (' + r.duration + 's)' : ''));
   const data   = raw.map(r => r.count);
   const COLORS = [
