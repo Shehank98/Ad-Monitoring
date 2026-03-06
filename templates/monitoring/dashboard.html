@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Monitoring Dashboard{% endblock %}
 {% block page_title %}Monitoring Dashboard{% endblock %}
-{% block page_subtitle %}Comprehensive ad-airing analytics — matched, missed, programme mismatches, sponsorship & full LMRB data{% endblock %}
+{% block page_subtitle %}Comprehensive ad-airing analytics — matched, missed, programme mismatches, sponsorship &amp; full LMRB data{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -64,6 +64,41 @@
   .lmrb-table th, .lmrb-table td {
     font-size: .7rem; padding: .3rem .5rem; white-space: nowrap;
   }
+
+  /* ── LMRB Detail Drawer ──────────────────────────────────── */
+  #lmrbDrawer {
+    position: fixed; top: 0; right: -480px; width: 480px; height: 100vh;
+    background: #fff; box-shadow: -4px 0 24px rgba(0,0,0,.12);
+    z-index: 1000; transition: right .3s ease; overflow-y: auto;
+    border-left: 1px solid #e2e8f0;
+  }
+  #lmrbDrawer.open { right: 0; }
+  #drawerOverlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.3);
+    z-index: 999; backdrop-filter: blur(2px);
+  }
+  #drawerOverlay.open { display: block; }
+
+  /* ── Analytics Modal ────────────────────────────────────── */
+  #analyticsModal {
+    display: none; position: fixed; inset: 0; z-index: 1100;
+    background: rgba(0,0,0,.5); backdrop-filter: blur(4px);
+    overflow-y: auto;
+  }
+  #analyticsModal.open { display: flex; align-items: flex-start; justify-content: center; padding: 2rem 1rem; }
+  #analyticsModalContent {
+    background: #fff; border-radius: 1.5rem; width: 100%; max-width: 1100px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.2); overflow: hidden;
+  }
+
+  /* ── Prime time bar ──────────────────────────────────────── */
+  .pt-bar { height: 12px; border-radius: 6px; overflow: hidden; display: flex; }
+  .pt-prime    { background: #7c3aed; }
+  .pt-nonprime { background: #0891b2; }
+  .pt-other    { background: #cbd5e1; }
+
+  /* ── Programme list ──────────────────────────────────────── */
+  .prog-list { max-height: 200px; overflow-y: auto; }
 </style>
 {% endblock %}
 
@@ -72,7 +107,6 @@
 <!-- ── Filter bar ─────────────────────────────────────────────── -->
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-4 mb-5">
   <form method="get" id="filterForm" class="flex flex-wrap gap-3 items-end">
-    <!-- Account -->
     <div class="flex-1 min-w-[160px]">
       <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Account</label>
       <select name="account_id" id="selAccount" class="select-field" onchange="this.form.submit()">
@@ -82,7 +116,6 @@
         {% endfor %}
       </select>
     </div>
-    <!-- Channel -->
     <div class="flex-1 min-w-[140px]">
       <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel</label>
       <select name="channel" id="selChannel" class="select-field" onchange="this.form.submit()" {% if not channels %}disabled{% endif %}>
@@ -92,7 +125,6 @@
         {% endfor %}
       </select>
     </div>
-    <!-- Month -->
     <div class="flex-1 min-w-[140px]">
       <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Month</label>
       <select name="month" id="selMonth" class="select-field" onchange="this.form.submit()" {% if not months %}disabled{% endif %}>
@@ -102,7 +134,6 @@
         {% endfor %}
       </select>
     </div>
-    <!-- Buttons -->
     <div class="flex gap-2">
       <button type="submit" class="btn-primary"><i class="fa-solid fa-filter"></i> Filter</button>
       <a href="/dashboard/monitor/" class="btn-secondary"><i class="fa-solid fa-rotate-left"></i> Reset</a>
@@ -113,11 +144,21 @@
 {% if stats %}
 
 <!-- ── Stat Cards ─────────────────────────────────────────────── -->
-<div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 mb-5">
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-3 mb-5">
 
   <div class="stat-card col-span-1">
     <span class="stat-val text-slate-800">{{ stats.total }}</span>
     <span class="stat-lbl">Total Spots</span>
+  </div>
+
+  <div class="stat-card col-span-1">
+    <span class="stat-val text-blue-600">{{ stats.commercial }}</span>
+    <span class="stat-lbl">Commercial</span>
+  </div>
+
+  <div class="stat-card col-span-1">
+    <span class="stat-val text-amber-600">{{ stats.sponsorship }}</span>
+    <span class="stat-lbl">Sponsorship</span>
   </div>
 
   <div class="stat-card col-span-1">
@@ -126,7 +167,7 @@
   </div>
 
   <div class="stat-card col-span-1">
-    <span class="stat-val text-blue-600">{{ stats.compliance }}%</span>
+    <span class="stat-val text-indigo-600">{{ stats.compliance }}%</span>
     <span class="stat-lbl">Compliance</span>
   </div>
 
@@ -136,7 +177,7 @@
   </div>
 
   <div class="stat-card col-span-1">
-    <span class="stat-val text-amber-600">{{ stats.prog_mis }}</span>
+    <span class="stat-val text-orange-500">{{ stats.prog_mis }}</span>
     <span class="stat-lbl">Prog Mismatch</span>
   </div>
 
@@ -148,11 +189,6 @@
   <div class="stat-card col-span-1">
     <span class="stat-val text-slate-600">{{ stats.aired }}</span>
     <span class="stat-lbl">Total Aired</span>
-  </div>
-
-  <div class="stat-card col-span-1">
-    <span class="stat-val text-indigo-600">{{ stats.sponsorship }}</span>
-    <span class="stat-lbl">Sponsorship</span>
   </div>
 
 </div>
@@ -196,23 +232,34 @@
     {% endif %}
   </div>
 
-  <!-- LMRB: Aired spots by Theme & Duration -->
+  <!-- LMRB: Aired spots by Theme & Duration — chart only, detail button per row -->
   <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-    <h3 class="text-sm font-bold text-slate-700 mb-3">
-      <i class="fa-solid fa-chart-bar text-indigo-500 mr-1"></i>
-      LMRB Aired — Theme × Duration (Schedule Period)
-    </h3>
-    {% if lmrb_chart %}
-    <div style="max-height:300px;overflow-y:auto;">
-      <canvas id="lmrbChart" style="max-height:280px;"></canvas>
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-bold text-slate-700">
+        <i class="fa-solid fa-chart-bar text-indigo-500 mr-1"></i>
+        LMRB Aired — Theme × Duration
+      </h3>
+      {% if lmrb_chart %}
+      <button onclick="openAnalyticsModal()"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700
+                     text-xs font-semibold hover:bg-indigo-100 transition border border-indigo-200">
+        <i class="fa-solid fa-chart-pie text-[10px]"></i> Full Analytics
+      </button>
+      {% endif %}
     </div>
+    {% if lmrb_chart %}
+    <div style="max-height:280px;overflow-y:auto;">
+      <canvas id="lmrbChart" style="max-height:260px;"></canvas>
+    </div>
+    <!-- Compact table with Detail buttons -->
     <div class="mt-3 overflow-x-auto">
       <table class="data-table w-full text-xs">
         <thead>
           <tr>
             <th>Theme</th>
-            <th class="text-right">Duration (s)</th>
-            <th class="text-right">Aired Count</th>
+            <th class="text-right">Dur (s)</th>
+            <th class="text-right">Aired</th>
+            <th class="text-right">Detail</th>
           </tr>
         </thead>
         <tbody>
@@ -221,6 +268,14 @@
             <td class="font-medium text-slate-800">{{ row.advt_theme }}</td>
             <td class="text-right text-slate-600">{{ row.duration|default:"—" }}</td>
             <td class="text-right font-bold text-indigo-700">{{ row.count }}</td>
+            <td class="text-right">
+              <button onclick="openLmrbDrawer({{ forloop.counter0 }})"
+                      class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px]
+                             font-semibold bg-slate-100 text-slate-600 hover:bg-indigo-100
+                             hover:text-indigo-700 transition">
+                <i class="fa-solid fa-circle-info"></i> Detail
+              </button>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -311,10 +366,9 @@
       {% include "monitoring/_match_table.html" with rows=tab_data.not_aired show_status=True %}
     </div>
 
-    <!-- ── Programme Mismatch Tab — Dashboard view ───────── -->
+    <!-- ── Programme Mismatch Tab ────────────────────────── -->
     <div id="tab-prog_mis" class="tab-pane">
       {% if tab_data.prog_mis %}
-      <!-- Mini summary row -->
       <div class="grid grid-cols-3 gap-3 mb-4">
         <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
           <p class="text-2xl font-black text-amber-700">{{ tab_data.prog_mis|length }}</p>
@@ -329,12 +383,9 @@
           <p class="text-xs text-blue-700">Brand exposure delivered — but in a <strong>different programme</strong> than planned. Verify with client.</p>
         </div>
       </div>
-
-      <!-- Detail cards: Planned vs Aired side-by-side -->
       <div class="space-y-3 mb-4" style="max-height:50vh;overflow-y:auto;">
         {% for mr in tab_data.prog_mis %}
         <div class="mismatch-card">
-          <!-- Left: Planned -->
           <div class="prog-planned">
             <p class="mismatch-section-label"><i class="fa-solid fa-calendar-days text-amber-500 mr-1"></i>Planned</p>
             <p class="mismatch-value">{{ mr.brand }}</p>
@@ -343,7 +394,6 @@
             <p class="mismatch-sub">Time Window: {{ mr.planned_start|default:"—" }} – {{ mr.planned_end|default:"—" }}</p>
             <p class="mismatch-sub">Duration: {{ mr.duration|default:"—" }}s</p>
           </div>
-          <!-- Right: Aired -->
           <div class="prog-aired">
             <p class="mismatch-section-label"><i class="fa-solid fa-tv text-violet-500 mr-1"></i>Actually Aired</p>
             <p class="mismatch-value">{{ mr.theme|default:mr.brand }}</p>
@@ -360,8 +410,6 @@
         </div>
         {% endfor %}
       </div>
-
-      <!-- Full data table below -->
       <details class="mt-2">
         <summary class="text-xs font-semibold text-slate-500 cursor-pointer hover:text-slate-700 select-none py-2">
           <i class="fa-solid fa-table mr-1"></i> Show full table view
@@ -379,10 +427,9 @@
       {% endif %}
     </div>
 
-    <!-- ── Late Telecast Tab — Dashboard view ────────────── -->
+    <!-- ── Late Telecast Tab ──────────────────────────────── -->
     <div id="tab-late" class="tab-pane">
       {% if tab_data.late %}
-      <!-- Mini summary row -->
       <div class="grid grid-cols-3 gap-3 mb-4">
         <div class="bg-violet-50 border border-violet-200 rounded-xl p-3 text-center">
           <p class="text-2xl font-black text-violet-700">{{ tab_data.late|length }}</p>
@@ -397,12 +444,9 @@
           <p class="text-xs text-orange-700">Campaign delivery delayed. Check if client approval needed for the makeup date.</p>
         </div>
       </div>
-
-      <!-- Detail cards: Planned vs Aired side-by-side -->
       <div class="space-y-3 mb-4" style="max-height:50vh;overflow-y:auto;">
         {% for mr in tab_data.late %}
         <div class="mismatch-card late">
-          <!-- Left: Planned -->
           <div class="prog-planned">
             <p class="mismatch-section-label"><i class="fa-solid fa-calendar-days text-amber-500 mr-1"></i>Planned</p>
             <p class="mismatch-value">{{ mr.brand }}</p>
@@ -411,7 +455,6 @@
             <p class="mismatch-sub">Time Window: {{ mr.planned_start|default:"—" }} – {{ mr.planned_end|default:"—" }}</p>
             <p class="mismatch-sub">Duration: {{ mr.duration|default:"—" }}s</p>
           </div>
-          <!-- Right: Actually Aired -->
           <div class="prog-aired-late">
             <p class="mismatch-section-label"><i class="fa-solid fa-clock text-violet-500 mr-1"></i>Actually Aired (Late)</p>
             <p class="mismatch-value">{{ mr.theme|default:mr.brand }}</p>
@@ -428,8 +471,6 @@
         </div>
         {% endfor %}
       </div>
-
-      <!-- Full data table below -->
       <details class="mt-2">
         <summary class="text-xs font-semibold text-slate-500 cursor-pointer hover:text-slate-700 select-none py-2">
           <i class="fa-solid fa-table mr-1"></i> Show full table view
@@ -529,29 +570,13 @@
       </div>
     </div>
 
-    <!-- ── Sponsorship Tab — Dashboard view ──────────────── -->
+    <!-- ── Sponsorship Tab ────────────────────────────────── -->
     {% if sponsorship_rows %}
     <div id="tab-sponsorship" class="tab-pane">
-
-      <!-- Sponsorship summary stats -->
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-center">
           <p class="text-2xl font-black text-yellow-700">{{ sponsorship_rows|length }}</p>
           <p class="text-xs font-semibold text-yellow-600 uppercase tracking-wide mt-0.5">Total Sponsorship Spots</p>
-        </div>
-        <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
-          {% with matched_count=0 %}
-          <p class="text-2xl font-black text-emerald-700">
-            {% for sr in sponsorship_rows %}{% if sr.is_matched %}+{% endif %}{% endfor %}
-          </p>
-          {% endwith %}
-          <p class="text-2xl font-black text-emerald-700">
-            {% with ns=0 %}
-            {% for sr in sponsorship_rows %}{% if sr.is_matched %}{% with ns=ns|add:1 %}{% endwith %}{% endif %}{% endfor %}
-            {{ sponsorship_rows|length }}
-            {% endwith %}
-          </p>
-          <p class="text-xs font-semibold text-emerald-600 uppercase tracking-wide mt-0.5">Spots Airing</p>
         </div>
         <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-center">
           <p class="text-2xl font-black text-indigo-700">{{ sponsorship_brand_summary|length }}</p>
@@ -563,8 +588,6 @@
           <p class="text-xs text-slate-500">Programme tie-in</p>
         </div>
       </div>
-
-      <!-- Sponsorship by Brand cards -->
       {% if sponsorship_brand_summary %}
       <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
         <i class="fa-solid fa-star text-yellow-500 mr-1"></i> By Brand
@@ -574,34 +597,25 @@
         <div class="spon-brand-card">
           <p class="text-sm font-bold text-amber-900 mb-2">{{ bs.brand }}</p>
           <div class="flex justify-between text-xs">
-            <span class="text-amber-700">Total:</span>
-            <span class="font-bold text-amber-900">{{ bs.total }}</span>
+            <span class="text-amber-700">Total:</span><span class="font-bold text-amber-900">{{ bs.total }}</span>
           </div>
           <div class="flex justify-between text-xs">
-            <span class="text-emerald-700">Matched:</span>
-            <span class="font-bold text-emerald-700">{{ bs.matched }}</span>
+            <span class="text-emerald-700">Matched:</span><span class="font-bold text-emerald-700">{{ bs.matched }}</span>
           </div>
           <div class="flex justify-between text-xs">
-            <span class="text-red-600">Unmatched:</span>
-            <span class="font-bold text-red-600">{{ bs.not_matched }}</span>
+            <span class="text-red-600">Unmatched:</span><span class="font-bold text-red-600">{{ bs.not_matched }}</span>
           </div>
         </div>
         {% endfor %}
       </div>
       {% endif %}
-
-      <!-- Sponsorship detail table -->
       <div class="tab-table-wrap">
         <table class="data-table w-full">
           <thead>
             <tr>
-              <th>Brand</th>
-              <th>Programme</th>
-              <th>Date</th>
-              <th>Start</th>
-              <th>End</th>
-              <th class="text-right">Duration (s)</th>
-              <th>Status</th>
+              <th>Brand</th><th>Programme</th><th>Date</th>
+              <th>Start</th><th>End</th>
+              <th class="text-right">Duration (s)</th><th>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -636,52 +650,30 @@
         <span class="px-2 py-1 rounded-lg bg-teal-100 text-teal-700 text-xs font-bold">
           <i class="fa-solid fa-database mr-1"></i> {{ lmrb_matched_rows|length }} Matched LMRB rows
         </span>
-        <span class="text-xs text-slate-400">All columns from the monitoring file for ads that were matched to the schedule</span>
+        <span class="text-xs text-slate-400">All monitoring file columns for ads matched to the schedule</span>
       </div>
       <div class="tab-table-wrap">
         <table class="data-table lmrb-table w-full">
           <thead>
             <tr>
-              <th>Product Group</th>
-              <th>Advertiser</th>
-              <th>Product</th>
-              <th>Advt Theme</th>
-              <th>Ads</th>
-              <th>Channel</th>
-              <th>Program</th>
-              <th>Dd</th>
-              <th>Mn</th>
-              <th>Yr</th>
-              <th>Day</th>
-              <th>Prog Time</th>
-              <th>Advt Time</th>
-              <th class="text-right">AdPos</th>
-              <th class="text-right">TotAds</th>
-              <th class="text-right">BrkNo</th>
-              <th class="text-right">PosinBrk</th>
-              <th class="text-right">AdsinBrk</th>
-              <th>Lng</th>
-              <th class="text-right">Dur</th>
-              <th class="text-right">Cost</th>
+              <th>Product Group</th><th>Advertiser</th><th>Product</th><th>Advt Theme</th>
+              <th>Ads</th><th>Channel</th><th>Program</th>
+              <th>Dd</th><th>Mn</th><th>Yr</th><th>Day</th><th>Prog Time</th>
+              <th>Advt Time</th><th class="text-right">AdPos</th><th class="text-right">TotAds</th>
+              <th class="text-right">BrkNo</th><th class="text-right">PosinBrk</th>
+              <th class="text-right">AdsinBrk</th><th>Lng</th>
+              <th class="text-right">Dur</th><th class="text-right">Cost</th>
             </tr>
           </thead>
           <tbody>
             {% for lr in lmrb_matched_rows %}
             <tr>
-              <td>{{ lr.product_group|default:"—" }}</td>
-              <td>{{ lr.advertiser|default:"—" }}</td>
-              <td>{{ lr.product|default:"—" }}</td>
-              <td class="font-medium text-slate-800">{{ lr.advt_theme }}</td>
-              <td>{{ lr.ads|default:"—" }}</td>
-              <td>{{ lr.channel }}</td>
-              <td>{{ lr.program|default:"—" }}</td>
-              <td>{{ lr.date|date:"d" }}</td>
-              <td>{{ lr.date|date:"n" }}</td>
-              <td>{{ lr.date|date:"Y" }}</td>
-              <td>{{ lr.day|default:lr.date|date:"D" }}</td>
-              <td>{{ lr.prog_time|default:"—" }}</td>
-              <td>{{ lr.advt_time }}</td>
-              <td class="text-right">{{ lr.ad_pos|default:"—" }}</td>
+              <td>{{ lr.product_group|default:"—" }}</td><td>{{ lr.advertiser|default:"—" }}</td>
+              <td>{{ lr.product|default:"—" }}</td><td class="font-medium text-slate-800">{{ lr.advt_theme }}</td>
+              <td>{{ lr.ads|default:"—" }}</td><td>{{ lr.channel }}</td><td>{{ lr.program|default:"—" }}</td>
+              <td>{{ lr.date|date:"d" }}</td><td>{{ lr.date|date:"n" }}</td><td>{{ lr.date|date:"Y" }}</td>
+              <td>{{ lr.day|default:lr.date|date:"D" }}</td><td>{{ lr.prog_time|default:"—" }}</td>
+              <td>{{ lr.advt_time }}</td><td class="text-right">{{ lr.ad_pos|default:"—" }}</td>
               <td class="text-right">{{ lr.tot_ads|default:"—" }}</td>
               <td class="text-right">{{ lr.brk_no|default:"—" }}</td>
               <td class="text-right">{{ lr.pos_in_brk|default:"—" }}</td>
@@ -691,9 +683,7 @@
               <td class="text-right">{{ lr.cost|default:"—" }}</td>
             </tr>
             {% empty %}
-            <tr>
-              <td colspan="21" class="text-center text-slate-400 py-10">No matched LMRB data for this scope.</td>
-            </tr>
+            <tr><td colspan="21" class="text-center text-slate-400 py-10">No matched LMRB data.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -706,52 +696,30 @@
         <span class="px-2 py-1 rounded-lg bg-rose-100 text-rose-700 text-xs font-bold">
           <i class="fa-solid fa-database mr-1"></i> {{ lmrb_unmatched_rows|length }} Unmatched LMRB rows
         </span>
-        <span class="text-xs text-slate-400">All columns from the monitoring file for ads that did NOT match any schedule entry</span>
+        <span class="text-xs text-slate-400">Monitoring rows that did NOT match any schedule entry</span>
       </div>
       <div class="tab-table-wrap">
         <table class="data-table lmrb-table w-full">
           <thead>
             <tr>
-              <th>Product Group</th>
-              <th>Advertiser</th>
-              <th>Product</th>
-              <th>Advt Theme</th>
-              <th>Ads</th>
-              <th>Channel</th>
-              <th>Program</th>
-              <th>Dd</th>
-              <th>Mn</th>
-              <th>Yr</th>
-              <th>Day</th>
-              <th>Prog Time</th>
-              <th>Advt Time</th>
-              <th class="text-right">AdPos</th>
-              <th class="text-right">TotAds</th>
-              <th class="text-right">BrkNo</th>
-              <th class="text-right">PosinBrk</th>
-              <th class="text-right">AdsinBrk</th>
-              <th>Lng</th>
-              <th class="text-right">Dur</th>
-              <th class="text-right">Cost</th>
+              <th>Product Group</th><th>Advertiser</th><th>Product</th><th>Advt Theme</th>
+              <th>Ads</th><th>Channel</th><th>Program</th>
+              <th>Dd</th><th>Mn</th><th>Yr</th><th>Day</th><th>Prog Time</th>
+              <th>Advt Time</th><th class="text-right">AdPos</th><th class="text-right">TotAds</th>
+              <th class="text-right">BrkNo</th><th class="text-right">PosinBrk</th>
+              <th class="text-right">AdsinBrk</th><th>Lng</th>
+              <th class="text-right">Dur</th><th class="text-right">Cost</th>
             </tr>
           </thead>
           <tbody>
             {% for lr in lmrb_unmatched_rows %}
             <tr>
-              <td>{{ lr.product_group|default:"—" }}</td>
-              <td>{{ lr.advertiser|default:"—" }}</td>
-              <td>{{ lr.product|default:"—" }}</td>
-              <td class="font-medium text-slate-800">{{ lr.advt_theme }}</td>
-              <td>{{ lr.ads|default:"—" }}</td>
-              <td>{{ lr.channel }}</td>
-              <td>{{ lr.program|default:"—" }}</td>
-              <td>{{ lr.date|date:"d" }}</td>
-              <td>{{ lr.date|date:"n" }}</td>
-              <td>{{ lr.date|date:"Y" }}</td>
-              <td>{{ lr.day|default:lr.date|date:"D" }}</td>
-              <td>{{ lr.prog_time|default:"—" }}</td>
-              <td>{{ lr.advt_time }}</td>
-              <td class="text-right">{{ lr.ad_pos|default:"—" }}</td>
+              <td>{{ lr.product_group|default:"—" }}</td><td>{{ lr.advertiser|default:"—" }}</td>
+              <td>{{ lr.product|default:"—" }}</td><td class="font-medium text-slate-800">{{ lr.advt_theme }}</td>
+              <td>{{ lr.ads|default:"—" }}</td><td>{{ lr.channel }}</td><td>{{ lr.program|default:"—" }}</td>
+              <td>{{ lr.date|date:"d" }}</td><td>{{ lr.date|date:"n" }}</td><td>{{ lr.date|date:"Y" }}</td>
+              <td>{{ lr.day|default:lr.date|date:"D" }}</td><td>{{ lr.prog_time|default:"—" }}</td>
+              <td>{{ lr.advt_time }}</td><td class="text-right">{{ lr.ad_pos|default:"—" }}</td>
               <td class="text-right">{{ lr.tot_ads|default:"—" }}</td>
               <td class="text-right">{{ lr.brk_no|default:"—" }}</td>
               <td class="text-right">{{ lr.pos_in_brk|default:"—" }}</td>
@@ -761,9 +729,7 @@
               <td class="text-right">{{ lr.cost|default:"—" }}</td>
             </tr>
             {% empty %}
-            <tr>
-              <td colspan="21" class="text-center text-slate-400 py-10">No unmatched LMRB data for this scope.</td>
-            </tr>
+            <tr><td colspan="21" class="text-center text-slate-400 py-10">No unmatched LMRB data.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -772,6 +738,265 @@
 
   </div><!-- /p-4 -->
 </div><!-- /card -->
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- LMRB THEME DETAIL DRAWER                                    -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div id="drawerOverlay" onclick="closeLmrbDrawer()"></div>
+<div id="lmrbDrawer">
+  <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+    <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+      <i class="fa-solid fa-chart-bar text-indigo-500"></i>
+      <span id="drawerTitle">LMRB Theme Detail</span>
+    </h3>
+    <button onclick="closeLmrbDrawer()" class="text-slate-400 hover:text-slate-700 transition">
+      <i class="fa-solid fa-xmark text-lg"></i>
+    </button>
+  </div>
+  <div id="drawerContent" class="p-5 space-y-5">
+    <!-- Populated by JS -->
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FULL ANALYTICS MODAL                                        -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div id="analyticsModal" onclick="handleModalClick(event)">
+  <div id="analyticsModalContent">
+    <!-- Header -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100 sticky top-0 bg-white z-10">
+      <div>
+        <h2 class="text-base font-bold text-slate-800">
+          <i class="fa-solid fa-chart-pie text-indigo-500 mr-2"></i>Full Analytics
+        </h2>
+        <p class="text-xs text-slate-400 mt-0.5">{{ channel }} · {{ month }}</p>
+      </div>
+      <button onclick="closeAnalyticsModal()" class="text-slate-400 hover:text-slate-700 transition p-1">
+        <i class="fa-solid fa-xmark text-xl"></i>
+      </button>
+    </div>
+
+    <div class="p-6 space-y-8">
+
+      <!-- Section 1: Charts side by side -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- Schedule chart copy -->
+        <div class="bg-slate-50 rounded-xl p-4">
+          <h4 class="text-xs font-bold text-slate-600 uppercase tracking-wider mb-3">
+            <i class="fa-solid fa-calendar-days text-blue-500 mr-1"></i>Schedule Spots — Brand × Duration
+          </h4>
+          {% if schedule_chart %}
+          <canvas id="scheduleChartModal" style="max-height:260px;"></canvas>
+          {% else %}
+          <p class="text-xs text-slate-400 text-center py-8">No schedule data.</p>
+          {% endif %}
+        </div>
+
+        <!-- LMRB chart copy -->
+        <div class="bg-slate-50 rounded-xl p-4">
+          <h4 class="text-xs font-bold text-slate-600 uppercase tracking-wider mb-3">
+            <i class="fa-solid fa-chart-bar text-indigo-500 mr-1"></i>LMRB Aired — Theme × Duration
+          </h4>
+          {% if lmrb_chart %}
+          <canvas id="lmrbChartModal" style="max-height:260px;"></canvas>
+          {% else %}
+          <p class="text-xs text-slate-400 text-center py-8">No LMRB data.</p>
+          {% endif %}
+        </div>
+
+      </div>
+
+      <!-- Section 2: Prime-time Distribution -->
+      {% if pt_all.total %}
+      <div>
+        <h4 class="text-sm font-bold text-slate-700 mb-1 flex items-center gap-2">
+          <i class="fa-solid fa-moon text-indigo-500"></i> Prime-time Distribution
+          <span class="text-[10px] font-normal text-slate-400">(Prime: 7pm–12am · Non-Prime: 6am–7pm · Other: 12am–6am)</span>
+        </h4>
+        <p class="text-xs text-slate-500 mb-4">Planned (Schedule) vs Aired (LMRB) — how many spots fell in each time band.</p>
+
+        <!-- Commercial -->
+        <div class="bg-blue-50 rounded-xl p-4 mb-4 border border-blue-100">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="px-2.5 py-1 rounded-lg bg-blue-600 text-white text-xs font-bold">Commercial Benefits</span>
+            <span class="text-xs text-slate-500">{{ stats.commercial }} planned spots</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <!-- Planned -->
+            <div>
+              <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Planned</p>
+              <div class="space-y-2">
+                <div>
+                  <div class="flex justify-between text-xs mb-0.5">
+                    <span class="font-semibold text-violet-700"><i class="fa-solid fa-moon mr-1"></i>Prime (7pm–12am)</span>
+                    <span class="font-bold">{{ sch_pt_comm.prime }}</span>
+                  </div>
+                  <div class="h-3 bg-slate-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-violet-500 rounded-full" style="width:{{ sch_pt_comm.prime_pct }}%"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-xs mb-0.5">
+                    <span class="font-semibold text-cyan-700"><i class="fa-solid fa-sun mr-1"></i>Non-Prime (6am–7pm)</span>
+                    <span class="font-bold">{{ sch_pt_comm.non_prime }}</span>
+                  </div>
+                  <div class="h-3 bg-slate-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-cyan-500 rounded-full" style="width:{{ sch_pt_comm.non_prime_pct }}%"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-xs mb-0.5">
+                    <span class="font-semibold text-slate-500"><i class="fa-solid fa-star-half-stroke mr-1"></i>Other (12am–6am)</span>
+                    <span class="font-bold">{{ sch_pt_comm.other }}</span>
+                  </div>
+                  <div class="h-3 bg-slate-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-slate-400 rounded-full" style="width:{{ sch_pt_comm.other_pct }}%"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- Aired -->
+            <div>
+              <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Aired (LMRB)</p>
+              <div class="space-y-2">
+                <div>
+                  <div class="flex justify-between text-xs mb-0.5">
+                    <span class="font-semibold text-violet-700"><i class="fa-solid fa-moon mr-1"></i>Prime (7pm–12am)</span>
+                    <span class="font-bold {% if pt_comm.prime < sch_pt_comm.prime %}text-red-600{% else %}text-emerald-600{% endif %}">
+                      {{ pt_comm.prime }}
+                      {% if sch_pt_comm.prime %}<span class="text-[10px] font-normal text-slate-400">/ {{ sch_pt_comm.prime }} planned</span>{% endif %}
+                    </span>
+                  </div>
+                  <div class="h-3 bg-slate-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-violet-500 rounded-full" style="width:{{ pt_comm.prime_pct }}%"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-xs mb-0.5">
+                    <span class="font-semibold text-cyan-700"><i class="fa-solid fa-sun mr-1"></i>Non-Prime (6am–7pm)</span>
+                    <span class="font-bold {% if pt_comm.non_prime < sch_pt_comm.non_prime %}text-red-600{% else %}text-emerald-600{% endif %}">
+                      {{ pt_comm.non_prime }}
+                      {% if sch_pt_comm.non_prime %}<span class="text-[10px] font-normal text-slate-400">/ {{ sch_pt_comm.non_prime }} planned</span>{% endif %}
+                    </span>
+                  </div>
+                  <div class="h-3 bg-slate-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-cyan-500 rounded-full" style="width:{{ pt_comm.non_prime_pct }}%"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-xs mb-0.5">
+                    <span class="font-semibold text-slate-500"><i class="fa-solid fa-star-half-stroke mr-1"></i>Other (12am–6am)</span>
+                    <span class="font-bold">{{ pt_comm.other }}</span>
+                  </div>
+                  <div class="h-3 bg-slate-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-slate-400 rounded-full" style="width:{{ pt_comm.other_pct }}%"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sponsorship -->
+        <div class="bg-amber-50 rounded-xl p-4 border border-amber-100">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="px-2.5 py-1 rounded-lg bg-amber-500 text-white text-xs font-bold">Sponsorship Benefits</span>
+            <span class="text-xs text-slate-500">{{ stats.sponsorship }} planned spots</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <!-- Planned -->
+            <div>
+              <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Planned</p>
+              <div class="space-y-2">
+                <div>
+                  <div class="flex justify-between text-xs mb-0.5">
+                    <span class="font-semibold text-violet-700"><i class="fa-solid fa-moon mr-1"></i>Prime</span>
+                    <span class="font-bold">{{ sch_pt_spon.prime }}</span>
+                  </div>
+                  <div class="h-3 bg-amber-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-violet-500 rounded-full" style="width:{{ sch_pt_spon.prime_pct }}%"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-xs mb-0.5">
+                    <span class="font-semibold text-cyan-700"><i class="fa-solid fa-sun mr-1"></i>Non-Prime</span>
+                    <span class="font-bold">{{ sch_pt_spon.non_prime }}</span>
+                  </div>
+                  <div class="h-3 bg-amber-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-cyan-500 rounded-full" style="width:{{ sch_pt_spon.non_prime_pct }}%"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-xs mb-0.5">
+                    <span class="font-semibold text-slate-500"><i class="fa-solid fa-star-half-stroke mr-1"></i>Other</span>
+                    <span class="font-bold">{{ sch_pt_spon.other }}</span>
+                  </div>
+                  <div class="h-3 bg-amber-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-slate-400 rounded-full" style="width:{{ sch_pt_spon.other_pct }}%"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- Aired -->
+            <div>
+              <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Aired (LMRB)</p>
+              <div class="space-y-2">
+                <div>
+                  <div class="flex justify-between text-xs mb-0.5">
+                    <span class="font-semibold text-violet-700"><i class="fa-solid fa-moon mr-1"></i>Prime</span>
+                    <span class="font-bold {% if pt_spon.prime < sch_pt_spon.prime %}text-red-600{% else %}text-emerald-600{% endif %}">
+                      {{ pt_spon.prime }}
+                      {% if sch_pt_spon.prime %}<span class="text-[10px] font-normal text-slate-400">/ {{ sch_pt_spon.prime }} planned</span>{% endif %}
+                    </span>
+                  </div>
+                  <div class="h-3 bg-amber-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-violet-500 rounded-full" style="width:{{ pt_spon.prime_pct }}%"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-xs mb-0.5">
+                    <span class="font-semibold text-cyan-700"><i class="fa-solid fa-sun mr-1"></i>Non-Prime</span>
+                    <span class="font-bold {% if pt_spon.non_prime < sch_pt_spon.non_prime %}text-red-600{% else %}text-emerald-600{% endif %}">
+                      {{ pt_spon.non_prime }}
+                      {% if sch_pt_spon.non_prime %}<span class="text-[10px] font-normal text-slate-400">/ {{ sch_pt_spon.non_prime }} planned</span>{% endif %}
+                    </span>
+                  </div>
+                  <div class="h-3 bg-amber-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-cyan-500 rounded-full" style="width:{{ pt_spon.non_prime_pct }}%"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-xs mb-0.5">
+                    <span class="font-semibold text-slate-500"><i class="fa-solid fa-star-half-stroke mr-1"></i>Other</span>
+                    <span class="font-bold">{{ pt_spon.other }}</span>
+                  </div>
+                  <div class="h-3 bg-amber-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-slate-400 rounded-full" style="width:{{ pt_spon.other_pct }}%"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Prime-time donut charts row -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+          <div class="bg-slate-50 rounded-xl p-4 text-center">
+            <p class="text-xs font-bold text-slate-600 mb-2">Commercial LMRB — Time Distribution</p>
+            <canvas id="ptCommChart" width="200" height="200" style="max-height:180px;"></canvas>
+          </div>
+          <div class="bg-slate-50 rounded-xl p-4 text-center">
+            <p class="text-xs font-bold text-slate-600 mb-2">Sponsorship LMRB — Time Distribution</p>
+            <canvas id="ptSponChart" width="200" height="200" style="max-height:180px;"></canvas>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+    </div><!-- /p-6 -->
+  </div><!-- /modal content -->
+</div><!-- /modal -->
 
 {% else %}
 <!-- ── Empty state ────────────────────────────────────────────── -->
@@ -791,6 +1016,7 @@
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
+/* ── Tab switcher ──────────────────────────────────────────────── */
 function showTab(name, btn) {
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -799,24 +1025,25 @@ function showTab(name, btn) {
   btn.classList.add('active');
 }
 
-{% if schedule_chart %}
-(function() {
-  const raw = {{ schedule_chart|safe }};
-  const labels = raw.map(r => r.brand + (r.duration ? ' (' + r.duration + 's)' : ''));
-  const data   = raw.map(r => r.count);
-  const COLORS = [
-    '#2563eb','#7c3aed','#0891b2','#059669','#d97706',
-    '#dc2626','#db2777','#65a30d','#ea580c','#0284c7',
-  ];
-  new Chart(document.getElementById('scheduleChart'), {
+/* ── Chart colour palette ──────────────────────────────────────── */
+const COLORS = [
+  '#2563eb','#7c3aed','#0891b2','#059669','#d97706',
+  '#dc2626','#db2777','#65a30d','#ea580c','#0284c7',
+];
+
+/* ── Build bar chart helper ────────────────────────────────────── */
+function buildBarChart(id, labels, data, colorArr) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  new Chart(el, {
     type: 'bar',
     data: {
       labels,
       datasets: [{
-        label: 'Spots',
+        label: 'Count',
         data,
-        backgroundColor: labels.map((_, i) => COLORS[i % COLORS.length] + 'cc'),
-        borderColor:     labels.map((_, i) => COLORS[i % COLORS.length]),
+        backgroundColor: colorArr.map((c, i) => COLORS[i % COLORS.length] + 'cc'),
+        borderColor:     colorArr.map((c, i) => COLORS[i % COLORS.length]),
         borderWidth: 1,
         borderRadius: 4,
       }],
@@ -832,43 +1059,212 @@ function showTab(name, btn) {
       },
     },
   });
+}
+
+/* ── Build donut chart helper ──────────────────────────────────── */
+function buildDonut(id, labels, data, colors) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  new Chart(el, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{ data, backgroundColor: colors, borderWidth: 2 }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12 } },
+      },
+    },
+  });
+}
+
+{% if schedule_chart %}
+(function() {
+  const raw    = {{ schedule_chart|safe }};
+  const labels = raw.map(r => r.brand + (r.duration ? ' (' + r.duration + 's)' : ''));
+  const data   = raw.map(r => r.count);
+  buildBarChart('scheduleChart', labels, data, labels);
 })();
 {% endif %}
 
 {% if lmrb_chart %}
 (function() {
-  const raw = {{ lmrb_chart|safe }};
+  const raw    = {{ lmrb_chart|safe }};
   const labels = raw.map(r => r.advt_theme + (r.duration ? ' (' + r.duration + 's)' : ''));
   const data   = raw.map(r => r.count);
-  const COLORS = [
-    '#7c3aed','#2563eb','#059669','#d97706','#dc2626',
-    '#0891b2','#db2777','#65a30d','#ea580c','#0284c7',
-  ];
-  new Chart(document.getElementById('lmrbChart'), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [{
-        label: 'Aired',
-        data,
-        backgroundColor: labels.map((_, i) => COLORS[i % COLORS.length] + 'cc'),
-        borderColor:     labels.map((_, i) => COLORS[i % COLORS.length]),
-        borderWidth: 1,
-        borderRadius: 4,
-      }],
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { font: { size: 10 } }, grid: { color: '#f1f5f9' } },
-        y: { ticks: { font: { size: 10 } } },
-      },
-    },
-  });
+  buildBarChart('lmrbChart', labels, data, labels);
 })();
 {% endif %}
+
+/* ── LMRB Theme Detail Drawer ──────────────────────────────────── */
+const LMRB_THEME_DETAIL = {{ lmrb_theme_detail|safe }};
+
+function openLmrbDrawer(idx) {
+  const d = LMRB_THEME_DETAIL[idx];
+  if (!d) return;
+
+  document.getElementById('drawerTitle').textContent = d.theme + (d.duration ? ' · ' + d.duration + 's' : '');
+
+  const schStart   = d.sch_start  ? new Date(d.sch_start).toLocaleDateString('en-GB',  {day:'2-digit',month:'short',year:'numeric'}) : null;
+  const firstAired = d.first_aired ? new Date(d.first_aired).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'}) : null;
+  const lastAired  = d.last_aired  ? new Date(d.last_aired).toLocaleDateString('en-GB',  {day:'2-digit',month:'short',year:'numeric'}) : null;
+
+  // Date comparison
+  let dateStatus = '';
+  if (schStart && firstAired) {
+    const schD  = new Date(d.sch_start);
+    const airD  = new Date(d.first_aired);
+    if (airD > schD) {
+      const diff = Math.round((airD - schD) / 86400000);
+      dateStatus = `<span class="text-amber-600 font-semibold">⚠ First aired ${diff} day(s) after schedule start</span>`;
+    } else {
+      dateStatus = `<span class="text-emerald-600 font-semibold">✓ Aired from schedule start</span>`;
+    }
+  } else if (schStart && !firstAired) {
+    dateStatus = `<span class="text-red-600 font-semibold">✗ Scheduled but no LMRB data found</span>`;
+  }
+
+  // Top programme
+  const topProg  = d.programmes.length > 0 ? d.programmes[0] : null;
+  const moreProg = d.programmes.slice(1);
+  let progHtml = '';
+  if (topProg) {
+    progHtml = `
+      <div class="flex items-center justify-between">
+        <span class="font-semibold text-slate-800 text-sm">${topProg.program || '—'}</span>
+        <span class="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full">${topProg.cnt} airings</span>
+      </div>`;
+    if (moreProg.length > 0) {
+      progHtml += `<details class="mt-2"><summary class="text-xs text-slate-500 cursor-pointer hover:text-slate-700">Show ${moreProg.length} more programme${moreProg.length > 1 ? 's' : ''}</summary>
+        <div class="mt-1 space-y-1 prog-list">` +
+        moreProg.map(p => `<div class="flex items-center justify-between py-1 border-t border-slate-50">
+          <span class="text-xs text-slate-700">${p.program || '—'}</span>
+          <span class="text-[10px] text-slate-500">${p.cnt} airings</span>
+        </div>`).join('') +
+        `</div></details>`;
+    }
+  } else {
+    progHtml = `<p class="text-xs text-slate-400">No programme data available</p>`;
+  }
+
+  document.getElementById('drawerContent').innerHTML = `
+    <!-- Key metrics -->
+    <div class="grid grid-cols-3 gap-3">
+      <div class="bg-indigo-50 rounded-xl p-3 text-center">
+        <p class="text-2xl font-black text-indigo-700">${d.count}</p>
+        <p class="text-[10px] font-bold text-indigo-500 uppercase tracking-wider">Total Aired</p>
+      </div>
+      <div class="bg-slate-50 rounded-xl p-3 text-center">
+        <p class="text-2xl font-black text-slate-700">${d.avg_per_day}</p>
+        <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Avg / Day</p>
+      </div>
+      <div class="bg-slate-50 rounded-xl p-3 text-center">
+        <p class="text-lg font-black text-slate-700">${d.duration ? d.duration + 's' : '—'}</p>
+        <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Duration</p>
+      </div>
+    </div>
+
+    <!-- Dates -->
+    <div class="bg-white rounded-xl border border-slate-100 p-4 space-y-2">
+      <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Date Comparison</p>
+      <div class="flex items-center gap-2 text-xs">
+        <i class="fa-solid fa-calendar-days text-blue-400 w-4"></i>
+        <span class="text-slate-500">Schedule Start:</span>
+        <span class="font-semibold text-slate-800">${schStart || '—'}</span>
+      </div>
+      <div class="flex items-center gap-2 text-xs">
+        <i class="fa-solid fa-satellite-dish text-indigo-400 w-4"></i>
+        <span class="text-slate-500">First LMRB Aired:</span>
+        <span class="font-semibold text-slate-800">${firstAired || '—'}</span>
+      </div>
+      <div class="flex items-center gap-2 text-xs">
+        <i class="fa-solid fa-clock-rotate-left text-slate-400 w-4"></i>
+        <span class="text-slate-500">Last Data Check:</span>
+        <span class="font-semibold text-slate-800">${lastAired || '—'}</span>
+      </div>
+      ${dateStatus ? `<div class="pt-1 text-xs">${dateStatus}</div>` : ''}
+    </div>
+
+    <!-- Programme breakdown -->
+    <div class="bg-white rounded-xl border border-slate-100 p-4">
+      <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">
+        <i class="fa-solid fa-tv mr-1"></i> Programme Breakdown
+        <span class="font-normal normal-case">(sorted by airings)</span>
+      </p>
+      ${progHtml}
+    </div>
+  `;
+
+  document.getElementById('drawerOverlay').classList.add('open');
+  document.getElementById('lmrbDrawer').classList.add('open');
+}
+
+function closeLmrbDrawer() {
+  document.getElementById('drawerOverlay').classList.remove('open');
+  document.getElementById('lmrbDrawer').classList.remove('open');
+}
+
+/* ── Analytics Modal ───────────────────────────────────────────── */
+let modalChartsBuilt = false;
+
+function openAnalyticsModal() {
+  document.getElementById('analyticsModal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  if (!modalChartsBuilt) {
+    modalChartsBuilt = true;
+    buildModalCharts();
+  }
+}
+
+function closeAnalyticsModal() {
+  document.getElementById('analyticsModal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function handleModalClick(e) {
+  if (e.target === document.getElementById('analyticsModal')) closeAnalyticsModal();
+}
+
+function buildModalCharts() {
+  {% if schedule_chart %}
+  (function() {
+    const raw    = {{ schedule_chart|safe }};
+    const labels = raw.map(r => r.brand + (r.duration ? ' (' + r.duration + 's)' : ''));
+    buildBarChart('scheduleChartModal', labels, raw.map(r => r.count), labels);
+  })();
+  {% endif %}
+
+  {% if lmrb_chart %}
+  (function() {
+    const raw    = {{ lmrb_chart|safe }};
+    const labels = raw.map(r => r.advt_theme + (r.duration ? ' (' + r.duration + 's)' : ''));
+    buildBarChart('lmrbChartModal', labels, raw.map(r => r.count), labels);
+  })();
+  {% endif %}
+
+  {% if pt_comm %}
+  buildDonut('ptCommChart',
+    ['Prime (7pm–12am)', 'Non-Prime (6am–7pm)', 'Other (12am–6am)'],
+    [{{ pt_comm.prime }}, {{ pt_comm.non_prime }}, {{ pt_comm.other }}],
+    ['#7c3aed', '#0891b2', '#cbd5e1']
+  );
+  buildDonut('ptSponChart',
+    ['Prime (7pm–12am)', 'Non-Prime (6am–7pm)', 'Other (12am–6am)'],
+    [{{ pt_spon.prime }}, {{ pt_spon.non_prime }}, {{ pt_spon.other }}],
+    ['#7c3aed', '#0891b2', '#cbd5e1']
+  );
+  {% endif %}
+}
+
+/* ── Keyboard close ────────────────────────────────────────────── */
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    closeLmrbDrawer();
+    closeAnalyticsModal();
+  }
+});
 </script>
 {% endblock %}

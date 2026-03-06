@@ -1059,6 +1059,13 @@ def monitoring_dashboard(request):
                 'not_matched': st - sm,
             })
 
+        # ── Commercial / Sponsorship counts from schedule ────────────────────
+        n_commercial = ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+            ad_type='COMMERCIAL BENEFITS',
+        ).count()
+        stats['commercial'] = n_commercial
+
         # ── Chart data 1: Schedule spots grouped by Brand × Duration ─────────
         sch_rows = (
             ScheduleRow.objects
@@ -1073,28 +1080,127 @@ def monitoring_dashboard(request):
         sch_dates = ScheduleRow.objects.filter(
             account_id=account_id, channel=channel, month=month
         ).aggregate(d_min=Min('date'), d_max=Max('date'))
-        # channel__iexact: LMRB file may store channel name in different case
-        # (e.g. "SIRASA TV" vs "Sirasa TV"). Use case-insensitive filter so data
-        # is never silently missed.
         lmrb_qs = LMRBRow.objects.filter(account_id=account_id, channel__iexact=channel)
         if sch_dates['d_min']:
             lmrb_qs = lmrb_qs.filter(date__gte=sch_dates['d_min'])
         if sch_dates['d_max']:
             lmrb_qs = lmrb_qs.filter(date__lte=sch_dates['d_max'])
-        print(f"[monitoring_dashboard] lmrb_qs count={lmrb_qs.count()} "
-              f"(account={account_id}, channel='{channel}', "
-              f"date_range={sch_dates['d_min']} → {sch_dates['d_max']})")
         lmrb_chart = list(
             lmrb_qs.values('advt_theme', 'duration')
             .annotate(count=Count('id'))
             .order_by('advt_theme', 'duration')
         )
 
+        # ── LMRB theme detail (per theme, for detail drawer) ─────────────────
+        def _time_bucket(t):
+            try:
+                h = int(str(t).split(':')[0])
+                if 19 <= h <= 23:
+                    return 'prime'
+                elif 6 <= h <= 18:
+                    return 'non_prime'
+                else:
+                    return 'other'
+            except Exception:
+                return 'other'
+
+        lmrb_theme_detail = []
+        for td in lmrb_chart:
+            t_theme = td['advt_theme']
+            t_dur   = td['duration']
+            tqs     = lmrb_qs.filter(advt_theme=t_theme, duration=t_dur)
+            progs   = list(
+                tqs.exclude(program='').exclude(program__isnull=True)
+                .values('program').annotate(cnt=Count('id')).order_by('-cnt')
+            )
+            dates     = tqs.aggregate(first=Min('date'), last=Max('date'))
+            date_span = (
+                (dates['last'] - dates['first']).days + 1
+                if (dates['first'] and dates['last']) else 1
+            )
+            avg_per_day = round(td['count'] / date_span, 1) if date_span else td['count']
+            bm      = BrandMapping.objects.filter(
+                account_id=account_id, theme__iexact=t_theme
+            ).first()
+            sch_start = None
+            if bm:
+                sch_start = ScheduleRow.objects.filter(
+                    account_id=account_id, channel=channel, month=month,
+                    brand=bm.brand,
+                ).aggregate(d=Min('date'))['d']
+            lmrb_theme_detail.append({
+                'theme':       t_theme,
+                'duration':    t_dur,
+                'count':       td['count'],
+                'programmes':  progs,
+                'first_aired': dates['first'].isoformat() if dates['first'] else None,
+                'last_aired':  dates['last'].isoformat()  if dates['last']  else None,
+                'sch_start':   sch_start.isoformat()      if sch_start      else None,
+                'avg_per_day': avg_per_day,
+            })
+
+        # ── Prime-time distribution (planned vs LMRB) ────────────────────────
+        # Build theme → ad_type lookup via BrandMapping
+        commercial_brands   = set(ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+            ad_type='COMMERCIAL BENEFITS',
+        ).values_list('brand', flat=True))
+        sponsorship_brands  = set(ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+            ad_type='SPONSORSHIP',
+        ).values_list('brand', flat=True))
+        theme_to_adtype = {}
+        for bm in BrandMapping.objects.filter(account_id=account_id):
+            key = (bm.theme or '').lower().strip()
+            if bm.brand in commercial_brands:
+                theme_to_adtype.setdefault(key, 'commercial')
+            if bm.brand in sponsorship_brands:
+                theme_to_adtype[key] = 'sponsorship'
+
+        def _pcts(d):
+            total = d['prime'] + d['non_prime'] + d['other']
+            return {
+                **d,
+                'total':          total,
+                'prime_pct':      round(d['prime']     / total * 100) if total else 0,
+                'non_prime_pct':  round(d['non_prime'] / total * 100) if total else 0,
+                'other_pct':      round(d['other']     / total * 100) if total else 0,
+            }
+
+        # LMRB prime time distribution
+        _pt_all  = {'prime': 0, 'non_prime': 0, 'other': 0}
+        _pt_comm = {'prime': 0, 'non_prime': 0, 'other': 0}
+        _pt_spon = {'prime': 0, 'non_prime': 0, 'other': 0}
+        for lr in lmrb_qs.values('advt_theme', 'advt_time'):
+            bucket = _time_bucket(lr['advt_time'])
+            _pt_all[bucket] += 1
+            tp = theme_to_adtype.get((lr['advt_theme'] or '').lower().strip())
+            if tp == 'commercial':
+                _pt_comm[bucket] += 1
+            elif tp == 'sponsorship':
+                _pt_spon[bucket] += 1
+        pt_all  = _pcts(_pt_all)
+        pt_comm = _pcts(_pt_comm)
+        pt_spon = _pcts(_pt_spon)
+
+        # Schedule (planned) prime time distribution
+        _sch_pt_comm = {'prime': 0, 'non_prime': 0, 'other': 0}
+        _sch_pt_spon = {'prime': 0, 'non_prime': 0, 'other': 0}
+        for sr in ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+        ).values('ad_type', 'start_time'):
+            bucket = _time_bucket(sr['start_time'])
+            if sr['ad_type'] == 'COMMERCIAL BENEFITS':
+                _sch_pt_comm[bucket] += 1
+            elif sr['ad_type'] == 'SPONSORSHIP':
+                _sch_pt_spon[bucket] += 1
+        sch_pt_comm = _pcts(_sch_pt_comm)
+        sch_pt_spon = _pcts(_sch_pt_spon)
+
         # ── Matched LMRB rows (for LMRB Matched tab) ─────────────────────────
         lmrb_matched_rows = list(
             lmrb_qs.filter(is_matched=True).order_by('date', 'advt_time')
         )
-        print(f"[monitoring_dashboard] lmrb_matched={len(lmrb_matched_rows)}  lmrb_unmatched={lmrb_qs.filter(is_matched=False).count()}")
         # ── Unmatched LMRB rows (for LMRB Unmatched tab) ─────────────────────
         lmrb_unmatched_rows = list(
             lmrb_qs.filter(is_matched=False).order_by('date', 'advt_time')
@@ -1116,6 +1222,12 @@ def monitoring_dashboard(request):
         'sponsorship_brand_summary': sponsorship_brand_summary,
         'schedule_chart':            schedule_chart,
         'lmrb_chart':                lmrb_chart,
+        'lmrb_theme_detail':         lmrb_theme_detail if selected_account and channel and month else [],
+        'pt_all':                    pt_all if selected_account and channel and month else {},
+        'pt_comm':                   pt_comm if selected_account and channel and month else {},
+        'pt_spon':                   pt_spon if selected_account and channel and month else {},
+        'sch_pt_comm':               sch_pt_comm if selected_account and channel and month else {},
+        'sch_pt_spon':               sch_pt_spon if selected_account and channel and month else {},
         'lmrb_matched_rows':         lmrb_matched_rows,
         'lmrb_unmatched_rows':       lmrb_unmatched_rows,
     })
