@@ -60,7 +60,12 @@
   </div>
   <div class="flex-1 min-w-[130px]">
     <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel</label>
-    <input type="text" name="channel" value="{{ filters.channel }}" placeholder="e.g. Sirasa" class="input-field"/>
+    <select name="channel" class="select-field">
+      <option value="">All channels</option>
+      {% for ch in channels %}
+        <option value="{{ ch.name }}" {% if filters.channel == ch.name %}selected{% endif %}>{{ ch.name }}</option>
+      {% endfor %}
+    </select>
   </div>
   <div class="flex gap-2">
     <button type="submit" class="btn-primary"><i class="fa-solid fa-filter"></i> Filter</button>
@@ -77,7 +82,7 @@
 </div>
 {% endif %}
 
-<!-- ── Data table (grouped by upload / file_group_id) ─────────── -->
+<!-- ── Data table (one row per upload batch) ──────────────────── -->
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
   <div class="overflow-x-auto">
     <table class="w-full text-sm">
@@ -85,7 +90,7 @@
         <tr class="bg-slate-50 border-b border-slate-100">
           <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Account</th>
           <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Type</th>
-          <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Channel</th>
+          <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Channels</th>
           <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Date Range</th>
           <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Rows</th>
           <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Uploaded By</th>
@@ -95,100 +100,84 @@
       </thead>
       <tbody class="divide-y divide-slate-100">
 
-        {% for group in data_groups %}
-          {# Visual separator between groups — a thin top border on the first row #}
-          {% for d in group %}
-          <tr class="hover:bg-slate-50/70 transition-colors
-                     {% if forloop.first and not forloop.parentloop.first %}border-t-2 border-slate-200{% endif %}
-                     {% if group|length > 1 %}bg-slate-50/40{% endif %}">
+        {% for batch in batch_summaries %}
+        <tr class="hover:bg-slate-50/70 transition-colors">
 
-            <td class="px-5 py-3">
-              {% if forloop.first %}
-              <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-100 text-slate-700 text-xs font-semibold">
-                <i class="fa-solid fa-building text-slate-400 text-[9px]"></i>
-                {{ d.account.name|default:"—" }}
-              </span>
-              {% if group|length > 1 %}
-              <div class="mt-1 text-[10px] text-slate-400 flex items-center gap-1">
-                <i class="fa-solid fa-layer-group text-slate-300"></i>
-                {{ group|length }} channels in this upload
-              </div>
-              {% endif %}
+          <td class="px-5 py-3">
+            <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-100 text-slate-700 text-xs font-semibold">
+              <i class="fa-solid fa-building text-slate-400 text-[9px]"></i>
+              {{ batch.account.name|default:"—" }}
+            </span>
+          </td>
+
+          <td class="px-5 py-3">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold
+              {% if batch.data_type == 'maponline' %}bg-blue-50 text-blue-700 ring-1 ring-blue-200
+              {% else %}bg-purple-50 text-purple-700 ring-1 ring-purple-200{% endif %}">
+              <i class="fa-solid {% if batch.data_type == 'maponline' %}fa-map{% else %}fa-chart-line{% endif %} text-[9px]"></i>
+              {% if batch.data_type == 'maponline' %}MapOnline{% else %}LMRB{% endif %}
+            </span>
+          </td>
+
+          <td class="px-5 py-3">
+            <div class="flex flex-wrap gap-1">
+              {% for ch in batch.channels %}
+              <span class="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md font-medium">{{ ch }}</span>
+              {% empty %}
+              <span class="text-xs text-slate-400">—</span>
+              {% endfor %}
+            </div>
+          </td>
+
+          <td class="px-5 py-3">
+            <span class="text-xs text-slate-500 whitespace-nowrap">
+              {% if batch.date_from and batch.date_to %}
+                {{ batch.date_from|date:"d M" }} → <strong class="text-slate-700">{{ batch.date_to|date:"d M Y" }}</strong>
               {% else %}
-              <span class="text-[10px] text-slate-300 pl-2">↳</span>
+                <span class="text-slate-400">—</span>
               {% endif %}
-            </td>
+            </span>
+          </td>
 
-            <td class="px-5 py-3">
-              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold
-                {% if d.data_type == 'maponline' %}bg-blue-50 text-blue-700 ring-1 ring-blue-200
-                {% else %}bg-purple-50 text-purple-700 ring-1 ring-purple-200{% endif %}">
-                <i class="fa-solid {% if d.data_type == 'maponline' %}fa-map{% else %}fa-chart-line{% endif %} text-[9px]"></i>
-                {% if d.data_type == 'maponline' %}MapOnline{% else %}LMRB{% endif %}
+          <td class="px-5 py-3 text-slate-500 text-sm">{{ batch.total_rows|default:"—" }}</td>
+
+          <td class="px-5 py-3 text-xs text-slate-500">{{ batch.uploaded_by.name|default:"—" }}</td>
+
+          <td class="px-5 py-3 text-xs text-slate-400 whitespace-nowrap">
+            {% if batch.uploaded_at.date == today %}
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-semibold ring-1 ring-emerald-200">
+                <span class="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></span> Today
               </span>
-            </td>
+            {% else %}
+              {{ batch.uploaded_at|date:"d M Y" }}
+            {% endif %}
+          </td>
 
-            <td class="px-5 py-3 font-medium text-slate-800">{{ d.channel }}</td>
+          <td class="px-5 py-3 text-right">
+            <div class="flex items-center justify-end gap-2">
 
-            <td class="px-5 py-3">
-              <span class="text-xs text-slate-500 whitespace-nowrap">
-                {{ d.start_date|date:"d M" }} → <strong class="text-slate-700">{{ d.end_date|date:"d M Y" }}</strong>
-              </span>
-            </td>
-
-            <td class="px-5 py-3 text-slate-500 text-sm">{{ d.row_count|default:"—" }}</td>
-
-            <td class="px-5 py-3 text-xs text-slate-500">{{ d.uploaded_by.name|default:"—" }}</td>
-
-            <td class="px-5 py-3 text-xs text-slate-400 whitespace-nowrap">
-              {% if d.uploaded_at.date == today %}
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-semibold ring-1 ring-emerald-200">
-                  <span class="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></span> Today
-                </span>
-              {% else %}
-                {{ d.uploaded_at|date:"d M Y" }}
+              {% if batch.group|length == 1 %}
+              <a href="/dashboard/monitoring/{{ batch.first.id }}/download/"
+                 class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200
+                        text-xs font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600
+                        hover:bg-blue-50 transition-all" title="Download">
+                <i class="fa-solid fa-download"></i>
+              </a>
               {% endif %}
-            </td>
 
-            <td class="px-5 py-3 text-right">
-              <div class="flex items-center justify-end gap-2">
+              {% if request.user.role in "super_admin,admin" or batch.uploaded_at.date == today and batch.uploaded_by == request.user %}
+              <a href="/dashboard/monitoring/group/{{ batch.file_group_id }}/delete/"
+                 onclick="return confirmBatchDelete({{ batch.total_rows }}, '{{ batch.date_from|date:'d M' }}–{{ batch.date_to|date:'d M Y' }}')"
+                 class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200
+                        text-xs font-semibold text-slate-500 hover:border-red-300 hover:text-red-600
+                        hover:bg-red-50 transition-all" title="Delete this upload batch">
+                <i class="fa-solid fa-trash"></i>
+              </a>
+              {% endif %}
 
-                <a href="/dashboard/monitoring/{{ d.id }}/download/"
-                   class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200
-                          text-xs font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600
-                          hover:bg-blue-50 transition-all" title="Download">
-                  <i class="fa-solid fa-download"></i>
-                </a>
-
-                {% if request.user.role in "super_admin,admin" or d.uploaded_at.date == today and d.uploaded_by == request.user %}
-
-                  {# "Delete All Channels" button — only on the FIRST row of a multi-channel group #}
-                  {% if forloop.first and group|length > 1 %}
-                  <a href="/dashboard/monitoring/group/{{ d.file_group_id }}/delete/"
-                     onclick="return confirmGroupDelete({{ group|length }}, '{{ d.file_group_id }}')"
-                     class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-orange-200
-                            text-xs font-semibold text-orange-600 hover:border-orange-400 hover:text-orange-700
-                            hover:bg-orange-50 transition-all"
-                     title="Delete all {{ group|length }} channels from this upload at once">
-                    <i class="fa-solid fa-trash-can"></i>
-                    <span>All {{ group|length }}</span>
-                  </a>
-                  {% endif %}
-
-                  {# Per-channel delete button #}
-                  <a href="/dashboard/monitoring/{{ d.id }}/delete/"
-                     onclick="return confirmSingleDelete('{{ d.channel }}')"
-                     class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200
-                            text-xs font-semibold text-slate-500 hover:border-red-300 hover:text-red-600
-                            hover:bg-red-50 transition-all" title="Delete this channel only">
-                    <i class="fa-solid fa-trash"></i>
-                  </a>
-
-                {% endif %}
-              </div>
-            </td>
-          </tr>
-          {% endfor %}
+            </div>
+          </td>
+        </tr>
         {% empty %}
         <tr>
           <td colspan="8" class="px-5 py-16 text-center">
@@ -211,86 +200,17 @@
   </div>
 </div>
 
-<!-- ── LMRB Controlled Deletion (Item 7) ──────────────────────── -->
-{% if request.user.role in "super_admin,admin" %}
-<div class="mt-6 bg-white rounded-2xl border border-red-100 shadow-sm overflow-hidden">
-  <div class="px-5 py-3 bg-red-50 border-b border-red-100 flex items-center gap-2">
-    <i class="fa-solid fa-trash-can text-red-500 text-sm"></i>
-    <h3 class="text-xs font-bold text-red-700 uppercase tracking-wider">Delete LMRB Records by Channel &amp; Date Range</h3>
-    <span class="text-xs text-red-400 ml-2">— matched schedule rows will be automatically unlocked</span>
-  </div>
-  <form method="post" action="/dashboard/monitoring/lmrb-delete/"
-        class="px-5 py-4 flex flex-wrap gap-3 items-end"
-        onsubmit="return confirmLmrbDelete(this);">
-    {% csrf_token %}
-    <div class="flex-1 min-w-[140px]">
-      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Account</label>
-      <select name="account_id" class="select-field" required>
-        <option value="">Select account</option>
-        {% for acc in accounts %}
-          <option value="{{ acc.id }}">{{ acc.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="flex-1 min-w-[130px]">
-      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel</label>
-      <input type="text" name="channel" placeholder="e.g. Sirasa TV" class="input-field" required />
-    </div>
-    <div class="flex-1 min-w-[130px]">
-      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">From Date</label>
-      <input type="date" name="date_from" class="input-field" />
-    </div>
-    <div class="flex-1 min-w-[130px]">
-      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">To Date</label>
-      <input type="date" name="date_to" class="input-field" />
-    </div>
-    <div>
-      <button type="submit" class="btn-danger">
-        <i class="fa-solid fa-trash-can"></i> Delete Records
-      </button>
-    </div>
-  </form>
-</div>
-{% endif %}
-
 {% block extra_js %}
 <script>
-  function confirmGroupDelete(channelCount, groupId) {
-    console.log('[monitoring] confirmGroupDelete called — groupId:', groupId, 'channels:', channelCount);
-    const ok = confirm(
-      'Delete ALL ' + channelCount + ' channel(s) from this upload?\n\n' +
-      'This removes the file record for every channel in this upload at once.\n' +
+  function confirmBatchDelete(rowCount, dateRange) {
+    return confirm(
+      'Delete upload batch (' + dateRange + ')?\n\n' +
+      rowCount + ' rows will be removed and any matched schedule rows will be unlocked.\n' +
       'This cannot be undone.'
     );
-    console.log('[monitoring] confirmGroupDelete result:', ok);
-    return ok;
   }
 
-  function confirmSingleDelete(channel) {
-    console.log('[monitoring] confirmSingleDelete called — channel:', channel);
-    const ok = confirm('Delete the dataset for "' + channel + '"?\nThis cannot be undone.');
-    console.log('[monitoring] confirmSingleDelete result:', ok);
-    return ok;
-  }
-
-  function confirmLmrbDelete(form) {
-    const account  = form.querySelector('[name=account_id]').value;
-    const channel  = form.querySelector('[name=channel]').value;
-    const dateFrom = form.querySelector('[name=date_from]').value;
-    const dateTo   = form.querySelector('[name=date_to]').value;
-    console.log('[monitoring] confirmLmrbDelete — account:', account, 'channel:', channel, 'from:', dateFrom, 'to:', dateTo);
-    const ok = confirm(
-      'This will permanently delete all LMRB records for:\n' +
-      '  Channel: ' + channel + '\n' +
-      (dateFrom ? '  From: ' + dateFrom + '\n' : '') +
-      (dateTo   ? '  To:   ' + dateTo   + '\n' : '') +
-      '\nMatched schedule rows will be automatically unlocked.\nContinue?'
-    );
-    console.log('[monitoring] confirmLmrbDelete result:', ok);
-    return ok;
-  }
-
-  console.log('[monitoring list] page loaded — groups rendered:', {{ data_groups|length }});
+  console.log('[monitoring list] page loaded — batches rendered:', {{ batch_summaries|length }});
 </script>
 {% endblock %}
 

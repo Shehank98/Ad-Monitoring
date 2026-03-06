@@ -248,9 +248,11 @@ def schedule_list(request):
 
     today    = date_cls.today()
     accounts = _account_qs(user)
+    channels = Channel.objects.all()
     return render(request, 'schedules/list.html', {
         'schedules': qs,
         'accounts':  accounts,
+        'channels':  channels,
         'filters':   {'account': account_id, 'channel': channel, 'month': month},
         'today':     today,
     })
@@ -455,15 +457,41 @@ def monitoring_list(request):
         .order_by('data_type', 'account__name', 'channel')
     )
 
+    # ── Build batch summaries for display (one row per file_group_id) ─────────
+    batch_summaries = []
+    for fgid in groups_order:
+        grp = groups_dict[fgid]
+        first = grp[0]
+        total_rows = sum(d.row_count or 0 for d in grp)
+        all_dates = [(d.start_date, d.end_date) for d in grp if d.start_date and d.end_date]
+        date_from = min(s for s, e in all_dates) if all_dates else None
+        date_to   = max(e for s, e in all_dates) if all_dates else None
+        ch_list   = sorted(set(d.channel for d in grp if d.channel))
+        batch_summaries.append({
+            'file_group_id': fgid,
+            'first':         first,
+            'data_type':     first.data_type,
+            'account':       first.account,
+            'channels':      ch_list,
+            'date_from':     date_from,
+            'date_to':       date_to,
+            'total_rows':    total_rows,
+            'uploaded_by':   first.uploaded_by,
+            'uploaded_at':   first.uploaded_at,
+            'group':         grp,         # still available for per-channel download
+        })
+
     today    = date_cls.today()
     accounts = _account_qs(user)
+    channels = Channel.objects.all()
     return render(request, 'monitoring/list.html', {
-        'data_list':   qs,
-        'data_groups': data_groups,
-        'coverage':    coverage,
-        'filters':     {'type': dtype, 'channel': channel, 'account': account_id},
-        'accounts':    accounts,
-        'today':       today,
+        'data_groups':     data_groups,
+        'batch_summaries': batch_summaries,
+        'coverage':        coverage,
+        'filters':         {'type': dtype, 'channel': channel, 'account': account_id},
+        'accounts':        accounts,
+        'channels':        channels,
+        'today':           today,
     })
 
 
@@ -539,9 +567,9 @@ def monitoring_upload(request):
                 mon.save()
                 print(f"[monitoring_upload]   saved MonitoringData pk={mon.pk}  channel={meta['channel']}  rows={meta['row_count']}")
 
-            # ── Parse LMRB rows into master DB table ───────────────────────────
-            print(f"[monitoring_upload] parsing LMRB rows …")
-            _parse_lmrb_rows(df, data_type, account)
+            # ── Parse LMRB rows into master DB table (append mode) ────────────
+            print(f"[monitoring_upload] parsing LMRB rows (append mode) …")
+            _parse_lmrb_rows(df, data_type, account, batch_id=uuid.UUID(group_id))
 
             ch_names = ', '.join(m['channel'] for m in channel_metas)
             print(f"[monitoring_upload] DONE — {len(channel_metas)} channel(s): {ch_names}")
@@ -562,61 +590,44 @@ def monitoring_upload(request):
     return render(request, 'monitoring/upload.html', {'form': form})
 
 
-def _parse_lmrb_rows(df, data_type, account):
+def _parse_lmrb_rows(df, data_type, account, batch_id=None):
     """
-    Parse monitoring DataFrame and upsert into LMRBRow master table.
+    Parse monitoring DataFrame and append into the LMRBRow master table.
 
-    Dedup key = sha256(account|channel|date|advt_time|advt_theme|duration)[:32].
-    If an existing row matches the key:
-      - Reset its linked ScheduleRow (unlock it)
-      - Delete the old LMRBRow
-    Then insert the new row with is_matched=False.
+    APPEND MODE — rows are never deleted or replaced.
+    Dedup key = SHA-256 of all meaningful columns.  If a row with the same key
+    already exists it is silently skipped (bulk_create with ignore_conflicts=True).
+    This means:
+      • Uploading the same file twice → zero new rows (all skipped as duplicates)
+      • Uploading a different date range → only truly new rows are inserted
+      • Historical data is never erased by re-uploads
+
+    batch_id: UUID (MonitoringData.file_group_id) so a batch can be bulk-deleted
+    later via monitoring_delete_group.
     """
     df = df.copy()
     df.columns = df.columns.str.strip()  # ensure columns are stripped
 
     # ── Build a case-insensitive channel name lookup from the Channel model ─────
-    # When the LMRB file has "SIRASA TV" but the schedule uses "Sirasa TV", the
-    # engine query (channel__iexact) will still work, but storing the canonical
-    # name avoids creating duplicate Channel records and keeps the DB consistent.
     _ch_canonical = {c.lower(): c for c in Channel.objects.values_list('name', flat=True)}
 
     def _canon_channel(raw: str) -> str:
-        """
-        Return the canonical Channel name for an LMRB channel string.
-
-        LMRB (MapOnline / MediaWatch) files prefix channel names with the medium,
-        e.g. "Tv - Sirasa TV" or "Radio - Sirasa FM".  Strip that prefix before
-        doing the canonical lookup so the stored LMRBRow.channel matches exactly
-        the channel name used in Schedule / TC records.
-
-        Lookup order:
-          1. Direct case-insensitive match (handles plain "SIRASA TV" → "Sirasa TV")
-          2. Strip "Tv - " / "Radio - " prefix then case-insensitive match
-          3. Return the stripped form even when not in Channel model
-             (keeps DB clean; avoids storing verbose prefix format)
-        """
         raw = str(raw).strip()
-        # 1. Direct lookup
         canonical = _ch_canonical.get(raw.lower())
         if canonical:
             return canonical
-        # 2. Strip LMRB medium prefix and look up again
         for prefix in ('tv - ', 'radio - '):
             if raw.lower().startswith(prefix):
-                stripped = raw[len(prefix):]          # preserve original casing of rest
+                stripped = raw[len(prefix):]
                 canonical = _ch_canonical.get(stripped.lower())
                 if canonical:
                     return canonical
-                # Not in Channel model yet — store stripped form so it can still
-                # match a future schedule that uses the same bare channel name.
                 return stripped
         return raw
 
     # ── Normalise to standard column names ─────────────────────────────────────
     if data_type == 'maponline':
         rename = {}
-        # Load super-admin configurable extra aliases
         _lmrb_ex_theme = get_setting_list('lmrb_extra_theme_aliases')
         _lmrb_ex_time  = get_setting_list('lmrb_extra_time_aliases')
         _lmrb_ex_dur   = get_setting_list('lmrb_extra_duration_aliases')
@@ -654,8 +665,8 @@ def _parse_lmrb_rows(df, data_type, account):
 
     ch_col = _find_col(df, 'Channel', 'Station')
 
-    # ── Build rows to upsert ──────────────────────────────────────────────────
-    rows_by_key = {}   # dedup_key → LMRBRow instance (to create)
+    # ── Build rows dict keyed by dedup_key ────────────────────────────────────
+    rows_by_key = {}
 
     for _, r in df.iterrows():
         channel   = _canon_channel(_safe_str(r.get(ch_col, 'Unknown')) if ch_col else 'Unknown')
@@ -663,16 +674,23 @@ def _parse_lmrb_rows(df, data_type, account):
         advt_time = _safe_str(r.get('Advt_time', ''))
         dur       = _safe_int(r.get('Dur'))
         date_val  = _safe_date(r.get('Date'))
+        brk_no    = _safe_int(r.get('BrkNo'))
+        pos_in_brk = _safe_int(r.get('PosinBrk'))
+        advertiser = _safe_str(r.get('Advertiser', ''))
+        product    = _safe_str(r.get('Product', ''))
 
         if not (theme and advt_time and date_val and channel):
             continue  # skip rows with missing key fields
 
-        dedup_key = LMRBRow.make_dedup_key(account.id, channel, date_val, advt_time, theme, dur)
+        dedup_key = LMRBRow.make_dedup_key(
+            account.id, channel, date_val, advt_time, theme, dur,
+            brk_no=brk_no, pos_in_brk=pos_in_brk,
+            advertiser=advertiser, product=product,
+        )
 
-        # Map programme from either mediawatch (Program) or maponline (Prg Name)
-        program_val = _safe_str(r.get('Program', r.get('Prg Name', '')))
+        program_val = _safe_str(r.get('Program', r.get('Programme', r.get('Prg Name', ''))))
 
-        # Latest row wins if multiple rows in the same upload share the same key
+        # If same key appears twice in this upload, last row wins
         rows_by_key[dedup_key] = LMRBRow(
             account       = account,
             channel       = channel,
@@ -682,17 +700,18 @@ def _parse_lmrb_rows(df, data_type, account):
             duration      = dur,
             source        = data_type,
             dedup_key     = dedup_key,
+            batch_id      = batch_id,
             # Extended columns
             product_group = _safe_str(r.get('Product_Group', '')),
-            advertiser    = _safe_str(r.get('Advertiser', '')),
-            product       = _safe_str(r.get('Product', '')),
+            advertiser    = advertiser,
+            product       = product,
             ads           = _safe_str(r.get('Ads', '')),
             program       = program_val,
             prog_time     = _safe_str(r.get('Prog_time', '')),
             ad_pos        = _safe_int(r.get('AdPos')),
             tot_ads       = _safe_int(r.get('TotAds')),
-            brk_no        = _safe_int(r.get('BrkNo')),
-            pos_in_brk    = _safe_int(r.get('PosinBrk')),
+            brk_no        = brk_no,
+            pos_in_brk    = pos_in_brk,
             ads_in_brk    = _safe_int(r.get('AdsinBrk')),
             lng           = _safe_str(r.get('Lng', '')),
             cost          = _safe_decimal(r.get('Cost')),
@@ -702,36 +721,15 @@ def _parse_lmrb_rows(df, data_type, account):
     print(f"[_parse_lmrb_rows] df rows={len(df)}  unique dedup_keys={len(rows_by_key)}")
     if not rows_by_key:
         print("[_parse_lmrb_rows] WARNING: no valid rows to insert (check column names and key fields)")
-        return
+        return 0
 
-    # ── Handle existing duplicates (unlock linked ScheduleRows first) ──────────
-    existing = LMRBRow.objects.filter(dedup_key__in=rows_by_key.keys())
-    existing_count = existing.count()
-    print(f"[_parse_lmrb_rows] existing duplicate rows found={existing_count}")
-    sch_row_ids_to_unlock = []
-    for old in existing:
-        if old.is_matched and old.matched_schedule_id:
-            sch_row_ids_to_unlock.append(old.matched_schedule_id)
-
-    print(f"[_parse_lmrb_rows] ScheduleRows to unlock={len(sch_row_ids_to_unlock)}")
-    if sch_row_ids_to_unlock:
-        from django.utils import timezone
-        ScheduleRow.objects.filter(id__in=sch_row_ids_to_unlock).update(
-            is_matched=False,
-            matched_lmrb=None,
-            matched_at=None,
-        )
-        print(f"[_parse_lmrb_rows] unlocked {len(sch_row_ids_to_unlock)} ScheduleRow(s)")
-
-    # Delete old rows (new ones will be inserted below)
-    deleted_count = existing.count()
-    existing.delete()
-    print(f"[_parse_lmrb_rows] deleted {deleted_count} old LMRBRow(s)")
-
-    # ── Bulk-create new rows ──────────────────────────────────────────────────
+    # ── Append-only insert — skip any rows that already exist ─────────────────
     new_rows = list(rows_by_key.values())
-    LMRBRow.objects.bulk_create(new_rows, batch_size=500)
-    print(f"[_parse_lmrb_rows] inserted {len(new_rows)} new LMRBRow(s)")
+    created = LMRBRow.objects.bulk_create(new_rows, batch_size=500, ignore_conflicts=True)
+    inserted = len(created)
+    skipped  = len(new_rows) - inserted
+    print(f"[_parse_lmrb_rows] inserted={inserted}  skipped(duplicate)={skipped}")
+    return inserted
 
 
 @login_required
@@ -831,6 +829,26 @@ def monitoring_delete_group(request, group_id):
         messages.error(request, 'You can only delete datasets you uploaded today.')
         return redirect('/dashboard/monitoring/')
 
+    # Delete LMRBRows that belong to this upload batch
+    import uuid as uuid_mod
+    try:
+        batch_uuid = uuid_mod.UUID(str(group_id))
+        lmrb_qs = LMRBRow.objects.filter(batch_id=batch_uuid)
+        # Unlock matched ScheduleRows before deleting
+        matched_sch_ids = list(
+            lmrb_qs.filter(is_matched=True).values_list('matched_schedule_id', flat=True)
+        )
+        if matched_sch_ids:
+            ScheduleRow.objects.filter(id__in=matched_sch_ids).update(
+                is_matched=False, matched_lmrb=None, matched_at=None,
+            )
+        lmrb_count = lmrb_qs.count()
+        lmrb_qs.delete()
+        print(f"[monitoring_delete_group] deleted {lmrb_count} LMRBRow(s) for batch {group_id}")
+    except Exception as e:
+        print(f"[monitoring_delete_group] WARNING: could not delete LMRBRows: {e}")
+        lmrb_count = 0
+
     # Delete the shared file once (all records in the group share the same file)
     if first.file:
         print(f"[monitoring_delete_group] deleting shared file: {first.file.name}")
@@ -838,7 +856,9 @@ def monitoring_delete_group(request, group_id):
 
     group_qs.delete()
     print(f"[monitoring_delete_group] deleted {count} MonitoringData record(s) successfully")
-    messages.success(request, f'Deleted {count} channel record(s): {", ".join(channels)}.')
+    messages.success(request,
+        f'Deleted upload batch ({", ".join(channels)}) — '
+        f'{lmrb_count:,} LMRB row(s) removed.')
     return redirect('/dashboard/monitoring/')
 
 
@@ -912,52 +932,6 @@ def brand_mapping_list(request):
         'accounts': account_qs,
         'filters':  {'account': account_id},
     })
-
-
-# ── LMRB controlled deletion (Item 7) ────────────────────────────────────────
-
-@login_required
-@require_POST
-def lmrb_delete_range(request):
-    """
-    Delete LMRBRow records for a specific account + channel + date range.
-    Any linked ScheduleRows are automatically unlocked (is_matched → False).
-    """
-    account_id = request.POST.get('account_id', '').strip()
-    channel    = request.POST.get('channel', '').strip()
-    date_from  = request.POST.get('date_from', '').strip()
-    date_to    = request.POST.get('date_to', '').strip()
-
-    if not account_id or not channel:
-        messages.error(request, 'Account and Channel are required.')
-        return redirect('/dashboard/monitoring/')
-
-    if not _account_access(request.user, account_id):
-        messages.error(request, 'Access denied.')
-        return redirect('/dashboard/monitoring/')
-
-    qs = LMRBRow.objects.filter(account_id=account_id, channel=channel)
-    if date_from:
-        qs = qs.filter(date__gte=date_from)
-    if date_to:
-        qs = qs.filter(date__lte=date_to)
-
-    # Unlock any ScheduleRows that were linked to these LMRB rows
-    matched_sch_ids = list(
-        qs.filter(is_matched=True).values_list('matched_schedule_id', flat=True)
-    )
-    if matched_sch_ids:
-        ScheduleRow.objects.filter(id__in=matched_sch_ids).update(
-            is_matched=False, matched_lmrb=None, matched_at=None,
-        )
-
-    count = qs.count()
-    qs.delete()
-    date_desc = f' ({date_from} → {date_to})' if (date_from or date_to) else ''
-    messages.success(request,
-        f'Deleted {count:,} LMRB records for {channel}{date_desc}. '
-        f'Linked schedule rows have been unlocked for re-matching.')
-    return redirect('/dashboard/monitoring/')
 
 
 # ── Monitoring Dashboard (Items 3 + 4) ───────────────────────────────────────

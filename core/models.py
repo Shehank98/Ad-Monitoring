@@ -136,10 +136,13 @@ class LMRBRow(models.Model):
     """
     Individual row from a monitoring (LMRB / MapOnline) file.
 
-    All monitoring data lives in a single master table per account, deduplicated
-    by (account, channel, date, advt_time, advt_theme, duration).  Uploading a
-    new file whose rows match existing entries replaces those entries (the old
-    record and its matched state are cleared first).
+    All monitoring uploads append to one master table per account.  Rows are
+    deduplicated on upload using a SHA-256 key of all meaningful columns so
+    uploading the same file twice produces no duplicates, while uploading a
+    different date range correctly adds new rows without touching existing ones.
+
+    batch_id: UUID shared by all rows from the same upload batch
+    (same as the MonitoringData.file_group_id).  Used to delete a batch cleanly.
     """
     account     = models.ForeignKey(Account, on_delete=models.CASCADE)
     channel     = models.CharField(max_length=200)
@@ -165,9 +168,13 @@ class LMRBRow(models.Model):
     cost          = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     day           = models.CharField(max_length=20, blank=True, default='')
 
-    # Dedup key = sha256(account_id|channel|date|advt_time|advt_theme|dur)[:32]
-    # Unique so duplicate uploads just replace the row.
+    # Dedup key — SHA-256 of all meaningful columns.
+    # Uploading the same file twice skips existing rows (append-only, no replace).
     dedup_key   = models.CharField(max_length=64, unique=True)
+
+    # Upload batch identifier — same UUID as MonitoringData.file_group_id so that
+    # deleting a MonitoringData group also removes all its LMRBRows.
+    batch_id    = models.UUIDField(null=True, blank=True, db_index=True)
 
     # Row-level locking
     is_matched       = models.BooleanField(default=False, db_index=True)
@@ -189,8 +196,15 @@ class LMRBRow(models.Model):
         return f'{self.channel} | {self.advt_theme} | {self.date} | {self.advt_time}'
 
     @staticmethod
-    def make_dedup_key(account_id, channel, date, advt_time, advt_theme, dur):
-        raw = f'{account_id}|{channel}|{date}|{advt_time}|{advt_theme}|{dur}'
+    def make_dedup_key(account_id, channel, date, advt_time, advt_theme, dur,
+                       brk_no=None, pos_in_brk=None, advertiser='', product=''):
+        """
+        Build a SHA-256 dedup key from all meaningful identifying columns.
+        Including brk_no + pos_in_brk ensures two spots in the same break
+        (same time/theme/duration) are treated as distinct rows.
+        """
+        raw = (f'{account_id}|{channel}|{date}|{advt_time}|{advt_theme}|{dur}|'
+               f'{brk_no or ""}|{pos_in_brk or ""}|{advertiser or ""}|{product or ""}')
         return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 

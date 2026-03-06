@@ -18,7 +18,12 @@
   </div>
   <div class="flex-1 min-w-[130px]">
     <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel</label>
-    <input type="text" name="channel" value="{{ filters.channel }}" placeholder="e.g. Sirasa" class="input-field"/>
+    <select name="channel" class="select-field">
+      <option value="">All channels</option>
+      {% for ch in channels %}
+        <option value="{{ ch.name }}" {% if filters.channel == ch.name %}selected{% endif %}>{{ ch.name }}</option>
+      {% endfor %}
+    </select>
   </div>
   <div class="flex-1 min-w-[130px]">
     <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Month</label>
