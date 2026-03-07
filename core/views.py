@@ -452,6 +452,26 @@ def schedule_delete(request, pk):
     today    = date_cls.today()
 
     if _is_admin(user) or (schedule.uploaded_by == user and schedule.uploaded_at.date() == today):
+        # Before deleting: clean up all associated data to maintain integrity
+        sch_row_ids = list(schedule.rows.values_list('id', flat=True))
+
+        if sch_row_ids:
+            # Unlock any LMRBRows matched to schedule rows in this schedule
+            LMRBRow.objects.filter(matched_schedule_id__in=sch_row_ids).update(
+                is_matched=False, matched_schedule=None, matched_at=None,
+            )
+            # Reset TCRow schedule-match state for these schedule rows
+            TCRow.objects.filter(matched_schedule_id__in=sch_row_ids).update(
+                is_schedule_matched=False, matched_schedule=None,
+            )
+            # Delete MatchResult records for this schedule's rows
+            MatchResult.objects.filter(schedule_row_id__in=sch_row_ids).delete()
+
+        # Also delete MatchResult records scoped to this channel/month (engine-level)
+        MatchResult.objects.filter(
+            account=schedule.account, channel=schedule.channel, month=schedule.month,
+        ).exclude(status='manual_match').delete()
+
         schedule.file.delete(save=False)
         schedule.delete()
         messages.success(request, 'Schedule deleted.')
@@ -881,10 +901,13 @@ def monitoring_delete_group(request, group_id):
 
     # Delete LMRBRows that belong to this upload batch
     import uuid as uuid_mod
+    from core.models import ManualMatch, SponsorshipLmrbAssignment
     try:
         batch_uuid = uuid_mod.UUID(str(group_id))
         lmrb_qs = LMRBRow.objects.filter(batch_id=batch_uuid)
-        # Unlock matched ScheduleRows before deleting
+        lmrb_ids = list(lmrb_qs.values_list('id', flat=True))
+
+        # 1. Unlock matched ScheduleRows before deleting
         matched_sch_ids = list(
             lmrb_qs.filter(is_matched=True).values_list('matched_schedule_id', flat=True)
         )
@@ -892,6 +915,38 @@ def monitoring_delete_group(request, group_id):
             ScheduleRow.objects.filter(id__in=matched_sch_ids).update(
                 is_matched=False, matched_lmrb=None, matched_at=None,
             )
+
+        # 2. Unlock TCRows that were LMRB-confirmed via these rows
+        if lmrb_ids:
+            from core.models import TCRow
+            TCRow.objects.filter(matched_lmrb_id__in=lmrb_ids).update(
+                is_lmrb_confirmed=False, matched_lmrb=None,
+            )
+
+        # 3. Remove ManualMatch records using these LMRB rows + unlock their ScheduleRows
+        if lmrb_ids:
+            manual_matches = ManualMatch.objects.filter(lmrb_row_id__in=lmrb_ids)
+            mm_sch_ids = list(manual_matches.exclude(schedule_row=None).values_list('schedule_row_id', flat=True))
+            if mm_sch_ids:
+                ScheduleRow.objects.filter(id__in=mm_sch_ids).update(is_manual_matched=False)
+            manual_matches.delete()
+
+        # 4. Remove SponsorshipLmrbAssignment records + unlock their ScheduleRows
+        if lmrb_ids:
+            spon_assignments = SponsorshipLmrbAssignment.objects.filter(lmrb_row_id__in=lmrb_ids)
+            spon_sch_ids = list(spon_assignments.values_list('schedule_row_id', flat=True))
+            spon_assignments.delete()
+            # Unlock sponsorship ScheduleRows (no is_matched for sponsorship, handled via assignment)
+
+        # 5. Delete MatchResult records linked to these LMRB rows
+        if lmrb_ids:
+            from core.models import MatchResult
+            MatchResult.objects.filter(lmrb_row_id__in=lmrb_ids).delete()
+            # Also delete MatchResult records for ScheduleRows that were matched to these LMRBs
+            if matched_sch_ids:
+                MatchResult.objects.filter(schedule_row_id__in=matched_sch_ids,
+                                           status='matched').delete()
+
         lmrb_count = lmrb_qs.count()
         lmrb_qs.delete()
         print(f"[monitoring_delete_group] deleted {lmrb_count} LMRBRow(s) for batch {group_id}")
@@ -984,6 +1039,28 @@ def brand_mapping_list(request):
     })
 
 
+@login_required
+def brand_mapping_options(request):
+    """AJAX: Return unique brands (from Schedule), LMRB themes, and TC themes for an account."""
+    account_id = request.GET.get('account_id', '').strip()
+    if not account_id or not _account_access(request.user, account_id):
+        return JsonResponse({'brands': [], 'themes': [], 'tc_themes': []})
+
+    brands = sorted(set(
+        ScheduleRow.objects.filter(account_id=account_id)
+        .exclude(brand='').values_list('brand', flat=True)
+    ))
+    themes = sorted(set(
+        LMRBRow.objects.filter(account_id=account_id)
+        .exclude(advt_theme='').values_list('advt_theme', flat=True)
+    ))
+    tc_themes = sorted(set(
+        TCRow.objects.filter(account_id=account_id)
+        .exclude(tc_theme='').values_list('tc_theme', flat=True)
+    ))
+    return JsonResponse({'brands': brands, 'themes': themes, 'tc_themes': tc_themes})
+
+
 # ── Monitoring Dashboard (Items 3 + 4) ───────────────────────────────────────
 
 @login_required
@@ -1042,7 +1119,8 @@ def monitoring_dashboard(request):
         n_not_aired  = qs.filter(status__in=['not_aired', 'no_mapping']).count()
         n_no_map     = qs.filter(status='no_mapping').count()
         n_aired      = n_matched + n_prog_mis + n_late
-        compliance   = round(n_matched / total * 100, 1) if total else 0
+        # Programme mismatch counts as a valid match (same day, brand, theme — time offset only)
+        compliance   = round((n_matched + n_prog_mis) / total * 100, 1) if total else 0
 
         n_sponsorship = ScheduleRow.objects.filter(
             account_id=account_id, channel=channel, month=month, ad_type='SPONSORSHIP',
@@ -1062,7 +1140,8 @@ def monitoring_dashboard(request):
 
         tab_data = {
             'full':     list(qs.select_related('lmrb_row').order_by('scheduled_date', 'brand')),
-            'matched':  list(qs.filter(status='matched').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
+            # Programme mismatch = valid match (same day, brand, theme — time offset only)
+            'matched':  list(qs.filter(status__in=['matched', 'programme_mismatch']).select_related('lmrb_row').order_by('scheduled_date', 'brand')),
             'not_aired': list(qs.filter(status__in=['not_aired', 'no_mapping']).order_by('scheduled_date', 'brand')),
             'prog_mis': list(qs.filter(status='programme_mismatch').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
             'late':     list(qs.filter(status='late_telecast').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
@@ -1259,6 +1338,44 @@ def monitoring_dashboard(request):
             lmrb_qs.filter(is_matched=False).order_by('date', 'advt_time')
         )
 
+        # ── Advt_Theme Analysis tab data ──────────────────────────────────────
+        # For each unique Advt_Theme: daily airings, programme breakdown, PT split
+        theme_analysis = []
+        all_themes = sorted(set(lmrb_qs.values_list('advt_theme', flat=True)))
+        for t in all_themes:
+            t_qs = lmrb_qs.filter(advt_theme=t)
+            t_total = t_qs.count()
+            # Daily counts
+            daily = list(
+                t_qs.values('date').annotate(cnt=Count('id')).order_by('date')
+            )
+            # Programme breakdown
+            progs = list(
+                t_qs.exclude(program='').values('program').annotate(cnt=Count('id')).order_by('-cnt')[:10]
+            )
+            # PT split
+            t_prime = t_non = 0
+            for r in t_qs.values_list('advt_time', flat=True):
+                bucket = _time_bucket(r)
+                if bucket == 'prime':
+                    t_prime += 1
+                else:
+                    t_non += 1
+            theme_analysis.append({
+                'theme':    t,
+                'total':    t_total,
+                'prime':    t_prime,
+                'non_prime': t_non,
+                'prime_pct': round(t_prime / t_total * 100) if t_total else 0,
+                'daily':    daily,
+                'programmes': progs,
+            })
+        theme_analysis_json = _to_js(theme_analysis)
+
+    else:
+        theme_analysis = []
+        theme_analysis_json = '[]'
+
     return render(request, 'monitoring/dashboard.html', {
         'accounts':                  account_qs,
         'selected_account':          selected_account,
@@ -1287,6 +1404,8 @@ def monitoring_dashboard(request):
         'sch_pt_spon':               sch_pt_spon if selected_account and channel and month else {},
         'lmrb_matched_rows':         lmrb_matched_rows,
         'lmrb_unmatched_rows':       lmrb_unmatched_rows,
+        'theme_analysis':            theme_analysis,
+        'theme_analysis_json':       theme_analysis_json,
     })
 
 
@@ -1971,6 +2090,7 @@ def tc_three_way(request):
             messages.error(request, 'Access denied.')
             return redirect('/dashboard/tc/detail/')
 
+        from core.models import ManualMatch
         sch_qs = (
             ScheduleRow.objects
             .filter(account_id=account_id, channel=channel, month=month)
@@ -1979,19 +2099,42 @@ def tc_three_way(request):
             .order_by('date', 'start_time', 'brand')
         )
 
+        # Build manual match lookup: {schedule_row_id: ManualMatch}
+        mm_lookup = {
+            mm.schedule_row_id: mm
+            for mm in ManualMatch.objects.filter(
+                account_id=account_id, channel=channel, month=month,
+                schedule_row__isnull=False,
+            ).select_related('tc_row', 'lmrb_row')
+        }
+
         for sr in sch_qs:
             lmrb = sr.matched_lmrb
             tc   = sr.tc_matches.filter(is_schedule_matched=True).first()
+
+            # Check for manual match (3way) which also sets is_schedule_matched
+            mm = mm_lookup.get(sr.id)
+            is_manual = mm is not None
+
+            # If engine didn't find a TC match but there's a manual 3way link, use that
+            if not tc and mm and mm.tc_row:
+                tc = mm.tc_row
 
             # Determine row status for colour-coding
             if tc and tc.is_lmrb_confirmed:
                 status = 'aired'          # confirmed by both TC and LMRB
             elif tc and not tc.is_lmrb_confirmed:
                 status = 'tc_only'        # TC says aired but LMRB doesn't confirm
-            elif lmrb:
+            elif lmrb or (mm and mm.lmrb_row):
                 status = 'lmrb_only'      # LMRB found a match but no TC record
+            elif is_manual:
+                status = 'manual'         # manually matched, no TC/LMRB confirmation
             else:
                 status = 'not_aired'      # neither source confirms it
+
+            # Use manual LMRB if engine didn't lock one
+            if not lmrb and mm and mm.lmrb_row:
+                lmrb = mm.lmrb_row
 
             rows.append({
                 'brand':          sr.brand,
@@ -2016,6 +2159,7 @@ def tc_three_way(request):
                 'has_lmrb':            lmrb is not None,
                 'has_tc':              tc is not None,
                 'tc_lmrb_confirmed':   tc.is_lmrb_confirmed if tc else False,
+                'is_manual':           is_manual,
                 'status':              status,
             })
 
@@ -2398,7 +2542,7 @@ def summary_pdf(request):
     from reportlab.lib.units import cm
     from reportlab.platypus import (
         SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
-        HRFlowable, PageBreak,
+        HRFlowable, PageBreak, Image as RLImage,
     )
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     from verification.tc_engine import build_summary_data
@@ -2427,6 +2571,7 @@ def summary_pdf(request):
 
     # ── ReportLab setup ───────────────────────────────────────────────────────
     buf = io.BytesIO()
+    page_w, page_h = landscape(A4)
     doc = SimpleDocTemplate(
         buf, pagesize=landscape(A4),
         leftMargin=1.5*cm, rightMargin=1.5*cm,
@@ -2438,29 +2583,64 @@ def summary_pdf(request):
     LGRAY = colors.HexColor('#f8fafc')
     MGRAY = colors.HexColor('#e2e8f0')
     DGRAY = colors.HexColor('#e2e8f0')
-    GOLD  = colors.HexColor('#fef9c3')
-    LBLUE = colors.HexColor('#dbeafe')
-    RED   = colors.HexColor('#fee2e2')
-    GREEN = colors.HexColor('#dcfce7')
 
     styles = getSampleStyleSheet()
     h_title = ParagraphStyle('title', fontSize=14, textColor=NAVY,
                               fontName='Helvetica-Bold', spaceAfter=4)
     h_sub   = ParagraphStyle('sub',   fontSize=9,  textColor=colors.HexColor('#475569'),
                               fontName='Helvetica', spaceAfter=2)
-    h_cell  = ParagraphStyle('cell',  fontSize=7.5, fontName='Helvetica')
-    h_hdr   = ParagraphStyle('hdr',   fontSize=7.5, fontName='Helvetica-Bold',
+    h_cell  = ParagraphStyle('cell',  fontSize=6.5, fontName='Helvetica')
+    h_cell_sm = ParagraphStyle('cellsm', fontSize=5.5, fontName='Helvetica')
+    h_hdr   = ParagraphStyle('hdr',   fontSize=6.5, fontName='Helvetica-Bold',
                               textColor=colors.white)
     h_sect  = ParagraphStyle('sect',  fontSize=9,  fontName='Helvetica-Bold',
                               textColor=NAVY)
 
     story = []
 
+    # ── Logo helper ───────────────────────────────────────────────────────────
+    def _logo_flowable():
+        """Return an Image flowable for the logo, or None if not available."""
+        logo_url = _branding_url('logo')
+        if not logo_url:
+            return None
+        try:
+            logo_path = os.path.join(
+                django_settings.MEDIA_ROOT,
+                logo_url.replace(django_settings.MEDIA_URL, '', 1),
+            )
+            if os.path.exists(logo_path):
+                img = RLImage(logo_path, width=3.5*cm, height=1.5*cm)
+                img.hAlign = 'RIGHT'
+                return img
+        except Exception:
+            pass
+        return None
+
     # ═══════════════════════════════════════════════════════════════════════════
     # PAGE 1: SUMMARY
     # ═══════════════════════════════════════════════════════════════════════════
 
-    story.append(Paragraph('RECONCILIATION SUMMARY REPORT', h_title))
+    # Header row: title left, logo right
+    logo = _logo_flowable()
+    if logo:
+        header_data = [[
+            Paragraph('RECONCILIATION SUMMARY REPORT', h_title),
+            logo,
+        ]]
+        header_tbl = Table(header_data, colWidths=[page_w - 3*cm - 4.5*cm, 4.5*cm])
+        header_tbl.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('ALIGN',  (1, 0), (1, 0),  'RIGHT'),
+            ('LEFTPADDING',  (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING',   (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING',(0, 0), (-1, -1), 0),
+        ]))
+        story.append(header_tbl)
+    else:
+        story.append(Paragraph('RECONCILIATION SUMMARY REPORT', h_title))
+
     story.append(Paragraph(
         f'Account: {account.name}  |  Channel: {channel}  |  Month: {month}  |  '
         f'Estimate No: {estimate_no}',
@@ -2540,6 +2720,21 @@ def summary_pdf(request):
             story.append(_summary_table(section['rows'], section['subtotal']))
             story.append(Spacer(1, 0.3*cm))
 
+    # Signatures
+    if meta and any([meta.prepared_by, meta.checked_by, meta.authorised_by]):
+        story.append(Spacer(1, 0.5*cm))
+        sig_data = [[
+            Paragraph(f'Prepared by: {meta.prepared_by or ""}', h_sub),
+            Paragraph(f'Checked by: {meta.checked_by or ""}', h_sub),
+            Paragraph(f'Authorised by: {meta.authorised_by or ""}', h_sub),
+        ]]
+        sig_tbl = Table(sig_data, colWidths=[6*cm, 6*cm, 6*cm])
+        sig_tbl.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        story.append(sig_tbl)
+
     # Notes
     if meta and meta.notes:
         story.append(Spacer(1, 0.3*cm))
@@ -2548,20 +2743,43 @@ def summary_pdf(request):
             story.append(Paragraph(line, h_sub))
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # PAGE 2+: MATCHED LMRB REPORT (full LMRB columns)
+    # PAGE 2+: MATCHED LMRB REPORT
+    # Columns (exact order): Product_Group | Advertiser | Product | Advt_Theme |
+    #   Ads | Channel | Program | Dd | Mn | Yr | Day | Prog_time | Advt_time |
+    #   AdPos | TotAds | BrkNo | PosinBrk | AdsinBrk | Lng | Dur | Cost
+    # Includes both commercial (TC-confirmed) and sponsorship (assignment) rows.
     # ═══════════════════════════════════════════════════════════════════════════
 
     story.append(PageBreak())
 
-    story.append(Paragraph('Matched LMRB Report', h_title))
+    # Header with logo
+    if logo:
+        logo2 = _logo_flowable()
+        hdr2_data = [[
+            Paragraph('Matched LMRB Report', h_title),
+            logo2 or Paragraph('', h_sub),
+        ]]
+        hdr2_tbl = Table(hdr2_data, colWidths=[page_w - 3*cm - 4.5*cm, 4.5*cm])
+        hdr2_tbl.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('ALIGN',  (1, 0), (1, 0),  'RIGHT'),
+            ('LEFTPADDING',  (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING',   (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING',(0, 0), (-1, -1), 0),
+        ]))
+        story.append(hdr2_tbl)
+    else:
+        story.append(Paragraph('Matched LMRB Report', h_title))
+
     story.append(Paragraph(
         f'Account: {account.name}  |  Channel: {channel}  |  Month: {month}  |  '
-        f'All LMRB entries confirmed against TC',
+        f'Commercial (TC-confirmed) + Sponsorship (assigned) LMRB rows',
         h_sub,
     ))
     story.append(HRFlowable(width='100%', thickness=1, color=BLUE, spaceAfter=8))
 
-    # Fetch all LMRBRows confirmed via TC for this scope
+    # Fetch scope date range
     from django.db.models import Min, Max
     sch_dates = Schedule.objects.filter(
         account_id=account_id, channel=channel, month=month
@@ -2569,61 +2787,103 @@ def summary_pdf(request):
     date_min = sch_dates.get('d_min')
     date_max = sch_dates.get('d_max')
 
-    lmrb_qs = LMRBRow.objects.filter(
-        account_id=account_id, channel=channel,
-    )
+    # Commercial: TC-confirmed LMRB rows
+    commercial_lmrb_qs = LMRBRow.objects.filter(account_id=account_id, channel__iexact=channel)
     if date_min and date_max:
-        lmrb_qs = lmrb_qs.filter(date__range=(date_min, date_max))
-    # Only rows confirmed by TC reconciliation
-    lmrb_qs = lmrb_qs.filter(tc_confirmations__isnull=False).distinct().order_by('date', 'advt_time')
+        commercial_lmrb_qs = commercial_lmrb_qs.filter(date__range=(date_min, date_max))
+    commercial_lmrb_qs = (
+        commercial_lmrb_qs
+        .filter(tc_confirmations__isnull=False)
+        .distinct()
+        .order_by('date', 'advt_time')
+    )
 
+    # Sponsorship: LMRB rows assigned via SponsorshipLmrbAssignment
+    from core.models import SponsorshipLmrbAssignment
+    spon_lmrb_ids = set(
+        SponsorshipLmrbAssignment.objects.filter(
+            account_id=account_id,
+            schedule_row__channel=channel,
+            schedule_row__month=month,
+        ).values_list('lmrb_row_id', flat=True)
+    )
+    sponsorship_lmrb_qs = LMRBRow.objects.filter(id__in=spon_lmrb_ids).order_by('date', 'advt_time')
+
+    # Combine: commercial first, then sponsorship (exclude overlap)
+    commercial_ids = set(commercial_lmrb_qs.values_list('id', flat=True))
+    sponsorship_only_ids = spon_lmrb_ids - commercial_ids
+    sponsorship_only_qs  = LMRBRow.objects.filter(id__in=sponsorship_only_ids).order_by('date', 'advt_time')
+
+    all_lmrb_rows = list(commercial_lmrb_qs) + list(sponsorship_only_qs)
+
+    # Required column order:
+    # Product_Group | Advertiser | Product | Advt_Theme | Ads | Channel |
+    # Program | Dd | Mn | Yr | Day | Prog_time | Advt_time |
+    # AdPos | TotAds | BrkNo | PosinBrk | AdsinBrk | Lng | Dur | Cost
     LMRB_HEADERS = [
-        'Date', 'Time', 'Theme', 'Dur', 'Programme', 'Prog Time',
-        'Advertiser', 'Product', 'Ad Pos', 'Brk No', 'Pos in Brk',
-        'Ads in Brk', 'Day', 'Cost',
+        'Product\nGroup', 'Advertiser', 'Product', 'Advt\nTheme', 'Ads',
+        'Channel', 'Program',
+        'Dd', 'Mn', 'Yr', 'Day', 'Prog\nTime', 'Advt\nTime',
+        'AdPos', 'TotAds', 'BrkNo', 'PosIn\nBrk', 'AdsIn\nBrk',
+        'Lng', 'Dur', 'Cost',
     ]
+    # Widths tuned for landscape A4 (total content width ≈ 25.7cm)
     LMRB_WIDTHS = [
-        1.8*cm, 1.6*cm, 4*cm, 1.2*cm, 3*cm, 1.6*cm,
-        3*cm, 2.5*cm, 1.2*cm, 1.2*cm, 1.5*cm,
-        1.5*cm, 1.2*cm, 1.8*cm,
+        2.2*cm, 2.5*cm, 2.2*cm, 3.0*cm, 0.8*cm,
+        2.0*cm, 2.5*cm,
+        0.65*cm, 0.65*cm, 0.9*cm, 0.8*cm, 1.2*cm, 1.2*cm,
+        0.9*cm, 0.9*cm, 0.9*cm, 0.9*cm, 0.9*cm,
+        0.7*cm, 0.7*cm, 1.3*cm,
     ]
 
-    if lmrb_qs.exists():
-        lmrb_data = [[Paragraph(h, h_hdr) for h in LMRB_HEADERS]]
-        for lr in lmrb_qs:
-            cost_str = f'{lr.cost:,.2f}' if lr.cost is not None else '—'
-            lmrb_data.append([
-                Paragraph(str(lr.date), h_cell),
-                Paragraph(str(lr.advt_time or '—'), h_cell),
-                Paragraph(str(lr.advt_theme or '—'), h_cell),
-                Paragraph(str(lr.duration or '—'), h_cell),
-                Paragraph(str(lr.program or '—'), h_cell),
-                Paragraph(str(lr.prog_time or '—'), h_cell),
-                Paragraph(str(lr.advertiser or '—'), h_cell),
-                Paragraph(str(lr.product or '—'), h_cell),
-                Paragraph(str(lr.ad_pos if lr.ad_pos is not None else '—'), h_cell),
-                Paragraph(str(lr.brk_no if lr.brk_no is not None else '—'), h_cell),
-                Paragraph(str(lr.pos_in_brk if lr.pos_in_brk is not None else '—'), h_cell),
-                Paragraph(str(lr.ads_in_brk if lr.ads_in_brk is not None else '—'), h_cell),
-                Paragraph(str(lr.day or '—'), h_cell),
-                Paragraph(cost_str, h_cell),
-            ])
+    tbl_style = TableStyle([
+        ('BACKGROUND',  (0, 0), (-1, 0),  NAVY),
+        ('TEXTCOLOR',   (0, 0), (-1, 0),  colors.white),
+        ('FONTNAME',    (0, 0), (-1, 0),  'Helvetica-Bold'),
+        ('FONTSIZE',    (0, 0), (-1, -1), 6),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [LGRAY, colors.white]),
+        ('VALIGN',      (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING',  (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('LEFTPADDING', (0, 0), (-1, -1), 2),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+        ('GRID',        (0, 0), (-1, -1), 0.3, MGRAY),
+        ('LINEBELOW',   (0, 0), (-1, 0),  1,   BLUE),
+    ])
 
+    if all_lmrb_rows:
+        lmrb_data = [[Paragraph(h, h_hdr) for h in LMRB_HEADERS]]
+        for lr in all_lmrb_rows:
+            cost_str = f'{lr.cost:,.2f}' if lr.cost is not None else ''
+            # Extract Dd / Mn / Yr from date
+            dd = str(lr.date.day)  if lr.date else ''
+            mn = str(lr.date.month) if lr.date else ''
+            yr = str(lr.date.year)  if lr.date else ''
+            lmrb_data.append([
+                Paragraph(str(lr.product_group or ''), h_cell_sm),
+                Paragraph(str(lr.advertiser or ''), h_cell_sm),
+                Paragraph(str(lr.product or ''), h_cell_sm),
+                Paragraph(str(lr.advt_theme or ''), h_cell_sm),
+                Paragraph(str(lr.ads or ''), h_cell_sm),
+                Paragraph(str(lr.channel or ''), h_cell_sm),
+                Paragraph(str(lr.program or ''), h_cell_sm),
+                Paragraph(dd, h_cell_sm),
+                Paragraph(mn, h_cell_sm),
+                Paragraph(yr, h_cell_sm),
+                Paragraph(str(lr.day or ''), h_cell_sm),
+                Paragraph(str(lr.prog_time or ''), h_cell_sm),
+                Paragraph(str(lr.advt_time or ''), h_cell_sm),
+                Paragraph(str(lr.ad_pos    if lr.ad_pos    is not None else ''), h_cell_sm),
+                Paragraph(str(lr.tot_ads   if lr.tot_ads   is not None else ''), h_cell_sm),
+                Paragraph(str(lr.brk_no    if lr.brk_no    is not None else ''), h_cell_sm),
+                Paragraph(str(lr.pos_in_brk if lr.pos_in_brk is not None else ''), h_cell_sm),
+                Paragraph(str(lr.ads_in_brk if lr.ads_in_brk is not None else ''), h_cell_sm),
+                Paragraph(str(lr.lng or ''), h_cell_sm),
+                Paragraph(str(lr.duration or ''), h_cell_sm),
+                Paragraph(cost_str, h_cell_sm),
+            ])
         lmrb_tbl = Table(lmrb_data, colWidths=LMRB_WIDTHS, repeatRows=1)
-        lmrb_tbl.setStyle(TableStyle([
-            ('BACKGROUND',  (0, 0), (-1, 0),  NAVY),
-            ('TEXTCOLOR',   (0, 0), (-1, 0),  colors.white),
-            ('FONTNAME',    (0, 0), (-1, 0),  'Helvetica-Bold'),
-            ('FONTSIZE',    (0, 0), (-1, -1), 7),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [LGRAY, colors.white]),
-            ('VALIGN',      (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING',  (0, 0), (-1, -1), 3),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-            ('LEFTPADDING', (0, 0), (-1, -1), 3),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-            ('GRID',        (0, 0), (-1, -1), 0.3, MGRAY),
-            ('LINEBELOW',   (0, 0), (-1, 0),  1,   BLUE),
-        ]))
+        lmrb_tbl.setStyle(tbl_style)
         story.append(lmrb_tbl)
     else:
         story.append(Paragraph('No matched LMRB rows found for this scope.', styles['Normal']))
@@ -3108,6 +3368,14 @@ def manual_match_create(request):
         ScheduleRow.objects.filter(id=sr.id).update(is_manual_matched=True)
     LMRBRow.objects.filter(id=lr.id).update(is_manual_matched=True)
 
+    # For 3way and tc_lmrb modes: also lock the TCRow so it appears as matched
+    # in TC reconciliation views (is_schedule_matched=True on TCRow).
+    if tr and match_mode in ('3way', 'tc_lmrb'):
+        update_fields = {'is_schedule_matched': True}
+        if sr:
+            update_fields['matched_schedule_id'] = sr.id
+        TCRow.objects.filter(id=tr.id).update(**update_fields)
+
     # Remove stale engine MatchResult for this schedule row
     if sr:
         MatchResult.objects.filter(
@@ -3161,12 +3429,21 @@ def manual_dematch(request, pk):
     else:
         sr_desc = 'entry'
 
+    tc_row_id_to_unlock = mm.tc_row_id
+    tc_mode = mm.match_mode
+
     mm.delete()
 
-    # Unlock rows (TCRow uses reverse relation — deleting ManualMatch frees it automatically)
+    # Unlock rows
     if sr_id:
         ScheduleRow.objects.filter(id=sr_id).update(is_manual_matched=False)
     LMRBRow.objects.filter(id=lr_id).update(is_manual_matched=False)
+
+    # Unlock TCRow if it was locked by this manual match
+    if tc_row_id_to_unlock and tc_mode in ('3way', 'tc_lmrb'):
+        TCRow.objects.filter(id=tc_row_id_to_unlock).update(
+            is_schedule_matched=False, matched_schedule=None,
+        )
 
     messages.success(request, f'De-matched: {sr_desc}. All rows are now available again.')
     return redirect(redirect_url)

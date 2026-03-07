@@ -432,6 +432,10 @@
       <i class="fa-solid fa-database mr-1 text-rose-500"></i> LMRB Unmatched
       <span class="ml-1 px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 text-[10px] font-bold">{{ lmrb_unmatched_rows|length }}</span>
     </button>
+    <button class="tab-btn" onclick="showTab('theme_analysis',this)">
+      <i class="fa-solid fa-tag mr-1 text-indigo-500"></i> Theme Analysis
+      <span class="ml-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold">{{ theme_analysis|length }}</span>
+    </button>
   </div>
 
   <div class="p-4">
@@ -819,6 +823,77 @@
           </tbody>
         </table>
       </div>
+    </div>
+
+    <!-- ── Advt_Theme Analysis Tab ──────────────────────────── -->
+    <div id="tab-theme_analysis" class="tab-pane">
+      {% if theme_analysis %}
+      <div class="mb-3 flex items-center gap-2">
+        <span class="px-2 py-1 rounded-lg bg-indigo-100 text-indigo-700 text-xs font-bold">
+          <i class="fa-solid fa-tag mr-1"></i> {{ theme_analysis|length }} Advt Themes
+        </span>
+        <span class="text-xs text-slate-400">Daily airings, programme breakdown, and prime-time split per theme</span>
+      </div>
+
+      <!-- Filter row -->
+      <div class="flex items-center gap-2 mb-3">
+        <input type="text" id="themeFilterInput" placeholder="Filter by theme…"
+               oninput="filterThemeRows(this.value)"
+               class="border border-slate-200 rounded-lg px-3 py-1.5 text-xs w-72 focus:ring-2 focus:ring-indigo-300 focus:outline-none">
+      </div>
+
+      <div class="tab-table-wrap">
+        <table class="data-table w-full text-xs" id="themeAnalysisTable">
+          <thead>
+            <tr>
+              <th class="text-left">Advt Theme</th>
+              <th class="text-right">Total Airings</th>
+              <th class="text-right">Prime Time</th>
+              <th class="text-right">Non-Prime</th>
+              <th class="text-right">PT %</th>
+              <th class="text-left">Top Programmes</th>
+              <th class="text-left">Daily Airings</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ta in theme_analysis %}
+            <tr class="theme-row">
+              <td class="font-semibold text-slate-800 max-w-[200px] truncate" title="{{ ta.theme }}">{{ ta.theme }}</td>
+              <td class="text-right font-bold text-slate-700">{{ ta.total }}</td>
+              <td class="text-right">
+                <span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 font-semibold">{{ ta.prime }}</span>
+              </td>
+              <td class="text-right">
+                <span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{{ ta.non_prime }}</span>
+              </td>
+              <td class="text-right">
+                <div class="flex items-center justify-end gap-1">
+                  <div class="w-12 bg-slate-200 rounded-full h-1.5">
+                    <div class="bg-amber-500 h-1.5 rounded-full" style="width:{{ ta.prime_pct }}%"></div>
+                  </div>
+                  <span class="text-amber-700 font-semibold text-[10px]">{{ ta.prime_pct }}%</span>
+                </div>
+              </td>
+              <td class="max-w-[220px]">
+                {% for p in ta.programmes %}
+                  <span class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-blue-50 text-blue-700 text-[9px] mr-0.5 mb-0.5">{{ p.program }} <span class="font-bold">({{ p.cnt }})</span></span>
+                {% empty %}<span class="text-slate-400 text-[10px]">—</span>{% endfor %}
+              </td>
+              <td class="text-[10px] text-slate-500">
+                {{ ta.daily|length }} day{{ ta.daily|length|pluralize }}<br>
+                <span class="text-[9px] text-slate-400">avg {{ ta.total }} total</span>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="flex flex-col items-center gap-3 py-16">
+        <i class="fa-solid fa-tag text-slate-300 text-4xl"></i>
+        <p class="text-slate-500 text-sm">Select an account, channel and month to see theme analysis.</p>
+      </div>
+      {% endif %}
     </div>
 
   </div><!-- /p-4 -->
@@ -1354,5 +1429,14 @@ document.addEventListener('keydown', function(e) {
     closeAnalyticsModal();
   }
 });
+
+// ── Theme Analysis filter ──────────────────────────────────────────────────
+function filterThemeRows(q) {
+  q = q.toLowerCase().trim();
+  document.querySelectorAll('#themeAnalysisTable tbody .theme-row').forEach(function(row) {
+    const theme = row.querySelector('td:first-child').textContent.toLowerCase();
+    row.style.display = (!q || theme.includes(q)) ? '' : 'none';
+  });
+}
 </script>
 {% endblock %}

@@ -39,7 +39,7 @@
             <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
               <i class="fa-solid fa-building mr-1 text-slate-400"></i> Account <span class="text-red-400">*</span>
             </label>
-            <select name="account_id" class="select-field" required>
+            <select name="account_id" id="addAccountSelect" class="select-field" required onchange="loadMappingOptions(this.value)">
               <option value="">Select account…</option>
               {% for acc in accounts %}
                 <option value="{{ acc.id }}" {% if filters.account == acc.id|stringformat:"s" %}selected{% endif %}>{{ acc.name }}</option>
@@ -51,7 +51,8 @@
             <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
               <i class="fa-solid fa-tag mr-1 text-slate-400"></i> Brand <span class="text-red-400">*</span>
             </label>
-            <input type="text" name="brand" placeholder="e.g. MOBITEL - 1298" class="input-field" required>
+            <input type="text" name="brand" id="brandInput" list="brandOptions" placeholder="Type or select from schedule…" class="input-field" required autocomplete="off">
+            <datalist id="brandOptions"></datalist>
             <p class="mt-1 text-[10px] text-slate-400">As it appears in the Schedule file (Brand column)</p>
           </div>
 
@@ -59,7 +60,8 @@
             <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
               <i class="fa-solid fa-chart-line mr-1 text-slate-400"></i> LMRB Theme <span class="text-red-400">*</span>
             </label>
-            <input type="text" name="theme" placeholder="e.g. Combo Pack_Data_Talk_Text_Rs555_2 (15)(Sin)" class="input-field" required>
+            <input type="text" name="theme" id="themeInput" list="themeOptions" placeholder="Type or select from LMRB data…" class="input-field" required autocomplete="off">
+            <datalist id="themeOptions"></datalist>
             <p class="mt-1 text-[10px] text-slate-400">As it appears in LMRB Advt_Theme or MapOnline Theme column</p>
           </div>
 
@@ -68,7 +70,8 @@
               <i class="fa-solid fa-file-invoice mr-1 text-slate-400"></i> TC Theme
               <span class="text-slate-400 font-normal normal-case ml-1">optional</span>
             </label>
-            <input type="text" name="tc_theme" placeholder="e.g. MOBITEL- 1298" class="input-field">
+            <input type="text" name="tc_theme" id="tcThemeAddInput" list="tcThemeOptions" placeholder="Type or select from TC data…" class="input-field" autocomplete="off">
+            <datalist id="tcThemeOptions"></datalist>
             <p class="mt-1 text-[10px] text-slate-400">As it appears in the Transmission Certificate (TC) file</p>
           </div>
 
@@ -230,6 +233,32 @@
 
 {% block extra_js %}
 <script>
+// ── Dropdown options loader ────────────────────────────────────────────────
+function loadMappingOptions(accountId) {
+  if (!accountId) return;
+  fetch(`/dashboard/brand-mappings/options/?account_id=${encodeURIComponent(accountId)}`)
+    .then(r => r.json())
+    .then(data => {
+      _fillDatalist('brandOptions',   data.brands    || []);
+      _fillDatalist('themeOptions',   data.themes    || []);
+      _fillDatalist('tcThemeOptions', data.tc_themes || []);
+    })
+    .catch(() => {});
+}
+
+function _fillDatalist(id, items) {
+  const dl = document.getElementById(id);
+  if (!dl) return;
+  dl.innerHTML = items.map(v => `<option value="${v.replace(/"/g, '&quot;')}"></option>`).join('');
+}
+
+// Auto-load if account is pre-selected
+(function() {
+  const sel = document.getElementById('addAccountSelect');
+  if (sel && sel.value) loadMappingOptions(sel.value);
+})();
+
+// ── TC Theme inline edit modal ─────────────────────────────────────────────
 function editTcTheme(mappingId, currentValue) {
   document.getElementById('tcMappingId').value = mappingId;
   document.getElementById('tcThemeInput').value = currentValue;
