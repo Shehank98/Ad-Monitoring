@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
-{% block title %}Full Analytics — {{ channel }} · {{ month }}{% endblock %}
+{% block title %}Full Analytics - {{ channel }} · {{ month }}{% endblock %}
 {% block page_title %}Full Analytics{% endblock %}
-{% block page_subtitle %}Comprehensive LMRB data dashboard — {{ channel }}{% if month %} · {{ month }}{% endif %}{% endblock %}
+{% block page_subtitle %}Comprehensive LMRB data dashboard - {{ channel }}{% if month %} · {{ month }}{% endif %}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -46,7 +46,7 @@
   <div class="min-w-[160px]">
     <label class="block text-xs font-semibold text-slate-500 mb-1">Account</label>
     <select name="account_id" class="select-field" onchange="this.form.submit()">
-      <option value="">— Select —</option>
+      <option value="">- Select -</option>
       {% for acct in accounts %}
         <option value="{{ acct.id }}" {% if acct.id|stringformat:"s" == account_id %}selected{% endif %}>{{ acct.name }}</option>
       {% endfor %}
@@ -56,7 +56,7 @@
   <div class="min-w-[160px]">
     <label class="block text-xs font-semibold text-slate-500 mb-1">Channel</label>
     <select name="channel" class="select-field" onchange="this.form.submit()">
-      <option value="">— Select —</option>
+      <option value="">- Select -</option>
       {% for ch in channels %}
         <option value="{{ ch }}" {% if ch == channel %}selected{% endif %}>{{ ch }}</option>
       {% endfor %}
@@ -68,7 +68,7 @@
   <div class="min-w-[160px]">
     <label class="block text-xs font-semibold text-slate-500 mb-1">Month</label>
     <select name="month" class="select-field" onchange="this.form.submit()">
-      <option value="">— Select —</option>
+      <option value="">- Select -</option>
       {% for m in months %}
         <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>
       {% endfor %}
@@ -165,14 +165,14 @@
   </div>
   <div class="kpi-card">
     <div class="kpi-val text-emerald-700 text-lg" id="kpi-cost">
-      {% if kpis.total_cost is not None %}{{ kpis.total_cost|floatformat:0 }}{% else %}—{% endif %}
+      {% if kpis.total_cost is not None %}{{ kpis.total_cost|floatformat:0 }}{% else %}-{% endif %}
     </div>
     <div class="kpi-lbl">Total Cost</div>
   </div>
 </div>
 
-<!-- ═══════════════ SECTION 1 — OVERVIEW ════════════════════════════════ -->
-<p class="section-hdr"><i class="fa-solid fa-globe mr-2 text-blue-500"></i>Section 1 — Overview</p>
+<!-- ═══════════════ SECTION 1 - OVERVIEW ════════════════════════════════ -->
+<p class="section-hdr"><i class="fa-solid fa-globe mr-2 text-blue-500"></i>Section 1 - Overview</p>
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
 
   <div class="chart-card">
@@ -201,8 +201,8 @@
 
 </div>
 
-<!-- ═══════════════ SECTION 2 — PROGRAMME ANALYSIS ══════════════════════ -->
-<p class="section-hdr"><i class="fa-solid fa-tv mr-2 text-indigo-500"></i>Section 2 — Programme Analysis</p>
+<!-- ═══════════════ SECTION 2 - PROGRAMME ANALYSIS ══════════════════════ -->
+<p class="section-hdr"><i class="fa-solid fa-tv mr-2 text-indigo-500"></i>Section 2 - Programme Analysis</p>
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
 
   <div class="chart-card">
@@ -212,7 +212,7 @@
   </div>
 
   <div class="chart-card">
-    <button class="export-btn" onclick="exportChart('c6')"><i class="fa-solid fa-moon text-violet-500"></i> Ads per Programme — Prime vs Non-Prime</h4>
+    <button class="export-btn" onclick="exportChart('c6')"><i class="fa-solid fa-moon text-violet-500"></i> Ads per Programme - Prime vs Non-Prime</h4>
     <div class="chart-wrap" style="height:240px;"><canvas id="c6"></canvas></div>
   </div>
 
@@ -230,13 +230,13 @@
 
 </div>
 
-<!-- ═══════════════ SECTION 3 — BREAK & POSITION ANALYSIS ═══════════════ -->
-<p class="section-hdr"><i class="fa-solid fa-list-ol mr-2 text-emerald-500"></i>Section 3 — Break &amp; Position Analysis</p>
+<!-- ═══════════════ SECTION 3 - BREAK & POSITION ANALYSIS ═══════════════ -->
+<p class="section-hdr"><i class="fa-solid fa-list-ol mr-2 text-emerald-500"></i>Section 3 - Break &amp; Position Analysis</p>
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
 
   <div class="chart-card">
     <button class="export-btn" onclick="exportChart('c9')"><i class="fa-solid fa-download"></i></button>
-    <h4><i class="fa-solid fa-arrow-down-1-9 text-slate-500"></i> Ad Position Distribution (AdPos — where in the programme)</h4>
+    <h4><i class="fa-solid fa-arrow-down-1-9 text-slate-500"></i> Ad Position Distribution (AdPos - where in the programme)</h4>
     <div class="chart-wrap" style="height:200px;"><canvas id="c9"></canvas></div>
   </div>
 
@@ -248,7 +248,7 @@
 
   <div class="chart-card">
     <button class="export-btn" onclick="exportChart('c11')"><i class="fa-solid fa-download"></i></button>
-    <h4><i class="fa-solid fa-crosshairs text-red-500"></i> Position in Break (PosinBrk — 1st / mid / last)</h4>
+    <h4><i class="fa-solid fa-crosshairs text-red-500"></i> Position in Break (PosinBrk - 1st / mid / last)</h4>
     <div class="chart-wrap" style="height:200px;"><canvas id="c11"></canvas></div>
   </div>
 
@@ -260,14 +260,14 @@
 
   <div class="chart-card lg:col-span-2">
     <button class="export-btn" onclick="exportChart('c13')"><i class="fa-solid fa-download"></i></button>
-    <h4><i class="fa-solid fa-star text-amber-500"></i> Premium Positions — First vs Last in Break (% of ads in position 1 vs final position)</h4>
+    <h4><i class="fa-solid fa-star text-amber-500"></i> Premium Positions - First vs Last in Break (% of ads in position 1 vs final position)</h4>
     <div class="chart-wrap" style="height:180px;"><canvas id="c13"></canvas></div>
   </div>
 
 </div>
 
-<!-- ═══════════════ SECTION 4 — DURATION & COST ══════════════════════════ -->
-<p class="section-hdr"><i class="fa-solid fa-clock mr-2 text-orange-500"></i>Section 4 — Duration &amp; Cost</p>
+<!-- ═══════════════ SECTION 4 - DURATION & COST ══════════════════════════ -->
+<p class="section-hdr"><i class="fa-solid fa-clock mr-2 text-orange-500"></i>Section 4 - Duration &amp; Cost</p>
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
 
   <div class="chart-card">
@@ -290,8 +290,8 @@
 
 </div>
 
-<!-- ═══════════════ SECTION 5 — SPONSORSHIP DEEP DIVE ═══════════════════ -->
-<p class="section-hdr"><i class="fa-solid fa-award mr-2 text-amber-500"></i>Section 5 — Sponsorship Deep Dive</p>
+<!-- ═══════════════ SECTION 5 - SPONSORSHIP DEEP DIVE ═══════════════════ -->
+<p class="section-hdr"><i class="fa-solid fa-award mr-2 text-amber-500"></i>Section 5 - Sponsorship Deep Dive</p>
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
 
   <div class="chart-card">
@@ -302,7 +302,7 @@
 
   <div class="chart-card">
     <button class="export-btn" onclick="exportChart('c18')"><i class="fa-solid fa-download"></i></button>
-    <h4><i class="fa-solid fa-moon text-violet-500"></i> Sponsorship — Prime vs Non-Prime per Product Group</h4>
+    <h4><i class="fa-solid fa-moon text-violet-500"></i> Sponsorship - Prime vs Non-Prime per Product Group</h4>
     <div class="chart-wrap" style="height:220px;"><canvas id="c18"></canvas></div>
   </div>
 
@@ -314,7 +314,7 @@
 
   <div class="chart-card">
     <button class="export-btn" onclick="exportChart('c20')"><i class="fa-solid fa-download"></i></button>
-    <h4><i class="fa-solid fa-crosshairs text-red-500"></i> Sponsorship — Position in Break</h4>
+    <h4><i class="fa-solid fa-crosshairs text-red-500"></i> Sponsorship - Position in Break</h4>
     <div class="chart-wrap" style="height:220px;"><canvas id="c20"></canvas></div>
   </div>
 
@@ -326,25 +326,25 @@
 
 </div>
 
-<!-- ═══════════════ SECTION 6 — HEATMAPS ════════════════════════════════ -->
-<p class="section-hdr"><i class="fa-solid fa-fire mr-2 text-red-500"></i>Section 6 — Heatmaps</p>
+<!-- ═══════════════ SECTION 6 - HEATMAPS ════════════════════════════════ -->
+<p class="section-hdr"><i class="fa-solid fa-fire mr-2 text-red-500"></i>Section 6 - Heatmaps</p>
 <div class="space-y-4 mb-6">
 
   <div class="chart-card" id="hmDayProg">
     <button class="export-btn" onclick="exportChart('c22')"><i class="fa-solid fa-download"></i></button>
-    <h4><i class="fa-solid fa-table-cells text-red-500"></i> Heatmap — Day of Week × Programme (ad count intensity)</h4>
+    <h4><i class="fa-solid fa-table-cells text-red-500"></i> Heatmap - Day of Week × Programme (ad count intensity)</h4>
     <div class="chart-wrap" style="min-height:260px;"><canvas id="c22"></canvas></div>
   </div>
 
   <div class="chart-card" id="hmDayHour">
     <button class="export-btn" onclick="exportChart('c23')"><i class="fa-solid fa-download"></i></button>
-    <h4><i class="fa-solid fa-table-cells text-orange-500"></i> Heatmap — Day of Week × Hour (ad count intensity)</h4>
+    <h4><i class="fa-solid fa-table-cells text-orange-500"></i> Heatmap - Day of Week × Hour (ad count intensity)</h4>
     <div class="chart-wrap" style="height:280px;"><canvas id="c23"></canvas></div>
   </div>
 
   <div class="chart-card" id="hmPrimePg">
     <button class="export-btn" onclick="exportChart('c24')"><i class="fa-solid fa-download"></i></button>
-    <h4><i class="fa-solid fa-table-cells text-violet-500"></i> Heatmap — Prime/Non-Prime × Product Group</h4>
+    <h4><i class="fa-solid fa-table-cells text-violet-500"></i> Heatmap - Prime/Non-Prime × Product Group</h4>
     <div class="chart-wrap" style="height:260px;"><canvas id="c24"></canvas></div>
   </div>
 
@@ -375,7 +375,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
 /* ════════════════════════════════════════════════════════════════
-   RAW DATA — injected from view (pre-serialised, null-safe JSON)
+   RAW DATA - injected from view (pre-serialised, null-safe JSON)
    ════════════════════════════════════════════════════════════════ */
 const ALL_ROWS = {{ rows_json|safe }};
 const PRIME_START = {{ prime_start_h }};
@@ -475,8 +475,8 @@ function sumByKey(arr, groupKey, valKey, top=15) {
 function stackedByKey(arr, groupKey, top=10) {
   const prime = {}, noprime = {};
   for (const r of arr) {
-    const k = r[groupKey] != null ? String(r[groupKey]) : '—';
-    if (!k || k==='—') continue;
+    const k = r[groupKey] != null ? String(r[groupKey]) : '-';
+    if (!k || k==='-') continue;
     if (r.prime) prime[k] = (prime[k]||0)+1;
     else noprime[k] = (noprime[k]||0)+1;
   }
@@ -551,7 +551,7 @@ function updateKPIs(rows) {
   document.getElementById('kpi-primepct').textContent = rows.length ? Math.round(prime/rows.length*100)+'%' : '0%';
   document.getElementById('kpi-spon').textContent     = spon;
   const hasCost = rows.some(r => r.cost != null);
-  document.getElementById('kpi-cost').textContent     = hasCost ? Math.round(totalCost).toLocaleString() : '—';
+  document.getElementById('kpi-cost').textContent     = hasCost ? Math.round(totalCost).toLocaleString() : '-';
   document.getElementById('rowCount').textContent     = rows.length;
 }
 
@@ -606,7 +606,7 @@ function buildC5(rows) { // Top 10 Programmes
     HBAR_OPT());
 }
 
-function buildC6(rows) { // Ads per Programme — prime vs non-prime (top 12)
+function buildC6(rows) { // Ads per Programme - prime vs non-prime (top 12)
   const { labels, prime, nonprime } = stackedByKey(rows.filter(r=>r.prog), 'prog', 12);
   makeOrUpdate('c6','bar', {
     labels,
@@ -915,7 +915,7 @@ document.addEventListener('DOMContentLoaded', () => {
   rebuildAll();
 });
 
-/* ── Row Detail Modal (placeholder — full columns shown) ────────── */
+/* ── Row Detail Modal (placeholder - full columns shown) ────────── */
 window.closeModal = function() {
   document.getElementById('rowModal').style.display = 'none';
 };

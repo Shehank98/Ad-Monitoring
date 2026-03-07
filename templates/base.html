@@ -3,14 +3,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{% block title %}Ad Monitor{% endblock %} — Ogilvy Lanka</title>
+  <title>{% block title %}Ogilvy Nova{% endblock %} - Ogilvy Media</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
       theme: {
         extend: {
           colors: {
-            navy: { 950:'#060d18', 900:'#0b1726', 800:'#0f2340', 700:'#173264' },
+            og: {
+              red:       '#EB3F43',
+              black:     '#000000',
+              darkgray:  '#545659',
+              lightgray: '#A6A6A8',
+              darkrose:  '#F58E8F',
+              lightrose: '#FBCECE',
+              offwhite:  '#F0F0F0',
+            },
           },
           fontFamily: { sans: ['Inter','ui-sans-serif','system-ui'] }
         }
@@ -21,12 +29,22 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
   <style>
+    :root {
+      --og-red:        #EB3F43;
+      --og-black:      #000000;
+      --og-dark-gray:  #545659;
+      --og-light-gray: #A6A6A8;
+      --og-dark-rose:  #F58E8F;
+      --og-light-rose: #FBCECE;
+      --og-off-white:  #F0F0F0;
+    }
+
     body { font-family: 'Inter', sans-serif; }
 
     /* ── Inputs ──────────────────────────────────────────────────── */
     .input-field {
       display: block; width: 100%;
-      border-radius: 0.625rem;
+      border-radius: 0.5rem;
       border: 1.5px solid #e2e8f0;
       padding: 0.5rem 0.75rem;
       font-size: 0.875rem; color: #1e293b;
@@ -36,13 +54,13 @@
       outline: none;
     }
     .input-field::placeholder { color: #94a3b8; }
-    .input-field:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
+    .input-field:focus { border-color: var(--og-red); box-shadow: 0 0 0 3px rgba(235,63,67,.12); }
 
     /* ── Select dropdowns ────────────────────────────────────────── */
     .select-field,
     select.input-field {
       display: block; width: 100%;
-      border-radius: 0.625rem;
+      border-radius: 0.5rem;
       border: 1.5px solid #e2e8f0;
       padding: 0.5rem 2.5rem 0.5rem 0.75rem;
       font-size: 0.875rem; color: #1e293b;
@@ -58,22 +76,22 @@
       outline: none;
     }
     .select-field:focus,
-    select.input-field:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
+    select.input-field:focus { border-color: var(--og-red); box-shadow: 0 0 0 3px rgba(235,63,67,.12); }
 
     /* ── Buttons ─────────────────────────────────────────────────── */
     .btn-primary {
       display: inline-flex; align-items: center; gap: .5rem;
-      border-radius: .625rem; background: #2563eb;
+      border-radius: .5rem; background: var(--og-red);
       padding: .5rem 1rem; font-size: .875rem; font-weight: 600; color: #fff;
-      box-shadow: 0 1px 3px rgba(37,99,235,.25);
-      transition: background .15s; outline: none; cursor: pointer;
+      box-shadow: 0 1px 3px rgba(235,63,67,.25);
+      transition: background .15s; outline: none; cursor: pointer; border: none;
     }
-    .btn-primary:hover { background: #1d4ed8; }
-    .btn-primary:focus { box-shadow: 0 0 0 3px rgba(59,130,246,.4); }
+    .btn-primary:hover { background: #d43036; }
+    .btn-primary:focus { box-shadow: 0 0 0 3px rgba(235,63,67,.3); }
 
     .btn-secondary {
       display: inline-flex; align-items: center; gap: .5rem;
-      border-radius: .625rem; background: #fff;
+      border-radius: .5rem; background: #fff;
       border: 1.5px solid #e2e8f0;
       padding: .5rem 1rem; font-size: .875rem; font-weight: 600; color: #475569;
       transition: background .15s, border-color .15s; cursor: pointer;
@@ -82,9 +100,9 @@
 
     .btn-danger {
       display: inline-flex; align-items: center; gap: .5rem;
-      border-radius: .625rem; background: #dc2626;
+      border-radius: .5rem; background: #dc2626;
       padding: .5rem 1rem; font-size: .875rem; font-weight: 600; color: #fff;
-      transition: background .15s; cursor: pointer;
+      transition: background .15s; cursor: pointer; border: none;
     }
     .btn-danger:hover { background: #b91c1c; }
 
@@ -112,33 +130,69 @@
     .data-table tr:hover td { background: rgba(248,250,252,.8); }
 
     /* ── Sidebar ─────────────────────────────────────────────────── */
-    .sidebar { background: linear-gradient(170deg, #0b1726 0%, #0e1f3a 60%, #112040 100%); }
+    .sidebar {
+      background: var(--og-black);
+      transition: width .2s ease, min-width .2s ease;
+    }
+    .sidebar-brand-text, .nav-text, .nav-label,
+    .user-pill-detail, .sidebar-footer-text { transition: opacity .15s, width .1s; }
+
+    /* Collapsed state */
+    body.sidebar-collapsed .sidebar {
+      width: 3.25rem !important;
+      min-width: 3.25rem !important;
+    }
+    body.sidebar-collapsed .sidebar-brand-text,
+    body.sidebar-collapsed .nav-text,
+    body.sidebar-collapsed .nav-label,
+    body.sidebar-collapsed .user-pill-detail,
+    body.sidebar-collapsed .sidebar-footer-text {
+      opacity: 0; width: 0; overflow: hidden; pointer-events: none;
+    }
+    body.sidebar-collapsed .user-pill { display: none; }
+    body.sidebar-collapsed .nav-item { justify-content: center; padding-left: 0; padding-right: 0; }
+    body.sidebar-collapsed .nav-icon { width: auto; }
 
     .nav-label {
       padding: .75rem .75rem .2rem;
       font-size: .6rem; font-weight: 700; letter-spacing: .12em;
-      color: #334155; text-transform: uppercase;
+      color: #374151; text-transform: uppercase;
     }
 
     .nav-item {
       position: relative; display: flex; align-items: center; gap: .625rem;
       padding: .45rem .75rem; border-radius: .5rem;
-      font-size: .8rem; font-weight: 500; color: #64748b;
+      font-size: .8rem; font-weight: 500; color: #6b7280;
       text-decoration: none; cursor: pointer;
       transition: background .15s, color .15s;
     }
-    .nav-item:hover { background: rgba(255,255,255,.06); color: #cbd5e1; }
+    .nav-item:hover { background: rgba(235,63,67,.1); color: #e2e8f0; }
     .nav-item.active {
-      background: rgba(59,130,246,.18);
-      color: #e2e8f0; font-weight: 600;
+      background: rgba(235,63,67,.15);
+      color: #fff; font-weight: 600;
     }
     .nav-item.active::before {
       content: ''; position: absolute; left: 0; top: 25%; bottom: 25%;
-      width: 3px; border-radius: 0 3px 3px 0; background: #3b82f6;
+      width: 3px; border-radius: 0 3px 3px 0; background: var(--og-red);
     }
+    body.sidebar-collapsed .nav-item.active::before { display: none; }
     .nav-icon { width: .9rem; text-align: center; flex-shrink: 0; opacity: .75; font-size: .75rem; }
     .nav-item.active .nav-icon,
     .nav-item:hover .nav-icon { opacity: 1; }
+
+    /* Sidebar toggle btn */
+    #sidebar-toggle {
+      background: none; border: none; cursor: pointer;
+      color: #6b7280; padding: .25rem .375rem; border-radius: .375rem;
+      transition: color .15s, background .15s; flex-shrink: 0;
+    }
+    #sidebar-toggle:hover { color: #fff; background: rgba(235,63,67,.15); }
+
+    /* ── Top bar red accent line ─────────────────────────────────── */
+    .topbar-accent {
+      display: block; height: 2px; background: var(--og-red);
+      position: absolute; bottom: 0; left: 0; right: 0;
+    }
   </style>
   {% block extra_head %}{% endblock %}
 </head>
@@ -147,21 +201,27 @@
 <div class="flex h-screen overflow-hidden">
 
   <!-- ════════ SIDEBAR ════════════════════════════════════════════ -->
-  <aside class="sidebar flex flex-col w-56 min-h-screen flex-shrink-0 shadow-2xl">
+  <aside class="sidebar flex flex-col w-56 min-h-screen flex-shrink-0 shadow-2xl" id="app-sidebar">
 
-    <!-- Logo -->
-    <div class="flex items-center gap-2.5 px-4 py-4 border-b border-white/[.06]">
-      <div class="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg">
-        <i class="fa-solid fa-tv text-white text-xs"></i>
+    <!-- Logo row + collapse toggle -->
+    <div class="flex items-center gap-2 px-3 py-4 border-b border-white/[.08]">
+      {% if sidebar_logo_url %}
+        <img src="{{ sidebar_logo_url }}" alt="Ogilvy" class="h-6 w-auto object-contain flex-shrink-0 sidebar-logo-img"
+             style="filter:brightness(0) invert(1);">
+      {% else %}
+        <div class="w-7 h-7 flex items-center justify-center flex-shrink-0" style="color:var(--og-red);font-size:1.1rem;font-weight:900;">O</div>
+      {% endif %}
+      <div class="min-w-0 flex-1 sidebar-brand-text">
+        <p class="text-white font-bold text-sm leading-tight tracking-tight truncate">Ogilvy Nova</p>
+        <p class="text-[9px] font-medium tracking-wide truncate" style="color:#545659;">OGILVY MEDIA</p>
       </div>
-      <div>
-        <p class="text-white font-bold text-sm leading-tight tracking-tight">Ad Monitor</p>
-        <p class="text-slate-600 text-[9px] font-medium tracking-wide">OGILVY LANKA</p>
-      </div>
+      <button id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
+        <i class="fa-solid fa-bars text-sm"></i>
+      </button>
     </div>
 
     <!-- User pill -->
-    <div class="mx-3 mt-3 mb-1 px-3 py-2.5 rounded-xl"
+    <div class="user-pill mx-3 mt-3 mb-1 px-3 py-2.5 rounded-xl"
          style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07)">
       <div class="flex items-center gap-2">
         <div class="w-7 h-7 rounded-lg flex items-center justify-center text-white font-bold text-[10px] flex-shrink-0
@@ -172,12 +232,12 @@
           {% else %}bg-gradient-to-br from-orange-400 to-orange-600{% endif %}">
           {{ request.user.initials }}
         </div>
-        <div class="min-w-0 flex-1">
+        <div class="min-w-0 flex-1 user-pill-detail">
           <p class="text-slate-200 text-xs font-semibold truncate leading-tight">{{ request.user.name }}</p>
           <p class="text-slate-500 text-[9px] truncate mt-0.5">{{ request.user.email }}</p>
         </div>
       </div>
-      <div class="mt-2">
+      <div class="mt-2 user-pill-detail">
         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-semibold
           {% if request.user.role == 'super_admin' %}bg-purple-500/20 text-purple-300
           {% elif request.user.role == 'admin' %}bg-blue-500/20 text-blue-300
@@ -199,77 +259,77 @@
     <nav class="flex-1 px-2 py-2 overflow-y-auto">
       {% with path=request.path %}
 
-      <p class="nav-label">Overview</p>
+      <p class="nav-label nav-text">Overview</p>
       <a href="/dashboard/" class="nav-item {% if path == '/dashboard/' %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-house"></i> Dashboard
+        <i class="nav-icon fa-solid fa-house"></i><span class="nav-text">Dashboard</span>
       </a>
 
       {% if request.user.role in 'super_admin,admin' %}
-        <p class="nav-label">Admin</p>
+        <p class="nav-label nav-text">Admin</p>
         <a href="/dashboard/users/" class="nav-item {% if '/users/' in path %}active{% endif %}">
-          <i class="nav-icon fa-solid fa-users"></i> Users
+          <i class="nav-icon fa-solid fa-users"></i><span class="nav-text">Users</span>
         </a>
         <a href="/dashboard/accounts/" class="nav-item {% if '/accounts/' in path %}active{% endif %}">
-          <i class="nav-icon fa-solid fa-building"></i> Accounts
+          <i class="nav-icon fa-solid fa-building"></i><span class="nav-text">Accounts</span>
         </a>
         <a href="/dashboard/channels/" class="nav-item {% if '/channels/' in path %}active{% endif %}">
-          <i class="nav-icon fa-solid fa-tv"></i> Channels
+          <i class="nav-icon fa-solid fa-tv"></i><span class="nav-text">Channels</span>
         </a>
         {% if request.user.role == 'super_admin' %}
         <a href="/dashboard/settings/" class="nav-item {% if '/settings/' in path %}active{% endif %}">
-          <i class="nav-icon fa-solid fa-sliders"></i> Settings
+          <i class="nav-icon fa-solid fa-sliders"></i><span class="nav-text">Settings</span>
         </a>
         {% endif %}
       {% endif %}
 
       {% if request.user.role != 'operations' %}
-        <p class="nav-label">Schedules</p>
+        <p class="nav-label nav-text">Schedules</p>
         <a href="/dashboard/schedules/" class="nav-item {% if '/schedules/' in path and 'upload' not in path %}active{% endif %}">
-          <i class="nav-icon fa-solid fa-calendar-days"></i> View Schedules
+          <i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-text">View Schedules</span>
         </a>
         {% if request.user.role in 'planner,super_admin,admin' %}
           <a href="/dashboard/schedules/upload/" class="nav-item {% if 'schedules/upload' in path %}active{% endif %}">
-            <i class="nav-icon fa-solid fa-file-arrow-up"></i> Upload Schedule
+            <i class="nav-icon fa-solid fa-file-arrow-up"></i><span class="nav-text">Upload Schedule</span>
           </a>
         {% endif %}
       {% endif %}
 
-      <p class="nav-label">Monitoring</p>
+      <p class="nav-label nav-text">Monitoring</p>
       <a href="/dashboard/monitoring/" class="nav-item {% if '/monitoring/' in path and 'upload' not in path and '/monitor/' not in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-chart-bar"></i> View Data
+        <i class="nav-icon fa-solid fa-chart-bar"></i><span class="nav-text">View Data</span>
       </a>
       {% if request.user.role in 'operations,super_admin,admin' %}
         <a href="/dashboard/monitoring/upload/" class="nav-item {% if 'monitoring/upload' in path %}active{% endif %}">
-          <i class="nav-icon fa-solid fa-cloud-arrow-up"></i> Upload Data
+          <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload Data</span>
         </a>
       {% endif %}
       <a href="/dashboard/monitor/" class="nav-item {% if '/monitor/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-gauge-high"></i> Dashboard
+        <i class="nav-icon fa-solid fa-gauge-high"></i><span class="nav-text">Dashboard</span>
       </a>
 
-      <p class="nav-label">Tools</p>
+      <p class="nav-label nav-text">Tools</p>
       <a href="/verify/" class="nav-item {% if '/verify/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-magnifying-glass-chart"></i> Verify Ads
+        <i class="nav-icon fa-solid fa-magnifying-glass-chart"></i><span class="nav-text">Verify Ads</span>
       </a>
       <a href="/dashboard/brand-mappings/" class="nav-item {% if '/brand-mappings/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-map"></i> Brand Mappings
+        <i class="nav-icon fa-solid fa-map"></i><span class="nav-text">Brand Mappings</span>
       </a>
 
-      <p class="nav-label">Transmission (TC)</p>
+      <p class="nav-label nav-text">Transmission (TC)</p>
       <a href="/dashboard/tc/" class="nav-item {% if '/tc/' in path and 'upload' not in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-file-invoice"></i> TC Reports
+        <i class="nav-icon fa-solid fa-file-invoice"></i><span class="nav-text">TC Reports</span>
       </a>
       {% if request.user.role in 'operations,super_admin,admin,planner' %}
       <a href="/dashboard/tc/upload/" class="nav-item {% if 'tc/upload' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-cloud-arrow-up"></i> Upload TC
+        <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload TC</span>
       </a>
       {% endif %}
       <a href="/dashboard/summary/" class="nav-item {% if '/summary/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-file-contract"></i> Summary Sheet
+        <i class="nav-icon fa-solid fa-file-contract"></i><span class="nav-text">Summary Sheet</span>
       </a>
       {% if request.user.role in 'super_admin,admin,operations' %}
       <a href="/dashboard/manual/" class="nav-item {% if '/manual/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-link"></i> Manual Reconcile
+        <i class="nav-icon fa-solid fa-link"></i><span class="nav-text">Manual Reconcile</span>
       </a>
       {% endif %}
 
@@ -277,16 +337,18 @@
     </nav>
 
     <!-- Sign out -->
-    <div class="px-2 pb-3 pt-2 border-t border-white/[.06]">
+    <div class="px-2 pb-3 pt-2 border-t border-white/[.08]">
       {% if request.user.must_change_password %}
         <a href="/auth/change-password/"
            class="nav-item text-amber-400 hover:bg-amber-500/10 hover:text-amber-300 mb-1">
-          <i class="nav-icon fa-solid fa-triangle-exclamation"></i> Change Password
+          <i class="nav-icon fa-solid fa-triangle-exclamation"></i>
+          <span class="nav-text sidebar-footer-text">Change Password</span>
         </a>
       {% endif %}
       <a href="/auth/logout/"
          class="nav-item text-slate-600 hover:text-red-400 hover:bg-red-500/10">
-        <i class="nav-icon fa-solid fa-arrow-right-from-bracket"></i> Sign Out
+        <i class="nav-icon fa-solid fa-arrow-right-from-bracket"></i>
+        <span class="nav-text sidebar-footer-text">Sign Out</span>
       </a>
     </div>
   </aside>
@@ -295,7 +357,7 @@
   <main class="flex-1 flex flex-col overflow-hidden">
 
     <!-- Top bar -->
-    <header class="flex items-center justify-between px-6 py-3 bg-white border-b border-slate-100 shadow-sm flex-shrink-0">
+    <header class="relative flex items-center justify-between px-6 py-3 bg-white border-b border-slate-100 shadow-sm flex-shrink-0">
       <div>
         <h1 class="text-sm font-bold text-slate-800 leading-tight">{% block page_title %}Dashboard{% endblock %}</h1>
         <p class="text-[11px] text-slate-400 mt-0.5">{% block page_subtitle %}{% endblock %}</p>
@@ -311,6 +373,7 @@
         </div>
         <span class="text-xs font-medium text-slate-600">{{ request.user.name }}</span>
       </div>
+      <span class="topbar-accent"></span>
     </header>
 
     <!-- Flash messages -->
@@ -341,5 +404,22 @@
 
 </div>
 {% block extra_js %}{% endblock %}
+<script>
+  // ── Sidebar collapse ──────────────────────────────────────────────
+  (function(){
+    const KEY = 'sidebar_collapsed';
+    function apply(collapsed){
+      document.body.classList.toggle('sidebar-collapsed', collapsed);
+    }
+    // Restore from localStorage
+    apply(localStorage.getItem(KEY) === '1');
+
+    window.toggleSidebar = function(){
+      const collapsed = !document.body.classList.contains('sidebar-collapsed');
+      apply(collapsed);
+      localStorage.setItem(KEY, collapsed ? '1' : '0');
+    };
+  })();
+</script>
 </body>
 </html>

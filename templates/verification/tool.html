@@ -208,7 +208,7 @@
       const data = await res.json();
       if (!data.ok) { alert('Error: ' + data.error); return; }
       if (!data.channels.length) {
-        chSel.innerHTML = '<option value="">No overlapping data — upload schedules and monitoring first</option>';
+        chSel.innerHTML = '<option value="">No overlapping data - upload schedules and monitoring first</option>';
         return;
       }
       chSel.innerHTML = '<option value="">Select channel…</option>' +
@@ -281,7 +281,7 @@
     const mapMsg = mapOk
       ? `${data.mapping_count} mapping${data.mapping_count !== 1 ? 's' : ''} ready` +
         (data.brands.length ? `<br><span class="opacity-75">${data.brands.join(', ')}</span>` : '')
-      : 'No brand mappings yet — <a href="/dashboard/brand-mappings/" target="_blank" class="underline font-semibold">add mappings →</a>';
+      : 'No brand mappings yet - <a href="/dashboard/brand-mappings/" target="_blank" class="underline font-semibold">add mappings →</a>';
 
     document.getElementById('preview-grid').innerHTML = `
       <div class="p-4 bg-slate-50 rounded-xl border border-slate-200">
@@ -321,7 +321,7 @@
       setMode('smart');
       return;
     }
-    document.getElementById('prev-run-at').textContent = `— last run ${data.last_run_at}`;
+    document.getElementById('prev-run-at').textContent = `- last run ${data.last_run_at}`;
     const pills = [
       { label: 'Matched',    n: data.matched,           color: 'emerald' },
       { label: 'Prog. Miss', n: data.programme_mismatch, color: 'amber' },

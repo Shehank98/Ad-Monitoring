@@ -55,6 +55,7 @@ urlpatterns = [
 
     # System Settings (super_admin only)
     path('settings/',                           views.system_settings, name='system_settings'),
+    path('settings/branding/',                  views.branding_upload, name='branding_upload'),
 
     # Sponsorship Reconciliation
     path('sponsorship/reconcile/',  views.sponsorship_reconcile,  name='sponsorship_reconcile'),

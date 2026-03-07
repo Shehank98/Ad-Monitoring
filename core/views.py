@@ -5,6 +5,7 @@ import uuid
 import pandas as pd
 from datetime import date as date_cls, datetime
 
+from django.conf import settings as django_settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Max, Min, Count
@@ -59,6 +60,18 @@ def _theme_adtype(theme: str, brand_map: dict, spon_kw: list) -> str:
         if kw and kw.lower() in key:
             return 'sponsorship'
     return 'other'
+
+
+# ── Branding helpers ──────────────────────────────────────────────────────────
+
+def _branding_url(asset_type: str) -> str:
+    """Return the media URL for a branding asset (logo/tartan), or empty string if not uploaded."""
+    branding_dir = os.path.join(django_settings.MEDIA_ROOT, 'branding')
+    for ext in ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'):
+        path = os.path.join(branding_dir, f'{asset_type}{ext}')
+        if os.path.exists(path):
+            return django_settings.MEDIA_URL + f'branding/{asset_type}{ext}'
+    return ''
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -2669,8 +2682,44 @@ def system_settings(request):
 
     return render(request, 'admin_panel/settings.html', {
         'categories': categories,
+        'branding_logo_url':   _branding_url('logo'),
+        'branding_tartan_url': _branding_url('tartan'),
     })
 
+
+# ── Branding upload ─────────────────────────────────────────────────────────────
+
+@login_required
+@role_required(['super_admin'])
+def branding_upload(request):
+    """Upload logo or tartan pattern image for the login page / sidebar."""
+    if request.method == 'POST':
+        asset_type = request.POST.get('asset_type')   # 'logo' or 'tartan'
+        uploaded   = request.FILES.get('file')
+        if asset_type not in ('logo', 'tartan') or not uploaded:
+            messages.error(request, 'Invalid upload — specify logo or tartan and provide a file.')
+            return redirect('system_settings')
+        # Determine extension
+        orig_name = uploaded.name.lower()
+        ext = '.png'
+        for e in ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'):
+            if orig_name.endswith(e):
+                ext = e
+                break
+        dest_dir = os.path.join(django_settings.MEDIA_ROOT, 'branding')
+        os.makedirs(dest_dir, exist_ok=True)
+        dest_path = os.path.join(dest_dir, f'{asset_type}{ext}')
+        # Remove previous files with different extensions
+        for e in ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'):
+            old = os.path.join(dest_dir, f'{asset_type}{e}')
+            if old != dest_path and os.path.exists(old):
+                os.remove(old)
+        with open(dest_path, 'wb') as fh:
+            for chunk in uploaded.chunks():
+                fh.write(chunk)
+        label = 'Logo' if asset_type == 'logo' else 'Tartan pattern'
+        messages.success(request, f'{label} uploaded successfully.')
+    return redirect('system_settings')
 
 
 # ── Sponsorship Reconciliation ─────────────────────────────────────────────────

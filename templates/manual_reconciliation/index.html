@@ -30,7 +30,7 @@
   <div class="flex-1 min-w-[180px]">
     <label class="block text-xs font-semibold text-slate-500 mb-1">Account</label>
     <select name="account_id" class="select-field" onchange="this.form.submit()">
-      <option value="">— Select Account —</option>
+      <option value="">- Select Account -</option>
       {% for acct in accounts %}
         <option value="{{ acct.id }}" {% if acct.id|stringformat:"s" == account_id %}selected{% endif %}>{{ acct.name }}</option>
       {% endfor %}
@@ -41,7 +41,7 @@
   <div class="flex-1 min-w-[180px]">
     <label class="block text-xs font-semibold text-slate-500 mb-1">Channel</label>
     <select name="channel" class="select-field" onchange="this.form.submit()">
-      <option value="">— Select Channel —</option>
+      <option value="">- Select Channel -</option>
       {% for ch in channels %}
         <option value="{{ ch }}" {% if ch == channel %}selected{% endif %}>{{ ch }}</option>
       {% endfor %}
@@ -54,7 +54,7 @@
   <div class="flex-1 min-w-[180px]">
     <label class="block text-xs font-semibold text-slate-500 mb-1">Month</label>
     <select name="month" class="select-field" onchange="this.form.submit()">
-      <option value="">— Select Month —</option>
+      <option value="">- Select Month -</option>
       {% for m in months %}
         <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>
       {% endfor %}
@@ -131,7 +131,7 @@
               {% for sr in unmatched_schedule %}
               <tr class="row-selectable" data-id="{{ sr.id }}" data-panel="sr"
                   onclick="selectRow(this,'sr')"
-                  title="{{ sr.brand }} | {{ sr.programme|default:'—' }} | {{ sr.start_time|slice:':5' }}–{{ sr.end_time|slice:':5' }}">
+                  title="{{ sr.brand }} | {{ sr.programme|default:'-' }} | {{ sr.start_time|slice:':5' }}–{{ sr.end_time|slice:':5' }}">
                 <td class="whitespace-nowrap text-xs">{{ sr.date }}</td>
                 <td class="font-medium text-xs">{{ sr.brand }}</td>
                 <td class="text-xs text-slate-500">{{ sr.duration }}s</td>
@@ -173,7 +173,7 @@
               <tr class="row-selectable" data-id="{{ tc.id }}" data-panel="tc"
                   data-date="{{ tc.date }}" data-time="{{ tc.aired_time }}"
                   onclick="selectRow(this,'tc')"
-                  title="{{ tc.tc_theme }} | {{ tc.programme|default:'—' }} | {{ tc.channel }}">
+                  title="{{ tc.tc_theme }} | {{ tc.programme|default:'-' }} | {{ tc.channel }}">
                 <td class="whitespace-nowrap text-xs">{{ tc.date }}</td>
                 <td class="font-medium text-xs">{{ tc.tc_theme }}</td>
                 <td class="text-xs text-slate-500">{{ tc.duration }}s</td>
@@ -216,8 +216,8 @@
                 <td class="font-medium text-xs">{{ lr.advt_theme }}</td>
                 <td class="text-xs text-slate-500">{{ lr.duration }}s</td>
                 <td class="text-xs text-slate-400 whitespace-nowrap">{{ lr.advt_time }}</td>
-                <td class="text-xs text-slate-400 max-w-[90px] truncate">{{ lr.program|default:"—" }}</td>
-                <td class="text-xs text-slate-400 text-center">{{ lr.ad_pos|default:"—" }}</td>
+                <td class="text-xs text-slate-400 max-w-[90px] truncate">{{ lr.program|default:"-" }}</td>
+                <td class="text-xs text-slate-400 text-center">{{ lr.ad_pos|default:"-" }}</td>
                 <td>
                   {% if sch_date_range.0 and sch_date_range.1 %}
                     {% if lr.date >= sch_date_range.0 and lr.date <= sch_date_range.1 %}
@@ -252,16 +252,16 @@
         <p class="text-sm">
           <span class="inline-flex items-center gap-1">
             <i class="fa-solid fa-calendar-check text-blue-500 text-xs"></i>
-            <span id="sel-sr-label" class="font-semibold text-blue-700">—</span>
+            <span id="sel-sr-label" class="font-semibold text-blue-700">-</span>
           </span>
           <span id="bar-tc-span" class="hidden">
             <i class="fa-solid fa-arrow-right mx-1 text-slate-300 text-xs"></i>
             <i class="fa-solid fa-file-certificate text-emerald-500 text-xs"></i>
-            <span id="sel-tc-label" class="font-semibold text-emerald-700">—</span>
+            <span id="sel-tc-label" class="font-semibold text-emerald-700">-</span>
           </span>
           <i class="fa-solid fa-arrow-right mx-1 text-slate-300 text-xs"></i>
           <i class="fa-solid fa-satellite-dish text-violet-500 text-xs"></i>
-          <span id="sel-lr-label" class="font-semibold text-violet-700">—</span>
+          <span id="sel-lr-label" class="font-semibold text-violet-700">-</span>
         </p>
       </div>
       <div class="flex-1 min-w-[220px]">
@@ -318,17 +318,17 @@
                 <span class="badge bg-blue-100 text-blue-700 text-[10px]">Sch+LMRB</span>
               {% endif %}
             </td>
-            <td class="whitespace-nowrap text-xs">{{ mm.schedule_row.date|default:"—" }}</td>
-            <td class="font-medium text-xs">{{ mm.schedule_row.brand|default:"—" }}</td>
-            <td class="text-xs">{{ mm.schedule_row.duration|default:"—" }}{% if mm.schedule_row %}s{% endif %}</td>
-            <td class="whitespace-nowrap text-xs">{{ mm.tc_row.date|default:"—" }}</td>
-            <td class="text-xs">{{ mm.tc_row.tc_theme|default:"—" }}</td>
-            <td class="text-xs text-slate-400 whitespace-nowrap">{{ mm.tc_row.aired_time|default:"—" }}</td>
+            <td class="whitespace-nowrap text-xs">{{ mm.schedule_row.date|default:"-" }}</td>
+            <td class="font-medium text-xs">{{ mm.schedule_row.brand|default:"-" }}</td>
+            <td class="text-xs">{{ mm.schedule_row.duration|default:"-" }}{% if mm.schedule_row %}s{% endif %}</td>
+            <td class="whitespace-nowrap text-xs">{{ mm.tc_row.date|default:"-" }}</td>
+            <td class="text-xs">{{ mm.tc_row.tc_theme|default:"-" }}</td>
+            <td class="text-xs text-slate-400 whitespace-nowrap">{{ mm.tc_row.aired_time|default:"-" }}</td>
             <td class="whitespace-nowrap text-xs">{{ mm.lmrb_row.date }}</td>
             <td class="text-xs">{{ mm.lmrb_row.advt_theme }}</td>
             <td class="text-xs text-slate-500 whitespace-nowrap">{{ mm.lmrb_row.advt_time }}</td>
-            <td class="text-xs text-slate-400 max-w-[140px] truncate" title="{{ mm.note }}">{{ mm.note|default:"—" }}</td>
-            <td class="text-xs text-slate-500">{{ mm.matched_by.name|default:"—" }}</td>
+            <td class="text-xs text-slate-400 max-w-[140px] truncate" title="{{ mm.note }}">{{ mm.note|default:"-" }}</td>
+            <td class="text-xs text-slate-500">{{ mm.matched_by.name|default:"-" }}</td>
             <td class="text-xs text-slate-400 whitespace-nowrap">{{ mm.matched_at|date:"d M Y H:i" }}</td>
             <td>
               <form method="post" action="{% url 'manual_dematch' mm.pk %}"
@@ -437,19 +437,19 @@
 
     if (panel === 'sr') {
       sel.sr = row.dataset.id;
-      sel.srLabel = `${cells[1].textContent.trim()} (${cells[2].textContent.trim()}) — ${cells[0].textContent.trim()}`;
+      sel.srLabel = `${cells[1].textContent.trim()} (${cells[2].textContent.trim()}) - ${cells[0].textContent.trim()}`;
       document.getElementById('hidden-sr').value = sel.sr;
       document.getElementById('sel-sr-label').textContent = sel.srLabel;
     } else if (panel === 'tc') {
       sel.tc = row.dataset.id;
-      sel.tcLabel = `${cells[1].textContent.trim()} (${cells[2].textContent.trim()}) — ${cells[0].textContent.trim()}`;
+      sel.tcLabel = `${cells[1].textContent.trim()} (${cells[2].textContent.trim()}) - ${cells[0].textContent.trim()}`;
       document.getElementById('hidden-tc').value = sel.tc;
       document.getElementById('sel-tc-label').textContent = sel.tcLabel;
       // Highlight LMRB rows within ±30s on the same date
       highlightLmrbForTc(row.dataset.date, row.dataset.time);
     } else {
       sel.lr = row.dataset.id;
-      sel.lrLabel = `${cells[1].textContent.trim()} — ${cells[0].textContent.trim()} @ ${cells[3].textContent.trim()}`;
+      sel.lrLabel = `${cells[1].textContent.trim()} - ${cells[0].textContent.trim()} @ ${cells[3].textContent.trim()}`;
       document.getElementById('hidden-lr').value = sel.lr;
       document.getElementById('sel-lr-label').textContent = sel.lrLabel;
     }

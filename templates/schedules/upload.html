@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Upload Schedule{% endblock %}
 {% block page_title %}Upload Schedule{% endblock %}
-{% block page_subtitle %}Add a new ad schedule — month and date range are detected automatically from the file{% endblock %}
+{% block page_subtitle %}Add a new ad schedule - month and date range are detected automatically from the file{% endblock %}
 
 {% block content %}
 <div class="max-w-2xl">
@@ -59,7 +59,7 @@
             <p class="text-sm text-slate-500 group-hover:text-blue-600">
               <span class="font-semibold">Click to upload</span> or drag & drop
             </p>
-            <p class="text-xs text-slate-400 mt-1">.xlsx or .xls — max 50 MB</p>
+            <p class="text-xs text-slate-400 mt-1">.xlsx or .xls - max 50 MB</p>
           </div>
           <p id="file-name" class="mt-2 text-xs text-blue-600 font-medium hidden"></p>
         </label>
@@ -111,7 +111,7 @@
       pcont.innerHTML = `
         <div class="bg-white rounded-lg border border-slate-200 p-2.5">
           <p class="text-slate-400 text-[10px] uppercase tracking-wider mb-0.5">Month</p>
-          <p class="font-semibold text-slate-800">${data.month || '—'}</p>
+          <p class="font-semibold text-slate-800">${data.month || '-'}</p>
         </div>
         <div class="bg-white rounded-lg border border-slate-200 p-2.5">
           <p class="text-slate-400 text-[10px] uppercase tracking-wider mb-0.5">Date Range</p>

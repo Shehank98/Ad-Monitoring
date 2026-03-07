@@ -15,7 +15,7 @@
         </label>
         <select name="account_id" onchange="this.form.submit()"
                 class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="">— Select an account —</option>
+          <option value="">- Select an account -</option>
           {% for acc in accounts %}
             <option value="{{ acc.id }}" {% if acc.id|stringformat:"s" == account_id %}selected{% endif %}>
               {{ acc.name }}
@@ -122,21 +122,21 @@
                   {% if scope.prog_mis %}
                     <span class="text-amber-700">{{ scope.prog_mis }}</span>
                   {% else %}
-                    <span class="text-slate-300">—</span>
+                    <span class="text-slate-300">-</span>
                   {% endif %}
                 </td>
                 <td class="px-4 py-3 text-right">
                   {% if scope.late %}
                     <span class="text-violet-700">{{ scope.late }}</span>
                   {% else %}
-                    <span class="text-slate-300">—</span>
+                    <span class="text-slate-300">-</span>
                   {% endif %}
                 </td>
                 <td class="px-4 py-3 text-right">
                   {% if scope.not_aired %}
                     <span class="text-red-700">{{ scope.not_aired }}</span>
                   {% else %}
-                    <span class="text-slate-300">—</span>
+                    <span class="text-slate-300">-</span>
                   {% endif %}
                 </td>
                 <td class="px-4 py-3 text-right">
@@ -151,7 +151,7 @@
                   {% if scope.last_run %}
                     {{ scope.last_run|date:"d M Y H:i" }}
                   {% else %}
-                    <span class="text-slate-300">—</span>
+                    <span class="text-slate-300">-</span>
                   {% endif %}
                 </td>
                 <td class="px-4 py-3 text-center">

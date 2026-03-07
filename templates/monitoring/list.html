@@ -11,7 +11,7 @@
   <div class="flex items-center gap-2 mb-3">
     <i class="fa-solid fa-chart-line text-slate-400 text-sm"></i>
     <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">Data Coverage</h3>
-    <span class="text-xs text-slate-400">— how far each dataset currently spans</span>
+    <span class="text-xs text-slate-400">- how far each dataset currently spans</span>
   </div>
   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
     {% for row in coverage %}
@@ -22,7 +22,7 @@
       </div>
       <div class="min-w-0">
         <p class="text-xs font-bold text-slate-800 truncate">
-          {{ row.account__name|default:"—" }} · {{ row.channel }}
+          {{ row.account__name|default:"-" }} · {{ row.channel }}
         </p>
         <p class="text-[10px] font-semibold {% if row.data_type == 'maponline' %}text-blue-600{% else %}text-purple-600{% endif %} mt-0.5">
           {% if row.data_type == 'maponline' %}MapOnline{% else %}LMRB{% endif %}
@@ -106,7 +106,7 @@
           <td class="px-5 py-3">
             <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-100 text-slate-700 text-xs font-semibold">
               <i class="fa-solid fa-building text-slate-400 text-[9px]"></i>
-              {{ batch.account.name|default:"—" }}
+              {{ batch.account.name|default:"-" }}
             </span>
           </td>
 
@@ -124,7 +124,7 @@
               {% for ch in batch.channels %}
               <span class="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md font-medium">{{ ch }}</span>
               {% empty %}
-              <span class="text-xs text-slate-400">—</span>
+              <span class="text-xs text-slate-400">-</span>
               {% endfor %}
             </div>
           </td>
@@ -134,14 +134,14 @@
               {% if batch.date_from and batch.date_to %}
                 {{ batch.date_from|date:"d M" }} → <strong class="text-slate-700">{{ batch.date_to|date:"d M Y" }}</strong>
               {% else %}
-                <span class="text-slate-400">—</span>
+                <span class="text-slate-400">-</span>
               {% endif %}
             </span>
           </td>
 
-          <td class="px-5 py-3 text-slate-500 text-sm">{{ batch.total_rows|default:"—" }}</td>
+          <td class="px-5 py-3 text-slate-500 text-sm">{{ batch.total_rows|default:"-" }}</td>
 
-          <td class="px-5 py-3 text-xs text-slate-500">{{ batch.uploaded_by.name|default:"—" }}</td>
+          <td class="px-5 py-3 text-xs text-slate-500">{{ batch.uploaded_by.name|default:"-" }}</td>
 
           <td class="px-5 py-3 text-xs text-slate-400 whitespace-nowrap">
             {% if batch.uploaded_at.date == today %}
@@ -210,7 +210,7 @@
     );
   }
 
-  console.log('[monitoring list] page loaded — batches rendered:', {{ batch_summaries|length }});
+  console.log('[monitoring list] page loaded - batches rendered:', {{ batch_summaries|length }});
 </script>
 {% endblock %}
 

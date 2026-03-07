@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Summary Sheet Report{% endblock %}
 {% block page_title %}Summary Sheet Report{% endblock %}
-{% block page_subtitle %}Finalized reconciliation summary — planned vs aired vs missed vs extra, with 3rd party LMRB confirmation{% endblock %}
+{% block page_subtitle %}Finalized reconciliation summary - planned vs aired vs missed vs extra, with 3rd party LMRB confirmation{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -102,7 +102,7 @@
     <i class="fa-solid fa-table-columns text-violet-600"></i> Plan vs LMRB vs TC
   </a>
 
-  <!-- Sponsorship reconciliation controls — always visible -->
+  <!-- Sponsorship reconciliation controls - always visible -->
   <form method="post" action="/dashboard/sponsorship/reconcile/" class="inline">
     {% csrf_token %}
     <input type="hidden" name="account_id" value="{{ account_id }}">
@@ -148,12 +148,12 @@
         </div>
         <div class="flex justify-between">
           <span class="text-slate-500 font-semibold uppercase tracking-wide">Estimate No</span>
-          <span class="font-bold text-slate-800">{{ schedule_obj.schedule_number|default:"—" }}</span>
+          <span class="font-bold text-slate-800">{{ schedule_obj.schedule_number|default:"-" }}</span>
         </div>
         {% if tc_report %}
         <div class="mt-2 pt-2 border-t border-slate-100">
           <p class="text-slate-400">TC: {{ tc_report.original_filename }}</p>
-          <p class="text-slate-400">{{ tc_report.start_date|date:"d M Y"|default:"—" }} → {{ tc_report.end_date|date:"d M Y"|default:"—" }} ({{ tc_report.row_count }} rows)</p>
+          <p class="text-slate-400">{{ tc_report.start_date|date:"d M Y"|default:"-" }} → {{ tc_report.end_date|date:"d M Y"|default:"-" }} ({{ tc_report.row_count }} rows)</p>
         </div>
         {% endif %}
       </div>
@@ -228,7 +228,7 @@
       <div class="bg-slate-800 px-5 py-3 flex items-center gap-3">
         <i class="fa-solid fa-file-contract text-slate-400"></i>
         <span class="font-bold text-white text-sm">SUMMARY SHEET REPORT</span>
-        <span class="text-slate-400 text-xs">— {{ month }} | {{ channel }}</span>
+        <span class="text-slate-400 text-xs">- {{ month }} | {{ channel }}</span>
       </div>
 
       <div class="p-4 space-y-4">
@@ -257,7 +257,7 @@
                 {% for row in summary_data.commercial %}
                 <tr>
                   <td class="font-medium text-slate-800">{{ row.product }}</td>
-                  <td class="text-center text-slate-600">{{ row.dur|default:"—" }}</td>
+                  <td class="text-center text-slate-600">{{ row.dur|default:"-" }}</td>
                   <td class="text-center font-semibold">{{ row.planned }}</td>
                   <td class="text-center text-emerald-700 font-semibold">{{ row.aired }}</td>
                   <td class="text-center {% if row.missed > 0 %}text-red-600 font-bold{% else %}text-slate-400{% endif %}">
@@ -332,11 +332,11 @@
                     <span class="status-{{ row.status }}">
                       {% if row.status == 'complete' %}✓ Complete
                       {% elif row.status == 'incomplete' %}⚠ Incomplete
-                      {% else %}— No data
+                      {% else %}- No data
                       {% endif %}
                     </span>
                   </td>
-                  <td class="text-center text-slate-600">{{ row.dur|default:"—" }}</td>
+                  <td class="text-center text-slate-600">{{ row.dur|default:"-" }}</td>
                   <td class="text-center font-semibold">{{ row.planned }}</td>
                   <td class="text-center text-emerald-700 font-semibold">{{ row.aired }}</td>
                   <td class="text-center {% if row.missed > 0 %}text-red-600 font-bold{% else %}text-slate-400{% endif %}">{{ row.missed }}</td>
@@ -452,7 +452,7 @@
     <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200">
       <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
         <i class="fa-solid fa-list-check text-amber-500"></i>
-        Select LMRB Rows — <span id="spon-modal-title" class="text-amber-700"></span>
+        Select LMRB Rows - <span id="spon-modal-title" class="text-amber-700"></span>
       </h3>
       <button type="button" onclick="closeSponModal()"
               class="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>

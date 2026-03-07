@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Transmission Reports{% endblock %}
 {% block page_title %}Transmission Reports (TC){% endblock %}
-{% block page_subtitle %}Manage uploaded channel transmission certificates — reconcile with schedule and LMRB{% endblock %}
+{% block page_subtitle %}Manage uploaded channel transmission certificates - reconcile with schedule and LMRB{% endblock %}
 
 {% block content %}
 <div class="space-y-4">
@@ -57,7 +57,7 @@
             <td class="px-4 py-3 font-medium text-slate-800">{{ rep.channel }}</td>
             <td class="px-4 py-3 text-slate-600">{{ rep.month }}</td>
             <td class="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">
-              {{ rep.start_date|date:"d M Y"|default:"—" }} → {{ rep.end_date|date:"d M Y"|default:"—" }}
+              {{ rep.start_date|date:"d M Y"|default:"-" }} → {{ rep.end_date|date:"d M Y"|default:"-" }}
             </td>
             <td class="px-4 py-3 text-right font-bold text-slate-700">{{ rep.row_count }}</td>
             <td class="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">

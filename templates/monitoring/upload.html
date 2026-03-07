@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Upload Monitoring Data{% endblock %}
 {% block page_title %}Upload Monitoring Data{% endblock %}
-{% block page_subtitle %}Add MapOnline or MediaWatch (LMRB) data — channels and dates are detected automatically{% endblock %}
+{% block page_subtitle %}Add MapOnline or MediaWatch (LMRB) data - channels and dates are detected automatically{% endblock %}
 
 {% block content %}
 <div class="max-w-2xl">
@@ -132,7 +132,7 @@
   async function detectChannels(file) {
     const dtype = document.querySelector('[name=data_type]:checked');
     const dtypeVal = dtype ? dtype.value : 'mediawatch';
-    console.log('[monitoring-upload] detectChannels — file:', file.name, 'data_type:', dtypeVal);
+    console.log('[monitoring-upload] detectChannels - file:', file.name, 'data_type:', dtypeVal);
 
     const fd = new FormData();
     fd.append('csrfmiddlewaretoken', CSRF);
@@ -171,7 +171,7 @@
       pcont.innerHTML = rows || '<p class="text-xs text-amber-600">No channels detected. Check the file format.</p>';
 
       if (!rows) {
-        console.warn('[monitoring-upload] WARNING: 0 channels detected — check column names in the file');
+        console.warn('[monitoring-upload] WARNING: 0 channels detected - check column names in the file');
       }
     } catch (e) {
       console.error('[monitoring-upload] detectChannels exception:', e);
@@ -190,7 +190,7 @@
     const account  = document.querySelector('[name=account]')?.value;
     const dtype    = document.querySelector('[name=data_type]:checked')?.value;
     const fileName = fi.files[0]?.name;
-    console.log('[monitoring-upload] SUBMIT — account:', account, 'data_type:', dtype, 'file:', fileName);
+    console.log('[monitoring-upload] SUBMIT - account:', account, 'data_type:', dtype, 'file:', fileName);
     const btn = document.getElementById('submit-btn');
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
     btn.disabled = true;

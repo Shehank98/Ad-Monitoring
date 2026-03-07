@@ -90,7 +90,7 @@
 
           <td class="px-5 py-3 text-slate-500">{{ s.row_count }}</td>
 
-          <td class="px-5 py-3 text-xs text-slate-500">{{ s.uploaded_by.name|default:"—" }}</td>
+          <td class="px-5 py-3 text-xs text-slate-500">{{ s.uploaded_by.name|default:"-" }}</td>
 
           <td class="px-5 py-3 text-xs text-slate-400 whitespace-nowrap">
             {% if s.uploaded_at.date == today %}

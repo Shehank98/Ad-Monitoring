@@ -1,3 +1,4 @@
+import os
 import secrets as secrets_mod
 import string
 
@@ -11,6 +12,26 @@ from core.models import Account
 from .decorators import role_required
 from .forms import ChangePasswordForm, CreateUserForm, LoginForm
 from .models import User
+
+
+def _branding_url(asset_type: str) -> str:
+    """Return media URL for a branding asset, or empty string if not uploaded."""
+    branding_dir = os.path.join(settings.MEDIA_ROOT, 'branding')
+    for ext in ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'):
+        path = os.path.join(branding_dir, f'{asset_type}{ext}')
+        if os.path.exists(path):
+            return settings.MEDIA_URL + f'branding/{asset_type}{ext}'
+    return ''
+
+
+def _login_ctx(form):
+    from datetime import date as _date
+    return {
+        'form':       form,
+        'logo_url':   _branding_url('logo'),
+        'tartan_url': _branding_url('tartan'),
+        'year':       _date.today().year,
+    }
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -28,7 +49,7 @@ def login_view(request):
             domain = settings.ALLOWED_EMAIL_DOMAIN
             if domain and not email.endswith(f'@{domain}'):
                 messages.error(request, f'Only @{domain} email addresses are allowed.')
-                return render(request, 'accounts/login.html', {'form': form})
+                return render(request, 'accounts/login.html', _login_ctx(form))
 
             user = authenticate(request, email=email, password=password)
             if user is None:
@@ -44,7 +65,7 @@ def login_view(request):
     else:
         form = LoginForm()
 
-    return render(request, 'accounts/login.html', {'form': form})
+    return render(request, 'accounts/login.html', _login_ctx(form))
 
 
 def logout_view(request):

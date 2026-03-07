@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Plan vs LMRB vs TC{% endblock %}
 {% block page_title %}Three-Way Comparison{% endblock %}
-{% block page_subtitle %}Plan (Schedule) · LMRB (3rd-party monitoring) · TC (channel certificate) — side by side for every planned ad{% endblock %}
+{% block page_subtitle %}Plan (Schedule) · LMRB (3rd-party monitoring) · TC (channel certificate) - side by side for every planned ad{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -127,10 +127,10 @@
 
 <!-- ── Colour legend ──────────────────────────────────────────── -->
 <div class="flex flex-wrap gap-2 mb-4 text-xs">
-  <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Aired — confirmed by both TC &amp; LMRB</span>
-  <span class="badge badge-amber"><i class="fa-solid fa-file-certificate"></i> TC only — TC says aired, LMRB not confirmed</span>
-  <span class="badge badge-blue"><i class="fa-solid fa-eye"></i> LMRB only — LMRB found a match, no TC record linked</span>
-  <span class="badge badge-red"><i class="fa-solid fa-circle-xmark"></i> Not aired — neither source confirms</span>
+  <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Aired - confirmed by both TC &amp; LMRB</span>
+  <span class="badge badge-amber"><i class="fa-solid fa-file-certificate"></i> TC only - TC says aired, LMRB not confirmed</span>
+  <span class="badge badge-blue"><i class="fa-solid fa-eye"></i> LMRB only - LMRB found a match, no TC record linked</span>
+  <span class="badge badge-red"><i class="fa-solid fa-circle-xmark"></i> Not aired - neither source confirms</span>
 </div>
 
 <!-- ── Main table ─────────────────────────────────────────────── -->
@@ -196,7 +196,7 @@
 
         <!-- Plan -->
         <td class="font-mono">{{ r.plan_date|date:"d M Y" }}</td>
-        <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.plan_programme }}">{{ r.plan_programme|default:"—" }}</td>
+        <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.plan_programme }}">{{ r.plan_programme|default:"-" }}</td>
         <td class="font-mono text-blue-700">{{ r.plan_start }}</td>
         <td class="font-mono text-blue-700">{{ r.plan_end }}</td>
 
@@ -205,11 +205,11 @@
           <td class="font-mono group-sep {% if r.lmrb_date == r.plan_date %}text-green-700{% else %}text-amber-600{% endif %}">
             {{ r.lmrb_date|date:"d M Y" }}
           </td>
-          <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.lmrb_programme }}">{{ r.lmrb_programme|default:"—" }}</td>
+          <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.lmrb_programme }}">{{ r.lmrb_programme|default:"-" }}</td>
           <td class="font-mono text-green-700">{{ r.lmrb_time }}</td>
           <td class="text-slate-600 max-w-[120px] truncate" title="{{ r.lmrb_theme }}">{{ r.lmrb_theme }}</td>
         {% else %}
-          <td class="group-sep text-red-400 italic text-center" colspan="4">— not found —</td>
+          <td class="group-sep text-red-400 italic text-center" colspan="4">- not found -</td>
         {% endif %}
 
         <!-- TC -->
@@ -217,11 +217,11 @@
           <td class="font-mono group-sep {% if r.tc_date == r.plan_date %}text-green-700{% else %}text-amber-600{% endif %}">
             {{ r.tc_date|date:"d M Y" }}
           </td>
-          <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.tc_programme }}">{{ r.tc_programme|default:"—" }}</td>
+          <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.tc_programme }}">{{ r.tc_programme|default:"-" }}</td>
           <td class="font-mono {% if r.tc_lmrb_confirmed %}text-green-700{% else %}text-amber-600{% endif %}">{{ r.tc_time }}</td>
           <td class="text-slate-600 max-w-[120px] truncate" title="{{ r.tc_theme }}">{{ r.tc_theme }}</td>
         {% else %}
-          <td class="group-sep text-red-400 italic text-center" colspan="4">— not found —</td>
+          <td class="group-sep text-red-400 italic text-center" colspan="4">- not found -</td>
         {% endif %}
 
         <!-- Status badge -->
