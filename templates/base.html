@@ -129,67 +129,130 @@
     .data-table tr:last-child td { border-bottom: none; }
     .data-table tr:hover td { background: rgba(248,250,252,.8); }
 
-    /* ── Sidebar ─────────────────────────────────────────────────── */
+    /* ══════════════════════════════════════════════════════════════
+       SIDEBAR  —  expanded (220px) and collapsed (56px)
+    ══════════════════════════════════════════════════════════════ */
     .sidebar {
-      background: var(--og-black);
-      transition: width .2s ease, min-width .2s ease;
+      width: 220px; min-width: 220px;
+      background: #0f0f0f;          /* near-black, not pure black */
+      border-right: 1px solid #1a1a1a;
+      transition: width .22s cubic-bezier(.4,0,.2,1),
+                  min-width .22s cubic-bezier(.4,0,.2,1);
+      overflow: hidden;             /* clip text during animation */
     }
-    .sidebar-brand-text, .nav-text, .nav-label,
-    .user-pill-detail, .sidebar-footer-text { transition: opacity .15s, width .1s; }
 
-    /* Collapsed state */
-    body.sidebar-collapsed .sidebar {
-      width: 3.25rem !important;
-      min-width: 3.25rem !important;
-    }
-    body.sidebar-collapsed .sidebar-brand-text,
-    body.sidebar-collapsed .nav-text,
-    body.sidebar-collapsed .nav-label,
-    body.sidebar-collapsed .user-pill-detail,
-    body.sidebar-collapsed .sidebar-footer-text {
-      opacity: 0; width: 0; overflow: hidden; pointer-events: none;
-    }
-    body.sidebar-collapsed .user-pill { display: none; }
-    body.sidebar-collapsed .nav-item { justify-content: center; padding-left: 0; padding-right: 0; }
-    body.sidebar-collapsed .nav-icon { width: auto; }
-
+    /* ── Section labels ── */
     .nav-label {
-      padding: .75rem .75rem .2rem;
-      font-size: .6rem; font-weight: 700; letter-spacing: .12em;
-      color: #374151; text-transform: uppercase;
+      padding: 1rem .875rem .25rem;
+      font-size: .58rem; font-weight: 700; letter-spacing: .14em;
+      color: #3f3f3f; text-transform: uppercase;
+      white-space: nowrap; overflow: hidden;
+      transition: opacity .15s, padding .22s;
     }
 
+    /* ── Nav items ── */
     .nav-item {
-      position: relative; display: flex; align-items: center; gap: .625rem;
-      padding: .45rem .75rem; border-radius: .5rem;
+      position: relative;
+      display: flex; align-items: center; gap: .625rem;
+      margin: 1px .5rem;
+      padding: .5rem .625rem;
+      border-radius: .5rem;
       font-size: .8rem; font-weight: 500; color: #6b7280;
-      text-decoration: none; cursor: pointer;
+      text-decoration: none; cursor: pointer; white-space: nowrap;
       transition: background .15s, color .15s;
     }
-    .nav-item:hover { background: rgba(235,63,67,.1); color: #e2e8f0; }
-    .nav-item.active {
-      background: rgba(235,63,67,.15);
-      color: #fff; font-weight: 600;
-    }
+    .nav-item:hover { background: rgba(235,63,67,.1); color: #d1d5db; }
+    .nav-item.active { background: rgba(235,63,67,.14); color: #fff; font-weight: 600; }
     .nav-item.active::before {
-      content: ''; position: absolute; left: 0; top: 25%; bottom: 25%;
-      width: 3px; border-radius: 0 3px 3px 0; background: var(--og-red);
+      content: ''; position: absolute; left: 0; top: 50%;
+      transform: translateY(-50%);
+      width: 3px; height: 60%; border-radius: 0 3px 3px 0;
+      background: var(--og-red);
+    }
+
+    /* Icon wrapper — always a fixed-size box so icons are consistent */
+    .nav-icon {
+      width: 1.75rem; height: 1.75rem;
+      display: inline-flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      border-radius: .375rem;
+      font-size: .75rem; color: #6b7280;
+      transition: color .15s, background .15s;
+    }
+    .nav-item:hover .nav-icon { color: #e2e8f0; }
+    .nav-item.active .nav-icon { color: var(--og-red); }
+
+    /* nav text span */
+    .nav-text {
+      overflow: hidden; white-space: nowrap;
+      transition: opacity .15s, max-width .22s;
+      max-width: 160px;
+    }
+
+    /* User pill */
+    .user-pill {
+      margin: .5rem .625rem; padding: .625rem .75rem;
+      border-radius: .625rem;
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.07);
+      overflow: hidden;
+      transition: margin .22s, padding .22s;
+    }
+    .user-pill-detail { overflow: hidden; transition: opacity .15s, max-width .22s; max-width: 200px; }
+
+    /* ════════════════════════════
+       COLLAPSED STATE  (56px)
+    ════════════════════════════ */
+    body.sidebar-collapsed .sidebar { width: 56px; min-width: 56px; }
+
+    /* Hide text/labels */
+    body.sidebar-collapsed .nav-label   { opacity: 0; padding-top: .35rem; padding-bottom: .1rem; pointer-events: none; }
+    body.sidebar-collapsed .nav-text    { opacity: 0; max-width: 0; pointer-events: none; }
+    body.sidebar-collapsed .sidebar-brand-text { opacity: 0; max-width: 0; pointer-events: none; overflow: hidden; }
+    body.sidebar-collapsed .user-pill-detail   { opacity: 0; max-width: 0; pointer-events: none; }
+
+    /* Collapsed user pill — just show the avatar circle compactly */
+    body.sidebar-collapsed .user-pill {
+      margin: .5rem .375rem; padding: .375rem;
+      display: flex; justify-content: center;
+    }
+
+    /* Collapsed nav items — full-width, icon centered */
+    body.sidebar-collapsed .nav-item {
+      margin: 1px .375rem;
+      padding: 0;
+      height: 36px;
+      justify-content: center;
+      gap: 0;
     }
     body.sidebar-collapsed .nav-item.active::before { display: none; }
-    .nav-icon { width: .9rem; text-align: center; flex-shrink: 0; opacity: .75; font-size: .75rem; }
-    .nav-item.active .nav-icon,
-    .nav-item:hover .nav-icon { opacity: 1; }
 
-    /* Sidebar toggle btn — lives in topbar, always visible */
+    /* Icon gets a pill background in collapsed */
+    body.sidebar-collapsed .nav-icon {
+      width: 2rem; height: 2rem;
+      border-radius: .5rem;
+    }
+    body.sidebar-collapsed .nav-item.active .nav-icon {
+      background: rgba(235,63,67,.18);
+      color: var(--og-red);
+    }
+    body.sidebar-collapsed .nav-item:hover .nav-icon {
+      background: rgba(255,255,255,.07);
+      color: #d1d5db;
+    }
+
+    /* Footer sign-out in collapsed */
+    body.sidebar-collapsed .sidebar-footer-text { opacity: 0; max-width: 0; pointer-events: none; overflow: hidden; }
+
+    /* ── Sidebar toggle btn (lives in topbar) ── */
     #sidebar-toggle {
       background: none; border: none; cursor: pointer;
       color: #94a3b8; padding: .375rem .5rem; border-radius: .375rem;
-      transition: color .15s, background .15s; flex-shrink: 0;
-      line-height: 1;
+      transition: color .15s, background .15s; flex-shrink: 0; line-height: 1;
     }
     #sidebar-toggle:hover { color: var(--og-red); background: rgba(235,63,67,.08); }
 
-    /* ── Top bar red accent line ─────────────────────────────────── */
+    /* ── Top bar red accent line ── */
     .topbar-accent {
       display: block; height: 2px; background: var(--og-red);
       position: absolute; bottom: 0; left: 0; right: 0;
