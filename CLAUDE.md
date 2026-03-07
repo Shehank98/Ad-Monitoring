@@ -143,14 +143,15 @@ programme (str)
 date (DateField)
 start_time, end_time (str, "HH:MM:SS")
 duration (int, seconds)
-ad_type (str)             ← EXACTLY 'COMMERCIAL BENEFITS' or 'SPONSORSHIP'
+ad_type (str)             ← stored as 'COMMERCIAL BENEFITS' or 'SPONSORSHIP'
 is_matched (bool)         ← row-level lock; True = claimed by engine
 matched_lmrb (FK → LMRBRow)
 matched_at
 ```
 
-> **CRITICAL:** `ad_type` must be exactly `'COMMERCIAL BENEFITS'` or `'SPONSORSHIP'`.
-> Any other value is silently skipped during parsing and never appears in reports.
+> **CRITICAL:** `ad_type` is stored as `'COMMERCIAL BENEFITS'` or `'SPONSORSHIP'`.
+> During parsing, `'SPONSORSHIP BENEFITS'` (the value in client schedule files) is
+> automatically normalised to `'SPONSORSHIP'`.  Any other value is silently skipped.
 
 ### `MonitoringData`
 One record per channel per uploaded monitoring file.
@@ -454,7 +455,7 @@ Function: `summary_pdf()` in `core/views.py`
 | "No brand mapping" in TC reconciliation | `BrandMapping.tc_theme` field is blank | Fill in `tc_theme` in the Brand Mappings admin |
 | Summary shows all zeros | Channel or month mismatch between TC and Schedule | Use linked schedule in TC upload to auto-fill exact values |
 | Duplicate rows after re-upload | Old dedup keys not deleted | This is handled automatically — re-upload replaces rows |
-| Schedule rows missing from report | `ad_type` value is not exactly `'COMMERCIAL BENEFITS'` or `'SPONSORSHIP'` | Fix the uploaded Excel file |
+| Schedule rows missing from report | `ad_type` column in Excel is not `'COMMERCIAL BENEFITS'` or `'SPONSORSHIP BENEFITS'` | Parser normalises `'SPONSORSHIP BENEFITS'` → `'SPONSORSHIP'`; any other value is skipped |
 | LMRB count wrong in 3rd Party column | BrandMapping.theme doesn't match LMRBRow.advt_theme | Check exact spelling in brand mappings; matching is case-insensitive but must otherwise match |
 
 ---

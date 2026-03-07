@@ -333,11 +333,13 @@ def schedule_upload(request):
 
 def _parse_schedule_rows(df, schedule, account, channel, month):
     """Parse a schedule DataFrame and bulk-create ScheduleRow records."""
-    VALID_TYPES = {'COMMERCIAL BENEFITS', 'SPONSORSHIP'}
     rows = []
     for _, r in df.iterrows():
-        ad_type = _safe_str(r.get('Advertisement_Type', '')).upper()
-        if ad_type not in VALID_TYPES:
+        ad_type = _safe_str(r.get('Advertisement_Type', '')).upper().strip()
+        # Normalise: 'SPONSORSHIP BENEFITS' → 'SPONSORSHIP'
+        if ad_type == 'SPONSORSHIP BENEFITS':
+            ad_type = 'SPONSORSHIP'
+        if ad_type not in ('COMMERCIAL BENEFITS', 'SPONSORSHIP'):
             continue
         rows.append(ScheduleRow(
             schedule   = schedule,
