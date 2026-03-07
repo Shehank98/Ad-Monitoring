@@ -8,14 +8,17 @@ Matching algorithm (two passes):
     1. Brand → Theme lookup (respecting optional duration on the mapping)
     2. Exact calendar date match
     3. Exact duration match (if both sides have it)
-    4a. Time-window match (aired time within planned Start_Time–End_Time) → MATCHED
+    4a. Time-window match — Prog_time (programme start time) falls within planned
+        Start_Time–End_Time; falls back to Advt_time when Prog_time is absent → MATCHED
+        (Rule 3: Prog_time is the primary time-window signal)
     4b. Candidates exist but none in time window → PROGRAMME MISMATCH
-       (Programme matching is done by time-window: instead of comparing programme
-        names — which often differ in text — we check that the aired time falls
-        within the planned slot's start/end time.)
+
   Pass 2 — for schedule rows still unmatched after Pass 1:
-    5. Same brand+theme+duration but on a different date → LATE TELECAST
+    5. Same brand+theme+duration but on a LATER date (Rule 7: aired_date > sch_date) → LATE TELECAST
     6. No candidate anywhere → NOT AIRED
+
+  Rule 4: when multiple in-window candidates exist, use fuzzy programme-name
+  matching (fuzzywuzzy token_sort_ratio) as a tiebreaker to pick the best one.
 
 Locking: any LMRB row consumed by Matched/Programme Mismatch/Late Telecast is
 locked (cannot be reused), preventing double-counting.
@@ -24,11 +27,16 @@ Extra Aired: LMRB rows not consumed by any schedule row.
 brand_theme_map format supplied by the caller:
   {norm_brand: [(norm_theme, duration_or_None), ...]}
 
-Smart re-run support:
-  pre_matched_idx — set of LMRB pool integer indices already consumed by a
-                    previous run (loaded from persisted MatchResult records).
+Smart re-run / multi-schedule support:
+  pre_matched_fp  — set of LMRB fingerprints locked in a previous run.
   skip_sch_keys   — set of (brand_norm, date, start_time, end_time, dur) tuples
-                    for schedule rows that were already matched in a previous run.
+                    for schedule rows already matched in a previous run.
+  pre_matched_idx — set of mon_pool integer indices already consumed by a
+                    previous schedule run (used for multi-schedule processing
+                    on the same shared LMRB pool).
+  max_verify_date — pandas Timestamp; schedule rows whose date exceeds this
+                    are skipped entirely (no LMRB data available yet for those
+                    dates — they will be processed when new data is uploaded).
 """
 import hashlib
 import pandas as pd
@@ -213,12 +221,23 @@ def _get_themes_for_dur(brand_theme_map, norm_brand, sch_dur):
     return list(dict.fromkeys(themes))  # deduplicate, preserve order
 
 
+def _fuzzy_score(sch_prog: str, lmrb_prog) -> int:
+    """Return fuzzywuzzy token_sort_ratio between two programme name strings."""
+    try:
+        from fuzzywuzzy import fuzz  # optional dependency
+        return fuzz.token_sort_ratio(normalize(sch_prog), normalize(str(lmrb_prog) if lmrb_prog else ''))
+    except Exception:
+        return 0
+
+
 def match_ads(
     sch_df: pd.DataFrame,
     mon_pool: pd.DataFrame,
     brand_theme_map: dict,
     pre_matched_fp: set = None,
     skip_sch_keys: set = None,
+    pre_matched_idx: set = None,
+    max_verify_date=None,
 ):
     """
     Match schedule rows against monitoring pool using brand mapping.
@@ -227,22 +246,35 @@ def match_ads(
 
     pre_matched_fp:
         Set of LMRB fingerprints already locked in a previous run.
-        Those monitoring rows will be treated as consumed from the start,
-        enabling smart re-run without double-counting.
+        Those monitoring rows will be treated as consumed from the start.
 
     skip_sch_keys:
         Set of (norm_brand, date, start_time, end_time, dur) tuples for schedule
         rows that already have a 'matched' MatchResult — skip them in smart re-run.
 
-    Returns (matched_df, prog_mismatch_df, late_telecast_df, not_aired_df, extra_df).
+    pre_matched_idx:
+        Set of mon_pool integer indices already consumed by a previous schedule
+        run.  Used for multi-schedule processing on the same shared LMRB pool.
+
+    max_verify_date:
+        pandas Timestamp (or None).  Schedule rows whose date is strictly after
+        this value are skipped — LMRB data is not yet available for those dates.
+        They will be processed automatically when new monitoring data is uploaded.
+
+    Returns (matched_df, prog_mismatch_df, late_telecast_df, not_aired_df,
+             extra_df, consumed_idx).
+    consumed_idx is the complete set of mon_pool integer indices consumed by
+    this call (includes pre_matched_idx entries).
     """
     if pre_matched_fp is None:
         pre_matched_fp = set()
     if skip_sch_keys is None:
         skip_sch_keys = set()
 
-    # Pre-lock monitoring rows that were matched in a previous run
-    matched_idx = set()
+    # Initialise consumed index set from both pre-consumed sources
+    matched_idx: set = set()
+    if pre_matched_idx:
+        matched_idx.update(pre_matched_idx)
     if pre_matched_fp:
         for idx, row in mon_pool.iterrows():
             if lmrb_fingerprint(row) in pre_matched_fp:
@@ -253,6 +285,11 @@ def match_ads(
     late_rows      = []
     not_aired_rows = []
     unmatched_sched = []
+
+    # Determine which time column the pool has for programme-start matching
+    # Rule 3: prefer Prog_time (programme start time); fall back to Advt_time
+    pool_has_prog_secs = '_prog_secs' in mon_pool.columns
+    pool_has_air_secs  = '_air_secs'  in mon_pool.columns
 
     # ── PASS 1 ────────────────────────────────────────────────────────────────
     for _, row in sch_df.iterrows():
@@ -272,6 +309,14 @@ def match_ads(
         if sch_key in skip_sch_keys:
             continue
 
+        # Rule 8: skip rows beyond the latest available LMRB data date
+        if max_verify_date is not None and sch_date is not None:
+            try:
+                if pd.notna(sch_date) and sch_date > max_verify_date:
+                    continue
+            except TypeError:
+                pass
+
         themes = _get_themes_for_dur(brand_theme_map, sch_brand_norm, sch_dur)
         if not themes:
             not_aired_rows.append({
@@ -283,6 +328,7 @@ def match_ads(
                 'Duration':       dur_val,
                 'Status':         'No Brand Mapping',
                 '_lmrb_fp':       '',
+                '_sch_row_id':    row.get('_sch_db_id'),
             })
             continue
 
@@ -298,11 +344,17 @@ def match_ads(
             unmatched_sched.append(row)
             continue
 
-        # Time-window split
-        if (sch_start is not None and sch_end is not None
-                and '_air_secs' in candidates.columns
-                and candidates['_air_secs'].notna().any()):
-            in_window = (candidates['_air_secs'] >= sch_start) & (candidates['_air_secs'] <= sch_end)
+        # ── Time-window split ────────────────────────────────────────────────
+        # Rule 3: use Prog_time (programme start time) for window check.
+        # Fall back to Advt_time when Prog_time is absent or all-null.
+        time_col = None
+        if pool_has_prog_secs and candidates['_prog_secs'].notna().any():
+            time_col = '_prog_secs'
+        elif pool_has_air_secs and candidates['_air_secs'].notna().any():
+            time_col = '_air_secs'
+
+        if sch_start is not None and sch_end is not None and time_col:
+            in_window = (candidates[time_col] >= sch_start) & (candidates[time_col] <= sch_end)
             cands_in  = candidates[in_window]
             cands_out = candidates[~in_window]
         else:
@@ -310,7 +362,15 @@ def match_ads(
             cands_out = pd.DataFrame()
 
         if not cands_in.empty:
-            best_idx = cands_in.index[0]
+            # Rule 4: fuzzy programme-name match as tiebreaker when >1 candidate
+            if len(cands_in) > 1 and sch_programme and 'Program' in cands_in.columns:
+                scores = cands_in['Program'].apply(
+                    lambda p: _fuzzy_score(sch_programme, p)
+                )
+                best_idx = scores.idxmax()
+            else:
+                best_idx = cands_in.index[0]
+
             matched_idx.add(best_idx)
             mon_row = mon_pool.loc[best_idx]
             fp = lmrb_fingerprint(mon_row)
@@ -376,8 +436,13 @@ def match_ads(
         if pd.notna(sch_dur) and 'Dur' in candidates.columns:
             candidates = candidates[candidates['Dur'] == sch_dur]
 
-        # Exclude the original planned date (already no match there)
-        candidates = candidates[candidates['Date'] != sch_date]
+        # Rule 7: ad can only be a Late Telecast if it aired AFTER the scheduled date.
+        # Aired date strictly before the scheduled date is invalid (not a late airing).
+        # (Same-date is already handled in Pass 1; here we require Date > sch_date.)
+        if sch_date is not None and pd.notna(sch_date):
+            candidates = candidates[candidates['Date'] > sch_date]
+        else:
+            candidates = candidates[candidates['Date'] != sch_date]
 
         if not candidates.empty:
             best_idx = candidates.index[0]
@@ -412,6 +477,7 @@ def match_ads(
                 'Status':         'Not Aired',
                 '_lmrb_fp':       '',
                 '_sch_key':       sch_key,
+                '_sch_row_id':    row.get('_sch_db_id'),
             })
 
     # ── Extra aired ────────────────────────────────────────────────────────────
@@ -435,4 +501,5 @@ def match_ads(
         _to_df(late_rows),
         _to_df(not_aired_rows),
         _to_df(extra_rows),
+        matched_idx,          # 6th value — full set of consumed pool indices
     )

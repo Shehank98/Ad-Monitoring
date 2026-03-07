@@ -10,6 +10,23 @@ Reset mode:
   Unlocks all rows for the scope (is_matched=False), deletes MatchResult
   records, then runs a full fresh match.
 
+Multi-schedule support (Rule 10):
+  A single (account, channel, month) scope may have multiple Schedule records
+  with different schedule_number values (e.g. different campaigns or booking
+  blocks within the same month).  run_scope processes them in ascending
+  schedule_number order.  The LMRB pool is shared across all schedules so a
+  monitoring row consumed by schedule #101 cannot be claimed by #102.
+
+Schedule versioning (Rule 12):
+  When multiple uploads exist for the same schedule_number, only the latest
+  version (highest version field) is used.
+
+LMRB date cap (Rule 8):
+  Verification is capped at the latest date for which LMRB data exists.
+  Schedule rows beyond that date are left unprocessed (is_matched=False)
+  and will be picked up automatically on the next LMRB upload via
+  auto_run_all_for_account.
+
 Public API
 ----------
 run_scope(account_id, channel, month, mode='smart')
@@ -77,14 +94,22 @@ def _build_sch_df(sch_qs):
 
 
 def _build_mon_pool(lmrb_qs):
-    """Convert a LMRBRow queryset to a monitoring pool DataFrame."""
+    """Convert a LMRBRow queryset to a monitoring pool DataFrame.
+
+    Includes prog_time (programme start time) so the engine can apply the
+    Rule 3 time-window check against Prog_time first, falling back to
+    Advt_time when Prog_time is absent.
+    Also includes program (programme name) for Rule 4 fuzzy tiebreaking.
+    """
     records = list(lmrb_qs.values(
         'id', 'advt_theme', 'date', 'advt_time', 'duration', 'source',
+        'prog_time', 'program',
     ))
     if not records:
         return pd.DataFrame(columns=[
             '_lmrb_db_id', 'Advt_Theme', 'Date', 'Advt_time',
             'Dur', '_source', '_norm_theme', '_air_secs',
+            'Prog_time', 'Program', '_prog_secs',
         ])
     df = pd.DataFrame(records)
     df.rename(columns={
@@ -94,11 +119,15 @@ def _build_mon_pool(lmrb_qs):
         'advt_time':  'Advt_time',
         'duration':   'Dur',
         'source':     '_source',
+        'prog_time':  'Prog_time',
+        'program':    'Program',
     }, inplace=True)
     df['Date']        = pd.to_datetime(df['Date'], errors='coerce')
     df['_norm_theme'] = df['Advt_Theme'].apply(normalize)
     df['_air_secs']   = df['Advt_time'].apply(_parse_time_to_seconds)
     df['Dur']         = pd.to_numeric(df['Dur'], errors='coerce')
+    # Rule 3: programme start time for time-window matching
+    df['_prog_secs']  = df['Prog_time'].apply(_parse_time_to_seconds)
     return df.reset_index(drop=True)
 
 
@@ -195,6 +224,29 @@ def _persist_results(account_obj, channel, month, results_by_status):
         MatchResult.objects.bulk_create(to_save, batch_size=500)
 
 
+def _active_schedules_for_scope(account_id, channel, month):
+    """
+    Return the list of Schedule objects to use for matching, in ascending
+    schedule_number order.
+
+    Rule 12 — versioning: when multiple uploads share the same schedule_number,
+    only the one with the highest version number (latest upload) is kept.
+    Rule 10 — ordering: the resulting distinct schedules are sorted by
+    schedule_number so overlapping date ranges are processed in booking order.
+    """
+    all_schedules = list(
+        Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+        .order_by('schedule_number', '-version')
+    )
+    seen_nums = set()
+    active = []
+    for s in all_schedules:
+        if s.schedule_number not in seen_nums:
+            seen_nums.add(s.schedule_number)
+            active.append(s)   # first occurrence = highest version for that number
+    return active   # already in schedule_number ascending order
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def run_scope(account_id, channel, month, mode='smart'):
@@ -206,22 +258,50 @@ def run_scope(account_id, channel, month, mode='smart'):
     mode='reset':  Unlock all rows for this scope, delete MatchResults, then
                    run a full fresh match.
 
+    Multiple Schedule records for the same (account, channel, month) are
+    processed in ascending schedule_number order (Rule 10) using the latest
+    version of each schedule_number (Rule 12).  A single LMRB pool is shared
+    across all schedules so monitoring rows cannot be double-claimed.
+
+    Verification is capped at the latest date for which LMRB data exists
+    (Rule 8) — schedule rows beyond that date are left unmatched until more
+    data is uploaded.
+
     Returns (matched_df, prog_mis_df, late_df, not_aired_df, extra_df), total_sch.
     """
-    # ── Date range from Schedule records (for LMRB date filter) ───────────────
-    schedules = Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
-    sch_dates  = schedules.aggregate(min=Min('start_date'), max=Max('end_date'))
-    date_start = sch_dates['min']
-    date_end   = sch_dates['max']
-    # Fallback: if Schedule header has no dates, derive range from actual ScheduleRow dates.
-    # This guarantees the LMRB pool is always restricted to the schedule period, preventing
-    # LMRB data from other months (e.g. September) contaminating a March schedule run.
+    # ── Resolve active schedules (latest version per schedule_number) ──────────
+    active_schedules = _active_schedules_for_scope(account_id, channel, month)
+
+    # ── Date range: union of all active schedule windows ──────────────────────
+    date_start = None
+    date_end   = None
+    if active_schedules:
+        s_dates = [s.start_date for s in active_schedules if s.start_date]
+        e_dates = [s.end_date   for s in active_schedules if s.end_date]
+        date_start = min(s_dates) if s_dates else None
+        date_end   = max(e_dates) if e_dates else None
+
+    # Fallback: derive range from ScheduleRow dates when Schedule headers have none
     if not date_start or not date_end:
         row_dates  = ScheduleRow.objects.filter(
             account_id=account_id, channel=channel, month=month,
         ).aggregate(min=Min('date'), max=Max('date'))
         date_start = date_start or row_dates['min']
         date_end   = date_end   or row_dates['max']
+
+    # ── Rule 8: cap LMRB date_end at the latest available monitoring date ──────
+    max_lmrb_date = LMRBRow.objects.filter(
+        account_id=account_id, channel__iexact=channel,
+    ).aggregate(d=Max('date'))['d']
+
+    if max_lmrb_date:
+        if date_end:
+            date_end = min(date_end, max_lmrb_date)
+        else:
+            date_end = max_lmrb_date
+
+    # Convert to pandas Timestamp for comparison inside match_ads
+    max_verify_ts = pd.Timestamp(date_end) if date_end else None
 
     # ── Reset mode: unlock all rows for this scope ─────────────────────────────
     if mode == 'reset':
@@ -239,14 +319,7 @@ def run_scope(account_id, channel, month, mode='smart'):
         )
         MatchResult.objects.filter(account_id=account_id, channel=channel, month=month).delete()
 
-    # ── Query ScheduleRows ────────────────────────────────────────────────────
-    sch_qs = ScheduleRow.objects.filter(
-        account_id=account_id, channel=channel, month=month,
-        ad_type='COMMERCIAL BENEFITS',
-    )
-    if mode == 'smart':
-        sch_qs = sch_qs.filter(is_matched=False)
-
+    # ── Total schedule rows count (for caller info) ────────────────────────────
     total_sch = ScheduleRow.objects.filter(
         account_id=account_id, channel=channel, month=month,
         ad_type='COMMERCIAL BENEFITS',
@@ -258,17 +331,9 @@ def run_scope(account_id, channel, month, mode='smart'):
             'Please re-upload the schedule file so rows are parsed into the database.'
         )
 
-    sch_df = _build_sch_df(sch_qs)
-
-    # If smart mode and all rows are already matched, return empty results
-    if sch_df.empty and mode == 'smart':
-        empty = pd.DataFrame()
-        return (empty, empty, empty, empty, empty), total_sch
-
-    # ── Query LMRBRows ─────────────────────────────────────────────────────────
-    # Use case-insensitive channel match so "Sirasa TV" / "SIRASA TV" / "sirasa tv"
-    # all resolve to the same pool.  The LMRB file's Channel column value may differ
-    # in case from the canonical Channel name stored in Schedule records.
+    # ── Build shared LMRB pool ─────────────────────────────────────────────────
+    # Case-insensitive channel match so "Sirasa TV" / "SIRASA TV" resolve to the
+    # same pool regardless of how the LMRB file spells the channel name.
     lmrb_qs = LMRBRow.objects.filter(account_id=account_id, channel__iexact=channel)
     if mode == 'smart':
         lmrb_qs = lmrb_qs.filter(is_matched=False)
@@ -278,13 +343,85 @@ def run_scope(account_id, channel, month, mode='smart'):
         lmrb_qs = lmrb_qs.filter(date__lte=date_end)
 
     mon_pool = _build_mon_pool(lmrb_qs)
-
     brand_theme_map = _build_brand_theme_map(account_id)
 
-    # ── Run matching ──────────────────────────────────────────────────────────
-    matched_df, prog_mis_df, late_df, not_aired_df, extra_df = match_ads(
-        sch_df, mon_pool, brand_theme_map,
-    )
+    # ── Process each schedule in order, sharing the LMRB pool ─────────────────
+    # Rule 10: schedules are ordered by schedule_number ascending.
+    # consumed_idx carries over — a pool row used by an earlier schedule cannot
+    # be claimed again by a later one (Rule 11: "Extra Airings unless matched to
+    # a second schedule" is handled naturally because later schedules see the
+    # remaining unconsumed pool).
+    all_matched_dfs   = []
+    all_prog_mis_dfs  = []
+    all_late_dfs      = []
+    all_not_aired_dfs = []
+    global_consumed_idx: set = set()
+
+    schedules_to_run = active_schedules if active_schedules else [None]
+
+    for sched in schedules_to_run:
+        if sched is not None:
+            sch_qs = ScheduleRow.objects.filter(
+                schedule=sched, ad_type='COMMERCIAL BENEFITS',
+            )
+        else:
+            # No Schedule headers found — fall back to all rows for the scope
+            sch_qs = ScheduleRow.objects.filter(
+                account_id=account_id, channel=channel, month=month,
+                ad_type='COMMERCIAL BENEFITS',
+            )
+
+        if mode == 'smart':
+            sch_qs = sch_qs.filter(is_matched=False)
+
+        sch_df = _build_sch_df(sch_qs)
+        if sch_df.empty:
+            continue
+
+        m_df, pm_df, l_df, na_df, _extra, consumed = match_ads(
+            sch_df, mon_pool, brand_theme_map,
+            pre_matched_idx=global_consumed_idx,
+            max_verify_date=max_verify_ts,
+        )
+        global_consumed_idx = consumed
+
+        if not m_df.empty:  all_matched_dfs.append(m_df)
+        if not pm_df.empty: all_prog_mis_dfs.append(pm_df)
+        if not l_df.empty:  all_late_dfs.append(l_df)
+        if not na_df.empty: all_not_aired_dfs.append(na_df)
+
+    # Early-exit for smart mode when nothing new was processed
+    if (mode == 'smart'
+            and not all_matched_dfs
+            and not all_prog_mis_dfs
+            and not all_late_dfs
+            and not all_not_aired_dfs):
+        empty = pd.DataFrame()
+        return (empty, empty, empty, empty, empty), total_sch
+
+    def _concat(dfs):
+        filtered = [d for d in dfs if not d.empty]
+        return pd.concat(filtered, ignore_index=True) if filtered else pd.DataFrame()
+
+    matched_df   = _concat(all_matched_dfs)
+    prog_mis_df  = _concat(all_prog_mis_dfs)
+    late_df      = _concat(all_late_dfs)
+    not_aired_df = _concat(all_not_aired_dfs)
+
+    # ── Rule 11: Extra Airings — pool rows not consumed by any schedule ────────
+    # These are genuine extra airings; if a second schedule had claimed them they
+    # would have been consumed above and not appear here.
+    extra_rows = []
+    for idx, mon_row in mon_pool.iterrows():
+        if idx not in global_consumed_idx:
+            extra_rows.append({
+                'Theme':    mon_row.get('Advt_Theme', ''),
+                'Date':     mon_row.get('Date', ''),
+                'Air_Time': mon_row.get('Advt_time', ''),
+                'Duration': mon_row.get('Dur', ''),
+                'Source':   mon_row.get('_source', ''),
+            })
+    extra_df = pd.DataFrame(extra_rows) if extra_rows else pd.DataFrame()
 
     # ── Lock matched rows in DB ────────────────────────────────────────────────
     _lock_matched_rows(matched_df, prog_mis_df, late_df)
