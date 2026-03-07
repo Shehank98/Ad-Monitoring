@@ -102,8 +102,7 @@
     <i class="fa-solid fa-table-columns text-violet-600"></i> Plan vs LMRB vs TC
   </a>
 
-  {% if summary_data.sponsorship %}
-  <!-- Sponsorship reconciliation controls -->
+  <!-- Sponsorship reconciliation controls — always visible -->
   <form method="post" action="/dashboard/sponsorship/reconcile/" class="inline">
     {% csrf_token %}
     <input type="hidden" name="account_id" value="{{ account_id }}">
@@ -114,6 +113,7 @@
       <i class="fa-solid fa-wand-magic-sparkles text-amber-500"></i> Run Sponsorship Auto-Match
     </button>
   </form>
+  {% if summary_data.sponsorship %}
   <form method="post" action="/dashboard/sponsorship/reset/" class="inline"
         onsubmit="return confirm('Reset all sponsorship assignments for this scope?');">
     {% csrf_token %}
@@ -296,13 +296,13 @@
         {% endif %}
 
         <!-- ── Sponsorship Benefits ─────────────────────────── -->
-        {% if summary_data.sponsorship %}
         <div>
           <div class="flex items-center gap-2 mb-2">
             <span class="text-xs font-bold text-amber-700 uppercase tracking-wider bg-amber-50 px-2 py-0.5 rounded-md">
               <i class="fa-solid fa-star mr-1 text-yellow-500"></i> Sponsorship Benefits
             </span>
           </div>
+          {% if summary_data.sponsorship %}
           <div class="overflow-x-auto border border-slate-200 rounded-xl">
             <table class="sum-table w-full border-collapse">
               <thead>
@@ -379,8 +379,15 @@
               </tbody>
             </table>
           </div>
+          {% else %}
+          <div class="text-xs text-slate-400 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
+            <i class="fa-solid fa-circle-info mr-1 text-amber-400"></i>
+            No SPONSORSHIP schedule rows found for this scope. Upload a schedule file containing
+            rows with <strong>ad_type = SPONSORSHIP</strong> to use sponsorship reconciliation.
+            Once uploaded, click <em>Run Sponsorship Auto-Match</em> above.
+          </div>
+          {% endif %}
         </div>
-        {% endif %}
 
         <!-- ── Notes ──────────────────────────────────────────── -->
         {% if meta and meta.notes %}
