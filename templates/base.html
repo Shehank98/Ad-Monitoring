@@ -180,13 +180,14 @@
     .nav-item.active .nav-icon,
     .nav-item:hover .nav-icon { opacity: 1; }
 
-    /* Sidebar toggle btn */
+    /* Sidebar toggle btn — lives in topbar, always visible */
     #sidebar-toggle {
       background: none; border: none; cursor: pointer;
-      color: #6b7280; padding: .25rem .375rem; border-radius: .375rem;
+      color: #94a3b8; padding: .375rem .5rem; border-radius: .375rem;
       transition: color .15s, background .15s; flex-shrink: 0;
+      line-height: 1;
     }
-    #sidebar-toggle:hover { color: #fff; background: rgba(235,63,67,.15); }
+    #sidebar-toggle:hover { color: var(--og-red); background: rgba(235,63,67,.08); }
 
     /* ── Top bar red accent line ─────────────────────────────────── */
     .topbar-accent {
@@ -203,10 +204,10 @@
   <!-- ════════ SIDEBAR ════════════════════════════════════════════ -->
   <aside class="sidebar flex flex-col w-56 min-h-screen flex-shrink-0 shadow-2xl" id="app-sidebar">
 
-    <!-- Logo row + collapse toggle -->
+    <!-- Logo row -->
     <div class="flex items-center gap-2 px-3 py-4 border-b border-white/[.08]">
       {% if sidebar_logo_url %}
-        <img src="{{ sidebar_logo_url }}" alt="Ogilvy" class="h-6 w-auto object-contain flex-shrink-0 sidebar-logo-img"
+        <img src="{{ sidebar_logo_url }}" alt="Ogilvy" class="h-6 w-auto object-contain flex-shrink-0"
              style="filter:brightness(0) invert(1);">
       {% else %}
         <div class="w-7 h-7 flex items-center justify-center flex-shrink-0" style="color:var(--og-red);font-size:1.1rem;font-weight:900;">O</div>
@@ -215,9 +216,6 @@
         <p class="text-white font-bold text-sm leading-tight tracking-tight truncate">Ogilvy Nova</p>
         <p class="text-[9px] font-medium tracking-wide truncate" style="color:#545659;">OGILVY MEDIA</p>
       </div>
-      <button id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
-        <i class="fa-solid fa-bars text-sm"></i>
-      </button>
     </div>
 
     <!-- User pill -->
@@ -357,8 +355,12 @@
   <main class="flex-1 flex flex-col overflow-hidden">
 
     <!-- Top bar -->
-    <header class="relative flex items-center justify-between px-6 py-3 bg-white border-b border-slate-100 shadow-sm flex-shrink-0">
-      <div>
+    <header class="relative flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100 shadow-sm flex-shrink-0">
+      <!-- Sidebar toggle — always visible in topbar -->
+      <button id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
+        <i class="fa-solid fa-bars text-sm"></i>
+      </button>
+      <div class="flex-1 min-w-0">
         <h1 class="text-sm font-bold text-slate-800 leading-tight">{% block page_title %}Dashboard{% endblock %}</h1>
         <p class="text-[11px] text-slate-400 mt-0.5">{% block page_subtitle %}{% endblock %}</p>
       </div>
