@@ -21,7 +21,8 @@ from .forms import AccountForm, ChannelForm, MonitoringUploadForm, ScheduleUploa
 from .models import (
     Account, BrandMapping, Channel,
     LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow,
-    SummaryReportMeta, SystemSetting, TCRow, TransmissionReport,
+    SponsorshipLmrbAssignment, SummaryReportMeta, SystemSetting,
+    TCRow, TransmissionReport,
     _ensure_defaults, get_setting_list,
 )
 
@@ -2464,3 +2465,195 @@ def system_settings(request):
         'categories': categories,
     })
 
+
+
+# ── Sponsorship Reconciliation ─────────────────────────────────────────────────
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations'])
+@require_POST
+def sponsorship_reconcile(request):
+    """
+    POST: Run auto Step 1 sponsorship reconciliation for a scope.
+    Accepts mode='smart' (default) or mode='reset'.
+    """
+    from verification.sponsorship_engine import reconcile_sponsorship
+
+    account_id = request.POST.get('account_id', '').strip()
+    channel    = request.POST.get('channel', '').strip()
+    month      = request.POST.get('month', '').strip()
+    mode       = request.POST.get('mode', 'smart')
+
+    if not (account_id and channel and month):
+        messages.error(request, 'Incomplete parameters.')
+        return redirect('/dashboard/summary/')
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return redirect('/dashboard/summary/')
+
+    result = reconcile_sponsorship(int(account_id), channel, month, mode=mode)
+    messages.success(
+        request,
+        f'Sponsorship reconciliation complete: '
+        f'{result["assigned"]} new assignments, '
+        f'{result["already_assigned"]} already assigned, '
+        f'{result["total_spon_rows"]} total sponsorship rows.'
+    )
+    return redirect(
+        f'/dashboard/summary/?account_id={account_id}&channel={channel}&month={month}'
+    )
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head'])
+def sponsorship_candidates(request):
+    """
+    GET (AJAX): Return unmatched LMRBRow list available for manual sponsorship
+    assignment.  Optionally filtered by brand and duration query params.
+    """
+    from verification.sponsorship_engine import lmrb_candidates
+
+    account_id = request.GET.get('account_id', '').strip()
+    channel    = request.GET.get('channel', '').strip()
+    month      = request.GET.get('month', '').strip()
+    brand      = request.GET.get('brand', '').strip()
+    duration   = request.GET.get('duration', '').strip()
+
+    if not (account_id and channel and month):
+        return JsonResponse({'error': 'Incomplete parameters.'}, status=400)
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'error': 'Access denied.'}, status=403)
+
+    rows = lmrb_candidates(int(account_id), channel, month)
+
+    # Optional server-side filter by brand mapping theme
+    if brand or duration:
+        from core.models import BrandMapping as BM
+        themes = set()
+        for bm in BM.objects.filter(account_id=account_id):
+            if brand and bm.brand.lower().strip() != brand.lower().strip():
+                continue
+            if duration:
+                try:
+                    if bm.duration is not None and int(bm.duration) != int(duration):
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            if bm.theme:
+                themes.add(bm.theme.lower().strip())
+
+        if themes:
+            rows = [
+                r for r in rows
+                if str(r.get('advt_theme', '')).lower().strip() in themes
+            ]
+        if duration:
+            try:
+                dur_int = int(duration)
+                rows = [r for r in rows if r.get('duration') == dur_int]
+            except ValueError:
+                pass
+
+    for r in rows:
+        if hasattr(r.get('date'), 'isoformat'):
+            r['date'] = r['date'].isoformat()
+
+    return JsonResponse({'candidates': rows})
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations'])
+@require_POST
+def sponsorship_assign(request):
+    """
+    POST (AJAX): Manually assign LMRB rows to sponsorship schedule rows.
+    Body: JSON {"assignments": [[schedule_row_id, lmrb_row_id], ...],
+                "account_id": ..., "channel": ..., "month": ...}
+    """
+    import json as _json
+    from verification.sponsorship_engine import manual_assign
+
+    try:
+        body = _json.loads(request.body)
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Invalid JSON.'}, status=400)
+
+    account_id = str(body.get('account_id', '')).strip()
+    channel    = str(body.get('channel', '')).strip()
+    month      = str(body.get('month', '')).strip()
+
+    if not (account_id and channel and month):
+        return JsonResponse({'error': 'Incomplete parameters.'}, status=400)
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'error': 'Access denied.'}, status=403)
+
+    try:
+        assignments = [(int(sr), int(lr)) for sr, lr in body.get('assignments', [])]
+    except (ValueError, TypeError, KeyError):
+        return JsonResponse({'error': 'Invalid assignments payload.'}, status=400)
+
+    result = manual_assign(int(account_id), channel, month, assignments, request.user)
+    return JsonResponse(result)
+
+
+@login_required
+@role_required(['super_admin', 'admin'])
+@require_POST
+def sponsorship_reset(request):
+    """POST: Delete all SponsorshipLmrbAssignments for a scope and unlock LMRBRows."""
+    from verification.sponsorship_engine import reset_sponsorship
+
+    account_id = request.POST.get('account_id', '').strip()
+    channel    = request.POST.get('channel', '').strip()
+    month      = request.POST.get('month', '').strip()
+
+    if not (account_id and channel and month):
+        messages.error(request, 'Incomplete parameters.')
+        return redirect('/dashboard/summary/')
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return redirect('/dashboard/summary/')
+
+    result = reset_sponsorship(int(account_id), channel, month)
+    messages.success(
+        request,
+        f'Sponsorship reconciliation reset: '
+        f'{result["deleted"]} assignments removed, '
+        f'{result["lmrb_unlocked"]} LMRB rows unlocked.'
+    )
+    return redirect(
+        f'/dashboard/summary/?account_id={account_id}&channel={channel}&month={month}'
+    )
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head'])
+def sponsorship_unmatched_rows(request):
+    """
+    GET (AJAX): Return unmatched SPONSORSHIP ScheduleRow ids for a brand/duration/month,
+    so the manual picker can pair selected LMRB rows with pending schedule rows.
+    """
+    account_id = request.GET.get('account_id', '').strip()
+    channel    = request.GET.get('channel', '').strip()
+    month      = request.GET.get('month', '').strip()
+    brand      = request.GET.get('brand', '').strip()
+    duration   = request.GET.get('duration', '').strip()
+
+    if not (account_id and channel and month):
+        return JsonResponse({'error': 'Incomplete parameters.'}, status=400)
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'error': 'Access denied.'}, status=403)
+
+    qs = ScheduleRow.objects.filter(
+        account_id=account_id, channel=channel, month=month,
+        ad_type='SPONSORSHIP', brand=brand,
+    ).exclude(sponsorship_assignment__isnull=False)
+
+    if duration:
+        try:
+            qs = qs.filter(duration=int(duration))
+        except ValueError:
+            pass
+
+    ids = list(qs.order_by('date', 'start_time').values_list('id', flat=True))
+    return JsonResponse({'schedule_row_ids': ids})

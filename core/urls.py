@@ -54,4 +54,11 @@ urlpatterns = [
 
     # System Settings (super_admin only)
     path('settings/',                           views.system_settings, name='system_settings'),
+
+    # Sponsorship Reconciliation
+    path('sponsorship/reconcile/',  views.sponsorship_reconcile,  name='sponsorship_reconcile'),
+    path('sponsorship/candidates/', views.sponsorship_candidates, name='sponsorship_candidates'),
+    path('sponsorship/assign/',        views.sponsorship_assign,         name='sponsorship_assign'),
+    path('sponsorship/reset/',         views.sponsorship_reset,          name='sponsorship_reset'),
+    path('sponsorship/unmatched-rows/',views.sponsorship_unmatched_rows, name='sponsorship_unmatched_rows'),
 ]

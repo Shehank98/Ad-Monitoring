@@ -35,7 +35,7 @@ from django.utils import timezone
 
 from core.models import (
     Account, BrandMapping, LMRBRow, Schedule, ScheduleRow,
-    SummaryReportMeta, TCRow, TransmissionReport,
+    SponsorshipLmrbAssignment, SummaryReportMeta, TCRow, TransmissionReport,
     get_setting_int,
 )
 
@@ -426,6 +426,35 @@ def build_summary_data(account_id, channel, month):
     }
 
     # ── Sponsorship Benefits ──────────────────────────────────────────────────
+    # Aired count = SponsorshipLmrbAssignment records (Step 1 auto + Step 2 manual).
+    # This replaces the old TC-based aired count for sponsorships.
+    #
+    # status per row:
+    #   'complete'   — aired >= planned
+    #   'incomplete' — aired < planned but leftover LMRB rows exist (auto ran)
+    #   'no_data'    — no brand mapping or zero leftover LMRB rows anywhere
+    #
+    # available_lmrb = count of unmatched LMRBRows for the scope that map to this
+    # brand/duration.  Used by the "Add from LMRB" picker to decide whether to
+    # show the button at all.
+
+    def _leftover_lmrb_count(lmrb_themes, dur_int):
+        """Count LMRBRows that are not matched commercially or for sponsorship."""
+        q = LMRBRow.objects.filter(
+            account_id=account_id, channel__iexact=channel,
+            is_matched=False, is_sponsorship_matched=False,
+        )
+        if date_min and date_max:
+            q = q.filter(date__range=(date_min, date_max))
+        if lmrb_themes:
+            tq = Q()
+            for t in lmrb_themes:
+                tq |= Q(advt_theme__iexact=t)
+            q = q.filter(tq)
+        if dur_int is not None:
+            q = q.filter(duration=dur_int)
+        return q.count()
+
     sponsorship_sections = []
     spon_programmes = (
         ScheduleRow.objects
@@ -450,33 +479,36 @@ def build_summary_data(account_id, channel, month):
             brand   = group['brand']
             dur     = group['duration']
             planned = group['cnt']
+            dur_int = int(dur) if dur is not None else None
 
-            tc_themes   = _tc_themes_for_brand(brand, dur, tc_theme_map)
             lmrb_themes = _lmrb_themes_for_brand(brand, dur, lmrb_theme_map)
-            dur_int     = int(dur) if dur is not None else None
 
-            # Aired = TC schedule-matched AND LMRB-confirmed
-            aired_q = TCRow.objects.filter(
-                account_id=account_id, channel=channel,
-                tc_report__month=month,
-                is_schedule_matched=True,
-                is_lmrb_confirmed=True,
-            )
-            if tc_themes:
-                theme_q = Q()
-                for t in tc_themes:
-                    theme_q |= Q(tc_theme__iexact=t)
-                aired_q = aired_q.filter(theme_q)
-            if dur_int is not None:
-                aired_q = aired_q.filter(duration=dur_int)
-            aired = aired_q.count()
+            # Aired = count of SponsorshipLmrbAssignment for this brand/dur/programme
+            aired = SponsorshipLmrbAssignment.objects.filter(
+                account_id=account_id,
+                schedule_row__channel=channel,
+                schedule_row__month=month,
+                schedule_row__ad_type='SPONSORSHIP',
+                schedule_row__programme=prog,
+                schedule_row__brand=brand,
+                schedule_row__duration=dur,
+            ).count()
 
-            # 3rd Party = total LMRB count
+            # Status
+            if aired >= planned:
+                status = 'complete'
+            else:
+                if lmrb_themes:
+                    available_lmrb = _leftover_lmrb_count(lmrb_themes, dur_int)
+                else:
+                    available_lmrb = 0
+                status = 'incomplete' if (aired > 0 or available_lmrb > 0) else 'no_data'
+
+            # 3rd Party = all LMRB rows (independent monitoring count, same as commercial)
             third_party = _lmrb_row_count(lmrb_themes, dur_int)
 
-            # Extra / Missed based on LMRB vs Planned
-            extra  = max(0, third_party - planned)
-            missed = max(0, planned - third_party)
+            missed = max(0, planned - aired)
+            extra  = max(0, aired - planned)
             avg_30 = round(aired * (dur_int or 0) / 30, 2) if dur_int else 0
 
             prog_rows.append({
@@ -488,6 +520,7 @@ def build_summary_data(account_id, channel, month):
                 'extra':       extra,
                 'third_party': third_party,
                 'avg_30':      avg_30,
+                'status':      status,
             })
 
         subtotal = {

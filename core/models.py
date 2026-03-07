@@ -176,13 +176,16 @@ class LMRBRow(models.Model):
     # deleting a MonitoringData group also removes all its LMRBRows.
     batch_id    = models.UUIDField(null=True, blank=True, db_index=True)
 
-    # Row-level locking
+    # Row-level locking — commercial reconciliation
     is_matched       = models.BooleanField(default=False, db_index=True)
     matched_schedule = models.ForeignKey(
         ScheduleRow, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='lmrb_matches',
     )
     matched_at       = models.DateTimeField(null=True, blank=True)
+
+    # Sponsorship reconciliation lock (set after Step 1 auto or Step 2 manual)
+    is_sponsorship_matched = models.BooleanField(default=False, db_index=True)
 
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
@@ -309,6 +312,53 @@ class TCRow(models.Model):
     def make_dedup_key(account_id, channel, date, aired_time, tc_theme, dur):
         raw = f'tc|{account_id}|{channel}|{date}|{aired_time}|{tc_theme}|{dur}'
         return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
+class SponsorshipLmrbAssignment(models.Model):
+    """Tracks the assignment of an LMRBRow to a SPONSORSHIP ScheduleRow.
+
+    Created either automatically by sponsorship_engine.reconcile_sponsorship
+    (match_type='auto') or manually by an operations user via the "Add from LMRB"
+    picker in the Summary Sheet (match_type='manual').
+
+    Once created, both the LMRBRow (is_sponsorship_matched=True) and the
+    SponsorshipLmrbAssignment record act as a permanent lock — the LMRB row
+    cannot be reused for any other schedule row.
+
+    Constraints:
+    - Each LMRBRow can have at most one assignment (unique lmrb_row).
+    - Each SPONSORSHIP ScheduleRow can have at most one assignment (unique schedule_row).
+    """
+    MATCH_TYPE_CHOICES = [
+        ('auto',   'Auto (Step 1)'),
+        ('manual', 'Manual (Step 2)'),
+    ]
+    account      = models.ForeignKey(Account, on_delete=models.CASCADE,
+                                     related_name='sponsorship_assignments')
+    schedule_row = models.OneToOneField(
+        ScheduleRow, on_delete=models.CASCADE,
+        related_name='sponsorship_assignment',
+    )
+    lmrb_row     = models.OneToOneField(
+        LMRBRow, on_delete=models.CASCADE,
+        related_name='sponsorship_assignment',
+    )
+    match_type   = models.CharField(max_length=10, choices=MATCH_TYPE_CHOICES,
+                                    default='auto')
+    matched_at   = models.DateTimeField(auto_now_add=True)
+    matched_by   = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='sponsorship_assignments',
+    )
+
+    class Meta:
+        ordering = ['schedule_row__date', 'schedule_row__start_time']
+
+    def __str__(self):
+        return (
+            f'Spon | {self.account} | {self.schedule_row.brand} '
+            f'| {self.schedule_row.date} | {self.match_type}'
+        )
 
 
 class SummaryReportMeta(models.Model):
