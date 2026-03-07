@@ -8,17 +8,20 @@ Matching algorithm (two passes):
     1. Brand → Theme lookup (respecting optional duration on the mapping)
     2. Exact calendar date match
     3. Exact duration match (if both sides have it)
-    4a. Time-window match — Prog_time (programme start time) falls within planned
-        Start_Time–End_Time; falls back to Advt_time when Prog_time is absent → MATCHED
-        (Rule 3: Prog_time is the primary time-window signal)
-    4b. Candidates exist but none in time window → PROGRAMME MISMATCH
+    4. Time-window: advt_time (or prog_time) must fall within planned Start_Time–End_Time
+       (Rule 3: Prog_time is the primary signal; falls back to Advt_time)
+    5a. In-window candidate found + programme name word overlap ≥ 50% → MATCHED
+    5b. In-window candidate found + programme name word overlap < 50% → PROGRAMME MISMATCH
+        (ad aired within the planned slot but in a different programme)
+    — Candidates that exist only OUTSIDE the time window are NOT consumed in Pass 1.
+      The schedule row proceeds to Pass 2 so Late Telecast / Not Aired can be assigned.
 
   Pass 2 — for schedule rows still unmatched after Pass 1:
-    5. Same brand+theme+duration but on a LATER date (Rule 7: aired_date > sch_date) → LATE TELECAST
-    6. No candidate anywhere → NOT AIRED
+    6. Same brand+theme+duration on a LATER date (Rule 7: aired_date > sch_date) → LATE TELECAST
+    7. No candidate anywhere → NOT AIRED
 
-  Rule 4: when multiple in-window candidates exist, use fuzzy programme-name
-  matching (fuzzywuzzy token_sort_ratio) as a tiebreaker to pick the best one.
+  Programme name matching uses word-overlap scoring: score = (matching words) / (scheduled
+  programme words). Score ≥ 0.5 → MATCHED; score < 0.5 → PROGRAMME MISMATCH.
 
 Locking: any LMRB row consumed by Matched/Programme Mismatch/Late Telecast is
 locked (cannot be reused), preventing double-counting.
@@ -230,6 +233,26 @@ def _fuzzy_score(sch_prog: str, lmrb_prog) -> int:
         return 0
 
 
+def _word_overlap_score(sch_prog: str, lmrb_prog) -> float:
+    """
+    Word-overlap score: fraction of scheduled programme words present in the
+    LMRB programme name.
+
+    Examples:
+      'Sirasa Superstar' vs 'Sirasa Superstar' → 1.0  (all words match → Matched)
+      'Super Show Colombo' vs 'Super Show'     → 0.67 (2/3 match → Matched)
+      'Sirasa Superstar' vs 'Sirasa News'      → 0.5  (1/2 match → borderline)
+      'Sirasa Superstar' vs 'Rupavahini Drama' → 0.0  (no words → Mismatch)
+
+    Returns 1.0 when sch_prog is empty (nothing to compare → treat as match).
+    """
+    sch_words  = set(normalize(sch_prog).split()) if sch_prog else set()
+    lmrb_words = set(normalize(str(lmrb_prog) if lmrb_prog else '').split())
+    if not sch_words:
+        return 1.0  # no planned programme → cannot mismatch
+    return len(sch_words & lmrb_words) / len(sch_words)
+
+
 def match_ads(
     sch_df: pd.DataFrame,
     mon_pool: pd.DataFrame,
@@ -353,28 +376,36 @@ def match_ads(
         elif pool_has_air_secs and candidates['_air_secs'].notna().any():
             time_col = '_air_secs'
 
+        # ── Time-window: only in-window candidates qualify for Pass 1 ──────────
+        # Rule (corrected):
+        #   MATCHED          — advt_time within [start, end] AND programme name matches
+        #   PROGRAMME MISMATCH — advt_time within [start, end] BUT programme name differs
+        #   Outside window on same day → NOT consumed here; schedule row goes to Pass 2
         if sch_start is not None and sch_end is not None and time_col:
             in_window = (candidates[time_col] >= sch_start) & (candidates[time_col] <= sch_end)
             cands_in  = candidates[in_window]
-            cands_out = candidates[~in_window]
         else:
-            cands_in  = candidates
-            cands_out = pd.DataFrame()
+            # No time-window info available — treat all same-day candidates as in-window
+            cands_in = candidates
 
         if not cands_in.empty:
-            # Rule 4: fuzzy programme-name match as tiebreaker when >1 candidate
-            if len(cands_in) > 1 and sch_programme and 'Program' in cands_in.columns:
-                scores = cands_in['Program'].apply(
-                    lambda p: _fuzzy_score(sch_programme, p)
+            # Pick best candidate by programme-name word overlap (highest score wins
+            # when multiple in-window rows exist for the same theme+duration).
+            has_prog_col = 'Program' in cands_in.columns
+            if has_prog_col and sch_programme:
+                overlap_scores = cands_in['Program'].apply(
+                    lambda p: _word_overlap_score(sch_programme, p)
                 )
-                best_idx = scores.idxmax()
+                best_idx   = overlap_scores.idxmax()
+                prog_score = float(overlap_scores[best_idx])
             else:
-                best_idx = cands_in.index[0]
+                best_idx   = cands_in.index[0]
+                prog_score = 1.0  # no programme column or no planned name → treat as match
 
             matched_idx.add(best_idx)
             mon_row = mon_pool.loc[best_idx]
             fp = lmrb_fingerprint(mon_row)
-            matched_rows.append({
+            base_record = {
                 'Brand':          sch_brand,
                 'Theme':          mon_row.get('Advt_Theme', ''),
                 'Programme':      sch_programme,
@@ -385,35 +416,26 @@ def match_ads(
                 'Air_Time':       mon_row.get('Advt_time', ''),
                 'Duration':       mon_row.get('Dur', sch_dur),
                 'Source':         mon_row.get('_source', ''),
-                'Status':         'Matched',
                 '_lmrb_fp':       fp,
                 '_sch_key':       sch_key,
                 '_sch_row_id':    row.get('_sch_db_id'),
                 '_lmrb_row_id':   mon_row.get('_lmrb_db_id'),
-            })
+            }
 
-        elif not cands_out.empty:
-            best_idx = cands_out.index[0]
-            matched_idx.add(best_idx)
-            mon_row = mon_pool.loc[best_idx]
-            fp = lmrb_fingerprint(mon_row)
-            prog_mis_rows.append({
-                'Brand':          sch_brand,
-                'Theme':          mon_row.get('Advt_Theme', ''),
-                'Programme':      sch_programme,
-                'Scheduled_Date': sch_date,
-                'Aired_Date':     mon_row.get('Date', ''),
-                'Planned_Start':  start_time_str,
-                'Planned_End':    end_time_str,
-                'Air_Time':       mon_row.get('Advt_time', ''),
-                'Duration':       mon_row.get('Dur', sch_dur),
-                'Source':         mon_row.get('_source', ''),
-                'Status':         'Programme Mismatch',
-                '_lmrb_fp':       fp,
-                '_sch_key':       sch_key,
-                '_sch_row_id':    row.get('_sch_db_id'),
-                '_lmrb_row_id':   mon_row.get('_lmrb_db_id'),
-            })
+            # ≥ 50 % of planned programme words match → full match
+            # < 50 % word overlap → programme mismatch (aired in wrong programme)
+            if prog_score >= 0.5:
+                base_record['Status'] = 'Matched'
+                matched_rows.append(base_record)
+            else:
+                base_record['Status'] = 'Programme Mismatch'
+                prog_mis_rows.append(base_record)
+
+        else:
+            # No in-window candidate on this date.
+            # Out-of-window same-day rows are intentionally left unconsumed so the
+            # schedule row can be reconsidered in Pass 2 (Late Telecast / Not Aired).
+            unmatched_sched.append(row)
 
     # ── PASS 2: Late Telecast / Not Aired ─────────────────────────────────────
     for row in unmatched_sched:
