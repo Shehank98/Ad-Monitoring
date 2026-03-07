@@ -267,6 +267,11 @@
       <a href="/dashboard/summary/" class="nav-item {% if '/summary/' in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-file-contract"></i> Summary Sheet
       </a>
+      {% if request.user.role in 'super_admin,admin,operations' %}
+      <a href="/dashboard/manual/" class="nav-item {% if '/manual/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-link"></i> Manual Reconcile
+      </a>
+      {% endif %}
 
       {% endwith %}
     </nav>

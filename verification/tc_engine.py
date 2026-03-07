@@ -34,7 +34,7 @@ from django.db.models import Count, Max, Min, Q
 from django.utils import timezone
 
 from core.models import (
-    Account, BrandMapping, LMRBRow, Schedule, ScheduleRow,
+    Account, BrandMapping, LMRBRow, ManualMatch, Schedule, ScheduleRow,
     SponsorshipLmrbAssignment, SummaryReportMeta, TCRow, TransmissionReport,
     get_setting_int,
 )
@@ -379,7 +379,7 @@ def build_summary_data(account_id, channel, month):
         lmrb_themes = _lmrb_themes_for_brand(brand, dur, lmrb_theme_map)
         dur_int     = int(dur) if dur is not None else None
 
-        # Aired = TC schedule-matched AND LMRB-confirmed
+        # Aired = (TC schedule-matched AND LMRB-confirmed) + manually reconciled
         aired_q = TCRow.objects.filter(
             account_id=account_id, channel=channel,
             tc_report__month=month,
@@ -393,7 +393,19 @@ def build_summary_data(account_id, channel, month):
             aired_q = aired_q.filter(theme_q)
         if dur_int is not None:
             aired_q = aired_q.filter(duration=dur_int)
-        aired = aired_q.count()
+        tc_aired = aired_q.count()
+
+        # Count ManualMatch records for this brand/duration/month as additional aired
+        manual_aired = ManualMatch.objects.filter(
+            account_id=account_id,
+            channel=channel,
+            month=month,
+            schedule_row__brand=brand,
+            schedule_row__duration=dur,
+            schedule_row__ad_type='COMMERCIAL BENEFITS',
+        ).count()
+
+        aired = tc_aired + manual_aired
 
         # 3rd Party = total LMRB count (independent monitoring)
         third_party = _lmrb_row_count(lmrb_themes, dur_int)

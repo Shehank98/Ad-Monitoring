@@ -113,13 +113,18 @@ class ScheduleRow(models.Model):
     duration    = models.IntegerField(null=True, blank=True)
     ad_type     = models.CharField(max_length=100, blank=True)   # 'COMMERCIAL BENEFITS' | 'SPONSORSHIP'
 
-    # Row-level locking
+    # Row-level locking — commercial reconciliation
     is_matched   = models.BooleanField(default=False, db_index=True)
     matched_lmrb = models.ForeignKey(
         'LMRBRow', on_delete=models.SET_NULL,
         null=True, blank=True, related_name='schedule_matches',
     )
     matched_at   = models.DateTimeField(null=True, blank=True)
+
+    # Manual reconciliation lock — set when a ManualMatch record is created for
+    # this row.  Prevents the engine from counting it as Not Aired and stops it
+    # from being re-processed in future auto runs.
+    is_manual_matched = models.BooleanField(default=False, db_index=True)
 
     class Meta:
         ordering = ['date', 'start_time']
@@ -186,6 +191,9 @@ class LMRBRow(models.Model):
 
     # Sponsorship reconciliation lock (set after Step 1 auto or Step 2 manual)
     is_sponsorship_matched = models.BooleanField(default=False, db_index=True)
+
+    # Manual reconciliation lock — permanently locked once a ManualMatch is created
+    is_manual_matched = models.BooleanField(default=False, db_index=True)
 
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
@@ -314,6 +322,50 @@ class TCRow(models.Model):
         return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
+class ManualMatch(models.Model):
+    """A manually confirmed match between a COMMERCIAL BENEFITS ScheduleRow and
+    an LMRBRow whose aired date falls outside (or anywhere outside) the normal
+    auto-reconciliation window.
+
+    Workflow:
+    1. Operations user opens /dashboard/manual/.
+    2. Selects one unmatched ScheduleRow (left panel) and one unmatched LMRBRow
+       (right panel), optionally adds a note, and clicks "Match".
+    3. Both rows are locked (is_manual_matched=True) so the engine and all other
+       matchers skip them.
+    4. The pair appears in the Manual Reconciliation tab, in per-schedule exports,
+       and is counted towards Dashboard totals.
+    5. De-matching removes the ManualMatch record and unlocks both rows.
+    """
+    account      = models.ForeignKey(Account, on_delete=models.CASCADE,
+                                     related_name='manual_matches')
+    channel      = models.CharField(max_length=200)
+    month        = models.CharField(max_length=50)
+    schedule_row = models.OneToOneField(
+        ScheduleRow, on_delete=models.CASCADE,
+        related_name='manual_match',
+    )
+    lmrb_row     = models.OneToOneField(
+        LMRBRow, on_delete=models.CASCADE,
+        related_name='manual_match',
+    )
+    note         = models.TextField(blank=True, default='')
+    matched_at   = models.DateTimeField(auto_now_add=True)
+    matched_by   = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='manual_matches',
+    )
+
+    class Meta:
+        ordering = ['-matched_at']
+
+    def __str__(self):
+        return (
+            f'ManualMatch | {self.account} | {self.channel} | '
+            f'{self.schedule_row.brand} | {self.schedule_row.date}'
+        )
+
+
 class SponsorshipLmrbAssignment(models.Model):
     """Tracks the assignment of an LMRBRow to a SPONSORSHIP ScheduleRow.
 
@@ -400,6 +452,7 @@ class MatchResult(models.Model):
         ('late_telecast',      'Late Telecast'),
         ('not_aired',          'Not Aired'),
         ('no_mapping',         'No Brand Mapping'),
+        ('manual_match',       'Manually Matched'),
     ]
     account          = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='match_results')
     channel          = models.CharField(max_length=200)

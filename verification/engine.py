@@ -317,9 +317,14 @@ def run_scope(account_id, channel, month, mode='smart'):
         ScheduleRow.objects.filter(id__in=scope_sch_ids).update(
             is_matched=False, matched_lmrb=None, matched_at=None,
         )
-        MatchResult.objects.filter(account_id=account_id, channel=channel, month=month).delete()
+        # Only delete non-manual MatchResult records; manual match results are
+        # managed independently via ManualMatch model and must not be wiped here.
+        MatchResult.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+        ).exclude(status='manual_match').delete()
 
     # ── Total schedule rows count (for caller info) ────────────────────────────
+    # Includes manually matched rows in the total so the planned count is accurate.
     total_sch = ScheduleRow.objects.filter(
         account_id=account_id, channel=channel, month=month,
         ad_type='COMMERCIAL BENEFITS',
@@ -335,6 +340,9 @@ def run_scope(account_id, channel, month, mode='smart'):
     # Case-insensitive channel match so "Sirasa TV" / "SIRASA TV" resolve to the
     # same pool regardless of how the LMRB file spells the channel name.
     lmrb_qs = LMRBRow.objects.filter(account_id=account_id, channel__iexact=channel)
+    # Always exclude manually matched LMRB rows — permanently locked once a
+    # ManualMatch record exists.  This filter applies in both smart and reset modes.
+    lmrb_qs = lmrb_qs.filter(is_manual_matched=False)
     if mode == 'smart':
         lmrb_qs = lmrb_qs.filter(is_matched=False)
     if date_start:
@@ -370,6 +378,10 @@ def run_scope(account_id, channel, month, mode='smart'):
                 account_id=account_id, channel=channel, month=month,
                 ad_type='COMMERCIAL BENEFITS',
             )
+
+        # Always exclude manually matched rows — they are locked and must never
+        # appear as Not Aired, Late Telecast, or be re-processed by the engine.
+        sch_qs = sch_qs.filter(is_manual_matched=False)
 
         if mode == 'smart':
             sch_qs = sch_qs.filter(is_matched=False)

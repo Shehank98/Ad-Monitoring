@@ -61,4 +61,9 @@ urlpatterns = [
     path('sponsorship/assign/',        views.sponsorship_assign,         name='sponsorship_assign'),
     path('sponsorship/reset/',         views.sponsorship_reset,          name='sponsorship_reset'),
     path('sponsorship/unmatched-rows/',views.sponsorship_unmatched_rows, name='sponsorship_unmatched_rows'),
+
+    # Manual Reconciliation
+    path('manual/',                    views.manual_reconciliation, name='manual_reconciliation'),
+    path('manual/match/',              views.manual_match_create,   name='manual_match_create'),
+    path('manual/dematch/<int:pk>/',   views.manual_dematch,        name='manual_dematch'),
 ]

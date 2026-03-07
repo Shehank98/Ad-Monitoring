@@ -1,0 +1,355 @@
+{% extends "base.html" %}
+{% block title %}Manual Reconciliation{% endblock %}
+{% block page_title %}Manual Reconciliation{% endblock %}
+{% block page_subtitle %}Match unmatched schedule spots to out-of-range LMRB rows{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* Panel row highlight on hover */
+  .row-selectable:hover { background: rgba(59,130,246,.06); cursor: pointer; }
+  .row-selectable.selected { background: rgba(59,130,246,.12); outline: 2px solid #3b82f6; outline-offset: -2px; }
+
+  /* Scroll containers */
+  .panel-scroll { max-height: 420px; overflow-y: auto; }
+
+  /* Out-of-range badge */
+  .badge-oor { background:#fef3c7; color:#92400e; }
+  .badge-in  { background:#dcfce7; color:#166534; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ═══════════════ FILTER BAR ═══════════════════════════════════════════ -->
+<form method="get" class="card mb-5 flex flex-wrap items-end gap-3">
+  <div class="flex-1 min-w-[180px]">
+    <label class="block text-xs font-semibold text-slate-500 mb-1">Account</label>
+    <select name="account_id" class="select-field" id="acct-sel" onchange="this.form.submit()">
+      <option value="">— Select Account —</option>
+      {% for acct in accounts %}
+        <option value="{{ acct.id }}" {% if acct.id|stringformat:"s" == account_id %}selected{% endif %}>
+          {{ acct.name }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  {% if account_id %}
+  <div class="flex-1 min-w-[180px]">
+    <label class="block text-xs font-semibold text-slate-500 mb-1">Channel</label>
+    <select name="channel" class="select-field" id="chan-sel" onchange="this.form.submit()">
+      <option value="">— Select Channel —</option>
+      {% for ch in channels %}
+        <option value="{{ ch }}" {% if ch == channel %}selected{% endif %}>{{ ch }}</option>
+      {% endfor %}
+    </select>
+    <input type="hidden" name="account_id" value="{{ account_id }}">
+  </div>
+  {% endif %}
+
+  {% if account_id and channel %}
+  <div class="flex-1 min-w-[180px]">
+    <label class="block text-xs font-semibold text-slate-500 mb-1">Month</label>
+    <select name="month" class="select-field">
+      <option value="">— Select Month —</option>
+      {% for m in months %}
+        <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>
+      {% endfor %}
+    </select>
+    <input type="hidden" name="account_id" value="{{ account_id }}">
+    <input type="hidden" name="channel" value="{{ channel }}">
+  </div>
+  <button type="submit" class="btn-primary">
+    <i class="fa-solid fa-filter"></i> Filter
+  </button>
+  {% endif %}
+</form>
+
+{% if not account_id or not channel or not month %}
+  <div class="card text-center text-slate-400 py-16">
+    <i class="fa-solid fa-filter text-4xl mb-3 block opacity-30"></i>
+    <p class="text-sm font-medium">Select an Account, Channel, and Month to begin.</p>
+  </div>
+{% else %}
+
+<!-- schedule date range hint -->
+{% if sch_date_range.0 %}
+<p class="text-xs text-slate-500 mb-3">
+  <i class="fa-solid fa-calendar-range mr-1 text-blue-400"></i>
+  Schedule date range: <strong>{{ sch_date_range.0 }}</strong> → <strong>{{ sch_date_range.1 }}</strong>
+  &nbsp;·&nbsp; LMRB rows outside this range are highlighted.
+</p>
+{% endif %}
+
+<!-- ═══════════════ TWO-PANEL MATCHER ════════════════════════════════════ -->
+<form method="post" action="{% url 'manual_match_create' %}" id="match-form">
+  {% csrf_token %}
+  <input type="hidden" name="account_id" value="{{ account_id }}">
+  <input type="hidden" name="channel"    value="{{ channel }}">
+  <input type="hidden" name="month"      value="{{ month }}">
+  <input type="hidden" name="schedule_row_id" id="hidden-sr" value="">
+  <input type="hidden" name="lmrb_row_id"     id="hidden-lr" value="">
+
+  <div class="grid grid-cols-2 gap-4 mb-4">
+
+    <!-- ── Left: Unmatched Schedule Rows ── -->
+    <div class="card p-0 overflow-hidden">
+      <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+        <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wide">
+          <i class="fa-solid fa-calendar-check mr-1 text-blue-500"></i>
+          Unmatched Schedule Spots
+        </h3>
+        <span class="badge bg-blue-100 text-blue-700">{{ unmatched_schedule|length }}</span>
+      </div>
+
+      {% if unmatched_schedule %}
+        <div class="panel-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Brand</th>
+                <th>Duration</th>
+                <th>Programme</th>
+                <th>Window</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for sr in unmatched_schedule %}
+              <tr class="row-selectable" data-id="{{ sr.id }}" data-panel="sr"
+                  onclick="selectRow(this,'sr')">
+                <td class="whitespace-nowrap">{{ sr.date }}</td>
+                <td class="font-medium">{{ sr.brand }}</td>
+                <td>{{ sr.duration }}s</td>
+                <td class="text-slate-500 text-xs">{{ sr.programme|default:"—" }}</td>
+                <td class="text-xs text-slate-400 whitespace-nowrap">
+                  {{ sr.start_time|slice:":5" }}–{{ sr.end_time|slice:":5" }}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="text-center text-slate-400 py-10 text-sm">
+          <i class="fa-solid fa-circle-check text-2xl mb-2 block text-emerald-400"></i>
+          No unmatched COMMERCIAL BENEFITS spots.
+        </div>
+      {% endif %}
+    </div>
+
+    <!-- ── Right: Unmatched LMRB Rows ── -->
+    <div class="card p-0 overflow-hidden">
+      <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+        <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wide">
+          <i class="fa-solid fa-satellite-dish mr-1 text-violet-500"></i>
+          Unmatched LMRB Rows
+        </h3>
+        <span class="badge bg-violet-100 text-violet-700">{{ unmatched_lmrb|length }}</span>
+      </div>
+
+      {% if unmatched_lmrb %}
+        <div class="panel-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Theme</th>
+                <th>Dur.</th>
+                <th>Aired Time</th>
+                <th>Range</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for lr in unmatched_lmrb %}
+              {% with in_range=lr.date|date:"Y-m-d" %}
+              <tr class="row-selectable" data-id="{{ lr.id }}" data-panel="lr"
+                  data-date="{{ lr.date|date:'Y-m-d' }}"
+                  onclick="selectRow(this,'lr')">
+                <td class="whitespace-nowrap">{{ lr.date }}</td>
+                <td class="font-medium text-xs">{{ lr.advt_theme }}</td>
+                <td>{{ lr.duration }}s</td>
+                <td class="text-slate-500 text-xs whitespace-nowrap">{{ lr.advt_time }}</td>
+                <td>
+                  {% if sch_date_range.0 and sch_date_range.1 %}
+                    {% if lr.date >= sch_date_range.0 and lr.date <= sch_date_range.1 %}
+                      <span class="badge badge-in text-[10px]">In range</span>
+                    {% else %}
+                      <span class="badge badge-oor text-[10px]">Out of range</span>
+                    {% endif %}
+                  {% endif %}
+                </td>
+              </tr>
+              {% endwith %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if unmatched_lmrb|length == 500 %}
+          <p class="text-xs text-slate-400 text-center py-2">Showing first 500 rows. Filter by account/channel to narrow results.</p>
+        {% endif %}
+      {% else %}
+        <div class="text-center text-slate-400 py-10 text-sm">
+          <i class="fa-solid fa-circle-check text-2xl mb-2 block text-emerald-400"></i>
+          No unmatched LMRB rows for this channel.
+        </div>
+      {% endif %}
+    </div>
+  </div><!-- /grid -->
+
+  <!-- ── Match action bar ── -->
+  <div id="match-bar" class="card mb-5 hidden">
+    <div class="flex flex-wrap items-center gap-4">
+      <div class="flex-1 min-w-0">
+        <p class="text-xs font-semibold text-slate-600 mb-1">Selected</p>
+        <p class="text-sm text-slate-800">
+          <span class="font-semibold text-blue-600" id="sel-sr-label">No schedule row selected</span>
+          <i class="fa-solid fa-arrow-right mx-2 text-slate-400"></i>
+          <span class="font-semibold text-violet-600" id="sel-lr-label">No LMRB row selected</span>
+        </p>
+      </div>
+      <div class="flex-1 min-w-[240px]">
+        <label class="block text-xs font-semibold text-slate-500 mb-1">Note <span class="font-normal">(optional)</span></label>
+        <input type="text" name="note" maxlength="300" class="input-field" placeholder="Reason for manual match…">
+      </div>
+      <button type="submit" id="match-btn" class="btn-primary" disabled>
+        <i class="fa-solid fa-link"></i> Confirm Match
+      </button>
+    </div>
+  </div>
+</form>
+
+<!-- ═══════════════ EXISTING MANUAL MATCHES ════════════════════════════ -->
+<div class="card p-0 overflow-hidden">
+  <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+    <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wide">
+      <i class="fa-solid fa-check-double mr-1 text-emerald-500"></i>
+      Existing Manual Matches
+    </h3>
+    <span class="badge bg-emerald-100 text-emerald-700">{{ manual_matches|length }}</span>
+  </div>
+
+  {% if manual_matches %}
+    <div class="overflow-x-auto">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Schedule Date</th>
+            <th>Brand</th>
+            <th>Duration</th>
+            <th>Programme</th>
+            <th>LMRB Date</th>
+            <th>LMRB Theme</th>
+            <th>LMRB Time</th>
+            <th>Note</th>
+            <th>Matched By</th>
+            <th>Matched At</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for mm in manual_matches %}
+          <tr>
+            <td class="whitespace-nowrap">{{ mm.schedule_row.date }}</td>
+            <td class="font-medium">{{ mm.schedule_row.brand }}</td>
+            <td>{{ mm.schedule_row.duration }}s</td>
+            <td class="text-xs text-slate-500">{{ mm.schedule_row.programme|default:"—" }}</td>
+            <td class="whitespace-nowrap">{{ mm.lmrb_row.date }}</td>
+            <td class="text-xs">{{ mm.lmrb_row.advt_theme }}</td>
+            <td class="text-xs text-slate-500 whitespace-nowrap">{{ mm.lmrb_row.advt_time }}</td>
+            <td class="text-xs text-slate-400 max-w-[160px] truncate" title="{{ mm.note }}">{{ mm.note|default:"—" }}</td>
+            <td class="text-xs text-slate-500">{{ mm.matched_by.name|default:"—" }}</td>
+            <td class="text-xs text-slate-400 whitespace-nowrap">{{ mm.matched_at|date:"d M Y H:i" }}</td>
+            <td>
+              <form method="post" action="{% url 'manual_dematch' mm.pk %}"
+                    onsubmit="return confirmDematch(event, '{{ mm.schedule_row.brand|escapejs }}', '{{ mm.schedule_row.date }}')">
+                {% csrf_token %}
+                <input type="hidden" name="account_id" value="{{ account_id }}">
+                <input type="hidden" name="channel"    value="{{ channel }}">
+                <input type="hidden" name="month"      value="{{ month }}">
+                <button type="submit" class="btn-danger text-xs px-2 py-1">
+                  <i class="fa-solid fa-link-slash"></i> De-match
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="text-center text-slate-400 py-8 text-sm">
+      No manual matches yet for this scope.
+    </div>
+  {% endif %}
+</div>
+
+{% endif %}{# end filter check #}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  // Track selections
+  const sel = { sr: null, sr_label: '', lr: null, lr_label: '' };
+
+  function selectRow(row, panel) {
+    // Deselect previously selected row in this panel
+    document.querySelectorAll(`.row-selectable[data-panel="${panel}"].selected`)
+      .forEach(r => r.classList.remove('selected'));
+
+    row.classList.add('selected');
+
+    if (panel === 'sr') {
+      sel.sr = row.dataset.id;
+      const cells = row.querySelectorAll('td');
+      sel.sr_label = `${cells[1].textContent.trim()} — ${cells[0].textContent.trim()} (${cells[2].textContent.trim()})`;
+      document.getElementById('hidden-sr').value = sel.sr;
+      document.getElementById('sel-sr-label').textContent = sel.sr_label;
+    } else {
+      sel.lr = row.dataset.id;
+      const cells = row.querySelectorAll('td');
+      sel.lr_label = `${cells[1].textContent.trim()} — ${cells[0].textContent.trim()} @ ${cells[3].textContent.trim()}`;
+      document.getElementById('hidden-lr').value = sel.lr;
+      document.getElementById('sel-lr-label').textContent = sel.lr_label;
+    }
+
+    updateBar();
+  }
+
+  function updateBar() {
+    const bar = document.getElementById('match-bar');
+    const btn = document.getElementById('match-btn');
+    const both = sel.sr && sel.lr;
+    bar.classList.toggle('hidden', false); // always show bar if either selected
+    btn.disabled = !both;
+  }
+
+  // Expose to onclick handlers in markup
+  window.selectRow = selectRow;
+
+  // De-match confirmation
+  window.confirmDematch = function (e, brand, date) {
+    const ok = confirm(
+      `Remove manual match for "${brand}" (${date})?\n\n` +
+      `Both the schedule row and the LMRB row will be unlocked and returned to the unmatched pool.`
+    );
+    if (!ok) e.preventDefault();
+    return ok;
+  };
+
+  // Confirm-before-submit for the match form
+  document.getElementById('match-form').addEventListener('submit', function (e) {
+    const srLabel = document.getElementById('sel-sr-label').textContent;
+    const lrLabel = document.getElementById('sel-lr-label').textContent;
+    if (!sel.sr || !sel.lr) { e.preventDefault(); return; }
+    const ok = confirm(
+      `Confirm manual match?\n\nSchedule: ${srLabel}\nLMRB: ${lrLabel}\n\n` +
+      `Both rows will be locked and excluded from the automatic engine.`
+    );
+    if (!ok) e.preventDefault();
+  });
+})();
+</script>
+{% endblock %}

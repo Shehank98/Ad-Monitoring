@@ -2657,3 +2657,208 @@ def sponsorship_unmatched_rows(request):
 
     ids = list(qs.order_by('date', 'start_time').values_list('id', flat=True))
     return JsonResponse({'schedule_row_ids': ids})
+
+
+# ── Manual Reconciliation ──────────────────────────────────────────────────────
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head'])
+def manual_reconciliation(request):
+    """
+    Two-panel view: unmatched schedule rows (left) vs unmatched LMRB rows (right).
+    Existing ManualMatch records for the scope are shown below with a De-match button.
+    """
+    from core.models import ManualMatch
+
+    user       = request.user
+    account_qs = _account_qs(user)
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+
+    channels = []
+    months   = []
+    unmatched_schedule = []
+    unmatched_lmrb     = []
+    manual_matches     = []
+    sch_date_range     = (None, None)
+
+    if account_id:
+        if _account_access(user, account_id):
+            channels = list(
+                ScheduleRow.objects.filter(account_id=account_id)
+                .values_list('channel', flat=True).distinct().order_by('channel')
+            )
+
+    if account_id and channel:
+        if _account_access(user, account_id):
+            months = list(
+                ScheduleRow.objects.filter(account_id=account_id, channel=channel)
+                .values_list('month', flat=True).distinct().order_by('month')
+            )
+
+    if account_id and channel and month and _account_access(user, account_id):
+        # Unmatched COMMERCIAL BENEFITS schedule rows
+        unmatched_schedule = list(
+            ScheduleRow.objects.filter(
+                account_id=account_id, channel=channel, month=month,
+                ad_type='COMMERCIAL BENEFITS',
+                is_matched=False,
+                is_manual_matched=False,
+            ).order_by('date', 'start_time', 'brand')
+        )
+
+        # Determine schedule date range for display purposes
+        from django.db.models import Min as _Min, Max as _Max
+        dr = ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+        ).aggregate(mn=_Min('date'), mx=_Max('date'))
+        sch_date_range = (dr['mn'], dr['mx'])
+
+        # Unmatched LMRB rows for this channel — NOT date-filtered so out-of-range
+        # rows (the whole purpose of manual matching) are visible.
+        unmatched_lmrb = list(
+            LMRBRow.objects.filter(
+                account_id=account_id,
+                channel__iexact=channel,
+                is_matched=False,
+                is_manual_matched=False,
+                is_sponsorship_matched=False,
+            ).order_by('advt_theme', 'duration', 'date', 'advt_time')[:500]
+        )
+
+        manual_matches = list(
+            ManualMatch.objects.filter(
+                account_id=account_id, channel=channel, month=month,
+            ).select_related('schedule_row', 'lmrb_row', 'matched_by')
+        )
+
+    return render(request, 'manual_reconciliation/index.html', {
+        'accounts':           account_qs,
+        'account_id':         account_id,
+        'channels':           channels,
+        'channel':            channel,
+        'months':             months,
+        'month':              month,
+        'unmatched_schedule': unmatched_schedule,
+        'unmatched_lmrb':     unmatched_lmrb,
+        'manual_matches':     manual_matches,
+        'sch_date_range':     sch_date_range,
+    })
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations'])
+@require_POST
+def manual_match_create(request):
+    """
+    POST: Create a ManualMatch between one ScheduleRow and one LMRBRow.
+    Locks both rows immediately.
+    """
+    from core.models import ManualMatch
+
+    account_id      = request.POST.get('account_id', '').strip()
+    channel         = request.POST.get('channel', '').strip()
+    month           = request.POST.get('month', '').strip()
+    schedule_row_id = request.POST.get('schedule_row_id', '').strip()
+    lmrb_row_id     = request.POST.get('lmrb_row_id', '').strip()
+    note            = request.POST.get('note', '').strip()
+
+    redirect_url = (
+        f'/dashboard/manual/?account_id={account_id}'
+        f'&channel={channel}&month={month}'
+    )
+
+    if not all([account_id, channel, month, schedule_row_id, lmrb_row_id]):
+        messages.error(request, 'Incomplete parameters.')
+        return redirect(redirect_url)
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return redirect(redirect_url)
+
+    sr = get_object_or_404(
+        ScheduleRow, id=schedule_row_id, account_id=account_id,
+        channel=channel, month=month, ad_type='COMMERCIAL BENEFITS',
+        is_matched=False, is_manual_matched=False,
+    )
+    lr = get_object_or_404(
+        LMRBRow, id=lmrb_row_id, account_id=account_id,
+        is_matched=False, is_manual_matched=False, is_sponsorship_matched=False,
+    )
+
+    # Guard against pre-existing matches (race condition protection)
+    if ManualMatch.objects.filter(schedule_row=sr).exists():
+        messages.error(request, f'Schedule row already manually matched.')
+        return redirect(redirect_url)
+    if ManualMatch.objects.filter(lmrb_row=lr).exists():
+        messages.error(request, f'LMRB row already manually matched.')
+        return redirect(redirect_url)
+
+    # Create the manual match
+    ManualMatch.objects.create(
+        account_id   = account_id,
+        channel      = channel,
+        month        = month,
+        schedule_row = sr,
+        lmrb_row     = lr,
+        note         = note,
+        matched_by   = request.user,
+    )
+
+    # Lock both rows
+    ScheduleRow.objects.filter(id=sr.id).update(is_manual_matched=True)
+    LMRBRow.objects.filter(id=lr.id).update(is_manual_matched=True)
+
+    # Remove any pre-existing Not Aired / Late Telecast MatchResult for this
+    # schedule row — manual match supersedes those engine results.
+    from core.models import MatchResult
+    MatchResult.objects.filter(
+        schedule_row=sr,
+        status__in=['not_aired', 'late_telecast', 'programme_mismatch'],
+    ).delete()
+
+    messages.success(
+        request,
+        f'Manually matched: {sr.brand} ({sr.duration}s, {sr.date}) '
+        f'← {lr.advt_theme} ({lr.date} {lr.advt_time})',
+    )
+    return redirect(redirect_url)
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations'])
+@require_POST
+def manual_dematch(request, pk):
+    """
+    POST: Remove a ManualMatch and unlock both rows.
+    """
+    from core.models import ManualMatch
+
+    account_id = request.POST.get('account_id', '').strip()
+    channel    = request.POST.get('channel', '').strip()
+    month      = request.POST.get('month', '').strip()
+
+    redirect_url = (
+        f'/dashboard/manual/?account_id={account_id}'
+        f'&channel={channel}&month={month}'
+    )
+
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return redirect(redirect_url)
+
+    mm = get_object_or_404(ManualMatch, pk=pk, account_id=account_id)
+
+    sr_id = mm.schedule_row_id
+    lr_id = mm.lmrb_row_id
+    sr_desc = f'{mm.schedule_row.brand} ({mm.schedule_row.date})'
+
+    mm.delete()
+
+    # Unlock both rows
+    ScheduleRow.objects.filter(id=sr_id).update(is_manual_matched=False)
+    LMRBRow.objects.filter(id=lr_id).update(is_manual_matched=False)
+
+    messages.success(request, f'De-matched: {sr_desc}. Both rows are now available again.')
+    return redirect(redirect_url)
