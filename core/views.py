@@ -27,6 +27,24 @@ from .models import (
 )
 
 
+# ── JSON serialisation helper ─────────────────────────────────────────────────
+
+class _JsonEnc(json.JSONEncoder):
+    """Handles date, datetime, and Decimal so view data serialises cleanly."""
+    def default(self, o):
+        from decimal import Decimal
+        if isinstance(o, (date_cls, datetime)):
+            return o.isoformat()
+        if isinstance(o, Decimal):
+            return float(o)
+        return super().default(o)
+
+
+def _to_js(data):
+    """Serialize Python data to a JS-safe JSON string (replaces </script> escapes)."""
+    return json.dumps(data, cls=_JsonEnc).replace('</', '<\\/')
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _is_admin(user):
@@ -1225,7 +1243,11 @@ def monitoring_dashboard(request):
         'sponsorship_brand_summary': sponsorship_brand_summary,
         'schedule_chart':            schedule_chart,
         'lmrb_chart':                lmrb_chart,
+        # Pre-serialised JSON — safe to emit with |safe in templates (no Python None/True/False)
+        'schedule_chart_json':       _to_js(list(schedule_chart)),
+        'lmrb_chart_json':           _to_js(list(lmrb_chart)),
         'lmrb_theme_detail':         lmrb_theme_detail if selected_account and channel and month else [],
+        'lmrb_theme_detail_json':    _to_js(lmrb_theme_detail if selected_account and channel and month else []),
         'pt_all':                    pt_all if selected_account and channel and month else {},
         'pt_comm':                   pt_comm if selected_account and channel and month else {},
         'pt_spon':                   pt_spon if selected_account and channel and month else {},
@@ -1233,6 +1255,167 @@ def monitoring_dashboard(request):
         'sch_pt_spon':               sch_pt_spon if selected_account and channel and month else {},
         'lmrb_matched_rows':         lmrb_matched_rows,
         'lmrb_unmatched_rows':       lmrb_unmatched_rows,
+    })
+
+
+# ── Full Analytics Page ───────────────────────────────────────────────────────
+
+@login_required
+def analytics_full(request):
+    """
+    Comprehensive LMRB analytics page.
+    Builds raw row JSON + pre-aggregated data for 25 charts across 6 sections.
+    All chart computation + filtering is done client-side in JS using Chart.js.
+    """
+    from django.db.models import Avg, Sum
+
+    user       = request.user
+    account_qs = _account_qs(user)
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+    # Prime-time window hours (configurable)
+    prime_start_h = int(request.GET.get('prime_start', 18))
+    prime_end_h   = int(request.GET.get('prime_end',   22))
+
+    channels = []
+    months   = []
+    rows_json = '[]'
+    kpis = {'total': 0, 'prime': 0, 'nonprime': 0, 'spon': 0, 'total_cost': None}
+    filter_pg_list  = []
+    filter_adv_list = []
+    selected_account = None
+    d_min = d_max = None
+
+    if account_id and _account_access(user, account_id):
+        try:
+            selected_account = account_qs.get(id=account_id)
+        except Exception:
+            selected_account = None
+        channels = list(
+            ScheduleRow.objects.filter(account_id=account_id)
+            .values_list('channel', flat=True).distinct().order_by('channel')
+        )
+
+    if account_id and channel and _account_access(user, account_id):
+        months = list(
+            ScheduleRow.objects.filter(account_id=account_id, channel=channel)
+            .values_list('month', flat=True).distinct().order_by('month')
+        )
+
+    if account_id and channel and month and _account_access(user, account_id):
+        # Date range from schedule
+        dr = ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month
+        ).aggregate(d_min=Min('date'), d_max=Max('date'))
+        d_min, d_max = dr['d_min'], dr['d_max']
+
+        # Build theme → ad_type mapping
+        commercial_brands  = set(ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+            ad_type='COMMERCIAL BENEFITS',
+        ).values_list('brand', flat=True))
+        sponsorship_brands = set(ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+            ad_type='SPONSORSHIP',
+        ).values_list('brand', flat=True))
+        theme_to_adtype = {}
+        for bm in BrandMapping.objects.filter(account_id=account_id):
+            key = (bm.theme or '').lower().strip()
+            if bm.brand in commercial_brands:
+                theme_to_adtype.setdefault(key, 'commercial')
+            if bm.brand in sponsorship_brands:
+                theme_to_adtype[key] = 'sponsorship'
+
+        # Fetch all LMRB rows for the scope
+        lmrb_qs = LMRBRow.objects.filter(
+            account_id=account_id, channel__iexact=channel,
+        )
+        if d_min:
+            lmrb_qs = lmrb_qs.filter(date__gte=d_min)
+        if d_max:
+            lmrb_qs = lmrb_qs.filter(date__lte=d_max)
+
+        # Build compact row list for JS
+        raw = []
+        total_cost_sum = 0.0
+        has_cost = False
+        for row in lmrb_qs.values(
+            'id', 'date', 'advt_theme', 'advt_time', 'duration',
+            'program', 'product_group', 'advertiser',
+            'ad_pos', 'tot_ads', 'brk_no', 'pos_in_brk', 'ads_in_brk',
+            'cost', 'day',
+        ):
+            try:
+                h = int(str(row['advt_time'] or '0').split(':')[0])
+            except Exception:
+                h = 0
+            adtype = theme_to_adtype.get(str(row['advt_theme'] or '').lower().strip(), 'other')
+            is_p   = prime_start_h <= h < prime_end_h
+            cost_v = float(row['cost']) if row['cost'] is not None else None
+            if cost_v is not None:
+                has_cost = True
+                total_cost_sum += cost_v
+            # day-of-week: use 'day' field if present, else derive from date
+            dow_name = (row['day'] or '').strip()
+            if not dow_name and row['date']:
+                dow_name = row['date'].strftime('%a')
+            raw.append({
+                'd':        str(row['date']),
+                'dow':      row['date'].weekday() if row['date'] else 0,
+                'downame':  dow_name,
+                'h':        h,
+                'theme':    row['advt_theme'] or '',
+                'dur':      row['duration'],
+                'prog':     row['program'] or '',
+                'pg':       row['product_group'] or '',
+                'adv':      row['advertiser'] or '',
+                'adtype':   adtype,
+                'prime':    is_p,
+                'adpos':    row['ad_pos'],
+                'totads':   row['tot_ads'],
+                'brkno':    row['brk_no'],
+                'posinbrk': row['pos_in_brk'],
+                'adsinbrk': row['ads_in_brk'],
+                'cost':     cost_v,
+            })
+
+        rows_json = _to_js(raw)
+
+        # KPI summary
+        kpis = {
+            'total':      len(raw),
+            'prime':      sum(1 for r in raw if r['prime']),
+            'nonprime':   sum(1 for r in raw if not r['prime']),
+            'spon':       sum(1 for r in raw if r['adtype'] == 'sponsorship'),
+            'total_cost': round(total_cost_sum, 2) if has_cost else None,
+        }
+        if kpis['total']:
+            kpis['prime_pct'] = round(kpis['prime'] / kpis['total'] * 100)
+        else:
+            kpis['prime_pct'] = 0
+
+        # Filter option lists for the UI dropdowns
+        filter_pg_list  = sorted({r['pg']  for r in raw if r['pg']})
+        filter_adv_list = sorted({r['adv'] for r in raw if r['adv']})[:100]
+
+    return render(request, 'monitoring/analytics.html', {
+        'accounts':         account_qs,
+        'selected_account': selected_account,
+        'account_id':       account_id,
+        'channels':         channels,
+        'months':           months,
+        'channel':          channel,
+        'month':            month,
+        'prime_start_h':    prime_start_h,
+        'prime_end_h':      prime_end_h,
+        'rows_json':        rows_json,
+        'kpis':             kpis,
+        'filter_pg_list':   filter_pg_list,
+        'filter_adv_list':  filter_adv_list,
+        'd_min':            d_min,
+        'd_max':            d_max,
     })
 
 
@@ -2667,7 +2850,8 @@ def sponsorship_unmatched_rows(request):
 @role_required(['super_admin', 'admin', 'operations', 'team_head'])
 def manual_reconciliation(request):
     """
-    Two-panel view: unmatched schedule rows (left) vs unmatched LMRB rows (right).
+    Three-panel view: unmatched schedule rows (left), unmatched TC spots (middle),
+    unmatched LMRB rows (right). Supports Schedule+LMRB, 3-way, and TC+LMRB modes.
     Existing ManualMatch records for the scope are shown below with a De-match button.
     """
     from core.models import ManualMatch
@@ -2679,9 +2863,10 @@ def manual_reconciliation(request):
     channel    = request.GET.get('channel', '')
     month      = request.GET.get('month', '')
 
-    channels = []
-    months   = []
+    channels           = []
+    months             = []
     unmatched_schedule = []
+    unmatched_tc       = []
     unmatched_lmrb     = []
     manual_matches     = []
     sch_date_range     = (None, None)
@@ -2718,6 +2903,17 @@ def manual_reconciliation(request):
         ).aggregate(mn=_Min('date'), mx=_Max('date'))
         sch_date_range = (dr['mn'], dr['mx'])
 
+        # Unmatched TC rows — no ManualMatch tc_row pointing to them yet
+        unmatched_tc = list(
+            TCRow.objects.filter(
+                account_id=account_id,
+                channel=channel,
+                tc_report__month=month,
+                manual_match__isnull=True,
+            ).select_related('tc_report')
+            .order_by('tc_theme', 'duration', 'date', 'aired_time')[:500]
+        )
+
         # Unmatched LMRB rows for this channel — NOT date-filtered so out-of-range
         # rows (the whole purpose of manual matching) are visible.
         unmatched_lmrb = list(
@@ -2733,7 +2929,7 @@ def manual_reconciliation(request):
         manual_matches = list(
             ManualMatch.objects.filter(
                 account_id=account_id, channel=channel, month=month,
-            ).select_related('schedule_row', 'lmrb_row', 'matched_by')
+            ).select_related('schedule_row', 'tc_row', 'lmrb_row', 'matched_by')
         )
 
     return render(request, 'manual_reconciliation/index.html', {
@@ -2744,6 +2940,7 @@ def manual_reconciliation(request):
         'months':             months,
         'month':              month,
         'unmatched_schedule': unmatched_schedule,
+        'unmatched_tc':       unmatched_tc,
         'unmatched_lmrb':     unmatched_lmrb,
         'manual_matches':     manual_matches,
         'sch_date_range':     sch_date_range,
@@ -2755,15 +2952,19 @@ def manual_reconciliation(request):
 @require_POST
 def manual_match_create(request):
     """
-    POST: Create a ManualMatch between one ScheduleRow and one LMRBRow.
-    Locks both rows immediately.
+    POST: Create a ManualMatch.  Supports three modes:
+      schedule_lmrb — Schedule + LMRB  (original)
+      3way          — Schedule + TC + LMRB
+      tc_lmrb       — TC + LMRB only (no schedule row)
     """
-    from core.models import ManualMatch
+    from core.models import ManualMatch, MatchResult
 
     account_id      = request.POST.get('account_id', '').strip()
     channel         = request.POST.get('channel', '').strip()
     month           = request.POST.get('month', '').strip()
+    match_mode      = request.POST.get('match_mode', 'schedule_lmrb').strip()
     schedule_row_id = request.POST.get('schedule_row_id', '').strip()
+    tc_row_id       = request.POST.get('tc_row_id', '').strip()
     lmrb_row_id     = request.POST.get('lmrb_row_id', '').strip()
     note            = request.POST.get('note', '').strip()
 
@@ -2772,29 +2973,51 @@ def manual_match_create(request):
         f'&channel={channel}&month={month}'
     )
 
-    if not all([account_id, channel, month, schedule_row_id, lmrb_row_id]):
+    if not all([account_id, channel, month, lmrb_row_id]):
         messages.error(request, 'Incomplete parameters.')
+        return redirect(redirect_url)
+    if match_mode in ('schedule_lmrb', '3way') and not schedule_row_id:
+        messages.error(request, 'A schedule row is required for this match mode.')
+        return redirect(redirect_url)
+    if match_mode in ('3way', 'tc_lmrb') and not tc_row_id:
+        messages.error(request, 'A TC row is required for this match mode.')
         return redirect(redirect_url)
     if not _account_access(request.user, account_id):
         messages.error(request, 'Access denied.')
         return redirect(redirect_url)
 
-    sr = get_object_or_404(
-        ScheduleRow, id=schedule_row_id, account_id=account_id,
-        channel=channel, month=month, ad_type='COMMERCIAL BENEFITS',
-        is_matched=False, is_manual_matched=False,
-    )
+    # Fetch schedule row if needed
+    sr = None
+    if schedule_row_id:
+        sr = get_object_or_404(
+            ScheduleRow, id=schedule_row_id, account_id=account_id,
+            channel=channel, month=month,
+            is_matched=False, is_manual_matched=False,
+        )
+
+    # Fetch TC row if needed
+    tr = None
+    if tc_row_id:
+        tr = get_object_or_404(
+            TCRow, id=tc_row_id, account_id=account_id, channel=channel,
+            manual_match__isnull=True,
+        )
+
+    # Fetch LMRB row
     lr = get_object_or_404(
         LMRBRow, id=lmrb_row_id, account_id=account_id,
         is_matched=False, is_manual_matched=False, is_sponsorship_matched=False,
     )
 
-    # Guard against pre-existing matches (race condition protection)
-    if ManualMatch.objects.filter(schedule_row=sr).exists():
-        messages.error(request, f'Schedule row already manually matched.')
-        return redirect(redirect_url)
+    # Race-condition guards
     if ManualMatch.objects.filter(lmrb_row=lr).exists():
-        messages.error(request, f'LMRB row already manually matched.')
+        messages.error(request, 'LMRB row already manually matched.')
+        return redirect(redirect_url)
+    if sr and ManualMatch.objects.filter(schedule_row=sr).exists():
+        messages.error(request, 'Schedule row already manually matched.')
+        return redirect(redirect_url)
+    if tr and ManualMatch.objects.filter(tc_row=tr).exists():
+        messages.error(request, 'TC row already manually matched.')
         return redirect(redirect_url)
 
     # Create the manual match
@@ -2802,28 +3025,35 @@ def manual_match_create(request):
         account_id   = account_id,
         channel      = channel,
         month        = month,
+        match_mode   = match_mode,
         schedule_row = sr,
+        tc_row       = tr,
         lmrb_row     = lr,
         note         = note,
         matched_by   = request.user,
     )
 
-    # Lock both rows
-    ScheduleRow.objects.filter(id=sr.id).update(is_manual_matched=True)
+    # Lock rows
+    if sr:
+        ScheduleRow.objects.filter(id=sr.id).update(is_manual_matched=True)
     LMRBRow.objects.filter(id=lr.id).update(is_manual_matched=True)
 
-    # Remove any pre-existing Not Aired / Late Telecast MatchResult for this
-    # schedule row — manual match supersedes those engine results.
-    from core.models import MatchResult
-    MatchResult.objects.filter(
-        schedule_row=sr,
-        status__in=['not_aired', 'late_telecast', 'programme_mismatch'],
-    ).delete()
+    # Remove stale engine MatchResult for this schedule row
+    if sr:
+        MatchResult.objects.filter(
+            schedule_row=sr,
+            status__in=['not_aired', 'late_telecast', 'programme_mismatch'],
+        ).delete()
 
+    if sr:
+        desc = f'{sr.brand} ({sr.duration}s, {sr.date})'
+    elif tr:
+        desc = f'TC: {tr.tc_theme} ({tr.date})'
+    else:
+        desc = 'unknown'
     messages.success(
         request,
-        f'Manually matched: {sr.brand} ({sr.duration}s, {sr.date}) '
-        f'← {lr.advt_theme} ({lr.date} {lr.advt_time})',
+        f'Manually matched [{match_mode}]: {desc} ← LMRB: {lr.advt_theme} ({lr.date} {lr.advt_time})',
     )
     return redirect(redirect_url)
 
@@ -2854,13 +3084,19 @@ def manual_dematch(request, pk):
 
     sr_id = mm.schedule_row_id
     lr_id = mm.lmrb_row_id
-    sr_desc = f'{mm.schedule_row.brand} ({mm.schedule_row.date})'
+    if mm.schedule_row_id:
+        sr_desc = f'{mm.schedule_row.brand} ({mm.schedule_row.date})'
+    elif mm.tc_row_id:
+        sr_desc = f'TC: {mm.tc_row.tc_theme} ({mm.tc_row.date})'
+    else:
+        sr_desc = 'entry'
 
     mm.delete()
 
-    # Unlock both rows
-    ScheduleRow.objects.filter(id=sr_id).update(is_manual_matched=False)
+    # Unlock rows (TCRow uses reverse relation — deleting ManualMatch frees it automatically)
+    if sr_id:
+        ScheduleRow.objects.filter(id=sr_id).update(is_manual_matched=False)
     LMRBRow.objects.filter(id=lr_id).update(is_manual_matched=False)
 
-    messages.success(request, f'De-matched: {sr_desc}. Both rows are now available again.')
+    messages.success(request, f'De-matched: {sr_desc}. All rows are now available again.')
     return redirect(redirect_url)

@@ -1,20 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Manual Reconciliation{% endblock %}
 {% block page_title %}Manual Reconciliation{% endblock %}
-{% block page_subtitle %}Match unmatched schedule spots to out-of-range LMRB rows{% endblock %}
+{% block page_subtitle %}Manually match unmatched schedule, TC, and LMRB rows{% endblock %}
 
 {% block extra_head %}
 <style>
-  /* Panel row highlight on hover */
   .row-selectable:hover { background: rgba(59,130,246,.06); cursor: pointer; }
-  .row-selectable.selected { background: rgba(59,130,246,.12); outline: 2px solid #3b82f6; outline-offset: -2px; }
-
-  /* Scroll containers */
-  .panel-scroll { max-height: 420px; overflow-y: auto; }
-
-  /* Out-of-range badge */
+  .row-selectable.selected-sr  { background: rgba(37,99,235,.1);  outline: 2px solid #2563eb; outline-offset:-2px; }
+  .row-selectable.selected-tc  { background: rgba(16,185,129,.1); outline: 2px solid #10b981; outline-offset:-2px; }
+  .row-selectable.selected-lr  { background: rgba(124,58,237,.1); outline: 2px solid #7c3aed; outline-offset:-2px; }
+  .panel-scroll { max-height: 400px; overflow-y: auto; }
   .badge-oor { background:#fef3c7; color:#92400e; }
   .badge-in  { background:#dcfce7; color:#166534; }
+  /* Mode pill tabs */
+  .mode-btn { padding:.35rem .9rem; border-radius:.5rem; font-size:.72rem; font-weight:600;
+              cursor:pointer; border:none; background:#f1f5f9; color:#64748b; transition:all .15s; }
+  .mode-btn.active { background:#1d4ed8; color:#fff; }
 </style>
 {% endblock %}
 
@@ -24,12 +25,10 @@
 <form method="get" class="card mb-5 flex flex-wrap items-end gap-3">
   <div class="flex-1 min-w-[180px]">
     <label class="block text-xs font-semibold text-slate-500 mb-1">Account</label>
-    <select name="account_id" class="select-field" id="acct-sel" onchange="this.form.submit()">
+    <select name="account_id" class="select-field" onchange="this.form.submit()">
       <option value="">— Select Account —</option>
       {% for acct in accounts %}
-        <option value="{{ acct.id }}" {% if acct.id|stringformat:"s" == account_id %}selected{% endif %}>
-          {{ acct.name }}
-        </option>
+        <option value="{{ acct.id }}" {% if acct.id|stringformat:"s" == account_id %}selected{% endif %}>{{ acct.name }}</option>
       {% endfor %}
     </select>
   </div>
@@ -37,7 +36,7 @@
   {% if account_id %}
   <div class="flex-1 min-w-[180px]">
     <label class="block text-xs font-semibold text-slate-500 mb-1">Channel</label>
-    <select name="channel" class="select-field" id="chan-sel" onchange="this.form.submit()">
+    <select name="channel" class="select-field" onchange="this.form.submit()">
       <option value="">— Select Channel —</option>
       {% for ch in channels %}
         <option value="{{ ch }}" {% if ch == channel %}selected{% endif %}>{{ ch }}</option>
@@ -78,50 +77,60 @@
 </p>
 {% endif %}
 
-<!-- ═══════════════ TWO-PANEL MATCHER ════════════════════════════════════ -->
+<!-- ═══════════════ MATCH MODE SELECTOR ═════════════════════════════════ -->
+<div class="card mb-4 flex flex-wrap items-center gap-3">
+  <span class="text-xs font-bold text-slate-500 uppercase tracking-wide">Match Mode:</span>
+  <button type="button" class="mode-btn active" id="mode-schedule_lmrb"
+          onclick="setMode('schedule_lmrb')">
+    <i class="fa-solid fa-link mr-1"></i> Schedule + LMRB
+  </button>
+  <button type="button" class="mode-btn" id="mode-3way"
+          onclick="setMode('3way')">
+    <i class="fa-solid fa-diagram-project mr-1"></i> Schedule + TC + LMRB (3-way)
+  </button>
+  <button type="button" class="mode-btn" id="mode-tc_lmrb"
+          onclick="setMode('tc_lmrb')">
+    <i class="fa-solid fa-satellite-dish mr-1"></i> TC + LMRB only
+  </button>
+  <span id="mode-hint" class="text-xs text-slate-400 ml-2">
+    Select one row from Schedule and one from LMRB.
+  </span>
+</div>
+
+<!-- ═══════════════ THREE-PANEL MATCHER ══════════════════════════════════ -->
 <form method="post" action="{% url 'manual_match_create' %}" id="match-form">
   {% csrf_token %}
   <input type="hidden" name="account_id" value="{{ account_id }}">
   <input type="hidden" name="channel"    value="{{ channel }}">
   <input type="hidden" name="month"      value="{{ month }}">
+  <input type="hidden" name="match_mode" id="hidden-mode" value="schedule_lmrb">
   <input type="hidden" name="schedule_row_id" id="hidden-sr" value="">
+  <input type="hidden" name="tc_row_id"       id="hidden-tc" value="">
   <input type="hidden" name="lmrb_row_id"     id="hidden-lr" value="">
 
-  <div class="grid grid-cols-2 gap-4 mb-4">
+  <div class="grid grid-cols-3 gap-3 mb-4" id="panels-grid">
 
-    <!-- ── Left: Unmatched Schedule Rows ── -->
-    <div class="card p-0 overflow-hidden">
-      <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-        <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wide">
-          <i class="fa-solid fa-calendar-check mr-1 text-blue-500"></i>
+    <!-- ── Left: Unmatched Schedule Spots ── -->
+    <div class="card p-0 overflow-hidden" id="panel-sr">
+      <div class="px-4 py-3 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
+        <h3 class="text-xs font-bold text-blue-700 uppercase tracking-wide">
+          <i class="fa-solid fa-calendar-check mr-1"></i>
           Unmatched Schedule Spots
         </h3>
         <span class="badge bg-blue-100 text-blue-700">{{ unmatched_schedule|length }}</span>
       </div>
-
       {% if unmatched_schedule %}
         <div class="panel-scroll">
           <table class="data-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Brand</th>
-                <th>Duration</th>
-                <th>Programme</th>
-                <th>Window</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Date</th><th>Brand</th><th>Dur.</th></tr></thead>
             <tbody>
               {% for sr in unmatched_schedule %}
               <tr class="row-selectable" data-id="{{ sr.id }}" data-panel="sr"
-                  onclick="selectRow(this,'sr')">
-                <td class="whitespace-nowrap">{{ sr.date }}</td>
-                <td class="font-medium">{{ sr.brand }}</td>
-                <td>{{ sr.duration }}s</td>
-                <td class="text-slate-500 text-xs">{{ sr.programme|default:"—" }}</td>
-                <td class="text-xs text-slate-400 whitespace-nowrap">
-                  {{ sr.start_time|slice:":5" }}–{{ sr.end_time|slice:":5" }}
-                </td>
+                  onclick="selectRow(this,'sr')"
+                  title="{{ sr.brand }} | {{ sr.programme|default:'—' }} | {{ sr.start_time|slice:':5' }}–{{ sr.end_time|slice:':5' }}">
+                <td class="whitespace-nowrap text-xs">{{ sr.date }}</td>
+                <td class="font-medium text-xs">{{ sr.brand }}</td>
+                <td class="text-xs text-slate-500">{{ sr.duration }}s</td>
               </tr>
               {% endfor %}
             </tbody>
@@ -130,82 +139,119 @@
       {% else %}
         <div class="text-center text-slate-400 py-10 text-sm">
           <i class="fa-solid fa-circle-check text-2xl mb-2 block text-emerald-400"></i>
-          No unmatched COMMERCIAL BENEFITS spots.
+          No unmatched spots.
+        </div>
+      {% endif %}
+    </div>
+
+    <!-- ── Middle: Unmatched TC Spots ── -->
+    <div class="card p-0 overflow-hidden" id="panel-tc">
+      <div class="px-4 py-3 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between">
+        <h3 class="text-xs font-bold text-emerald-700 uppercase tracking-wide">
+          <i class="fa-solid fa-file-certificate mr-1"></i>
+          Unmatched TC Spots
+        </h3>
+        <span class="badge bg-emerald-100 text-emerald-700">{{ unmatched_tc|length }}</span>
+      </div>
+      {% if unmatched_tc %}
+        <div class="panel-scroll">
+          <table class="data-table">
+            <thead><tr><th>Date</th><th>Theme / Brand</th><th>Dur.</th><th>Aired Time</th></tr></thead>
+            <tbody>
+              {% for tc in unmatched_tc %}
+              <tr class="row-selectable" data-id="{{ tc.id }}" data-panel="tc"
+                  onclick="selectRow(this,'tc')"
+                  title="{{ tc.tc_theme }} | {{ tc.programme|default:'—' }} | {{ tc.channel }}">
+                <td class="whitespace-nowrap text-xs">{{ tc.date }}</td>
+                <td class="font-medium text-xs">{{ tc.tc_theme }}</td>
+                <td class="text-xs text-slate-500">{{ tc.duration }}s</td>
+                <td class="text-xs text-slate-400 whitespace-nowrap">{{ tc.aired_time }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if unmatched_tc|length == 500 %}
+          <p class="text-xs text-slate-400 text-center py-2">Showing first 500 rows.</p>
+        {% endif %}
+      {% else %}
+        <div class="text-center text-slate-400 py-10 text-sm">
+          <i class="fa-solid fa-circle-check text-2xl mb-2 block text-emerald-400"></i>
+          No unmatched TC spots.
         </div>
       {% endif %}
     </div>
 
     <!-- ── Right: Unmatched LMRB Rows ── -->
-    <div class="card p-0 overflow-hidden">
-      <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-        <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wide">
-          <i class="fa-solid fa-satellite-dish mr-1 text-violet-500"></i>
+    <div class="card p-0 overflow-hidden" id="panel-lr">
+      <div class="px-4 py-3 bg-violet-50 border-b border-violet-100 flex items-center justify-between">
+        <h3 class="text-xs font-bold text-violet-700 uppercase tracking-wide">
+          <i class="fa-solid fa-satellite-dish mr-1"></i>
           Unmatched LMRB Rows
         </h3>
         <span class="badge bg-violet-100 text-violet-700">{{ unmatched_lmrb|length }}</span>
       </div>
-
       {% if unmatched_lmrb %}
         <div class="panel-scroll">
           <table class="data-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Theme</th>
-                <th>Dur.</th>
-                <th>Aired Time</th>
-                <th>Range</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Date</th><th>Theme</th><th>Dur.</th><th>Aired Time</th><th>Programme</th><th>AdPos</th><th>Range</th></tr></thead>
             <tbody>
               {% for lr in unmatched_lmrb %}
-              {% with in_range=lr.date|date:"Y-m-d" %}
               <tr class="row-selectable" data-id="{{ lr.id }}" data-panel="lr"
-                  data-date="{{ lr.date|date:'Y-m-d' }}"
                   onclick="selectRow(this,'lr')">
-                <td class="whitespace-nowrap">{{ lr.date }}</td>
+                <td class="whitespace-nowrap text-xs">{{ lr.date }}</td>
                 <td class="font-medium text-xs">{{ lr.advt_theme }}</td>
-                <td>{{ lr.duration }}s</td>
-                <td class="text-slate-500 text-xs whitespace-nowrap">{{ lr.advt_time }}</td>
+                <td class="text-xs text-slate-500">{{ lr.duration }}s</td>
+                <td class="text-xs text-slate-400 whitespace-nowrap">{{ lr.advt_time }}</td>
+                <td class="text-xs text-slate-400 max-w-[90px] truncate">{{ lr.program|default:"—" }}</td>
+                <td class="text-xs text-slate-400 text-center">{{ lr.ad_pos|default:"—" }}</td>
                 <td>
                   {% if sch_date_range.0 and sch_date_range.1 %}
                     {% if lr.date >= sch_date_range.0 and lr.date <= sch_date_range.1 %}
-                      <span class="badge badge-in text-[10px]">In range</span>
+                      <span class="badge badge-in text-[10px]">In</span>
                     {% else %}
-                      <span class="badge badge-oor text-[10px]">Out of range</span>
+                      <span class="badge badge-oor text-[10px]">Out</span>
                     {% endif %}
                   {% endif %}
                 </td>
               </tr>
-              {% endwith %}
               {% endfor %}
             </tbody>
           </table>
         </div>
         {% if unmatched_lmrb|length == 500 %}
-          <p class="text-xs text-slate-400 text-center py-2">Showing first 500 rows. Filter by account/channel to narrow results.</p>
+          <p class="text-xs text-slate-400 text-center py-2">Showing first 500 rows.</p>
         {% endif %}
       {% else %}
         <div class="text-center text-slate-400 py-10 text-sm">
           <i class="fa-solid fa-circle-check text-2xl mb-2 block text-emerald-400"></i>
-          No unmatched LMRB rows for this channel.
+          No unmatched LMRB rows.
         </div>
       {% endif %}
     </div>
   </div><!-- /grid -->
 
   <!-- ── Match action bar ── -->
-  <div id="match-bar" class="card mb-5 hidden">
+  <div id="match-bar" class="card mb-5 hidden bg-slate-50 border border-slate-200">
     <div class="flex flex-wrap items-center gap-4">
-      <div class="flex-1 min-w-0">
-        <p class="text-xs font-semibold text-slate-600 mb-1">Selected</p>
-        <p class="text-sm text-slate-800">
-          <span class="font-semibold text-blue-600" id="sel-sr-label">No schedule row selected</span>
-          <i class="fa-solid fa-arrow-right mx-2 text-slate-400"></i>
-          <span class="font-semibold text-violet-600" id="sel-lr-label">No LMRB row selected</span>
+      <div class="flex-1 min-w-0 space-y-1">
+        <p class="text-xs font-semibold text-slate-500">Selected rows</p>
+        <p class="text-sm">
+          <span class="inline-flex items-center gap-1">
+            <i class="fa-solid fa-calendar-check text-blue-500 text-xs"></i>
+            <span id="sel-sr-label" class="font-semibold text-blue-700">—</span>
+          </span>
+          <span id="bar-tc-span" class="hidden">
+            <i class="fa-solid fa-arrow-right mx-1 text-slate-300 text-xs"></i>
+            <i class="fa-solid fa-file-certificate text-emerald-500 text-xs"></i>
+            <span id="sel-tc-label" class="font-semibold text-emerald-700">—</span>
+          </span>
+          <i class="fa-solid fa-arrow-right mx-1 text-slate-300 text-xs"></i>
+          <i class="fa-solid fa-satellite-dish text-violet-500 text-xs"></i>
+          <span id="sel-lr-label" class="font-semibold text-violet-700">—</span>
         </p>
       </div>
-      <div class="flex-1 min-w-[240px]">
+      <div class="flex-1 min-w-[220px]">
         <label class="block text-xs font-semibold text-slate-500 mb-1">Note <span class="font-normal">(optional)</span></label>
         <input type="text" name="note" maxlength="300" class="input-field" placeholder="Reason for manual match…">
       </div>
@@ -231,35 +277,49 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>Schedule Date</th>
+            <th>Mode</th>
+            <th>Sch. Date</th>
             <th>Brand</th>
-            <th>Duration</th>
-            <th>Programme</th>
+            <th>Dur.</th>
+            <th>TC Date</th>
+            <th>TC Theme</th>
+            <th>TC Aired</th>
             <th>LMRB Date</th>
             <th>LMRB Theme</th>
             <th>LMRB Time</th>
             <th>Note</th>
-            <th>Matched By</th>
-            <th>Matched At</th>
+            <th>By</th>
+            <th>At</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           {% for mm in manual_matches %}
           <tr>
-            <td class="whitespace-nowrap">{{ mm.schedule_row.date }}</td>
-            <td class="font-medium">{{ mm.schedule_row.brand }}</td>
-            <td>{{ mm.schedule_row.duration }}s</td>
-            <td class="text-xs text-slate-500">{{ mm.schedule_row.programme|default:"—" }}</td>
-            <td class="whitespace-nowrap">{{ mm.lmrb_row.date }}</td>
+            <td>
+              {% if mm.match_mode == '3way' %}
+                <span class="badge bg-indigo-100 text-indigo-700 text-[10px]">3-way</span>
+              {% elif mm.match_mode == 'tc_lmrb' %}
+                <span class="badge bg-emerald-100 text-emerald-700 text-[10px]">TC+LMRB</span>
+              {% else %}
+                <span class="badge bg-blue-100 text-blue-700 text-[10px]">Sch+LMRB</span>
+              {% endif %}
+            </td>
+            <td class="whitespace-nowrap text-xs">{{ mm.schedule_row.date|default:"—" }}</td>
+            <td class="font-medium text-xs">{{ mm.schedule_row.brand|default:"—" }}</td>
+            <td class="text-xs">{{ mm.schedule_row.duration|default:"—" }}{% if mm.schedule_row %}s{% endif %}</td>
+            <td class="whitespace-nowrap text-xs">{{ mm.tc_row.date|default:"—" }}</td>
+            <td class="text-xs">{{ mm.tc_row.tc_theme|default:"—" }}</td>
+            <td class="text-xs text-slate-400 whitespace-nowrap">{{ mm.tc_row.aired_time|default:"—" }}</td>
+            <td class="whitespace-nowrap text-xs">{{ mm.lmrb_row.date }}</td>
             <td class="text-xs">{{ mm.lmrb_row.advt_theme }}</td>
             <td class="text-xs text-slate-500 whitespace-nowrap">{{ mm.lmrb_row.advt_time }}</td>
-            <td class="text-xs text-slate-400 max-w-[160px] truncate" title="{{ mm.note }}">{{ mm.note|default:"—" }}</td>
+            <td class="text-xs text-slate-400 max-w-[140px] truncate" title="{{ mm.note }}">{{ mm.note|default:"—" }}</td>
             <td class="text-xs text-slate-500">{{ mm.matched_by.name|default:"—" }}</td>
             <td class="text-xs text-slate-400 whitespace-nowrap">{{ mm.matched_at|date:"d M Y H:i" }}</td>
             <td>
               <form method="post" action="{% url 'manual_dematch' mm.pk %}"
-                    onsubmit="return confirmDematch(event, '{{ mm.schedule_row.brand|escapejs }}', '{{ mm.schedule_row.date }}')">
+                    onsubmit="return confirmDematch(event, '{{ mm.lmrb_row.advt_theme|escapejs }}', '{{ mm.matched_at|date:"d M Y" }}')">
                 {% csrf_token %}
                 <input type="hidden" name="account_id" value="{{ account_id }}">
                 <input type="hidden" name="channel"    value="{{ channel }}">
@@ -275,76 +335,116 @@
       </table>
     </div>
   {% else %}
-    <div class="text-center text-slate-400 py-8 text-sm">
-      No manual matches yet for this scope.
-    </div>
+    <div class="text-center text-slate-400 py-8 text-sm">No manual matches yet for this scope.</div>
   {% endif %}
 </div>
 
 {% endif %}{# end filter check #}
-
 {% endblock %}
 
 {% block extra_js %}
 <script>
 (function () {
-  // Track selections
-  const sel = { sr: null, sr_label: '', lr: null, lr_label: '' };
+  // ── State ────────────────────────────────────────────────────────────────
+  let currentMode = 'schedule_lmrb';
+  const sel = { sr: null, srLabel: '', tc: null, tcLabel: '', lr: null, lrLabel: '' };
 
-  function selectRow(row, panel) {
-    // Deselect previously selected row in this panel
-    document.querySelectorAll(`.row-selectable[data-panel="${panel}"].selected`)
-      .forEach(r => r.classList.remove('selected'));
+  const HINTS = {
+    schedule_lmrb: 'Select one row from <b>Schedule</b> and one from <b>LMRB</b>.',
+    '3way':        'Select one row from <b>Schedule</b>, one from <b>TC</b>, and one from <b>LMRB</b>.',
+    tc_lmrb:       'Select one row from <b>TC</b> and one from <b>LMRB</b>. No schedule row needed.',
+  };
 
-    row.classList.add('selected');
+  // ── Mode switching ───────────────────────────────────────────────────────
+  window.setMode = function (mode) {
+    currentMode = mode;
+    document.getElementById('hidden-mode').value = mode;
+    // Update mode buttons
+    ['schedule_lmrb', '3way', 'tc_lmrb'].forEach(m => {
+      document.getElementById('mode-' + m).classList.toggle('active', m === mode);
+    });
+    // Show/hide panels
+    const srPanel = document.getElementById('panel-sr');
+    const tcPanel = document.getElementById('panel-tc');
+    if (mode === 'tc_lmrb') {
+      srPanel.style.opacity = '0.4'; srPanel.style.pointerEvents = 'none';
+      sel.sr = null; sel.srLabel = ''; document.getElementById('hidden-sr').value = '';
+    } else {
+      srPanel.style.opacity = ''; srPanel.style.pointerEvents = '';
+    }
+    if (mode === 'schedule_lmrb') {
+      tcPanel.style.opacity = '0.4'; tcPanel.style.pointerEvents = 'none';
+      sel.tc = null; sel.tcLabel = ''; document.getElementById('hidden-tc').value = '';
+    } else {
+      tcPanel.style.opacity = ''; tcPanel.style.pointerEvents = '';
+    }
+    // Update hint
+    document.getElementById('mode-hint').innerHTML = HINTS[mode] || '';
+    // TC label span visibility
+    document.getElementById('bar-tc-span').classList.toggle('hidden', mode === 'schedule_lmrb');
+    // Clear selections in now-disabled panels
+    document.querySelectorAll('.row-selectable').forEach(r => {
+      if (mode === 'tc_lmrb' && r.dataset.panel === 'sr') r.classList.remove('selected-sr');
+      if (mode === 'schedule_lmrb' && r.dataset.panel === 'tc') r.classList.remove('selected-tc');
+    });
+    updateBar();
+  };
+
+  // ── Row selection ────────────────────────────────────────────────────────
+  window.selectRow = function (row, panel) {
+    const cls = { sr: 'selected-sr', tc: 'selected-tc', lr: 'selected-lr' }[panel];
+    document.querySelectorAll(`.row-selectable[data-panel="${panel}"]`).forEach(r => r.classList.remove(cls));
+    row.classList.add(cls);
+    const cells = row.querySelectorAll('td');
 
     if (panel === 'sr') {
       sel.sr = row.dataset.id;
-      const cells = row.querySelectorAll('td');
-      sel.sr_label = `${cells[1].textContent.trim()} — ${cells[0].textContent.trim()} (${cells[2].textContent.trim()})`;
+      sel.srLabel = `${cells[1].textContent.trim()} (${cells[2].textContent.trim()}) — ${cells[0].textContent.trim()}`;
       document.getElementById('hidden-sr').value = sel.sr;
-      document.getElementById('sel-sr-label').textContent = sel.sr_label;
+      document.getElementById('sel-sr-label').textContent = sel.srLabel;
+    } else if (panel === 'tc') {
+      sel.tc = row.dataset.id;
+      sel.tcLabel = `${cells[1].textContent.trim()} (${cells[2].textContent.trim()}) — ${cells[0].textContent.trim()}`;
+      document.getElementById('hidden-tc').value = sel.tc;
+      document.getElementById('sel-tc-label').textContent = sel.tcLabel;
     } else {
       sel.lr = row.dataset.id;
-      const cells = row.querySelectorAll('td');
-      sel.lr_label = `${cells[1].textContent.trim()} — ${cells[0].textContent.trim()} @ ${cells[3].textContent.trim()}`;
+      sel.lrLabel = `${cells[1].textContent.trim()} — ${cells[0].textContent.trim()} @ ${cells[3].textContent.trim()}`;
       document.getElementById('hidden-lr').value = sel.lr;
-      document.getElementById('sel-lr-label').textContent = sel.lr_label;
+      document.getElementById('sel-lr-label').textContent = sel.lrLabel;
     }
-
     updateBar();
-  }
+  };
 
+  // ── Bar visibility / submit enable ───────────────────────────────────────
   function updateBar() {
     const bar = document.getElementById('match-bar');
     const btn = document.getElementById('match-btn');
-    const both = sel.sr && sel.lr;
-    bar.classList.toggle('hidden', false); // always show bar if either selected
-    btn.disabled = !both;
+    const anySel = sel.sr || sel.tc || sel.lr;
+    bar.classList.toggle('hidden', !anySel);
+
+    let ready = false;
+    if (currentMode === 'schedule_lmrb') ready = !!(sel.sr && sel.lr);
+    else if (currentMode === '3way')     ready = !!(sel.sr && sel.tc && sel.lr);
+    else if (currentMode === 'tc_lmrb') ready = !!(sel.tc && sel.lr);
+    btn.disabled = !ready;
   }
 
-  // Expose to onclick handlers in markup
-  window.selectRow = selectRow;
-
-  // De-match confirmation
-  window.confirmDematch = function (e, brand, date) {
-    const ok = confirm(
-      `Remove manual match for "${brand}" (${date})?\n\n` +
-      `Both the schedule row and the LMRB row will be unlocked and returned to the unmatched pool.`
-    );
+  // ── Confirm handlers ─────────────────────────────────────────────────────
+  window.confirmDematch = function (e, theme, date) {
+    const ok = confirm(`Remove manual match for "${theme}" (${date})?\n\nAll linked rows will be unlocked.`);
     if (!ok) e.preventDefault();
     return ok;
   };
 
-  // Confirm-before-submit for the match form
   document.getElementById('match-form').addEventListener('submit', function (e) {
-    const srLabel = document.getElementById('sel-sr-label').textContent;
-    const lrLabel = document.getElementById('sel-lr-label').textContent;
-    if (!sel.sr || !sel.lr) { e.preventDefault(); return; }
-    const ok = confirm(
-      `Confirm manual match?\n\nSchedule: ${srLabel}\nLMRB: ${lrLabel}\n\n` +
-      `Both rows will be locked and excluded from the automatic engine.`
-    );
+    if (document.getElementById('match-btn').disabled) { e.preventDefault(); return; }
+    const modeLabel = { schedule_lmrb: 'Schedule + LMRB', '3way': 'Schedule + TC + LMRB', tc_lmrb: 'TC + LMRB only' }[currentMode];
+    const lines = [`Mode: ${modeLabel}`];
+    if (sel.sr)  lines.push(`Schedule: ${sel.srLabel}`);
+    if (sel.tc)  lines.push(`TC: ${sel.tcLabel}`);
+    if (sel.lr)  lines.push(`LMRB: ${sel.lrLabel}`);
+    const ok = confirm(`Confirm manual match?\n\n${lines.join('\n')}\n\nSelected rows will be locked.`);
     if (!ok) e.preventDefault();
   });
 })();

@@ -38,6 +38,7 @@ urlpatterns = [
     # Monitoring Dashboard (analytics + 7 tabs + PDF)
     path('monitor/',                            views.monitoring_dashboard, name='monitoring_dashboard'),
     path('monitor/pdf/',                        views.monitoring_pdf,       name='monitoring_pdf'),
+    path('monitor/analytics/',                  views.analytics_full,       name='analytics_full'),
 
     # Transmission Certificate (TC)
     path('tc/',                                 views.tc_list,      name='tc_list'),

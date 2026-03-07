@@ -1,0 +1,924 @@
+{% extends 'base.html' %}
+{% block title %}Full Analytics — {{ channel }} · {{ month }}{% endblock %}
+{% block page_title %}Full Analytics{% endblock %}
+{% block page_subtitle %}Comprehensive LMRB data dashboard — {{ channel }}{% if month %} · {{ month }}{% endif %}{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* ── Filter bar ────────────────────────────────────────────── */
+  .filter-pill {
+    display:inline-flex; align-items:center; gap:.4rem;
+    padding:.35rem .8rem; border-radius:.5rem; font-size:.72rem; font-weight:600;
+    border:1px solid #e2e8f0; background:#f8fafc; color:#475569;
+    cursor:pointer; transition:all .15s;
+  }
+  .filter-pill.active { background:#1d4ed8; color:#fff; border-color:#1d4ed8; }
+  /* ── KPI cards ─────────────────────────────────────────────── */
+  .kpi-card { background:#fff; border-radius:1rem; border:1px solid #f1f5f9;
+              box-shadow:0 1px 3px rgba(0,0,0,.05); padding:1rem 1.25rem; }
+  .kpi-val  { font-size:1.75rem; font-weight:800; line-height:1.1; }
+  .kpi-lbl  { font-size:.65rem; font-weight:700; text-transform:uppercase;
+              letter-spacing:.07em; color:#94a3b8; margin-top:.2rem; }
+  /* ── Chart cards ───────────────────────────────────────────── */
+  .chart-card { background:#fff; border-radius:1rem; border:1px solid #f1f5f9;
+                box-shadow:0 1px 3px rgba(0,0,0,.05); padding:1.25rem; position:relative; }
+  .chart-card h4 { font-size:.75rem; font-weight:700; color:#334155;
+                   margin-bottom:.75rem; display:flex; align-items:center; gap:.4rem; }
+  .chart-wrap { position:relative; }
+  .export-btn { position:absolute; top:.75rem; right:.75rem; padding:.25rem .6rem;
+                font-size:.65rem; font-weight:600; border-radius:.4rem;
+                background:#f1f5f9; color:#64748b; border:none; cursor:pointer;
+                transition:all .15s; }
+  .export-btn:hover { background:#e2e8f0; }
+  /* ── Section headers ───────────────────────────────────────── */
+  .section-hdr { font-size:.8rem; font-weight:800; text-transform:uppercase;
+                 letter-spacing:.1em; color:#64748b; padding:.5rem 0;
+                 border-bottom:2px solid #f1f5f9; margin-bottom:1.25rem; }
+  /* ── Heatmap ───────────────────────────────────────────────── */
+  #hmDayProg canvas, #hmDayHour canvas, #hmPrimePg canvas { cursor: default; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ═══════════════ FILTER BAR ═══════════════════════════════════════════ -->
+<form method="get" class="card mb-5 flex flex-wrap items-end gap-3" id="filter-form">
+  <div class="min-w-[160px]">
+    <label class="block text-xs font-semibold text-slate-500 mb-1">Account</label>
+    <select name="account_id" class="select-field" onchange="this.form.submit()">
+      <option value="">— Select —</option>
+      {% for acct in accounts %}
+        <option value="{{ acct.id }}" {% if acct.id|stringformat:"s" == account_id %}selected{% endif %}>{{ acct.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% if account_id %}
+  <div class="min-w-[160px]">
+    <label class="block text-xs font-semibold text-slate-500 mb-1">Channel</label>
+    <select name="channel" class="select-field" onchange="this.form.submit()">
+      <option value="">— Select —</option>
+      {% for ch in channels %}
+        <option value="{{ ch }}" {% if ch == channel %}selected{% endif %}>{{ ch }}</option>
+      {% endfor %}
+    </select>
+    <input type="hidden" name="account_id" value="{{ account_id }}">
+  </div>
+  {% endif %}
+  {% if account_id and channel %}
+  <div class="min-w-[160px]">
+    <label class="block text-xs font-semibold text-slate-500 mb-1">Month</label>
+    <select name="month" class="select-field" onchange="this.form.submit()">
+      <option value="">— Select —</option>
+      {% for m in months %}
+        <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>
+      {% endfor %}
+    </select>
+    <input type="hidden" name="account_id" value="{{ account_id }}">
+    <input type="hidden" name="channel" value="{{ channel }}">
+  </div>
+  {% endif %}
+  <div class="min-w-[100px]">
+    <label class="block text-xs font-semibold text-slate-500 mb-1">Prime Start (h)</label>
+    <input type="number" name="prime_start" value="{{ prime_start_h }}" min="0" max="23"
+           class="input-field" style="width:80px;">
+    <input type="hidden" name="account_id" value="{{ account_id }}">
+    <input type="hidden" name="channel" value="{{ channel }}">
+    <input type="hidden" name="month" value="{{ month }}">
+  </div>
+  <div class="min-w-[100px]">
+    <label class="block text-xs font-semibold text-slate-500 mb-1">Prime End (h)</label>
+    <input type="number" name="prime_end" value="{{ prime_end_h }}" min="0" max="23"
+           class="input-field" style="width:80px;">
+  </div>
+  <button type="submit" class="btn-primary">Apply</button>
+</form>
+
+{% if not account_id or not channel or not month %}
+<div class="card text-center text-slate-400 py-20">
+  <i class="fa-solid fa-chart-pie text-5xl mb-4 block opacity-20"></i>
+  <p class="font-semibold">Select Account, Channel and Month to load analytics.</p>
+</div>
+{% else %}
+
+<!-- ── JS Filters ───────────────────────────────────────────────────────── -->
+<div class="card mb-5 flex flex-wrap items-center gap-3">
+  <span class="text-xs font-bold text-slate-500 uppercase tracking-wide mr-1">JS Filters:</span>
+
+  <div class="flex gap-1">
+    <button class="filter-pill active" id="fAdtype-all"   onclick="setFilter('adtype','all')">All Types</button>
+    <button class="filter-pill"        id="fAdtype-commercial" onclick="setFilter('adtype','commercial')">Commercial</button>
+    <button class="filter-pill"        id="fAdtype-sponsorship" onclick="setFilter('adtype','sponsorship')">Sponsorship</button>
+  </div>
+
+  <div class="flex gap-1">
+    <button class="filter-pill active" id="fPrime-all"    onclick="setFilter('prime','all')">All Times</button>
+    <button class="filter-pill"        id="fPrime-prime"  onclick="setFilter('prime','prime')">Prime Only</button>
+    <button class="filter-pill"        id="fPrime-nonprime" onclick="setFilter('prime','nonprime')">Non-Prime Only</button>
+  </div>
+
+  <select id="fPgSel" class="select-field" style="min-width:160px; font-size:.75rem;"
+          onchange="setFilter('pg', this.value)">
+    <option value="">All Product Groups</option>
+    {% for pg in filter_pg_list %}<option value="{{ pg }}">{{ pg }}</option>{% endfor %}
+  </select>
+
+  <select id="fAdvSel" class="select-field" style="min-width:160px; font-size:.75rem;"
+          onchange="setFilter('adv', this.value)">
+    <option value="">All Advertisers</option>
+    {% for adv in filter_adv_list %}<option value="{{ adv }}">{{ adv }}</option>{% endfor %}
+  </select>
+
+  <button onclick="resetFilters()" class="filter-pill text-red-500 border-red-200">
+    <i class="fa-solid fa-rotate-left"></i> Reset
+  </button>
+
+  <span class="ml-auto text-xs text-slate-400">
+    Showing <b id="rowCount">{{ kpis.total }}</b> rows
+  </span>
+
+  <button onclick="exportAll()" class="btn-primary text-xs py-1.5">
+    <i class="fa-solid fa-download"></i> Export All Charts (PNG)
+  </button>
+</div>
+
+<!-- ═══════════════ KPI CARDS ════════════════════════════════════════════ -->
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+  <div class="kpi-card">
+    <div class="kpi-val text-slate-800" id="kpi-total">{{ kpis.total }}</div>
+    <div class="kpi-lbl">Total Ads</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-val text-violet-700" id="kpi-prime">{{ kpis.prime }}</div>
+    <div class="kpi-lbl">Prime Ads ({{ prime_start_h }}:00–{{ prime_end_h }}:00)</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-val text-cyan-700" id="kpi-nonprime">{{ kpis.nonprime }}</div>
+    <div class="kpi-lbl">Non-Prime Ads</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-val text-amber-600" id="kpi-primepct">{{ kpis.prime_pct }}%</div>
+    <div class="kpi-lbl">Prime %</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-val text-amber-700" id="kpi-spon">{{ kpis.spon }}</div>
+    <div class="kpi-lbl">Sponsorships</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-val text-emerald-700 text-lg" id="kpi-cost">
+      {% if kpis.total_cost is not None %}{{ kpis.total_cost|floatformat:0 }}{% else %}—{% endif %}
+    </div>
+    <div class="kpi-lbl">Total Cost</div>
+  </div>
+</div>
+
+<!-- ═══════════════ SECTION 1 — OVERVIEW ════════════════════════════════ -->
+<p class="section-hdr"><i class="fa-solid fa-globe mr-2 text-blue-500"></i>Section 1 — Overview</p>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c1')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-calendar-week text-blue-500"></i> Ads by Day of Week (Prime / Non-Prime)</h4>
+    <div class="chart-wrap" style="height:240px;"><canvas id="c1"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c2')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-chart-line text-indigo-500"></i> Ads by Date (Prime / Non-Prime)</h4>
+    <div class="chart-wrap" style="height:240px;"><canvas id="c2"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c3')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-layer-group text-emerald-500"></i> Ads by Product Group</h4>
+    <div class="chart-wrap" style="height:220px;"><canvas id="c3"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c4')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-building text-cyan-500"></i> Ads by Advertiser (Top 15)</h4>
+    <div class="chart-wrap" style="height:220px;"><canvas id="c4"></canvas></div>
+  </div>
+
+</div>
+
+<!-- ═══════════════ SECTION 2 — PROGRAMME ANALYSIS ══════════════════════ -->
+<p class="section-hdr"><i class="fa-solid fa-tv mr-2 text-indigo-500"></i>Section 2 — Programme Analysis</p>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c5')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-trophy text-amber-500"></i> Top 10 Programmes by Ad Count</h4>
+    <div class="chart-wrap" style="height:240px;"><canvas id="c5"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c6')"><i class="fa-solid fa-moon text-violet-500"></i> Ads per Programme — Prime vs Non-Prime</h4>
+    <div class="chart-wrap" style="height:240px;"><canvas id="c6"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c7')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-signal text-blue-500"></i> Avg TotAds per Programme (how ad-heavy each programme is)</h4>
+    <div class="chart-wrap" style="height:220px;"><canvas id="c7"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c8')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-people-group text-emerald-500"></i> Avg AdsInBreak per Programme (break clutter)</h4>
+    <div class="chart-wrap" style="height:220px;"><canvas id="c8"></canvas></div>
+  </div>
+
+</div>
+
+<!-- ═══════════════ SECTION 3 — BREAK & POSITION ANALYSIS ═══════════════ -->
+<p class="section-hdr"><i class="fa-solid fa-list-ol mr-2 text-emerald-500"></i>Section 3 — Break &amp; Position Analysis</p>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c9')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-arrow-down-1-9 text-slate-500"></i> Ad Position Distribution (AdPos — where in the programme)</h4>
+    <div class="chart-wrap" style="height:200px;"><canvas id="c9"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c10')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-pause text-orange-500"></i> Break Number Distribution (which breaks carry most ads)</h4>
+    <div class="chart-wrap" style="height:200px;"><canvas id="c10"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c11')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-crosshairs text-red-500"></i> Position in Break (PosinBrk — 1st / mid / last)</h4>
+    <div class="chart-wrap" style="height:200px;"><canvas id="c11"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c12')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-users text-slate-500"></i> AdsInBreak Distribution (how many ads share each break)</h4>
+    <div class="chart-wrap" style="height:200px;"><canvas id="c12"></canvas></div>
+  </div>
+
+  <div class="chart-card lg:col-span-2">
+    <button class="export-btn" onclick="exportChart('c13')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-star text-amber-500"></i> Premium Positions — First vs Last in Break (% of ads in position 1 vs final position)</h4>
+    <div class="chart-wrap" style="height:180px;"><canvas id="c13"></canvas></div>
+  </div>
+
+</div>
+
+<!-- ═══════════════ SECTION 4 — DURATION & COST ══════════════════════════ -->
+<p class="section-hdr"><i class="fa-solid fa-clock mr-2 text-orange-500"></i>Section 4 — Duration &amp; Cost</p>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c14')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-stopwatch text-orange-500"></i> Ads by Duration (10s / 15s / 20s / 30s / 45s / 60s+)</h4>
+    <div class="chart-wrap" style="height:220px;"><canvas id="c14"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c15')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-coins text-emerald-600"></i> Cost by Product Group</h4>
+    <div class="chart-wrap" style="height:220px;"><canvas id="c15"></canvas></div>
+  </div>
+
+  <div class="chart-card lg:col-span-2">
+    <button class="export-btn" onclick="exportChart('c16')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-ruler-horizontal text-blue-500"></i> Average Duration by Programme</h4>
+    <div class="chart-wrap" style="height:200px;"><canvas id="c16"></canvas></div>
+  </div>
+
+</div>
+
+<!-- ═══════════════ SECTION 5 — SPONSORSHIP DEEP DIVE ═══════════════════ -->
+<p class="section-hdr"><i class="fa-solid fa-award mr-2 text-amber-500"></i>Section 5 — Sponsorship Deep Dive</p>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c17')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-tv text-amber-500"></i> Sponsorship Ads by Programme</h4>
+    <div class="chart-wrap" style="height:220px;"><canvas id="c17"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c18')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-moon text-violet-500"></i> Sponsorship — Prime vs Non-Prime per Product Group</h4>
+    <div class="chart-wrap" style="height:220px;"><canvas id="c18"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c19')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-calendar-week text-amber-500"></i> Sponsorship by Day of Week</h4>
+    <div class="chart-wrap" style="height:220px;"><canvas id="c19"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <button class="export-btn" onclick="exportChart('c20')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-crosshairs text-red-500"></i> Sponsorship — Position in Break</h4>
+    <div class="chart-wrap" style="height:220px;"><canvas id="c20"></canvas></div>
+  </div>
+
+  <div class="chart-card lg:col-span-2">
+    <button class="export-btn" onclick="exportChart('c21')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-chart-bar text-indigo-500"></i> Sponsorship vs Commercial ratio per Programme (%)</h4>
+    <div class="chart-wrap" style="height:200px;"><canvas id="c21"></canvas></div>
+  </div>
+
+</div>
+
+<!-- ═══════════════ SECTION 6 — HEATMAPS ════════════════════════════════ -->
+<p class="section-hdr"><i class="fa-solid fa-fire mr-2 text-red-500"></i>Section 6 — Heatmaps</p>
+<div class="space-y-4 mb-6">
+
+  <div class="chart-card" id="hmDayProg">
+    <button class="export-btn" onclick="exportChart('c22')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-table-cells text-red-500"></i> Heatmap — Day of Week × Programme (ad count intensity)</h4>
+    <div class="chart-wrap" style="min-height:260px;"><canvas id="c22"></canvas></div>
+  </div>
+
+  <div class="chart-card" id="hmDayHour">
+    <button class="export-btn" onclick="exportChart('c23')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-table-cells text-orange-500"></i> Heatmap — Day of Week × Hour (ad count intensity)</h4>
+    <div class="chart-wrap" style="height:280px;"><canvas id="c23"></canvas></div>
+  </div>
+
+  <div class="chart-card" id="hmPrimePg">
+    <button class="export-btn" onclick="exportChart('c24')"><i class="fa-solid fa-download"></i></button>
+    <h4><i class="fa-solid fa-table-cells text-violet-500"></i> Heatmap — Prime/Non-Prime × Product Group</h4>
+    <div class="chart-wrap" style="height:260px;"><canvas id="c24"></canvas></div>
+  </div>
+
+</div>
+
+<!-- ═══════════════ LMRB ROW DETAIL MODAL ═══════════════════════════════ -->
+<div id="rowModal" style="display:none; position:fixed; inset:0; z-index:9999;
+     background:rgba(0,0,0,.5); backdrop-filter:blur(4px); overflow-y:auto;"
+     onclick="if(event.target===this) closeModal()">
+  <div style="margin:2rem auto; max-width:720px; background:#fff; border-radius:1.5rem;
+              padding:1.5rem; position:relative;">
+    <button onclick="closeModal()" style="position:absolute; top:1rem; right:1rem;
+            background:none; border:none; font-size:1.2rem; cursor:pointer; color:#64748b;">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+    <h3 style="font-weight:800; font-size:.9rem; color:#1e293b; margin-bottom:1rem;">
+      <i class="fa-solid fa-circle-info text-indigo-500 mr-2"></i>LMRB Row Detail
+    </h3>
+    <div id="rowModalBody" style="font-size:.8rem; color:#334155;"></div>
+  </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if account_id and channel and month %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+/* ════════════════════════════════════════════════════════════════
+   RAW DATA — injected from view (pre-serialised, null-safe JSON)
+   ════════════════════════════════════════════════════════════════ */
+const ALL_ROWS = {{ rows_json|safe }};
+const PRIME_START = {{ prime_start_h }};
+const PRIME_END   = {{ prime_end_h }};
+
+/* ── Filter state ───────────────────────────────────────────────── */
+let FLT = { adtype: 'all', prime: 'all', pg: '', adv: '' };
+
+function getFiltered() {
+  return ALL_ROWS.filter(r => {
+    if (FLT.adtype !== 'all' && r.adtype !== FLT.adtype) return false;
+    if (FLT.prime === 'prime'    && !r.prime)  return false;
+    if (FLT.prime === 'nonprime' &&  r.prime)  return false;
+    if (FLT.pg  && r.pg  !== FLT.pg)  return false;
+    if (FLT.adv && r.adv !== FLT.adv) return false;
+    return true;
+  });
+}
+
+window.setFilter = function(key, val) {
+  FLT[key] = val;
+  // Update pill active state for button groups
+  if (key === 'adtype') ['all','commercial','sponsorship'].forEach(v =>
+    document.getElementById('fAdtype-' + v)?.classList.toggle('active', v === val));
+  if (key === 'prime')  ['all','prime','nonprime'].forEach(v =>
+    document.getElementById('fPrime-' + v)?.classList.toggle('active', v === val));
+  rebuildAll();
+};
+
+window.resetFilters = function() {
+  FLT = { adtype: 'all', prime: 'all', pg: '', adv: '' };
+  document.getElementById('fPgSel').value  = '';
+  document.getElementById('fAdvSel').value = '';
+  ['fAdtype-all','fPrime-all'].forEach(id => document.getElementById(id)?.classList.add('active'));
+  ['fAdtype-commercial','fAdtype-sponsorship','fPrime-prime','fPrime-nonprime']
+    .forEach(id => document.getElementById(id)?.classList.remove('active'));
+  rebuildAll();
+};
+
+/* ── Chart registry ─────────────────────────────────────────────── */
+const CHS = {};
+
+function makeOrUpdate(id, type, data, options) {
+  const el = document.getElementById(id);
+  if (!el) return null;
+  if (CHS[id]) {
+    CHS[id].data    = data;
+    CHS[id].options = { ...CHS[id].options, ...options };
+    CHS[id].update('none');
+    return CHS[id];
+  }
+  CHS[id] = new Chart(el, { type, data, options: options || {} });
+  return CHS[id];
+}
+
+const COLORS10 = ['#2563eb','#7c3aed','#0891b2','#059669','#d97706',
+                  '#dc2626','#db2777','#65a30d','#ea580c','#0284c7'];
+const PRIME_C    = '#7c3aed';
+const NONPRIME_C = '#0891b2';
+
+function colArr(n) { return Array.from({length:n}, (_,i) => COLORS10[i % COLORS10.length]); }
+
+/* ── Aggregation helpers ────────────────────────────────────────── */
+function freq(arr, key, top=0) {
+  const m = {};
+  for (const r of arr) {
+    const k = r[key] != null ? String(r[key]) : '';
+    m[k] = (m[k] || 0) + 1;
+  }
+  let entries = Object.entries(m).sort((a,b) => b[1]-a[1]);
+  if (top > 0) entries = entries.slice(0, top);
+  return { labels: entries.map(e=>e[0]), data: entries.map(e=>e[1]) };
+}
+
+function avgByKey(arr, groupKey, valKey) {
+  const sums = {}, cnts = {};
+  for (const r of arr) {
+    const k = r[groupKey] != null ? String(r[groupKey]) : '';
+    if (!k) continue;
+    if (r[valKey] != null) { sums[k] = (sums[k]||0) + r[valKey]; cnts[k] = (cnts[k]||0)+1; }
+  }
+  const labels = Object.keys(sums).sort((a,b)=>(sums[b]/cnts[b])-(sums[a]/cnts[a])).slice(0,15);
+  return { labels, data: labels.map(l => Math.round(sums[l]/cnts[l]*10)/10) };
+}
+
+function sumByKey(arr, groupKey, valKey, top=15) {
+  const m = {};
+  for (const r of arr) {
+    const k = r[groupKey] != null ? String(r[groupKey]) : '';
+    if (!k) continue;
+    m[k] = (m[k]||0) + (r[valKey] || 0);
+  }
+  let entries = Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,top);
+  return { labels: entries.map(e=>e[0]), data: entries.map(e=>Math.round(e[1]*100)/100) };
+}
+
+function stackedByKey(arr, groupKey, top=10) {
+  const prime = {}, noprime = {};
+  for (const r of arr) {
+    const k = r[groupKey] != null ? String(r[groupKey]) : '—';
+    if (!k || k==='—') continue;
+    if (r.prime) prime[k] = (prime[k]||0)+1;
+    else noprime[k] = (noprime[k]||0)+1;
+  }
+  const all = new Set([...Object.keys(prime), ...Object.keys(noprime)]);
+  let labs = [...all].sort((a,b) => ((prime[b]||0)+(noprime[b]||0))-((prime[a]||0)+(noprime[a]||0))).slice(0,top);
+  return {
+    labels:   labs,
+    prime:    labs.map(l => prime[l]||0),
+    nonprime: labs.map(l => noprime[l]||0),
+  };
+}
+
+const BASE_OPT = (axis='y', maxH=null) => ({
+  responsive: true, maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    tooltip: { callbacks: { label: ctx => ` ${ctx.parsed[axis==='y'?'x':'y']}` } },
+  },
+  scales: {
+    x: { ticks: { font: { size: 10 } }, grid: { color: '#f8fafc' } },
+    y: { ticks: { font: { size: 10 } }, grid: { color: '#f8fafc' },
+         ...(maxH ? { max: maxH } : {}) },
+  },
+});
+
+const HBAR_OPT = () => ({
+  indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+  plugins: { legend: { display: false },
+             tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.x}` } } },
+  scales: {
+    x: { ticks: { font:{size:10} }, grid:{color:'#f8fafc'} },
+    y: { ticks: { font:{size:10} } },
+  },
+});
+
+const STACK_OPT = (axis='x') => ({
+  [axis === 'x' ? 'indexAxis' : '_'] : axis === 'y' ? 'y' : undefined,
+  responsive: true, maintainAspectRatio: false,
+  plugins: {
+    legend: { display: true, position: 'bottom', labels: { font:{size:10}, boxWidth:12 } },
+    tooltip: { mode: 'index', intersect: false },
+  },
+  scales: {
+    x: { stacked: true, ticks:{font:{size:10}}, grid:{color:'#f8fafc'} },
+    y: { stacked: true, ticks:{font:{size:10}}, grid:{color:'#f8fafc'} },
+  },
+});
+
+/* ── Export helpers ─────────────────────────────────────────────── */
+window.exportChart = function(id) {
+  const ch = CHS[id];
+  if (!ch) return;
+  const a = document.createElement('a');
+  a.download = 'analytics_' + id + '.png';
+  a.href = ch.toBase64Image('image/png', 1);
+  a.click();
+};
+
+window.exportAll = function() {
+  Object.keys(CHS).forEach((id, i) => setTimeout(() => exportChart(id), i * 200));
+};
+
+/* ── KPI update ─────────────────────────────────────────────────── */
+function updateKPIs(rows) {
+  const prime    = rows.filter(r => r.prime).length;
+  const nonprime = rows.length - prime;
+  const spon     = rows.filter(r => r.adtype === 'sponsorship').length;
+  const totalCost = rows.reduce((s,r) => s + (r.cost||0), 0);
+  document.getElementById('kpi-total').textContent    = rows.length;
+  document.getElementById('kpi-prime').textContent    = prime;
+  document.getElementById('kpi-nonprime').textContent = nonprime;
+  document.getElementById('kpi-primepct').textContent = rows.length ? Math.round(prime/rows.length*100)+'%' : '0%';
+  document.getElementById('kpi-spon').textContent     = spon;
+  const hasCost = rows.some(r => r.cost != null);
+  document.getElementById('kpi-cost').textContent     = hasCost ? Math.round(totalCost).toLocaleString() : '—';
+  document.getElementById('rowCount').textContent     = rows.length;
+}
+
+/* ═══════════════════════════ CHART BUILDERS ════════════════════ */
+
+function buildC1(rows) { // Ads by Day of Week, stacked
+  const DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const p = Array(7).fill(0), np = Array(7).fill(0);
+  rows.forEach(r => { if (r.prime) p[r.dow]++; else np[r.dow]++; });
+  makeOrUpdate('c1', 'bar', {
+    labels: DOW,
+    datasets: [
+      { label:'Prime',     data:p,  backgroundColor:PRIME_C+'cc',    borderColor:PRIME_C,    borderWidth:1, borderRadius:3, stack:'s' },
+      { label:'Non-Prime', data:np, backgroundColor:NONPRIME_C+'cc', borderColor:NONPRIME_C, borderWidth:1, borderRadius:3, stack:'s' },
+    ],
+  }, { ...STACK_OPT(), scales:{x:{stacked:true,ticks:{font:{size:10}}},y:{stacked:true,ticks:{font:{size:10}}}} });
+}
+
+function buildC2(rows) { // Ads by Date, line
+  const dp = {}, dn = {};
+  rows.forEach(r => { if(r.prime) dp[r.d]=(dp[r.d]||0)+1; else dn[r.d]=(dn[r.d]||0)+1; });
+  const dates = [...new Set(rows.map(r=>r.d))].sort();
+  makeOrUpdate('c2', 'line', {
+    labels: dates,
+    datasets: [
+      { label:'Prime',     data:dates.map(d=>dp[d]||0), borderColor:PRIME_C,    backgroundColor:PRIME_C+'33',    fill:true, tension:.3, pointRadius:2 },
+      { label:'Non-Prime', data:dates.map(d=>dn[d]||0), borderColor:NONPRIME_C, backgroundColor:NONPRIME_C+'33', fill:true, tension:.3, pointRadius:2 },
+    ],
+  }, { responsive:true, maintainAspectRatio:false,
+       plugins:{ legend:{display:true,position:'bottom',labels:{font:{size:10},boxWidth:12}} },
+       scales:{ x:{ticks:{font:{size:9},maxTicksLimit:16}}, y:{ticks:{font:{size:10}}} } });
+}
+
+function buildC3(rows) { // Ads by Product Group
+  const { labels, data } = freq(rows.filter(r=>r.pg), 'pg', 15);
+  makeOrUpdate('c3','bar',
+    { labels, datasets:[{ data, backgroundColor:colArr(labels.length)+'cc', borderWidth:0, borderRadius:4 }] },
+    HBAR_OPT());
+}
+
+function buildC4(rows) { // Top 15 Advertisers
+  const { labels, data } = freq(rows.filter(r=>r.adv), 'adv', 15);
+  makeOrUpdate('c4','bar',
+    { labels, datasets:[{ data, backgroundColor:colArr(labels.length).map(c=>c+'cc'), borderWidth:0, borderRadius:4 }] },
+    HBAR_OPT());
+}
+
+function buildC5(rows) { // Top 10 Programmes
+  const { labels, data } = freq(rows.filter(r=>r.prog), 'prog', 10);
+  makeOrUpdate('c5','bar',
+    { labels, datasets:[{ data, backgroundColor:colArr(labels.length).map(c=>c+'cc'), borderWidth:0, borderRadius:4 }] },
+    HBAR_OPT());
+}
+
+function buildC6(rows) { // Ads per Programme — prime vs non-prime (top 12)
+  const { labels, prime, nonprime } = stackedByKey(rows.filter(r=>r.prog), 'prog', 12);
+  makeOrUpdate('c6','bar', {
+    labels,
+    datasets:[
+      { label:'Prime',     data:prime,    backgroundColor:PRIME_C+'cc',    borderWidth:0, borderRadius:2, stack:'s' },
+      { label:'Non-Prime', data:nonprime, backgroundColor:NONPRIME_C+'cc', borderWidth:0, borderRadius:2, stack:'s' },
+    ],
+  }, { indexAxis:'y', responsive:true, maintainAspectRatio:false,
+       plugins:{ legend:{display:true,position:'bottom',labels:{font:{size:10},boxWidth:12}} },
+       scales:{ x:{stacked:true,ticks:{font:{size:10}}}, y:{stacked:true,ticks:{font:{size:9}}} } });
+}
+
+function buildC7(rows) { // Avg TotAds per Programme
+  const { labels, data } = avgByKey(rows.filter(r=>r.prog&&r.totads!=null), 'prog', 'totads');
+  const top = labels.slice(0,15); const d = data.slice(0,15);
+  makeOrUpdate('c7','bar',
+    { labels:top, datasets:[{ data:d, backgroundColor:'#0891b2cc', borderWidth:0, borderRadius:4 }] },
+    HBAR_OPT());
+}
+
+function buildC8(rows) { // Avg AdsInBreak per Programme
+  const { labels, data } = avgByKey(rows.filter(r=>r.prog&&r.adsinbrk!=null), 'prog', 'adsinbrk');
+  const top=labels.slice(0,15); const d=data.slice(0,15);
+  makeOrUpdate('c8','bar',
+    { labels:top, datasets:[{ data:d, backgroundColor:'#059669cc', borderWidth:0, borderRadius:4 }] },
+    HBAR_OPT());
+}
+
+function buildC9(rows) { // AdPos distribution
+  const r2 = rows.filter(r=>r.adpos!=null);
+  const { labels, data } = freq(r2, 'adpos', 20);
+  makeOrUpdate('c9','bar',
+    { labels, datasets:[{ data, backgroundColor:'#2563ebcc', borderWidth:0, borderRadius:3 }] },
+    BASE_OPT('x'));
+}
+
+function buildC10(rows) { // BrkNo distribution
+  const r2 = rows.filter(r=>r.brkno!=null);
+  const { labels, data } = freq(r2, 'brkno', 20);
+  makeOrUpdate('c10','bar',
+    { labels, datasets:[{ data, backgroundColor:'#ea580ccc', borderWidth:0, borderRadius:3 }] },
+    BASE_OPT('x'));
+}
+
+function buildC11(rows) { // PosinBrk distribution
+  const r2 = rows.filter(r=>r.posinbrk!=null);
+  const { labels, data } = freq(r2, 'posinbrk', 20);
+  makeOrUpdate('c11','bar',
+    { labels, datasets:[{ data, backgroundColor:'#dc2626cc', borderWidth:0, borderRadius:3 }] },
+    BASE_OPT('x'));
+}
+
+function buildC12(rows) { // AdsInBreak distribution
+  const r2 = rows.filter(r=>r.adsinbrk!=null);
+  const { labels, data } = freq(r2, 'adsinbrk', 20);
+  makeOrUpdate('c12','bar',
+    { labels, datasets:[{ data, backgroundColor:'#7c3aedcc', borderWidth:0, borderRadius:3 }] },
+    BASE_OPT('x'));
+}
+
+function buildC13(rows) { // First vs Last in break
+  const total = rows.filter(r=>r.posinbrk!=null&&r.adsinbrk!=null).length || 1;
+  const first = rows.filter(r=>r.posinbrk===1).length;
+  const last  = rows.filter(r=>r.posinbrk!=null&&r.adsinbrk!=null&&r.posinbrk===r.adsinbrk).length;
+  const mid   = total - first - last;
+  makeOrUpdate('c13','doughnut', {
+    labels:['First in Break','Last in Break','Mid-Break'],
+    datasets:[{ data:[first,last,Math.max(mid,0)], backgroundColor:['#059669','#dc2626','#94a3b8'], borderWidth:2 }],
+  }, { responsive:true, maintainAspectRatio:false,
+       plugins:{ legend:{display:true,position:'bottom',labels:{font:{size:10},boxWidth:12}},
+                 tooltip:{callbacks:{label:ctx=>`${ctx.label}: ${ctx.parsed} (${Math.round(ctx.parsed/total*100)}%)`}} } });
+}
+
+function buildC14(rows) { // Ads by Duration
+  const BUCKETS = ['≤10','15','20','30','45','60+'];
+  const cnt = Array(6).fill(0);
+  rows.forEach(r => {
+    const d = r.dur || 0;
+    if (d <= 10) cnt[0]++;
+    else if (d <= 15) cnt[1]++;
+    else if (d <= 20) cnt[2]++;
+    else if (d <= 30) cnt[3]++;
+    else if (d <= 45) cnt[4]++;
+    else cnt[5]++;
+  });
+  makeOrUpdate('c14','bar',
+    { labels:BUCKETS, datasets:[{ data:cnt, backgroundColor:colArr(6).map(c=>c+'cc'), borderWidth:0, borderRadius:4 }] },
+    BASE_OPT('x'));
+}
+
+function buildC15(rows) { // Cost by Product Group
+  const r2 = rows.filter(r=>r.pg&&r.cost!=null);
+  const { labels, data } = sumByKey(r2, 'pg', 'cost', 15);
+  makeOrUpdate('c15','bar',
+    { labels, datasets:[{ data, backgroundColor:'#059669cc', borderWidth:0, borderRadius:4 }] },
+    HBAR_OPT());
+}
+
+function buildC16(rows) { // Avg Duration by Programme
+  const { labels, data } = avgByKey(rows.filter(r=>r.prog&&r.dur!=null), 'prog', 'dur');
+  const top=labels.slice(0,15); const d=data.slice(0,15);
+  makeOrUpdate('c16','bar',
+    { labels:top, datasets:[{ data:d, backgroundColor:'#2563ebcc', borderWidth:0, borderRadius:4 }] },
+    HBAR_OPT());
+}
+
+function buildC17(rows) { // Sponsorship by Programme
+  const spon = rows.filter(r=>r.adtype==='sponsorship'&&r.prog);
+  const { labels, data } = freq(spon, 'prog', 15);
+  makeOrUpdate('c17','bar',
+    { labels, datasets:[{ data, backgroundColor:'#d97706cc', borderWidth:0, borderRadius:4 }] },
+    HBAR_OPT());
+}
+
+function buildC18(rows) { // Sponsorship Prime vs Non-Prime per Product Group
+  const spon = rows.filter(r=>r.adtype==='sponsorship');
+  const { labels, prime, nonprime } = stackedByKey(spon.filter(r=>r.pg), 'pg', 12);
+  makeOrUpdate('c18','bar', {
+    labels,
+    datasets:[
+      { label:'Prime',     data:prime,    backgroundColor:PRIME_C+'cc',    borderWidth:0, borderRadius:2, stack:'s' },
+      { label:'Non-Prime', data:nonprime, backgroundColor:NONPRIME_C+'cc', borderWidth:0, borderRadius:2, stack:'s' },
+    ],
+  }, { indexAxis:'y', responsive:true, maintainAspectRatio:false,
+       plugins:{ legend:{display:true,position:'bottom',labels:{font:{size:10},boxWidth:12}} },
+       scales:{ x:{stacked:true,ticks:{font:{size:10}}}, y:{stacked:true,ticks:{font:{size:9}}} } });
+}
+
+function buildC19(rows) { // Sponsorship by Day of Week
+  const DOW=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const cnt=Array(7).fill(0);
+  rows.filter(r=>r.adtype==='sponsorship').forEach(r=>cnt[r.dow]++);
+  makeOrUpdate('c19','bar',
+    { labels:DOW, datasets:[{ data:cnt, backgroundColor:'#d97706cc', borderWidth:0, borderRadius:3 }] },
+    BASE_OPT('x'));
+}
+
+function buildC20(rows) { // Sponsorship Position in Break
+  const spon=rows.filter(r=>r.adtype==='sponsorship'&&r.posinbrk!=null);
+  const {labels,data}=freq(spon,'posinbrk',15);
+  makeOrUpdate('c20','bar',
+    { labels, datasets:[{ data, backgroundColor:'#d97706cc', borderWidth:0, borderRadius:3 }] },
+    BASE_OPT('x'));
+}
+
+function buildC21(rows) { // Sponsorship vs Commercial ratio per Programme
+  const progs = [...new Set(rows.filter(r=>r.prog).map(r=>r.prog))];
+  const sponMap={},commMap={};
+  rows.filter(r=>r.prog).forEach(r=>{
+    if (r.adtype==='sponsorship') sponMap[r.prog]=(sponMap[r.prog]||0)+1;
+    else commMap[r.prog]=(commMap[r.prog]||0)+1;
+  });
+  // Sort by total desc, take top 15
+  const sorted=progs.sort((a,b)=>((sponMap[b]||0)+(commMap[b]||0))-((sponMap[a]||0)+(commMap[a]||0))).slice(0,15);
+  const totals=sorted.map(p=>(sponMap[p]||0)+(commMap[p]||0));
+  makeOrUpdate('c21','bar', {
+    labels:sorted,
+    datasets:[
+      { label:'Sponsorship', data:sorted.map(p=>totals[sorted.indexOf(p)]?Math.round((sponMap[p]||0)/totals[sorted.indexOf(p)]*100):0),
+        backgroundColor:'#d97706cc', borderWidth:0, borderRadius:2, stack:'s' },
+      { label:'Commercial',  data:sorted.map(p=>totals[sorted.indexOf(p)]?Math.round((commMap[p]||0)/totals[sorted.indexOf(p)]*100):0),
+        backgroundColor:'#2563ebcc', borderWidth:0, borderRadius:2, stack:'s' },
+    ],
+  }, { indexAxis:'y', responsive:true, maintainAspectRatio:false,
+       plugins:{ legend:{display:true,position:'bottom',labels:{font:{size:10},boxWidth:12}},
+                 tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.x}%`}} },
+       scales:{ x:{stacked:true,max:100,ticks:{callback:v=>v+'%',font:{size:10}}}, y:{stacked:true,ticks:{font:{size:9}}} } });
+}
+
+/* ── Heatmaps (using Chart.js matrix-style via bar with custom rendering) ── */
+function buildHeatmap(canvasId, rowKeys, colKeys, getData, rowLabel='Row', colLabel='Col') {
+  const el = document.getElementById(canvasId);
+  if (!el) return;
+
+  // Build flat x/y/v arrays for a bubble-style heatmap
+  const labels_x = colKeys;
+  const datasets = rowKeys.map((rk, ri) => ({
+    label: rk,
+    data: colKeys.map(ck => getData(rk, ck)),
+    backgroundColor: 'transparent',
+  }));
+
+  // Use a custom canvas drawing instead of Chart.js for simplicity
+  const vals = rowKeys.map(rk => colKeys.map(ck => getData(rk, ck)));
+  const maxV  = Math.max(1, ...vals.flat());
+
+  // Destroy existing chart if any
+  if (CHS[canvasId]) { CHS[canvasId].destroy(); delete CHS[canvasId]; }
+
+  // Draw heatmap on canvas directly
+  const dpr    = window.devicePixelRatio || 1;
+  const W      = el.parentElement.clientWidth || 600;
+  const cellH  = 28;
+  const LABEL_W = 120;
+  const cellW  = Math.max(24, Math.floor((W - LABEL_W) / Math.max(colKeys.length, 1)));
+  const H      = (rowKeys.length + 1) * cellH + 8;
+
+  el.width  = W * dpr;
+  el.height = H * dpr;
+  el.style.width  = W + 'px';
+  el.style.height = H + 'px';
+
+  const ctx = el.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  // Header row
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(0, 0, W, cellH);
+  ctx.fillStyle = '#64748b';
+  ctx.font = 'bold 9px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  colKeys.forEach((ck, ci) => {
+    const x = LABEL_W + ci * cellW + cellW / 2;
+    ctx.save();
+    ctx.translate(x, cellH / 2);
+    ctx.fillText(String(ck).slice(0,8), 0, 0);
+    ctx.restore();
+  });
+
+  // Data rows
+  const clr = (v) => {
+    const t = maxV > 0 ? v / maxV : 0;
+    const r = Math.round(37  + (220 - 37)  * (1 - t));
+    const g = Math.round(99  + (238 - 99)  * (1 - t));
+    const b = Math.round(235 + (235 - 235) * (1 - t));
+    // From blue (#2563eb) to very light (#e0eaff)
+    const r2 = Math.round(224 + (37  - 224) * t);
+    const g2 = Math.round(234 + (99  - 234) * t);
+    const b2 = Math.round(255 + (235 - 255) * t);
+    return `rgb(${r2},${g2},${b2})`;
+  };
+
+  rowKeys.forEach((rk, ri) => {
+    const y = (ri + 1) * cellH;
+    // Row label
+    ctx.fillStyle = '#334155';
+    ctx.font = '9px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(rk).slice(0,16), LABEL_W - 4, y + cellH / 2);
+
+    colKeys.forEach((ck, ci) => {
+      const v = getData(rk, ck);
+      const x = LABEL_W + ci * cellW;
+      ctx.fillStyle = clr(v);
+      ctx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
+      if (v > 0) {
+        ctx.fillStyle = v / maxV > 0.5 ? '#fff' : '#1e293b';
+        ctx.font = 'bold 8px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(v, x + cellW / 2, y + cellH / 2);
+      }
+    });
+  });
+
+  // Store a dummy object so exportChart can use toDataURL
+  CHS[canvasId] = { toBase64Image: () => el.toDataURL('image/png') };
+}
+
+function buildC22(rows) { // Day × Programme heatmap
+  const DOW=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const progs=[...new Set(rows.filter(r=>r.prog).map(r=>r.prog))]
+    .sort((a,b)=> rows.filter(r=>r.prog===b).length - rows.filter(r=>r.prog===a).length).slice(0,12);
+  const m = {};
+  rows.filter(r=>r.prog).forEach(r=>{ const k=`${DOW[r.dow]}||${r.prog}`; m[k]=(m[k]||0)+1; });
+  buildHeatmap('c22', progs, DOW, (prog,dow)=> m[`${dow}||${prog}`]||0);
+}
+
+function buildC23(rows) { // Day × Hour heatmap
+  const DOW=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const hours=Array.from({length:24},(_,i)=>i);
+  const m={};
+  rows.forEach(r=>{ const k=`${DOW[r.dow]}||${r.h}`; m[k]=(m[k]||0)+1; });
+  buildHeatmap('c23', DOW, hours, (dow,h)=> m[`${dow}||${h}`]||0);
+}
+
+function buildC24(rows) { // Prime/Non-Prime × Product Group heatmap
+  const pgs=[...new Set(rows.filter(r=>r.pg).map(r=>r.pg))].slice(0,20);
+  const bands=['Prime','Non-Prime'];
+  const m={};
+  rows.filter(r=>r.pg).forEach(r=>{
+    const band=r.prime?'Prime':'Non-Prime';
+    const k=`${band}||${r.pg}`; m[k]=(m[k]||0)+1;
+  });
+  buildHeatmap('c24', pgs, bands, (pg,band)=> m[`${band}||${pg}`]||0);
+}
+
+/* ── Rebuild all ────────────────────────────────────────────────── */
+function rebuildAll() {
+  const rows = getFiltered();
+  updateKPIs(rows);
+  buildC1(rows); buildC2(rows); buildC3(rows); buildC4(rows);
+  buildC5(rows); buildC6(rows); buildC7(rows); buildC8(rows);
+  buildC9(rows); buildC10(rows); buildC11(rows); buildC12(rows); buildC13(rows);
+  buildC14(rows); buildC15(rows); buildC16(rows);
+  buildC17(rows); buildC18(rows); buildC19(rows); buildC20(rows); buildC21(rows);
+  buildC22(rows); buildC23(rows); buildC24(rows);
+}
+
+/* ── Init ───────────────────────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', () => {
+  // Re-classify prime based on current setting (view already set it, but re-do in JS for JS-filter consistency)
+  ALL_ROWS.forEach(r => { r.prime = PRIME_START <= r.h && r.h < PRIME_END; });
+  rebuildAll();
+});
+
+/* ── Row Detail Modal (placeholder — full columns shown) ────────── */
+window.closeModal = function() {
+  document.getElementById('rowModal').style.display = 'none';
+};
+</script>
+{% endif %}
+{% endblock %}

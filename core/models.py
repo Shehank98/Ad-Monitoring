@@ -323,27 +323,40 @@ class TCRow(models.Model):
 
 
 class ManualMatch(models.Model):
-    """A manually confirmed match between a COMMERCIAL BENEFITS ScheduleRow and
-    an LMRBRow whose aired date falls outside (or anywhere outside) the normal
-    auto-reconciliation window.
+    """A manually confirmed match linking an LMRBRow to a ScheduleRow and/or TCRow.
+
+    Supports three match modes:
+    - 'schedule_lmrb' : Schedule + LMRB  (original mode)
+    - '3way'          : Schedule + TC + LMRB  (full three-way)
+    - 'tc_lmrb'       : TC + LMRB only  (no corresponding schedule row)
 
     Workflow:
     1. Operations user opens /dashboard/manual/.
-    2. Selects one unmatched ScheduleRow (left panel) and one unmatched LMRBRow
-       (right panel), optionally adds a note, and clicks "Match".
-    3. Both rows are locked (is_manual_matched=True) so the engine and all other
-       matchers skip them.
-    4. The pair appears in the Manual Reconciliation tab, in per-schedule exports,
-       and is counted towards Dashboard totals.
-    5. De-matching removes the ManualMatch record and unlocks both rows.
+    2. Selects rows from the relevant panels, optionally adds a note, clicks "Match".
+    3. Rows are locked (is_manual_matched=True) so the engine skips them.
+    4. De-matching removes the record and unlocks all rows.
     """
+    MATCH_MODES = [
+        ('schedule_lmrb', 'Schedule + LMRB'),
+        ('3way',          'Schedule + TC + LMRB'),
+        ('tc_lmrb',       'TC + LMRB only'),
+    ]
+
     account      = models.ForeignKey(Account, on_delete=models.CASCADE,
                                      related_name='manual_matches')
     channel      = models.CharField(max_length=200)
     month        = models.CharField(max_length=50)
+    match_mode   = models.CharField(max_length=20, choices=MATCH_MODES,
+                                    default='schedule_lmrb')
     schedule_row = models.OneToOneField(
         ScheduleRow, on_delete=models.CASCADE,
         related_name='manual_match',
+        null=True, blank=True,
+    )
+    tc_row       = models.OneToOneField(
+        'TCRow', on_delete=models.CASCADE,
+        related_name='manual_match',
+        null=True, blank=True,
     )
     lmrb_row     = models.OneToOneField(
         LMRBRow, on_delete=models.CASCADE,
@@ -360,10 +373,14 @@ class ManualMatch(models.Model):
         ordering = ['-matched_at']
 
     def __str__(self):
-        return (
-            f'ManualMatch | {self.account} | {self.channel} | '
-            f'{self.schedule_row.brand} | {self.schedule_row.date}'
-        )
+        if self.schedule_row_id:
+            return (
+                f'ManualMatch | {self.account} | {self.channel} | '
+                f'{self.schedule_row.brand} | {self.schedule_row.date}'
+            )
+        if self.tc_row_id:
+            return f'ManualMatch | TC | {self.account} | {self.channel} | {self.tc_row.tc_theme}'
+        return f'ManualMatch | {self.account} | {self.channel}'
 
 
 class SponsorshipLmrbAssignment(models.Model):

@@ -240,11 +240,19 @@
         LMRB Aired — Theme × Duration
       </h3>
       {% if lmrb_chart %}
-      <button onclick="openAnalyticsModal()"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700
-                     text-xs font-semibold hover:bg-indigo-100 transition border border-indigo-200">
-        <i class="fa-solid fa-chart-pie text-[10px]"></i> Full Analytics
-      </button>
+      <div class="flex items-center gap-2">
+        <button onclick="openAnalyticsModal()"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700
+                       text-xs font-semibold hover:bg-indigo-100 transition border border-indigo-200">
+          <i class="fa-solid fa-chart-pie text-[10px]"></i> Quick View
+        </button>
+        <a href="{% url 'analytics_full' %}?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
+           target="_blank"
+           class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-50 text-violet-700
+                  text-xs font-semibold hover:bg-violet-100 transition border border-violet-200">
+          <i class="fa-solid fa-expand text-[10px]"></i> Full Analytics
+        </a>
+      </div>
       {% endif %}
     </div>
     {% if lmrb_chart %}
@@ -1083,7 +1091,7 @@ function buildDonut(id, labels, data, colors) {
 
 {% if schedule_chart %}
 (function() {
-  const raw    = {{ schedule_chart|safe }};
+  const raw    = {{ schedule_chart_json|safe }};
   const labels = raw.map(r => r.brand + (r.duration ? ' (' + r.duration + 's)' : ''));
   const data   = raw.map(r => r.count);
   buildBarChart('scheduleChart', labels, data, labels);
@@ -1092,7 +1100,7 @@ function buildDonut(id, labels, data, colors) {
 
 {% if lmrb_chart %}
 (function() {
-  const raw    = {{ lmrb_chart|safe }};
+  const raw    = {{ lmrb_chart_json|safe }};
   const labels = raw.map(r => r.advt_theme + (r.duration ? ' (' + r.duration + 's)' : ''));
   const data   = raw.map(r => r.count);
   buildBarChart('lmrbChart', labels, data, labels);
@@ -1100,7 +1108,8 @@ function buildDonut(id, labels, data, colors) {
 {% endif %}
 
 /* ── LMRB Theme Detail Drawer ──────────────────────────────────── */
-const LMRB_THEME_DETAIL = {{ lmrb_theme_detail|safe }};
+// lmrb_theme_detail_json is pre-serialised in the view via json.dumps (null/true/false safe)
+const LMRB_THEME_DETAIL = {{ lmrb_theme_detail_json|safe }};
 
 function openLmrbDrawer(idx) {
   const d = LMRB_THEME_DETAIL[idx];
@@ -1215,7 +1224,9 @@ function openAnalyticsModal() {
   document.body.style.overflow = 'hidden';
   if (!modalChartsBuilt) {
     modalChartsBuilt = true;
-    buildModalCharts();
+    // Defer two animation frames so the browser repaints the now-visible modal
+    // before Chart.js measures canvas dimensions (fixes 0-size canvas bug).
+    requestAnimationFrame(() => requestAnimationFrame(buildModalCharts));
   }
 }
 
@@ -1231,7 +1242,7 @@ function handleModalClick(e) {
 function buildModalCharts() {
   {% if schedule_chart %}
   (function() {
-    const raw    = {{ schedule_chart|safe }};
+    const raw    = {{ schedule_chart_json|safe }};
     const labels = raw.map(r => r.brand + (r.duration ? ' (' + r.duration + 's)' : ''));
     buildBarChart('scheduleChartModal', labels, raw.map(r => r.count), labels);
   })();
@@ -1239,7 +1250,7 @@ function buildModalCharts() {
 
   {% if lmrb_chart %}
   (function() {
-    const raw    = {{ lmrb_chart|safe }};
+    const raw    = {{ lmrb_chart_json|safe }};
     const labels = raw.map(r => r.advt_theme + (r.duration ? ' (' + r.duration + 's)' : ''));
     buildBarChart('lmrbChartModal', labels, raw.map(r => r.count), labels);
   })();
