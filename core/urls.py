@@ -69,4 +69,9 @@ urlpatterns = [
     path('manual/',                    views.manual_reconciliation, name='manual_reconciliation'),
     path('manual/match/',              views.manual_match_create,   name='manual_match_create'),
     path('manual/dematch/<int:pk>/',   views.manual_dematch,        name='manual_dematch'),
+
+    # Commercial Tags Pool (manual LMRB → commercial schedule assignment)
+    path('commercial/candidates/',     views.commercial_candidates,    name='commercial_candidates'),
+    path('commercial/unmatched-rows/', views.commercial_unmatched_rows, name='commercial_unmatched_rows'),
+    path('commercial/assign/',         views.commercial_assign,         name='commercial_assign'),
 ]

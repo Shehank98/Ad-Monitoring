@@ -3447,3 +3447,196 @@ def manual_dematch(request, pk):
 
     messages.success(request, f'De-matched: {sr_desc}. All rows are now available again.')
     return redirect(redirect_url)
+
+
+# ── Commercial Tags Pool ───────────────────────────────────────────────────────
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head'])
+def commercial_candidates(request):
+    """
+    GET (AJAX): Return unmatched LMRBRow list available for manual commercial
+    Tags assignment.  Filtered by brand theme mapping and optionally by duration.
+    Only returns rows that are not commercially matched, not sponsorship matched,
+    and not manually matched (i.e., fully available).
+    """
+    from django.db.models import Q as _Q, Min as _Min, Max as _Max
+
+    account_id = request.GET.get('account_id', '').strip()
+    channel    = request.GET.get('channel', '').strip()
+    month      = request.GET.get('month', '').strip()
+    brand      = request.GET.get('brand', '').strip()
+    duration   = request.GET.get('duration', '').strip()
+
+    if not (account_id and channel and month):
+        return JsonResponse({'error': 'Incomplete parameters.'}, status=400)
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'error': 'Access denied.'}, status=403)
+
+    # Get scope date range from schedule
+    agg = Schedule.objects.filter(account_id=account_id, channel=channel, month=month
+        ).aggregate(d_min=_Min('start_date'), d_max=_Max('end_date'))
+    d_min, d_max = agg['d_min'], agg['d_max']
+    if not d_min or not d_max:
+        ragg = ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+        ).aggregate(d_min=_Min('date'), d_max=_Max('date'))
+        d_min = d_min or ragg['d_min']
+        d_max = d_max or ragg['d_max']
+
+    # Base queryset: fully unmatched LMRB rows in scope
+    qs = LMRBRow.objects.filter(
+        account_id=account_id, channel__iexact=channel,
+        is_matched=False, is_sponsorship_matched=False, is_manual_matched=False,
+    )
+    if d_min:
+        qs = qs.filter(date__gte=d_min)
+    if d_max:
+        qs = qs.filter(date__lte=d_max)
+
+    # Filter by theme matching the brand
+    if brand:
+        themes = set()
+        for bm in BrandMapping.objects.filter(account_id=account_id):
+            if bm.brand.lower().strip() != brand.lower().strip():
+                continue
+            if duration:
+                try:
+                    if bm.duration is not None and int(bm.duration) != int(duration):
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            if bm.theme:
+                themes.add(bm.theme.lower().strip())
+        if themes:
+            theme_q = _Q()
+            for t in themes:
+                theme_q |= _Q(advt_theme__iexact=t)
+            qs = qs.filter(theme_q)
+
+    if duration:
+        try:
+            qs = qs.filter(duration=int(duration))
+        except ValueError:
+            pass
+
+    rows = list(qs.order_by('advt_theme', 'date', 'advt_time').values(
+        'id', 'date', 'advt_time', 'advt_theme', 'duration', 'program', 'source',
+    ))
+    for r in rows:
+        if hasattr(r.get('date'), 'isoformat'):
+            r['date'] = r['date'].isoformat()
+
+    return JsonResponse({'candidates': rows})
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head'])
+def commercial_unmatched_rows(request):
+    """
+    GET (AJAX): Return unmatched COMMERCIAL BENEFITS ScheduleRow IDs for a
+    brand/duration/month so the picker can pair LMRB rows with schedule slots.
+    """
+    account_id = request.GET.get('account_id', '').strip()
+    channel    = request.GET.get('channel', '').strip()
+    month      = request.GET.get('month', '').strip()
+    brand      = request.GET.get('brand', '').strip()
+    duration   = request.GET.get('duration', '').strip()
+
+    if not (account_id and channel and month):
+        return JsonResponse({'error': 'Incomplete parameters.'}, status=400)
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'error': 'Access denied.'}, status=403)
+
+    qs = ScheduleRow.objects.filter(
+        account_id=account_id, channel=channel, month=month,
+        ad_type='COMMERCIAL BENEFITS', brand=brand,
+        is_matched=False, is_manual_matched=False,
+    )
+    if duration:
+        try:
+            qs = qs.filter(duration=int(duration))
+        except ValueError:
+            pass
+
+    ids = list(qs.order_by('date', 'start_time').values_list('id', flat=True))
+    return JsonResponse({'schedule_row_ids': ids})
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations'])
+@require_POST
+def commercial_assign(request):
+    """
+    POST (AJAX): Manually assign LMRB rows to commercial BENEFITS schedule rows
+    as 'Tags'.  Creates ManualMatch records (schedule_lmrb mode) which are then
+    counted in build_summary_data's manual_aired column.
+
+    Body: JSON {
+      "account_id": ..., "channel": ..., "month": ...,
+      "assignments": [[schedule_row_id, lmrb_row_id], ...]
+    }
+    """
+    import json as _json
+    from core.models import ManualMatch as _MM
+
+    try:
+        body = _json.loads(request.body)
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Invalid JSON.'}, status=400)
+
+    account_id = str(body.get('account_id', '')).strip()
+    channel    = str(body.get('channel', '')).strip()
+    month      = str(body.get('month', '')).strip()
+
+    if not (account_id and channel and month):
+        return JsonResponse({'error': 'Incomplete parameters.'}, status=400)
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'error': 'Access denied.'}, status=403)
+
+    try:
+        assignments = [(int(sr), int(lr)) for sr, lr in body.get('assignments', [])]
+    except (ValueError, TypeError, KeyError):
+        return JsonResponse({'error': 'Invalid assignments payload.'}, status=400)
+
+    created = 0
+    skipped = 0
+
+    for sr_id, lr_id in assignments:
+        try:
+            sr = ScheduleRow.objects.get(
+                id=sr_id, account_id=account_id, channel=channel,
+                month=month, ad_type='COMMERCIAL BENEFITS',
+                is_matched=False, is_manual_matched=False,
+            )
+        except ScheduleRow.DoesNotExist:
+            skipped += 1
+            continue
+
+        try:
+            lr = LMRBRow.objects.get(
+                id=lr_id, account_id=account_id,
+                is_matched=False, is_sponsorship_matched=False,
+                is_manual_matched=False,
+            )
+        except LMRBRow.DoesNotExist:
+            skipped += 1
+            continue
+
+        # Race-condition guard
+        if _MM.objects.filter(lmrb_row=lr).exists() or _MM.objects.filter(schedule_row=sr).exists():
+            skipped += 1
+            continue
+
+        _MM.objects.create(
+            account_id=account_id, channel=channel, month=month,
+            match_mode='schedule_lmrb',
+            schedule_row=sr, lmrb_row=lr,
+            note='Commercial Tags – manually assigned via summary picker',
+            matched_by=request.user,
+        )
+        ScheduleRow.objects.filter(id=sr_id).update(is_manual_matched=True)
+        LMRBRow.objects.filter(id=lr_id).update(is_manual_matched=True)
+        created += 1
+
+    return JsonResponse({'created': created, 'skipped': skipped})
