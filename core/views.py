@@ -45,6 +45,22 @@ def _to_js(data):
     return json.dumps(data, cls=_JsonEnc).replace('</', '<\\/')
 
 
+def _theme_adtype(theme: str, brand_map: dict, spon_kw: list) -> str:
+    """Classify a theme as 'commercial', 'sponsorship', or 'other'.
+
+    Priority: BrandMapping lookup first, then keyword substring match.
+    spon_kw is a list of lowercase keyword strings from SystemSetting.
+    """
+    key = (theme or '').lower().strip()
+    tp = brand_map.get(key)
+    if tp:
+        return tp
+    for kw in spon_kw:
+        if kw and kw.lower() in key:
+            return 'sponsorship'
+    return 'other'
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _is_admin(user):
@@ -1177,6 +1193,9 @@ def monitoring_dashboard(request):
                 theme_to_adtype.setdefault(key, 'commercial')
             if bm.brand in sponsorship_brands:
                 theme_to_adtype[key] = 'sponsorship'
+        # Load sponsorship keyword list from settings (e.g. -BB, Tag, Com Break …)
+        from .models import get_setting_list as _gsl
+        spon_kw = _gsl('lmrb_sponsorship_keywords')
 
         def _pcts(d):
             total = d['prime'] + d['non_prime'] + d['other']
@@ -1195,7 +1214,7 @@ def monitoring_dashboard(request):
         for lr in lmrb_qs.values('advt_theme', 'advt_time'):
             bucket = _time_bucket(lr['advt_time'])
             _pt_all[bucket] += 1
-            tp = theme_to_adtype.get((lr['advt_theme'] or '').lower().strip())
+            tp = _theme_adtype(lr['advt_theme'], theme_to_adtype, spon_kw)
             if tp == 'commercial':
                 _pt_comm[bucket] += 1
             elif tp == 'sponsorship':
@@ -1327,6 +1346,8 @@ def analytics_full(request):
                 theme_to_adtype.setdefault(key, 'commercial')
             if bm.brand in sponsorship_brands:
                 theme_to_adtype[key] = 'sponsorship'
+        from .models import get_setting_list as _gsl
+        spon_kw = _gsl('lmrb_sponsorship_keywords')
 
         # Fetch all LMRB rows for the scope
         lmrb_qs = LMRBRow.objects.filter(
@@ -1351,7 +1372,7 @@ def analytics_full(request):
                 h = int(str(row['advt_time'] or '0').split(':')[0])
             except Exception:
                 h = 0
-            adtype = theme_to_adtype.get(str(row['advt_theme'] or '').lower().strip(), 'other')
+            adtype = _theme_adtype(row['advt_theme'], theme_to_adtype, spon_kw)
             is_p   = prime_start_h <= h < prime_end_h
             cost_v = float(row['cost']) if row['cost'] is not None else None
             if cost_v is not None:
@@ -2886,11 +2907,11 @@ def manual_reconciliation(request):
             )
 
     if account_id and channel and month and _account_access(user, account_id):
-        # Unmatched COMMERCIAL BENEFITS schedule rows
+        # Unmatched schedule rows (both COMMERCIAL BENEFITS and SPONSORSHIP)
         unmatched_schedule = list(
             ScheduleRow.objects.filter(
                 account_id=account_id, channel=channel, month=month,
-                ad_type='COMMERCIAL BENEFITS',
+                ad_type__in=['COMMERCIAL BENEFITS', 'SPONSORSHIP'],
                 is_matched=False,
                 is_manual_matched=False,
             ).order_by('date', 'start_time', 'brand')

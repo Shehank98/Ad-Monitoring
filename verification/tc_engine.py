@@ -343,11 +343,18 @@ def build_summary_data(account_id, channel, month):
     date_min = sch_dates.get('d_min')
     date_max = sch_dates.get('d_max')
 
-    def _lmrb_row_count(lmrb_themes, dur_int):
-        """Count LMRBRows for this brand in the scope."""
+    def _lmrb_row_count(lmrb_themes, dur_int, exclude_spon=False):
+        """Count LMRBRows for this brand in the scope.
+
+        exclude_spon=True: exclude rows already claimed by a SponsorshipLmrbAssignment
+        (is_sponsorship_matched=True), so they are not double-counted in the
+        commercial 3rd-party column.
+        """
         # channel__iexact: LMRB file may store the channel name in a different case
         # (e.g. "SIRASA TV" in the Excel vs "Sirasa TV" in the schedule/TC form).
         q = LMRBRow.objects.filter(account_id=account_id, channel__iexact=channel)
+        if exclude_spon:
+            q = q.filter(is_sponsorship_matched=False)
         if date_min and date_max:
             q = q.filter(date__range=(date_min, date_max))
         if lmrb_themes:
@@ -407,8 +414,9 @@ def build_summary_data(account_id, channel, month):
 
         aired = tc_aired + manual_aired
 
-        # 3rd Party = total LMRB count (independent monitoring)
-        third_party = _lmrb_row_count(lmrb_themes, dur_int)
+        # 3rd Party = LMRB count excluding rows already claimed as sponsorship,
+        # so sponsorship tags are not double-counted in the commercial extra column.
+        third_party = _lmrb_row_count(lmrb_themes, dur_int, exclude_spon=True)
 
         # Extra / Missed based on LMRB vs Planned
         extra  = max(0, third_party - planned)

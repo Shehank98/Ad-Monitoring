@@ -457,13 +457,31 @@
       <button type="button" onclick="closeSponModal()"
               class="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
     </div>
+    <!-- Filter toolbar -->
+    <div class="flex flex-wrap items-center gap-2 px-4 pt-3 pb-2 border-b border-slate-100 bg-slate-50">
+      <div class="relative flex-1 min-w-[200px]">
+        <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-300 text-xs"></i>
+        <input type="text" id="spon-theme-filter" placeholder="Filter by theme…"
+               oninput="filterSponRows()"
+               class="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400">
+      </div>
+      <button type="button" onclick="selectAllFiltered()"
+              class="text-xs px-3 py-1.5 rounded-lg bg-amber-100 text-amber-700 font-semibold hover:bg-amber-200 transition border border-amber-200">
+        <i class="fa-solid fa-check-double mr-1"></i>Select All Filtered
+      </button>
+      <button type="button" onclick="assignAllFiltered()"
+              class="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition">
+        <i class="fa-solid fa-bolt mr-1"></i>Batch Assign Filtered
+      </button>
+      <span id="spon-visible-count" class="text-xs text-slate-400 ml-1"></span>
+    </div>
     <!-- Body -->
-    <div id="spon-modal-body" class="p-4">
+    <div id="spon-modal-body" class="p-4" style="max-height:55vh; overflow-y:auto;">
       <p id="spon-loading" class="text-xs text-slate-400">Loading…</p>
       <table id="spon-cand-table" class="sum-table w-full border-collapse hidden">
         <thead>
           <tr>
-            <th class="text-center w-8"><input type="checkbox" id="spon-select-all" title="Select all"></th>
+            <th class="text-center w-8"><input type="checkbox" id="spon-select-all" title="Select all visible"></th>
             <th class="text-left">Theme</th>
             <th class="text-center">Dur</th>
             <th class="text-center">Date</th>
@@ -478,7 +496,10 @@
     </div>
     <!-- Footer -->
     <div class="flex items-center justify-between px-5 py-3 border-t border-slate-200 bg-slate-50 rounded-b-2xl">
-      <p id="spon-selected-count" class="text-xs text-slate-500">0 selected</p>
+      <div>
+        <p id="spon-selected-count" class="text-xs text-slate-500">0 selected</p>
+        <p id="spon-capacity-hint" class="text-[10px] text-slate-400 mt-0.5"></p>
+      </div>
       <div class="flex gap-2">
         <button type="button" onclick="closeSponModal()" class="btn-secondary text-xs">Cancel</button>
         <button type="button" id="spon-confirm-btn" onclick="confirmSponAssign()" class="btn-primary text-xs" disabled>
@@ -507,7 +528,11 @@
     document.getElementById('spon-cand-table').classList.add('hidden');
     document.getElementById('spon-no-rows').classList.add('hidden');
     document.getElementById('spon-selected-count').textContent = '0 selected';
+    document.getElementById('spon-capacity-hint').textContent = '';
+    document.getElementById('spon-visible-count').textContent = '';
     document.getElementById('spon-confirm-btn').disabled = true;
+    // Clear filter
+    document.getElementById('spon-theme-filter').value = '';
     document.getElementById('spon-modal').classList.add('open');
 
     // Fetch unassigned sponsorship schedule row ids for this product
@@ -545,9 +570,16 @@
           chk.addEventListener('change', updateSelectedCount);
         });
         document.getElementById('spon-select-all').addEventListener('change', function () {
-          document.querySelectorAll('.spon-lmrb-chk').forEach(c => { c.checked = this.checked; });
+          // Only toggle visible (filtered) rows
+          document.querySelectorAll('#spon-cand-tbody tr').forEach(tr => {
+            if (tr.style.display !== 'none') {
+              const c = tr.querySelector('.spon-lmrb-chk');
+              if (c) c.checked = this.checked;
+            }
+          });
           updateSelectedCount();
         });
+        filterSponRows(); // show total count
       })
       .catch(() => {
         document.getElementById('spon-loading').textContent = 'Error loading candidates.';
@@ -564,10 +596,45 @@
       .catch(() => {});
   };
 
+  window.filterSponRows = function () {
+    const q = (document.getElementById('spon-theme-filter').value || '').toLowerCase();
+    let visible = 0;
+    document.querySelectorAll('#spon-cand-tbody tr').forEach(tr => {
+      const theme = (tr.querySelector('td:nth-child(2)')?.textContent || '').toLowerCase();
+      const show = !q || theme.includes(q);
+      tr.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+    const total = document.querySelectorAll('#spon-cand-tbody tr').length;
+    document.getElementById('spon-visible-count').textContent =
+        q ? visible + ' of ' + total + ' shown' : total + ' rows';
+    updateSelectedCount();
+  };
+
+  window.selectAllFiltered = function () {
+    document.querySelectorAll('#spon-cand-tbody tr').forEach(tr => {
+      if (tr.style.display !== 'none') {
+        const chk = tr.querySelector('.spon-lmrb-chk');
+        if (chk) chk.checked = true;
+      }
+    });
+    updateSelectedCount();
+  };
+
+  window.assignAllFiltered = function () {
+    selectAllFiltered();
+    confirmSponAssign();
+  };
+
   function updateSelectedCount () {
     const checked = document.querySelectorAll('.spon-lmrb-chk:checked');
     const n = checked.length;
     document.getElementById('spon-selected-count').textContent = n + ' selected';
+    const cap = _pendingScheduleRowIds.length;
+    if (cap > 0) {
+      document.getElementById('spon-capacity-hint').textContent =
+          cap + ' unmatched schedule slot' + (cap === 1 ? '' : 's') + ' available';
+    }
     document.getElementById('spon-confirm-btn').disabled = (n === 0);
   }
 

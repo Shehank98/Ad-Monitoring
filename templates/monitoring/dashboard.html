@@ -143,54 +143,131 @@
 
 {% if stats %}
 
-<!-- ── Stat Cards ─────────────────────────────────────────────── -->
-<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-3 mb-5">
+<!-- ── KPI Banner ─────────────────────────────────────────────── -->
+<div class="mb-5">
 
-  <div class="stat-card col-span-1">
-    <span class="stat-val text-slate-800">{{ stats.total }}</span>
-    <span class="stat-lbl">Total Spots</span>
+  <!-- Row 1: Compliance hero + spot-type split -->
+  <div class="grid grid-cols-1 lg:grid-cols-4 gap-3 mb-3">
+
+    <!-- Compliance — hero card -->
+    <div class="lg:col-span-1 rounded-2xl p-5 flex flex-col justify-between text-white
+                {% if stats.compliance >= 90 %}bg-gradient-to-br from-emerald-500 to-emerald-700
+                {% elif stats.compliance >= 75 %}bg-gradient-to-br from-amber-500 to-orange-600
+                {% else %}bg-gradient-to-br from-red-500 to-red-700{% endif %}">
+      <div class="text-[10px] font-bold uppercase tracking-widest opacity-80">
+        <i class="fa-solid fa-circle-check mr-1"></i>Compliance Rate
+      </div>
+      <div class="text-5xl font-black my-2 leading-none">{{ stats.compliance }}%</div>
+      <div class="text-xs opacity-70">
+        {{ stats.matched }} of {{ stats.total }} spots matched
+      </div>
+    </div>
+
+    <!-- Spot-type breakdown -->
+    <div class="lg:col-span-3 grid grid-cols-3 gap-3">
+
+      <!-- Total Spots with split bar -->
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-col justify-between">
+        <div>
+          <div class="text-2xl font-black text-slate-800">{{ stats.total }}</div>
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">Total Spots</div>
+        </div>
+        {% if stats.total %}
+        <div class="mt-3">
+          <div class="h-2 rounded-full bg-amber-200 overflow-hidden">
+            <div class="h-full bg-blue-500 rounded-full"
+                 style="width:{% widthratio stats.commercial stats.total 100 %}%"></div>
+          </div>
+          <div class="flex justify-between text-[9px] font-semibold mt-1">
+            <span class="text-blue-600">{{ stats.commercial }} Commercial</span>
+            <span class="text-amber-600">{{ stats.sponsorship }} Spon.</span>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Commercial -->
+      <div class="bg-blue-50 rounded-2xl border border-blue-100 shadow-sm p-4 flex flex-col">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-[9px] font-bold text-blue-500 uppercase tracking-widest">Commercial</span>
+          <i class="fa-solid fa-rectangle-ad text-blue-300 text-xs"></i>
+        </div>
+        <div class="text-3xl font-black text-blue-700 mt-auto">{{ stats.commercial }}</div>
+        <div class="text-[9px] text-blue-400 mt-1">scheduled spots</div>
+      </div>
+
+      <!-- Sponsorship -->
+      <div class="bg-amber-50 rounded-2xl border border-amber-100 shadow-sm p-4 flex flex-col">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-[9px] font-bold text-amber-600 uppercase tracking-widest">Sponsorship</span>
+          <i class="fa-solid fa-award text-amber-300 text-xs"></i>
+        </div>
+        <div class="text-3xl font-black text-amber-700 mt-auto">{{ stats.sponsorship }}</div>
+        <div class="text-[9px] text-amber-400 mt-1">scheduled spots</div>
+      </div>
+
+    </div>
   </div>
 
-  <div class="stat-card col-span-1">
-    <span class="stat-val text-blue-600">{{ stats.commercial }}</span>
-    <span class="stat-lbl">Commercial</span>
-  </div>
+  <!-- Row 2: Status breakdown -->
+  <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
 
-  <div class="stat-card col-span-1">
-    <span class="stat-val text-amber-600">{{ stats.sponsorship }}</span>
-    <span class="stat-lbl">Sponsorship</span>
-  </div>
+    <!-- Matched -->
+    <div class="bg-white rounded-xl border-l-4 border-emerald-500 shadow-sm p-3 flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-circle-check text-emerald-500 text-sm"></i>
+      </div>
+      <div>
+        <div class="text-xl font-black text-emerald-700">{{ stats.matched }}</div>
+        <div class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Matched</div>
+      </div>
+    </div>
 
-  <div class="stat-card col-span-1">
-    <span class="stat-val text-emerald-600">{{ stats.matched }}</span>
-    <span class="stat-lbl">Matched</span>
-  </div>
+    <!-- Total Aired -->
+    <div class="bg-white rounded-xl border-l-4 border-slate-400 shadow-sm p-3 flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl bg-slate-50 flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-satellite-dish text-slate-400 text-sm"></i>
+      </div>
+      <div>
+        <div class="text-xl font-black text-slate-700">{{ stats.aired }}</div>
+        <div class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Total Aired</div>
+      </div>
+    </div>
 
-  <div class="stat-card col-span-1">
-    <span class="stat-val text-indigo-600">{{ stats.compliance }}%</span>
-    <span class="stat-lbl">Compliance</span>
-  </div>
+    <!-- Not Aired -->
+    <div class="bg-white rounded-xl border-l-4 {% if stats.not_aired %}border-red-500{% else %}border-slate-200{% endif %} shadow-sm p-3 flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl {% if stats.not_aired %}bg-red-50{% else %}bg-slate-50{% endif %} flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-ban {% if stats.not_aired %}text-red-500{% else %}text-slate-300{% endif %} text-sm"></i>
+      </div>
+      <div>
+        <div class="text-xl font-black {% if stats.not_aired %}text-red-600{% else %}text-slate-400{% endif %}">{{ stats.not_aired }}</div>
+        <div class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Not Aired</div>
+      </div>
+    </div>
 
-  <div class="stat-card col-span-1">
-    <span class="stat-val text-red-600">{{ stats.not_aired }}</span>
-    <span class="stat-lbl">Not Aired</span>
-  </div>
+    <!-- Prog Mismatch -->
+    <div class="bg-white rounded-xl border-l-4 {% if stats.prog_mis %}border-orange-400{% else %}border-slate-200{% endif %} shadow-sm p-3 flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl {% if stats.prog_mis %}bg-orange-50{% else %}bg-slate-50{% endif %} flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-triangle-exclamation {% if stats.prog_mis %}text-orange-400{% else %}text-slate-300{% endif %} text-sm"></i>
+      </div>
+      <div>
+        <div class="text-xl font-black {% if stats.prog_mis %}text-orange-500{% else %}text-slate-400{% endif %}">{{ stats.prog_mis }}</div>
+        <div class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Prog Mismatch</div>
+      </div>
+    </div>
 
-  <div class="stat-card col-span-1">
-    <span class="stat-val text-orange-500">{{ stats.prog_mis }}</span>
-    <span class="stat-lbl">Prog Mismatch</span>
-  </div>
+    <!-- Late Telecast -->
+    <div class="bg-white rounded-xl border-l-4 {% if stats.late %}border-violet-400{% else %}border-slate-200{% endif %} shadow-sm p-3 flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl {% if stats.late %}bg-violet-50{% else %}bg-slate-50{% endif %} flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-clock-rotate-left {% if stats.late %}text-violet-400{% else %}text-slate-300{% endif %} text-sm"></i>
+      </div>
+      <div>
+        <div class="text-xl font-black {% if stats.late %}text-violet-600{% else %}text-slate-400{% endif %}">{{ stats.late }}</div>
+        <div class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Late Telecast</div>
+      </div>
+    </div>
 
-  <div class="stat-card col-span-1">
-    <span class="stat-val text-violet-600">{{ stats.late }}</span>
-    <span class="stat-lbl">Late Telecast</span>
   </div>
-
-  <div class="stat-card col-span-1">
-    <span class="stat-val text-slate-600">{{ stats.aired }}</span>
-    <span class="stat-lbl">Total Aired</span>
-  </div>
-
 </div>
 
 <!-- ── Charts Row ─────────────────────────────────────────────── -->

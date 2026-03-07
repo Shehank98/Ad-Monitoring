@@ -629,6 +629,19 @@ SETTING_DEFAULTS = [
         ),
         'category': 'lmrb_parsing',
     },
+    # ── LMRB sponsorship detection ─────────────────────────────────────────────
+    {
+        'key': 'lmrb_sponsorship_keywords',
+        'value': '-BB,Com Break,DJ,-Extro,-Intro,-LLogo,Tag,Time Check,-Tr',
+        'label': 'LMRB Sponsorship Theme Keywords',
+        'description': (
+            'Comma-separated keywords. If an LMRB Advt_Theme contains any of these '
+            'as a case-insensitive substring, the row is classified as Sponsorship Benefits '
+            'in analytics — regardless of BrandMapping. Add more keywords as needed. '
+            'Default: -BB, Com Break, DJ, -Extro, -Intro, -LLogo, Tag, Time Check, -Tr'
+        ),
+        'category': 'lmrb_parsing',
+    },
 ]
 
 

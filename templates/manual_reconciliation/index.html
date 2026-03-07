@@ -16,6 +16,10 @@
   .mode-btn { padding:.35rem .9rem; border-radius:.5rem; font-size:.72rem; font-weight:600;
               cursor:pointer; border:none; background:#f1f5f9; color:#64748b; transition:all .15s; }
   .mode-btn.active { background:#1d4ed8; color:#fff; }
+  /* TC→LMRB proximity highlight */
+  .lmrb-tc-highlight { background: rgba(251,191,36,.18) !important; outline: 2px solid #f59e0b; outline-offset: -2px; }
+  .badge-commercial { background:#dbeafe; color:#1d4ed8; }
+  .badge-sponsorship { background:#fef3c7; color:#92400e; }
 </style>
 {% endblock %}
 
@@ -122,7 +126,7 @@
       {% if unmatched_schedule %}
         <div class="panel-scroll">
           <table class="data-table">
-            <thead><tr><th>Date</th><th>Brand</th><th>Dur.</th></tr></thead>
+            <thead><tr><th>Date</th><th>Brand</th><th>Dur.</th><th>Type</th></tr></thead>
             <tbody>
               {% for sr in unmatched_schedule %}
               <tr class="row-selectable" data-id="{{ sr.id }}" data-panel="sr"
@@ -131,6 +135,13 @@
                 <td class="whitespace-nowrap text-xs">{{ sr.date }}</td>
                 <td class="font-medium text-xs">{{ sr.brand }}</td>
                 <td class="text-xs text-slate-500">{{ sr.duration }}s</td>
+                <td class="text-xs">
+                  {% if sr.ad_type == 'SPONSORSHIP' %}
+                    <span class="badge badge-sponsorship text-[9px]">Spon</span>
+                  {% else %}
+                    <span class="badge badge-commercial text-[9px]">Com</span>
+                  {% endif %}
+                </td>
               </tr>
               {% endfor %}
             </tbody>
@@ -160,6 +171,7 @@
             <tbody>
               {% for tc in unmatched_tc %}
               <tr class="row-selectable" data-id="{{ tc.id }}" data-panel="tc"
+                  data-date="{{ tc.date }}" data-time="{{ tc.aired_time }}"
                   onclick="selectRow(this,'tc')"
                   title="{{ tc.tc_theme }} | {{ tc.programme|default:'—' }} | {{ tc.channel }}">
                 <td class="whitespace-nowrap text-xs">{{ tc.date }}</td>
@@ -198,6 +210,7 @@
             <tbody>
               {% for lr in unmatched_lmrb %}
               <tr class="row-selectable" data-id="{{ lr.id }}" data-panel="lr"
+                  data-date="{{ lr.date }}" data-time="{{ lr.advt_time }}"
                   onclick="selectRow(this,'lr')">
                 <td class="whitespace-nowrap text-xs">{{ lr.date }}</td>
                 <td class="font-medium text-xs">{{ lr.advt_theme }}</td>
@@ -382,13 +395,38 @@
     document.getElementById('mode-hint').innerHTML = HINTS[mode] || '';
     // TC label span visibility
     document.getElementById('bar-tc-span').classList.toggle('hidden', mode === 'schedule_lmrb');
-    // Clear selections in now-disabled panels
+    // Clear selections in now-disabled panels + TC highlights if TC disabled
     document.querySelectorAll('.row-selectable').forEach(r => {
       if (mode === 'tc_lmrb' && r.dataset.panel === 'sr') r.classList.remove('selected-sr');
       if (mode === 'schedule_lmrb' && r.dataset.panel === 'tc') r.classList.remove('selected-tc');
     });
+    if (mode === 'schedule_lmrb') {
+      document.querySelectorAll('.lmrb-tc-highlight').forEach(r => r.classList.remove('lmrb-tc-highlight'));
+    }
     updateBar();
   };
+
+  // ── Time helpers ─────────────────────────────────────────────────────────
+  function timeToSecs(t) {
+    if (!t) return -1;
+    const parts = t.trim().split(':');
+    if (parts.length < 2) return -1;
+    return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2] || 0);
+  }
+
+  function highlightLmrbForTc(tcDate, tcTime) {
+    // Clear previous TC-proximity highlights
+    document.querySelectorAll('.lmrb-tc-highlight').forEach(r => r.classList.remove('lmrb-tc-highlight'));
+    if (!tcDate || !tcTime) return;
+    const tcSecs = timeToSecs(tcTime);
+    document.querySelectorAll('[data-panel="lr"]').forEach(lr => {
+      if (lr.dataset.date !== tcDate) return;
+      const lrSecs = timeToSecs(lr.dataset.time);
+      if (lrSecs >= 0 && Math.abs(lrSecs - tcSecs) <= 30) {
+        lr.classList.add('lmrb-tc-highlight');
+      }
+    });
+  }
 
   // ── Row selection ────────────────────────────────────────────────────────
   window.selectRow = function (row, panel) {
@@ -407,6 +445,8 @@
       sel.tcLabel = `${cells[1].textContent.trim()} (${cells[2].textContent.trim()}) — ${cells[0].textContent.trim()}`;
       document.getElementById('hidden-tc').value = sel.tc;
       document.getElementById('sel-tc-label').textContent = sel.tcLabel;
+      // Highlight LMRB rows within ±30s on the same date
+      highlightLmrbForTc(row.dataset.date, row.dataset.time);
     } else {
       sel.lr = row.dataset.id;
       sel.lrLabel = `${cells[1].textContent.trim()} — ${cells[0].textContent.trim()} @ ${cells[3].textContent.trim()}`;
