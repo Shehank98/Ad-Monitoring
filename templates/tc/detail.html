@@ -76,13 +76,28 @@
         {% endfor %}
       </select>
     </div>
+    {% if schedules_in_scope|length > 1 %}
+    <div class="flex-1 min-w-[160px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Schedule #</label>
+      <select name="schedule_id" class="select-field" onchange="this.form.submit()">
+        <option value="">All schedules</option>
+        {% for sched in schedules_in_scope %}
+          <option value="{{ sched.id }}" {% if sched.id|stringformat:"s" == schedule_id %}selected{% endif %}>
+            #{{ sched.schedule_number }} (v{{ sched.version }}, {{ sched.row_count }} rows)
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    {% elif schedules_in_scope %}
+    <input type="hidden" name="schedule_id" value="{{ schedules_in_scope.0.id }}">
+    {% endif %}
     {% if account_id and channel and month %}
     <div class="flex gap-2 items-end">
-      <a href="/dashboard/summary/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
+      <a href="/dashboard/summary/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
          class="btn-secondary text-xs">
         <i class="fa-solid fa-table-list"></i> Summary
       </a>
-      <a href="/dashboard/monitor/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
+      <a href="/dashboard/monitor/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
          class="btn-secondary text-xs">
         <i class="fa-solid fa-chart-bar"></i> Dashboard
       </a>

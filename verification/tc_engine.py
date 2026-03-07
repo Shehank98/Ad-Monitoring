@@ -117,12 +117,13 @@ def _tc_themes_for_brand(brand: str, duration, tc_theme_map: dict) -> list[str]:
 # ── Main reconciliation ───────────────────────────────────────────────────────
 
 @transaction.atomic
-def reconcile_tc(account_id, channel, month, mode='smart'):
+def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
     """
     Run TC-Schedule and TC-LMRB reconciliation for one scope.
 
     mode='smart' : skip already-matched TC rows; add new results.
     mode='reset' : clear all TC reconciliation state for scope, then re-run.
+    schedule_id  : when set, restrict to ScheduleRows from that specific Schedule.
 
     Returns dict with summary counts.
     """
@@ -156,7 +157,10 @@ def reconcile_tc(account_id, channel, month, mode='smart'):
     # ── Load ScheduleRows for scope ───────────────────────────────────────────
     sch_qs = ScheduleRow.objects.filter(
         account_id=account_id, channel__iexact=channel, month=month,
-    ).order_by('date', 'start_time')
+    )
+    if schedule_id:
+        sch_qs = sch_qs.filter(schedule_id=schedule_id)
+    sch_qs = sch_qs.order_by('date', 'start_time')
 
     # ── Load unmatched TCRows for scope ───────────────────────────────────────
     # channel__iexact: handles case differences between the TC upload form and
@@ -298,7 +302,7 @@ def reconcile_tc(account_id, channel, month, mode='smart'):
 
 # ── Summary data builder ──────────────────────────────────────────────────────
 
-def build_summary_data(account_id, channel, month):
+def build_summary_data(account_id, channel, month, schedule_id=None):
     """
     Build structured summary data for the Summary Sheet report.
 
@@ -366,12 +370,19 @@ def build_summary_data(account_id, channel, month):
             q = q.filter(duration=dur_int)
         return q.count()
 
+    # Helper: restrict ScheduleRow queries to a specific schedule when schedule_id is set
+    def _sch_qs(**kwargs):
+        qs = ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month, **kwargs
+        )
+        if schedule_id:
+            qs = qs.filter(schedule_id=schedule_id)
+        return qs
+
     # ── Commercial Benefits ───────────────────────────────────────────────────
     commercial_rows = []
     sch_commercial = (
-        ScheduleRow.objects
-        .filter(account_id=account_id, channel=channel, month=month,
-                ad_type='COMMERCIAL BENEFITS')
+        _sch_qs(ad_type='COMMERCIAL BENEFITS')
         .values('brand', 'duration')
         .annotate(cnt=Count('id'))
         .order_by('brand', 'duration')
@@ -403,14 +414,14 @@ def build_summary_data(account_id, channel, month):
         tc_aired = aired_q.count()
 
         # Count ManualMatch records for this brand/duration/month as additional aired
-        manual_aired = ManualMatch.objects.filter(
-            account_id=account_id,
-            channel=channel,
-            month=month,
-            schedule_row__brand=brand,
-            schedule_row__duration=dur,
+        manual_q = ManualMatch.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+            schedule_row__brand=brand, schedule_row__duration=dur,
             schedule_row__ad_type='COMMERCIAL BENEFITS',
-        ).count()
+        )
+        if schedule_id:
+            manual_q = manual_q.filter(schedule_row__schedule_id=schedule_id)
+        manual_aired = manual_q.count()
 
         aired = tc_aired + manual_aired
 
@@ -477,9 +488,7 @@ def build_summary_data(account_id, channel, month):
 
     sponsorship_sections = []
     spon_programmes = (
-        ScheduleRow.objects
-        .filter(account_id=account_id, channel=channel, month=month,
-                ad_type='SPONSORSHIP')
+        _sch_qs(ad_type='SPONSORSHIP')
         .values_list('programme', flat=True)
         .distinct()
         .order_by('programme')
@@ -487,9 +496,7 @@ def build_summary_data(account_id, channel, month):
 
     for prog in spon_programmes:
         prog_sch = (
-            ScheduleRow.objects
-            .filter(account_id=account_id, channel=channel, month=month,
-                    ad_type='SPONSORSHIP', programme=prog)
+            _sch_qs(ad_type='SPONSORSHIP', programme=prog)
             .values('brand', 'duration')
             .annotate(cnt=Count('id'))
             .order_by('brand', 'duration')
@@ -504,7 +511,7 @@ def build_summary_data(account_id, channel, month):
             lmrb_themes = _lmrb_themes_for_brand(brand, dur, lmrb_theme_map)
 
             # Aired = count of SponsorshipLmrbAssignment for this brand/dur/programme
-            aired = SponsorshipLmrbAssignment.objects.filter(
+            spon_asgn_q = SponsorshipLmrbAssignment.objects.filter(
                 account_id=account_id,
                 schedule_row__channel=channel,
                 schedule_row__month=month,
@@ -512,7 +519,10 @@ def build_summary_data(account_id, channel, month):
                 schedule_row__programme=prog,
                 schedule_row__brand=brand,
                 schedule_row__duration=dur,
-            ).count()
+            )
+            if schedule_id:
+                spon_asgn_q = spon_asgn_q.filter(schedule_row__schedule_id=schedule_id)
+            aired = spon_asgn_q.count()
 
             # Status
             if aired >= planned:

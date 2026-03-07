@@ -134,6 +134,21 @@
         {% endfor %}
       </select>
     </div>
+    {% if schedules_in_scope|length > 1 %}
+    <div class="flex-1 min-w-[160px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Schedule #</label>
+      <select name="schedule_id" class="select-field" onchange="this.form.submit()">
+        <option value="">All schedules</option>
+        {% for sched in schedules_in_scope %}
+          <option value="{{ sched.id }}" {% if sched.id|stringformat:"s" == schedule_id %}selected{% endif %}>
+            #{{ sched.schedule_number }} (v{{ sched.version }})
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    {% elif schedules_in_scope %}
+    <input type="hidden" name="schedule_id" value="{{ schedules_in_scope.0.id }}">
+    {% endif %}
     <div class="flex gap-2">
       <button type="submit" class="btn-primary"><i class="fa-solid fa-filter"></i> Filter</button>
       <a href="/dashboard/monitor/" class="btn-secondary"><i class="fa-solid fa-rotate-left"></i> Reset</a>

@@ -1074,13 +1074,15 @@ def monitoring_dashboard(request):
     user       = request.user
     account_qs = _account_qs(user)
 
-    account_id = request.GET.get('account_id', '')
-    channel    = request.GET.get('channel', '')
-    month      = request.GET.get('month', '')
+    account_id  = request.GET.get('account_id', '')
+    channel     = request.GET.get('channel', '')
+    month       = request.GET.get('month', '')
+    schedule_id = request.GET.get('schedule_id', '').strip()
 
-    selected_account = None
-    channels = []
-    months   = []
+    selected_account   = None
+    channels           = []
+    months             = []
+    schedules_in_scope = []
     stats    = {}
     tab_data = {}
     ch_summary     = []
@@ -1110,7 +1112,16 @@ def monitoring_dashboard(request):
             ))
 
     if selected_account and channel and month:
-        qs    = MatchResult.objects.filter(account_id=account_id, channel=channel, month=month)
+        schedules_in_scope = list(
+            Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+            .order_by('schedule_number')
+        )
+        if not schedule_id and len(schedules_in_scope) == 1:
+            schedule_id = str(schedules_in_scope[0].id)
+
+        qs = MatchResult.objects.filter(account_id=account_id, channel=channel, month=month)
+        if schedule_id:
+            qs = qs.filter(schedule_row__schedule_id=schedule_id)
         total = qs.count()
 
         n_matched    = qs.filter(status='matched').count()
@@ -1122,9 +1133,10 @@ def monitoring_dashboard(request):
         # Programme mismatch counts as a valid match (same day, brand, theme — time offset only)
         compliance   = round((n_matched + n_prog_mis) / total * 100, 1) if total else 0
 
-        n_sponsorship = ScheduleRow.objects.filter(
-            account_id=account_id, channel=channel, month=month, ad_type='SPONSORSHIP',
-        ).count()
+        _sr_base = ScheduleRow.objects.filter(account_id=account_id, channel=channel, month=month)
+        if schedule_id:
+            _sr_base = _sr_base.filter(schedule_id=schedule_id)
+        n_sponsorship = _sr_base.filter(ad_type='SPONSORSHIP').count()
 
         stats = {
             'total':      total,
@@ -1382,6 +1394,8 @@ def monitoring_dashboard(request):
         'account_id':                account_id,
         'channels':                  channels,
         'months':                    months,
+        'schedules_in_scope':        schedules_in_scope,
+        'schedule_id':               schedule_id,
         'channel':                   channel,
         'month':                     month,
         'stats':                     stats,
@@ -1989,10 +2003,11 @@ def tc_reconcile(request):
     """Run TC-Schedule + TC-LMRB reconciliation for a scope."""
     from verification.tc_engine import reconcile_tc
 
-    account_id = request.POST.get('account_id') or request.GET.get('account_id', '')
-    channel    = request.POST.get('channel')    or request.GET.get('channel', '')
-    month      = request.POST.get('month')      or request.GET.get('month', '')
-    mode       = request.POST.get('mode', 'smart')
+    account_id  = request.POST.get('account_id') or request.GET.get('account_id', '')
+    channel     = request.POST.get('channel')    or request.GET.get('channel', '')
+    month       = request.POST.get('month')      or request.GET.get('month', '')
+    mode        = request.POST.get('mode', 'smart')
+    schedule_id = (request.POST.get('schedule_id') or request.GET.get('schedule_id', '')).strip()
 
     if not (account_id and channel and month):
         messages.error(request, 'Account, channel and month are required.')
@@ -2002,8 +2017,9 @@ def tc_reconcile(request):
         messages.error(request, 'Access denied.')
         return redirect('/dashboard/tc/')
 
+    sid = int(schedule_id) if schedule_id else None
     try:
-        result = reconcile_tc(account_id, channel, month, mode=mode)
+        result = reconcile_tc(account_id, channel, month, mode=mode, schedule_id=sid)
         msg = (
             f'Reconciliation complete: {result["matched"]} matched, '
             f'{result["extra"]} extra, {result["lmrb_confirmed"]} LMRB-confirmed.'
@@ -2035,7 +2051,10 @@ def tc_reconcile(request):
     except Exception as e:
         messages.error(request, f'Reconciliation failed: {e}')
 
-    return redirect(f'/dashboard/summary/?account_id={account_id}&channel={channel}&month={month}')
+    redir = f'/dashboard/summary/?account_id={account_id}&channel={channel}&month={month}'
+    if schedule_id:
+        redir += f'&schedule_id={schedule_id}'
+    return redirect(redir)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2059,14 +2078,16 @@ def tc_three_way(request):
     user       = request.user
     account_qs = _account_qs(user)
 
-    account_id = request.GET.get('account_id', '')
-    channel    = request.GET.get('channel', '')
-    month      = request.GET.get('month', '')
+    account_id  = request.GET.get('account_id', '')
+    channel     = request.GET.get('channel', '')
+    month       = request.GET.get('month', '')
+    schedule_id = request.GET.get('schedule_id', '').strip()
 
-    selected_account = None
-    channels = []
-    months   = []
-    rows     = []
+    selected_account   = None
+    channels           = []
+    months             = []
+    schedules_in_scope = []
+    rows               = []
 
     if account_id:
         try:
@@ -2090,10 +2111,20 @@ def tc_three_way(request):
             messages.error(request, 'Access denied.')
             return redirect('/dashboard/tc/detail/')
 
+        schedules_in_scope = list(
+            Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+            .order_by('schedule_number')
+        )
+        if not schedule_id and len(schedules_in_scope) == 1:
+            schedule_id = str(schedules_in_scope[0].id)
+
         from core.models import ManualMatch
+        sch_filter = dict(account_id=account_id, channel=channel, month=month)
+        if schedule_id:
+            sch_filter['schedule_id'] = schedule_id
         sch_qs = (
             ScheduleRow.objects
-            .filter(account_id=account_id, channel=channel, month=month)
+            .filter(**sch_filter)
             .select_related('matched_lmrb')
             .prefetch_related('tc_matches')
             .order_by('date', 'start_time', 'brand')
@@ -2164,19 +2195,21 @@ def tc_three_way(request):
             })
 
     return render(request, 'tc/detail.html', {
-        'accounts':          account_qs,
-        'selected_account':  selected_account,
-        'account_id':        account_id,
-        'channels':          channels,
-        'months':            months,
-        'channel':           channel,
-        'month':             month,
-        'rows':              rows,
-        'total':             len(rows),
-        'n_aired':           sum(1 for r in rows if r['status'] == 'aired'),
-        'n_tc_only':         sum(1 for r in rows if r['status'] == 'tc_only'),
-        'n_lmrb_only':       sum(1 for r in rows if r['status'] == 'lmrb_only'),
-        'n_not_aired':       sum(1 for r in rows if r['status'] == 'not_aired'),
+        'accounts':           account_qs,
+        'selected_account':   selected_account,
+        'account_id':         account_id,
+        'channels':           channels,
+        'months':             months,
+        'schedules_in_scope': schedules_in_scope,
+        'schedule_id':        schedule_id,
+        'channel':            channel,
+        'month':              month,
+        'rows':               rows,
+        'total':              len(rows),
+        'n_aired':            sum(1 for r in rows if r['status'] == 'aired'),
+        'n_tc_only':          sum(1 for r in rows if r['status'] == 'tc_only'),
+        'n_lmrb_only':        sum(1 for r in rows if r['status'] == 'lmrb_only'),
+        'n_not_aired':        sum(1 for r in rows if r['status'] == 'not_aired'),
     })
 
 
@@ -2192,15 +2225,17 @@ def summary_report(request):
     user       = request.user
     account_qs = _account_qs(user)
 
-    account_id = request.GET.get('account_id', '')
-    channel    = request.GET.get('channel', '')
-    month      = request.GET.get('month', '')
+    account_id  = request.GET.get('account_id', '')
+    channel     = request.GET.get('channel', '')
+    month       = request.GET.get('month', '')
+    schedule_id = request.GET.get('schedule_id', '').strip()
 
     # Save metadata if POST
     if request.method == 'POST':
-        account_id = request.POST.get('account_id', '').strip()
-        channel    = request.POST.get('channel', '').strip()
-        month      = request.POST.get('month', '').strip()
+        account_id  = request.POST.get('account_id', '').strip()
+        channel     = request.POST.get('channel', '').strip()
+        month       = request.POST.get('month', '').strip()
+        schedule_id = request.POST.get('schedule_id', '').strip()
 
         if account_id and channel and month and _account_access(user, account_id):
             account = get_object_or_404(Account, id=account_id)
@@ -2216,16 +2251,20 @@ def summary_report(request):
             meta.authorised_by       = request.POST.get('authorised_by', '').strip()
             meta.save()
             messages.success(request, 'Summary metadata saved.')
-        return redirect(f'/dashboard/summary/?account_id={account_id}&channel={channel}&month={month}')
+        qs_str = f'account_id={account_id}&channel={channel}&month={month}'
+        if schedule_id:
+            qs_str += f'&schedule_id={schedule_id}'
+        return redirect(f'/dashboard/summary/?{qs_str}')
 
     # Dropdown data
-    channels = []
-    months   = []
-    selected_account = None
-    summary_data = None
-    meta         = None
-    schedule_obj = None
-    tc_report    = None
+    channels          = []
+    months            = []
+    schedules_in_scope = []
+    selected_account  = None
+    summary_data      = None
+    meta              = None
+    schedule_obj      = None
+    tc_report         = None
 
     if account_id:
         try:
@@ -2249,8 +2288,18 @@ def summary_report(request):
             messages.error(request, 'Access denied.')
             return redirect('/dashboard/summary/')
 
+        # Build schedule selector for this scope
+        schedules_in_scope = list(
+            Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+            .order_by('schedule_number')
+        )
+        # Auto-select when only one schedule exists
+        if not schedule_id and len(schedules_in_scope) == 1:
+            schedule_id = str(schedules_in_scope[0].id)
+
+        sid = int(schedule_id) if schedule_id else None
         try:
-            summary_data = build_summary_data(account_id, channel, month)
+            summary_data = build_summary_data(account_id, channel, month, schedule_id=sid)
         except Exception as e:
             messages.warning(request, f'Could not build summary: {e}')
 
@@ -2258,26 +2307,29 @@ def summary_report(request):
             account_id=account_id, channel=channel, month=month
         ).first()
 
-        schedule_obj = Schedule.objects.filter(
-            account_id=account_id, channel=channel, month=month
-        ).order_by('-uploaded_at').first()
+        if schedule_id:
+            schedule_obj = Schedule.objects.filter(id=schedule_id).first()
+        else:
+            schedule_obj = schedules_in_scope[0] if schedules_in_scope else None
 
         tc_report = TransmissionReport.objects.filter(
             account_id=account_id, channel=channel, month=month
         ).order_by('-uploaded_at').first()
 
     return render(request, 'summary/report.html', {
-        'accounts':        account_qs,
-        'selected_account': selected_account,
-        'account_id':      account_id,
-        'channels':        channels,
-        'months':          months,
-        'channel':         channel,
-        'month':           month,
-        'summary_data':    summary_data,
-        'meta':            meta,
-        'schedule_obj':    schedule_obj,
-        'tc_report':       tc_report,
+        'accounts':           account_qs,
+        'selected_account':   selected_account,
+        'account_id':         account_id,
+        'channels':           channels,
+        'months':             months,
+        'schedules_in_scope': schedules_in_scope,
+        'schedule_id':        schedule_id,
+        'channel':            channel,
+        'month':              month,
+        'summary_data':       summary_data,
+        'meta':               meta,
+        'schedule_obj':       schedule_obj,
+        'tc_report':          tc_report,
     })
 
 
@@ -2994,10 +3046,11 @@ def sponsorship_reconcile(request):
     """
     from verification.sponsorship_engine import reconcile_sponsorship
 
-    account_id = request.POST.get('account_id', '').strip()
-    channel    = request.POST.get('channel', '').strip()
-    month      = request.POST.get('month', '').strip()
-    mode       = request.POST.get('mode', 'smart')
+    account_id  = request.POST.get('account_id', '').strip()
+    channel     = request.POST.get('channel', '').strip()
+    month       = request.POST.get('month', '').strip()
+    mode        = request.POST.get('mode', 'smart')
+    schedule_id = request.POST.get('schedule_id', '').strip()
 
     if not (account_id and channel and month):
         messages.error(request, 'Incomplete parameters.')
@@ -3006,7 +3059,8 @@ def sponsorship_reconcile(request):
         messages.error(request, 'Access denied.')
         return redirect('/dashboard/summary/')
 
-    result = reconcile_sponsorship(int(account_id), channel, month, mode=mode)
+    sid = int(schedule_id) if schedule_id else None
+    result = reconcile_sponsorship(int(account_id), channel, month, mode=mode, schedule_id=sid)
     messages.success(
         request,
         f'Sponsorship reconciliation complete: '
@@ -3014,9 +3068,10 @@ def sponsorship_reconcile(request):
         f'{result["already_assigned"]} already assigned, '
         f'{result["total_spon_rows"]} total sponsorship rows.'
     )
-    return redirect(
-        f'/dashboard/summary/?account_id={account_id}&channel={channel}&month={month}'
-    )
+    redir = f'/dashboard/summary/?account_id={account_id}&channel={channel}&month={month}'
+    if schedule_id:
+        redir += f'&schedule_id={schedule_id}'
+    return redirect(redir)
 
 
 @login_required

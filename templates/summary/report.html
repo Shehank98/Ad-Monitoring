@@ -53,6 +53,21 @@
         {% endfor %}
       </select>
     </div>
+    {% if schedules_in_scope|length > 1 %}
+    <div class="flex-1 min-w-[160px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Schedule #</label>
+      <select name="schedule_id" class="select-field" onchange="this.form.submit()">
+        <option value="">All schedules</option>
+        {% for sched in schedules_in_scope %}
+          <option value="{{ sched.id }}" {% if sched.id|stringformat:"s" == schedule_id %}selected{% endif %}>
+            #{{ sched.schedule_number }} (v{{ sched.version }}, {{ sched.row_count }} rows)
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    {% elif schedules_in_scope %}
+    <input type="hidden" name="schedule_id" value="{{ schedules_in_scope.0.id }}">
+    {% endif %}
   </form>
 </div>
 
@@ -60,6 +75,7 @@
 
 <!-- ── Action buttons ─────────────────────────────────────────── -->
 <div class="flex flex-wrap gap-2 mb-5">
+  {% comment %}Scope hidden inputs reused across all forms on this page{% endcomment %}
   {% if not tc_report %}
   <div class="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
     <i class="fa-solid fa-triangle-exclamation"></i>
@@ -67,37 +83,39 @@
     <a href="/dashboard/tc/upload/" class="font-bold underline">Upload TC</a> first, then
     <form method="post" action="/dashboard/tc/reconcile/" class="inline">
       {% csrf_token %}
-      <input type="hidden" name="account_id" value="{{ account_id }}">
-      <input type="hidden" name="channel"    value="{{ channel }}">
-      <input type="hidden" name="month"      value="{{ month }}">
-      <input type="hidden" name="mode"       value="smart">
+      <input type="hidden" name="account_id"  value="{{ account_id }}">
+      <input type="hidden" name="channel"     value="{{ channel }}">
+      <input type="hidden" name="month"       value="{{ month }}">
+      <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
+      <input type="hidden" name="mode"        value="smart">
       <button type="submit" class="font-bold underline">run reconciliation</button>.
     </form>
   </div>
   {% else %}
   <form method="post" action="/dashboard/tc/reconcile/">
     {% csrf_token %}
-    <input type="hidden" name="account_id" value="{{ account_id }}">
-    <input type="hidden" name="channel"    value="{{ channel }}">
-    <input type="hidden" name="month"      value="{{ month }}">
-    <input type="hidden" name="mode"       value="reset">
+    <input type="hidden" name="account_id"  value="{{ account_id }}">
+    <input type="hidden" name="channel"     value="{{ channel }}">
+    <input type="hidden" name="month"       value="{{ month }}">
+    <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
+    <input type="hidden" name="mode"        value="reset">
     <button type="submit" class="btn-secondary text-xs">
       <i class="fa-solid fa-rotate text-emerald-600"></i> Re-run Reconciliation
     </button>
   </form>
   {% endif %}
 
-  <a href="/dashboard/summary/excel/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
+  <a href="/dashboard/summary/excel/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
      class="btn-primary text-xs">
     <i class="fa-solid fa-file-excel"></i> Download Excel Summary
   </a>
 
-  <a href="/dashboard/summary/pdf/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
+  <a href="/dashboard/summary/pdf/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
      class="btn-secondary text-xs">
     <i class="fa-solid fa-file-pdf text-red-500"></i> Download Reconciliation PDF
   </a>
 
-  <a href="/dashboard/tc/detail/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
+  <a href="/dashboard/tc/detail/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
      class="btn-secondary text-xs">
     <i class="fa-solid fa-table-columns text-violet-600"></i> Plan vs LMRB vs TC
   </a>
@@ -105,10 +123,11 @@
   <!-- Sponsorship reconciliation controls - always visible -->
   <form method="post" action="/dashboard/sponsorship/reconcile/" class="inline">
     {% csrf_token %}
-    <input type="hidden" name="account_id" value="{{ account_id }}">
-    <input type="hidden" name="channel"    value="{{ channel }}">
-    <input type="hidden" name="month"      value="{{ month }}">
-    <input type="hidden" name="mode"       value="smart">
+    <input type="hidden" name="account_id"  value="{{ account_id }}">
+    <input type="hidden" name="channel"     value="{{ channel }}">
+    <input type="hidden" name="month"       value="{{ month }}">
+    <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
+    <input type="hidden" name="mode"        value="smart">
     <button type="submit" class="btn-secondary text-xs">
       <i class="fa-solid fa-wand-magic-sparkles text-amber-500"></i> Run Sponsorship Auto-Match
     </button>
@@ -117,9 +136,10 @@
   <form method="post" action="/dashboard/sponsorship/reset/" class="inline"
         onsubmit="return confirm('Reset all sponsorship assignments for this scope?');">
     {% csrf_token %}
-    <input type="hidden" name="account_id" value="{{ account_id }}">
-    <input type="hidden" name="channel"    value="{{ channel }}">
-    <input type="hidden" name="month"      value="{{ month }}">
+    <input type="hidden" name="account_id"  value="{{ account_id }}">
+    <input type="hidden" name="channel"     value="{{ channel }}">
+    <input type="hidden" name="month"       value="{{ month }}">
+    <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
     <button type="submit" class="btn-secondary text-xs">
       <i class="fa-solid fa-rotate-left text-rose-500"></i> Reset Sponsorship
     </button>
@@ -166,9 +186,10 @@
       </h3>
       <form method="post" class="space-y-3">
         {% csrf_token %}
-        <input type="hidden" name="account_id" value="{{ account_id }}">
-        <input type="hidden" name="channel"    value="{{ channel }}">
-        <input type="hidden" name="month"      value="{{ month }}">
+        <input type="hidden" name="account_id"  value="{{ account_id }}">
+        <input type="hidden" name="channel"     value="{{ channel }}">
+        <input type="hidden" name="month"       value="{{ month }}">
+        <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
 
         {% for field_name, label, placeholder in meta_fields %}
         {% endfor %}

@@ -104,7 +104,7 @@ def _scope_date_range(account_id, channel, month):
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def reconcile_sponsorship(account_id: int, channel: str, month: str,
-                          mode: str = 'smart') -> dict:
+                          mode: str = 'smart', schedule_id=None) -> dict:
     """
     Step 1 — Auto: match leftover LMRBRows to SPONSORSHIP ScheduleRows.
 
@@ -123,7 +123,10 @@ def reconcile_sponsorship(account_id: int, channel: str, month: str,
     spon_qs = ScheduleRow.objects.filter(
         account_id=account_id, channel=channel, month=month,
         ad_type='SPONSORSHIP',
-    ).order_by('date', 'start_time', 'brand')
+    )
+    if schedule_id:
+        spon_qs = spon_qs.filter(schedule_id=schedule_id)
+    spon_qs = spon_qs.order_by('date', 'start_time', 'brand')
 
     total_spon = spon_qs.count()
     if total_spon == 0:
