@@ -466,10 +466,11 @@ def match_ads(
         else:
             # No in-window candidate on this date.
             # Out-of-window same-day rows are intentionally left unconsumed so the
-            # schedule row can be reconsidered in Pass 2 (Late Telecast / Not Aired).
+            # schedule row can be reconsidered in Pass 2 (same-date mismatch first,
+            # then Late Telecast / Not Aired).
             unmatched_sched.append(row)
 
-    # ── PASS 2: Late Telecast / Not Aired ─────────────────────────────────────
+    # ── PASS 2: same-date out-of-window → Programme Mismatch, then Late Telecast / Not Aired ──
     for row in unmatched_sched:
         sch_date       = row.get('Date')
         sch_brand_norm = row.get('_norm_brand', '')
@@ -492,13 +493,46 @@ def match_ads(
         if pd.notna(sch_dur) and 'Dur' in candidates.columns:
             candidates = candidates[candidates['Dur'] == sch_dur]
 
+        # ── Sub-pass 2a: same-date out-of-window ─────────────────────────────
+        # An ad that aired on the scheduled date but outside the planned time
+        # window (e.g. 20:36 vs a 20:00–20:30 window) is a better match than
+        # an ad on a completely different date.  Consume it here as Programme
+        # Mismatch so it is not lost and does not cause a later date's row to be
+        # incorrectly tagged as Late Telecast.
+        same_day = candidates[candidates['Date'] == sch_date] if sch_date is not None and pd.notna(sch_date) else candidates.iloc[0:0]
+
+        if not same_day.empty:
+            # Pick the candidate closest to the planned window end
+            if pool_has_air_secs and same_day['_air_secs'].notna().any():
+                ref_secs = sch_end if sch_end is not None else 0
+                best_idx = (same_day['_air_secs'] - ref_secs).abs().idxmin()
+            else:
+                best_idx = same_day.index[0]
+            matched_idx.add(best_idx)
+            mon_row = mon_pool.loc[best_idx]
+            fp = lmrb_fingerprint(mon_row)
+            prog_mis_rows.append({
+                'Brand':          sch_brand,
+                'Theme':          mon_row.get('Advt_Theme', ''),
+                'Programme':      sch_programme,
+                'Scheduled_Date': sch_date,
+                'Aired_Date':     mon_row.get('Date', ''),
+                'Planned_Start':  start_time_str,
+                'Planned_End':    end_time_str,
+                'Air_Time':       mon_row.get('Advt_time', ''),
+                'Duration':       mon_row.get('Dur', sch_dur),
+                'Source':         mon_row.get('_source', ''),
+                'Status':         'Programme Mismatch',
+                '_lmrb_fp':       fp,
+                '_sch_key':       sch_key,
+                '_sch_row_id':    row.get('_sch_db_id'),
+                '_lmrb_row_id':   mon_row.get('_lmrb_db_id'),
+            })
+            continue
+
+        # ── Sub-pass 2b: later date, in-window → Late Telecast ───────────────
         # Rule 7: ad can only be a Late Telecast if it aired AFTER the scheduled date.
-        # Aired date strictly before the scheduled date is invalid (not a late airing).
-        # (Same-date is already handled in Pass 1; here we require Date > sch_date.)
-        if sch_date is not None and pd.notna(sch_date):
-            candidates = candidates[candidates['Date'] > sch_date]
-        else:
-            candidates = candidates[candidates['Date'] != sch_date]
+        later = candidates[candidates['Date'] > sch_date] if sch_date is not None and pd.notna(sch_date) else candidates[candidates['Date'] != sch_date]
 
         # Rule: Late Telecast must also fall within the planned time window —
         # same requirement as Matched / Programme Mismatch (different date only).
@@ -508,17 +542,17 @@ def match_ads(
         # reasoning as Pass 1: programme can start before window but ad airs inside it.
         if sch_start is not None and sch_end is not None:
             time_col = None
-            if pool_has_air_secs and candidates['_air_secs'].notna().any():
+            if pool_has_air_secs and later['_air_secs'].notna().any():
                 time_col = '_air_secs'
-            elif pool_has_prog_secs and candidates['_prog_secs'].notna().any():
+            elif pool_has_prog_secs and later['_prog_secs'].notna().any():
                 time_col = '_prog_secs'
             if time_col:
-                candidates = candidates[
-                    (candidates[time_col] >= sch_start) & (candidates[time_col] <= sch_end)
+                later = later[
+                    (later[time_col] >= sch_start) & (later[time_col] <= sch_end)
                 ]
 
-        if not candidates.empty:
-            best_idx = candidates.index[0]
+        if not later.empty:
+            best_idx = later.index[0]
             matched_idx.add(best_idx)
             mon_row = mon_pool.loc[best_idx]
             fp = lmrb_fingerprint(mon_row)
