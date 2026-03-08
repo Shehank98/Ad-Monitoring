@@ -213,6 +213,8 @@ def _get_themes_for_dur(brand_theme_map, norm_brand, sch_dur):
 
     brand_theme_map: {norm_brand: [(norm_theme, mapping_dur_or_None), ...]}
     mapping_dur_or_None: if set, only applies when sch_dur matches; if None, applies to any duration.
+
+    Themes may end with '*' (wildcard) — see _build_theme_mask().
     """
     entries = brand_theme_map.get(norm_brand, [])
     themes = []
@@ -222,6 +224,31 @@ def _get_themes_for_dur(brand_theme_map, norm_brand, sch_dur):
         elif sch_dur is not None and int(sch_dur) == int(map_dur):
             themes.append(norm_theme)
     return list(dict.fromkeys(themes))  # deduplicate, preserve order
+
+
+def _build_theme_mask(pool: pd.DataFrame, themes: list) -> pd.Series:
+    """
+    Build a boolean mask for pool rows whose '_norm_theme' matches any entry in themes.
+
+    Supports wildcard '*' suffix in theme values:
+      - 'ai national expo 2025*'  matches any LMRB theme that starts with
+        'ai national expo 2025' (e.g. 'ai national expo 2025_3 (30)(sin)').
+      - Themes without '*' require an exact (case-insensitive) match.
+
+    This lets a single BrandMapping row like 'Ai National Expo 2025*' cover
+    all campaign variants (_1, _2, _3 …) without needing a separate mapping
+    for every theme name the LMRB data uses.
+    """
+    if pool.empty:
+        return pd.Series(False, index=pool.index)
+
+    exact_themes = [t for t in themes if not t.endswith('*')]
+    wildcard_prefixes = [t[:-1] for t in themes if t.endswith('*')]
+
+    mask = pool['_norm_theme'].isin(exact_themes)
+    for prefix in wildcard_prefixes:
+        mask = mask | pool['_norm_theme'].str.startswith(prefix, na=False)
+    return mask
 
 
 def _fuzzy_score(sch_prog: str, lmrb_prog) -> int:
@@ -355,7 +382,7 @@ def match_ads(
             })
             continue
 
-        theme_mask = mon_pool['_norm_theme'].isin(themes)
+        theme_mask = _build_theme_mask(mon_pool, themes)
         date_mask  = mon_pool['Date'] == sch_date
         used_mask  = ~mon_pool.index.isin(matched_idx)
         candidates = mon_pool[theme_mask & date_mask & used_mask]
@@ -451,7 +478,7 @@ def match_ads(
 
         themes = _get_themes_for_dur(brand_theme_map, sch_brand_norm, sch_dur)
 
-        theme_mask = mon_pool['_norm_theme'].isin(themes)
+        theme_mask = _build_theme_mask(mon_pool, themes)
         used_mask  = ~mon_pool.index.isin(matched_idx)
         candidates = mon_pool[theme_mask & used_mask]
 

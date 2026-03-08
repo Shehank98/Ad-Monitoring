@@ -201,6 +201,12 @@ duration (int, optional) ← if set, mapping only applies when duration matches 
 > - If `tc_theme` is blank, that brand is skipped during TC reconciliation
 > - If `duration` is None, the mapping matches any duration
 > - Matching is always **case-insensitive + strip whitespace** (`_normalize`)
+> - **Wildcard suffix `*`:** If `theme` ends with `*`, the engine treats it as a
+>   prefix match — any LMRB `Advt_Theme` that *starts with* the prefix (before the `*`)
+>   will match.  Use this when a campaign has multiple LMRB theme variants that share
+>   a common prefix, e.g. `Ai National Expo 2025*` matches
+>   `Ai National Expo 2025_1 (30)(Sin)`, `Ai National Expo 2025_3 (30)(Sin)`, etc.
+>   This avoids creating a separate mapping row for every theme variant.
 
 ### `TransmissionReport`
 One record per TC file upload.
