@@ -2198,7 +2198,7 @@ def tc_three_way(request):
             ScheduleRow.objects
             .filter(**sch_filter)
             .select_related('matched_lmrb')
-            .prefetch_related('tc_matches')
+            .prefetch_related('tc_matches', 'tc_matches__matched_lmrb')
             .order_by('date', 'start_time', 'brand')
         )
 
@@ -2239,6 +2239,17 @@ def tc_three_way(request):
             if not lmrb and mm and mm.lmrb_row:
                 lmrb = mm.lmrb_row
 
+            # ── Display LMRB: prefer the LMRB that TC was confirmed against ──────
+            # When TC is confirmed, tc.matched_lmrb is the LMRB row within ±tolerance
+            # seconds of the TC aired time — i.e. the SAME physical broadcast.
+            # Using sr.matched_lmrb (Schedule↔LMRB engine result) can show a
+            # different LMRB from a completely different time slot, which confuses
+            # users into thinking the pair is wrong.  When TC is not confirmed we
+            # fall back to sr.matched_lmrb so something useful is still shown.
+            display_lmrb = lmrb
+            if tc and tc.is_lmrb_confirmed and tc.matched_lmrb_id:
+                display_lmrb = tc.matched_lmrb
+
             rows.append({
                 'brand':          sr.brand,
                 'ad_type':        sr.ad_type,
@@ -2248,18 +2259,18 @@ def tc_three_way(request):
                 'plan_programme': sr.programme,
                 'plan_start':     sr.start_time,
                 'plan_end':       sr.end_time,
-                # LMRB (3rd-party monitoring)
-                'lmrb_date':      lmrb.date       if lmrb else None,
-                'lmrb_programme': lmrb.program    if lmrb else '',
-                'lmrb_time':      lmrb.advt_time  if lmrb else '',
-                'lmrb_theme':     lmrb.advt_theme if lmrb else '',
+                # LMRB (3rd-party monitoring) — uses TC-confirmed LMRB when available
+                'lmrb_date':      display_lmrb.date       if display_lmrb else None,
+                'lmrb_programme': display_lmrb.program    if display_lmrb else '',
+                'lmrb_time':      display_lmrb.advt_time  if display_lmrb else '',
+                'lmrb_theme':     display_lmrb.advt_theme if display_lmrb else '',
                 # TC (channel certificate)
                 'tc_date':        tc.date          if tc else None,
                 'tc_programme':   tc.programme     if tc else '',
                 'tc_time':        tc.aired_time    if tc else '',
                 'tc_theme':       tc.tc_theme      if tc else '',
                 # Status flags
-                'has_lmrb':            lmrb is not None,
+                'has_lmrb':            display_lmrb is not None,
                 'has_tc':              tc is not None,
                 'tc_lmrb_confirmed':   tc.is_lmrb_confirmed if tc else False,
                 'is_manual':           is_manual,
