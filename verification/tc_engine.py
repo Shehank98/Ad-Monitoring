@@ -566,8 +566,12 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
                     available_lmrb = 0
                 status = 'incomplete' if (aired > 0 or available_lmrb > 0) else 'no_data'
 
-            # 3rd Party = all LMRB rows (independent monitoring count, same as commercial)
-            third_party = _lmrb_row_count(lmrb_themes, dur_int)
+            # 3rd Party for sponsorship = count of assigned LMRB spots.
+            # This is the same as `aired` (SponsorshipLmrbAssignment count) and
+            # is what users see as "manually matched LMRB spots" in the UI.
+            # The previous behaviour of showing the total independent LMRB count
+            # (which can be hundreds) was confusing for sponsorship rows.
+            third_party = aired
 
             missed = max(0, planned - aired)
             extra  = max(0, aired - planned)

@@ -257,6 +257,50 @@
       display: block; height: 2px; background: var(--og-red);
       position: absolute; bottom: 0; left: 0; right: 0;
     }
+
+    /* ════════════════════════════════════════════════════════════════
+       MOBILE  (≤768px)
+    ════════════════════════════════════════════════════════════════ */
+    @media (max-width: 768px) {
+      /* Hide sidebar entirely on mobile */
+      #app-sidebar { display: none !important; }
+
+      /* Prevent content from being hidden behind bottom tab bar */
+      main .flex-1.overflow-y-auto { padding-bottom: 4.5rem; }
+
+      /* Smaller table fonts on mobile — vertical scroll only */
+      .data-table  { font-size: 11px; }
+      .data-table th { padding: .5rem .6rem; }
+      .data-table td { padding: .5rem .6rem; }
+
+      /* Export buttons stack vertically */
+      .export-btn-group { flex-direction: column !important; align-items: stretch !important; }
+      .export-btn-group > * { width: 100% !important; justify-content: center; }
+
+      /* Cards take full width on mobile */
+      .card { padding: 1rem; }
+    }
+
+    /* ── Mobile bottom tab bar ─────────────────────────────────── */
+    #mobile-tab-bar {
+      display: none;
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 999;
+      background: #0f0f0f; border-top: 1px solid #222;
+      padding: .4rem 0 env(safe-area-inset-bottom, .4rem);
+      justify-content: space-around; align-items: center;
+    }
+    @media (max-width: 768px) { #mobile-tab-bar { display: flex; } }
+
+    .mob-tab {
+      display: flex; flex-direction: column; align-items: center; gap: .15rem;
+      color: #6b7280; text-decoration: none; padding: .2rem .5rem;
+      font-size: .58rem; font-weight: 600; letter-spacing: .03em;
+      border-radius: .375rem; transition: color .15s;
+      min-width: 3.2rem; text-align: center;
+    }
+    .mob-tab i { font-size: 1rem; display: block; }
+    .mob-tab:hover { color: #d1d5db; }
+    .mob-tab.active { color: var(--og-red); }
   </style>
   {% block extra_head %}{% endblock %}
 </head>
@@ -271,7 +315,8 @@
     <div class="flex items-center gap-2 px-3 py-4 border-b border-white/[.08]">
       {% if sidebar_logo_url %}
         <img src="{{ sidebar_logo_url }}" alt="Ogilvy" class="h-6 w-auto object-contain flex-shrink-0"
-             style="filter:brightness(0) invert(1);">
+             style="filter:brightness(0) invert(1);"
+             onerror="this.style.display='none'">
       {% else %}
         <div class="w-7 h-7 flex items-center justify-center flex-shrink-0" style="color:var(--og-red);font-size:1.1rem;font-weight:900;">O</div>
       {% endif %}
@@ -473,6 +518,27 @@
   </main>
 
 </div>
+<!-- ── Mobile bottom tab bar ─────────────────────────────────────── -->
+<nav id="mobile-tab-bar" aria-label="Mobile navigation">
+  {% with path=request.path %}
+  <a href="/dashboard/" class="mob-tab {% if path == '/dashboard/' %}active{% endif %}">
+    <i class="fa-solid fa-house"></i><span>Home</span>
+  </a>
+  <a href="/dashboard/summary/" class="mob-tab {% if '/summary/' in path %}active{% endif %}">
+    <i class="fa-solid fa-file-contract"></i><span>Summary</span>
+  </a>
+  <a href="/dashboard/manual/" class="mob-tab {% if '/manual/' in path %}active{% endif %}">
+    <i class="fa-solid fa-link"></i><span>Reconcile</span>
+  </a>
+  <a href="/verify/" class="mob-tab {% if '/verify/' in path %}active{% endif %}">
+    <i class="fa-solid fa-magnifying-glass-chart"></i><span>Verify</span>
+  </a>
+  <a href="/dashboard/settings/" class="mob-tab {% if '/settings/' in path %}active{% endif %}">
+    <i class="fa-solid fa-sliders"></i><span>Settings</span>
+  </a>
+  {% endwith %}
+</nav>
+
 {% block extra_js %}{% endblock %}
 <script>
   // ── Sidebar collapse ──────────────────────────────────────────────

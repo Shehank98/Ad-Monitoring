@@ -2636,6 +2636,10 @@ def summary_excel(request):
         )
         c = ws.cell(row+1, start_col, lbl); c.font = bold10; c.alignment = centre
 
+    # ── Matched LMRB sheet (second sheet) ────────────────────────────────────
+    ws_lmrb = wb.create_sheet('Matched LMRB')
+    _write_matched_lmrb_sheet(ws_lmrb, account_id, channel, month)
+
     # ── Build response ────────────────────────────────────────────────────────
     buf = io.BytesIO()
     wb.save(buf)
@@ -2729,11 +2733,13 @@ def summary_pdf(request):
         if logo_path:
             lw, lh = 3.5 * cm, 1.4 * cm
             try:
+                from reportlab.lib.utils import ImageReader as _IR
+                _img = _IR(logo_path)
                 canvas.drawImage(
-                    logo_path,
+                    _img,
                     pw - MARGIN - lw, ph - MARGIN - lh,
                     width=lw, height=lh,
-                    preserveAspectRatio=True, mask='auto',
+                    preserveAspectRatio=True,
                 )
             except Exception:
                 pass
@@ -2821,8 +2827,19 @@ def summary_pdf(request):
     story = []
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # COVER PAGE (Portrait)
+    # COVER PAGE (Portrait) — navy header band design
     # ═══════════════════════════════════════════════════════════════════════════
+
+    from reportlab.platypus import Image as _RLImage
+    from reportlab.lib.colors import HexColor as _HC
+
+    # Cover-page colour palette
+    C_NAVY   = _HC('#1F3864')
+    C_ACCENT = _HC('#2E75B6')
+    C_LGRAY  = _HC('#F2F2F2')
+    C_WHITE  = colors.white
+
+    content_w = PORT_W - 2 * MARGIN
 
     # Campaign period
     sch_dates = Schedule.objects.filter(
@@ -2838,101 +2855,165 @@ def summary_pdf(request):
     elif date_min:
         campaign_period = date_min.strftime('%d %b %Y')
 
-    # Totals for cover summary
-    comm_total = data.get('commercial_total', {})
-    spon_total = data.get('sponsorship_total', {})
+    # Totals for KPI strip
+    comm_total    = data.get('commercial_total', {})
+    spon_total    = data.get('sponsorship_total', {})
     total_planned = (comm_total.get('planned', 0) or 0) + (spon_total.get('planned', 0) or 0)
     total_aired   = (comm_total.get('aired',   0) or 0) + (spon_total.get('aired',   0) or 0)
     total_missed  = (comm_total.get('missed',  0) or 0) + (spon_total.get('missed',  0) or 0)
 
-    story.append(Spacer(1, 1.8 * cm))
-    story.append(Paragraph('ADVERTISEMENT MONITORING', S['cover_s']))
-    story.append(Paragraph('RECONCILIATION SUMMARY REPORT', S['cover_t']))
-    story.append(HRFlowable(width='70%', thickness=2, color=BLUE,
-                             spaceAfter=16, hAlign='CENTER'))
+    # ── Paragraph styles for cover page ──────────────────────────────────────
+    def _cps(name, **kw):
+        kw.setdefault('fontName', 'Helvetica')
+        return ParagraphStyle(name, **kw)
 
-    # Cover metadata table
+    CS = dict(
+        hdr_channel = _cps('cov_hdrch',  fontSize=9,  textColor=C_WHITE,
+                            fontName='Helvetica', spaceAfter=4),
+        hdr_title   = _cps('cov_hdrtit', fontSize=20, textColor=C_WHITE,
+                            fontName='Helvetica-Bold', leading=24, spaceAfter=0),
+        lbl         = _cps('cov_lbl',    fontSize=9,  textColor=HexColor('#475569'),
+                            fontName='Helvetica-Bold', alignment=TA_LEFT),
+        val         = _cps('cov_val',    fontSize=10, textColor=C_NAVY,
+                            fontName='Helvetica-Bold', alignment=TA_LEFT),
+        kpi_lbl     = _cps('cov_kpi_l',  fontSize=8,  textColor=HexColor('#64748b'),
+                            fontName='Helvetica-Bold', alignment=TA_CENTER),
+        kpi_val     = _cps('cov_kpi_v',  fontSize=22, textColor=C_NAVY,
+                            fontName='Helvetica-Bold', alignment=TA_CENTER, spaceAfter=2),
+        conf        = _cps('cov_conf',   fontSize=8,  textColor=HexColor('#94a3b8'),
+                            fontName='Helvetica-Bold', alignment=TA_CENTER),
+    )
+
+    # ── Navy header band ─────────────────────────────────────────────────────
+    # Left cell: subtitle + main title (white text)
+    hdr_left_inner = Table(
+        [
+            [Paragraph('ADVERTISEMENT MONITORING', CS['hdr_channel'])],
+            [Paragraph('RECONCILIATION<br/>SUMMARY REPORT', CS['hdr_title'])],
+        ],
+        colWidths=[content_w * 0.72],
+    )
+    hdr_left_inner.setStyle(TableStyle([
+        ('TOPPADDING',    (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 0),
+        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+    ]))
+
+    # Right cell: logo or blank
+    if logo_path:
+        try:
+            _logo_cov = _RLImage(logo_path, width=3.2 * cm, height=1.3 * cm, kind='bound')
+        except Exception:
+            _logo_cov = Spacer(3.2 * cm, 1.3 * cm)
+    else:
+        _logo_cov = Spacer(3.2 * cm, 1.3 * cm)
+
+    hdr_tbl = Table(
+        [[hdr_left_inner, _logo_cov]],
+        colWidths=[content_w * 0.72, content_w * 0.28],
+    )
+    hdr_tbl.setStyle(TableStyle([
+        ('BACKGROUND',    (0, 0), (-1, -1), C_NAVY),
+        ('TOPPADDING',    (0, 0), (-1, -1), 20),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 20),
+        ('LEFTPADDING',   (0, 0), (0, 0),  20),
+        ('LEFTPADDING',   (1, 0), (1, 0),   8),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 15),
+        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN',         (1, 0), (1, 0),  'RIGHT'),
+    ]))
+    story.append(hdr_tbl)
+    story.append(Spacer(1, 0.6 * cm))
+
+    # ── Info block (two-column table) ─────────────────────────────────────────
     cover_meta = [
         ['Client / Account', account.name],
-        ['Channel',           channel],
-        ['Campaign Month',    month],
-        ['Campaign Period',   campaign_period or '\u2014'],
+        ['Agency',           'Phoenix O & M (Pvt) Ltd'],
+        ['Channel',          channel],
+        ['Campaign Period',  campaign_period or '\u2014'],
         ['Estimate / RO No.', estimate_no or '\u2014'],
-        ['Report Date',       report_ts[:11]],
+        ['Report Date',      report_ts[:11]],
     ]
     if meta:
         if meta.invoice_no:
             cover_meta.append(['Invoice No.',  meta.invoice_no])
         if meta.po_no:
-            cover_meta.append(['PO No.',       meta.po_no])
+            cover_meta.append(['Release Order Ref.', meta.po_no])
 
     cov_tbl = Table(
-        [[Paragraph(k, S['cover_lbl']), Paragraph(str(v), S['cover_val'])]
+        [[Paragraph(k, CS['lbl']), Paragraph(str(v), CS['val'])]
          for k, v in cover_meta],
-        colWidths=[5.5 * cm, 9.5 * cm],
-        hAlign='CENTER',
+        colWidths=[5 * cm, 10 * cm],
+        hAlign='LEFT',
     )
     cov_tbl.setStyle(TableStyle([
-        ('BACKGROUND',    (0, 0), (0, -1), LGRAY),
-        ('BACKGROUND',    (1, 0), (1, -1), colors.white),
-        ('GRID',          (0, 0), (-1, -1), 0.4, MGRAY),
-        ('TOPPADDING',    (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('BACKGROUND',    (0, 0), (0, -1), C_LGRAY),
+        ('BACKGROUND',    (1, 0), (1, -1), C_WHITE),
+        ('GRID',          (0, 0), (-1, -1), 0.5, HexColor('#cbd5e1')),
+        ('TOPPADDING',    (0, 0), (-1, -1), 7),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
         ('LEFTPADDING',   (0, 0), (-1, -1), 10),
         ('RIGHTPADDING',  (0, 0), (-1, -1), 10),
         ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
     ]))
     story.append(cov_tbl)
-    story.append(Spacer(1, 0.7 * cm))
+    story.append(Spacer(1, 0.5 * cm))
 
-    # Spot summary KPI boxes
+    # ── Bold horizontal rule ──────────────────────────────────────────────────
+    story.append(HRFlowable(width='100%', thickness=2.5, color=C_NAVY, spaceAfter=12))
+
+    # ── KPI boxes: Total Planned | Total Aired | Total Missed ─────────────────
     kpi_items = [
-        ('PLANNED', str(total_planned)),
-        ('AIRED',   str(total_aired)),
-        ('MISSED',  str(total_missed)),
+        ('TOTAL PLANNED', str(total_planned)),
+        ('TOTAL AIRED',   str(total_aired)),
+        ('TOTAL MISSED',  str(total_missed)),
     ]
     kpi_cells = []
     for label, val in kpi_items:
         inner = Table(
-            [[Paragraph(label, S['cover_lbl'])], [Paragraph(val, S['cover_val'])]],
-            colWidths=[4.5 * cm],
+            [
+                [Paragraph(label, CS['kpi_lbl'])],
+                [Paragraph(val,   CS['kpi_val'])],
+            ],
+            colWidths=[4.8 * cm],
         )
         inner.setStyle(TableStyle([
-            ('BACKGROUND',    (0, 0), (-1, -1), LGRAY),
-            ('TOPPADDING',    (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ('LEFTPADDING',   (0, 0), (-1, -1), 4),
-            ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+            ('BACKGROUND',    (0, 0), (-1, -1), C_LGRAY),
+            ('TOPPADDING',    (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('LEFTPADDING',   (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING',  (0, 0), (-1, -1), 6),
             ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
-            ('LINEBELOW',     (0, 0), (-1, 0),  2, BLUE),
+            ('LINEBELOW',     (0, 0), (-1, 0),  3, C_ACCENT),
         ]))
         kpi_cells.append(inner)
-    kpi_row = Table([kpi_cells], colWidths=[5 * cm, 5 * cm, 5 * cm], hAlign='CENTER')
+    kpi_row = Table([kpi_cells], colWidths=[5.2 * cm, 5.2 * cm, 5.2 * cm], hAlign='LEFT')
     kpi_row.setStyle(TableStyle([
         ('LEFTPADDING',  (0, 0), (-1, -1), 4),
         ('RIGHTPADDING', (0, 0), (-1, -1), 4),
     ]))
     story.append(kpi_row)
-    story.append(Spacer(1, 1.2 * cm))
+    story.append(Spacer(1, 0.8 * cm))
 
-    # Signature fields on cover
+    # ── Signature fields (optional) ───────────────────────────────────────────
     if meta and any([meta.prepared_by, meta.checked_by, meta.authorised_by]):
         sig_tbl = Table(
             [[
-                Paragraph(f'Prepared by\n{meta.prepared_by or ""}', S['cover_lbl']),
-                Paragraph(f'Checked by\n{meta.checked_by or ""}', S['cover_lbl']),
-                Paragraph(f'Authorised by\n{meta.authorised_by or ""}', S['cover_lbl']),
+                Paragraph(f'Prepared by<br/>{meta.prepared_by or ""}', CS['lbl']),
+                Paragraph(f'Checked by<br/>{meta.checked_by or ""}',   CS['lbl']),
+                Paragraph(f'Authorised by<br/>{meta.authorised_by or ""}', CS['lbl']),
             ]],
             colWidths=[5 * cm, 5 * cm, 5 * cm],
-            hAlign='CENTER',
+            hAlign='LEFT',
         )
         sig_tbl.setStyle(TableStyle([
-            ('TOPPADDING',    (0, 0), (-1, -1), 6),
+            ('TOPPADDING',    (0, 0), (-1, -1), 8),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 14),
-            ('LEFTPADDING',   (0, 0), (-1, -1), 4),
-            ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+            ('LEFTPADDING',   (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING',  (0, 0), (-1, -1), 6),
             ('LINEABOVE',     (0, 0), (-1, 0),  0.5, HexColor('#94a3b8')),
-            ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
         ]))
         story.append(sig_tbl)
         story.append(Spacer(1, 0.3 * cm))
@@ -3168,52 +3249,53 @@ def summary_pdf(request):
     return response
 
 
-@login_required
-def matched_lmrb_excel(request):
+def _write_matched_lmrb_sheet(ws, account_id, channel, month):
     """
-    FIX 3 — Export matched LMRB rows for the selected scope as an Excel file.
+    Shared helper: write all matched LMRB rows (commercial + sponsorship) into
+    an existing openpyxl worksheet.  Returns the row count written.
 
-    Includes ALL LMRBRow columns.  Filtered to the selected channel only
-    (not all channels in the LMRB data).  Only rows where is_matched=True
-    (consumed by the Schedule↔LMRB engine).
+    Commercial matched  = LMRBRow.is_matched=True (Schedule↔LMRB engine)
+    Sponsorship matched = LMRBRow rows linked via SponsorshipLmrbAssignment
+    Both sets are deduplicated so a row appearing in both groups is written once.
     """
-    import openpyxl
+    import openpyxl  # noqa — imported by callers too; ensure available
     from openpyxl.styles import Font, Alignment, PatternFill
     from django.db.models import Min, Max
+    from core.models import SponsorshipLmrbAssignment
 
-    account_id = request.GET.get('account_id', '')
-    channel    = request.GET.get('channel', '')
-    month      = request.GET.get('month', '')
-
-    if not (account_id and channel and month):
-        return HttpResponse('Missing parameters: account_id, channel, month', status=400)
-    if not _account_access(request.user, account_id):
-        return HttpResponse('Access denied', status=403)
-
-    account = get_object_or_404(Account, id=account_id)
-
-    # Date range from schedule
     sch_dates = Schedule.objects.filter(
-        account_id=account_id, channel=channel, month=month
+        account_id=account_id, channel=channel, month=month,
     ).aggregate(d_min=Min('start_date'), d_max=Max('end_date'))
     date_min = sch_dates.get('d_min')
     date_max = sch_dates.get('d_max')
 
-    qs = LMRBRow.objects.filter(
+    # Commercial matched (auto-matched by Schedule↔LMRB engine)
+    comm_qs = LMRBRow.objects.filter(
         account_id=account_id, channel__iexact=channel, is_matched=True,
-    ).order_by('date', 'advt_time')
+    )
     if date_min and date_max:
-        qs = qs.filter(date__range=(date_min, date_max))
+        comm_qs = comm_qs.filter(date__range=(date_min, date_max))
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = 'Matched LMRB'
+    # Sponsorship matched (via SponsorshipLmrbAssignment)
+    spon_ids = set(
+        SponsorshipLmrbAssignment.objects.filter(
+            account_id=account_id,
+            schedule_row__channel=channel,
+            schedule_row__month=month,
+        ).values_list('lmrb_row_id', flat=True)
+    )
+    spon_qs = LMRBRow.objects.filter(id__in=spon_ids) if spon_ids else LMRBRow.objects.none()
+
+    # Combine, deduplicate by id, sort by date+time
+    all_ids  = set(comm_qs.values_list('id', flat=True)) | spon_ids
+    combined = list(
+        LMRBRow.objects.filter(id__in=all_ids).order_by('date', 'advt_time')
+    )
 
     HDR_FILL = PatternFill('solid', fgColor='0F2340')
     hdr_font = Font(bold=True, color='FFFFFF', size=10)
     norm     = Font(size=10)
     centre   = Alignment(horizontal='center', vertical='center')
-    left_al  = Alignment(horizontal='left',   vertical='center')
 
     headers = [
         'Date', 'Channel', 'Advt_Theme', 'Advt_Time', 'Duration', 'Source',
@@ -3225,7 +3307,7 @@ def matched_lmrb_excel(request):
         c = ws.cell(1, col_i, h)
         c.font = hdr_font; c.fill = HDR_FILL; c.alignment = centre
 
-    for row_i, lr in enumerate(qs, start=2):
+    for row_i, lr in enumerate(combined, start=2):
         ws.cell(row_i,  1, str(lr.date) if lr.date else '').font = norm
         ws.cell(row_i,  2, lr.channel or '').font = norm
         ws.cell(row_i,  3, lr.advt_theme or '').font = norm
@@ -3246,6 +3328,34 @@ def matched_lmrb_excel(request):
         ws.cell(row_i, 18, lr.lng or '').font = norm
         ws.cell(row_i, 19, float(lr.cost) if lr.cost is not None else '').font = norm
         ws.cell(row_i, 20, lr.day or '').font = norm
+
+    return len(combined)
+
+
+@login_required
+def matched_lmrb_excel(request):
+    """
+    Export all matched LMRB rows (commercial auto-matched + sponsorship manually
+    matched) for the selected scope as a standalone Excel file.
+    """
+    import openpyxl
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+
+    if not (account_id and channel and month):
+        return HttpResponse('Missing parameters: account_id, channel, month', status=400)
+    if not _account_access(request.user, account_id):
+        return HttpResponse('Access denied', status=403)
+
+    account = get_object_or_404(Account, id=account_id)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Matched LMRB'
+
+    _write_matched_lmrb_sheet(ws, account_id, channel, month)
 
     buf = io.BytesIO()
     wb.save(buf); buf.seek(0)
@@ -3739,6 +3849,17 @@ def manual_reconciliation(request):
             )
 
     if account_id and channel and month and _account_access(user, account_id):
+        # Sponsorship schedule rows that have already been matched via
+        # SponsorshipLmrbAssignment must not appear in the unmatched panel.
+        from core.models import SponsorshipLmrbAssignment as _SLA
+        matched_spon_sr_ids = set(
+            _SLA.objects.filter(
+                account_id=account_id,
+                schedule_row__channel=channel,
+                schedule_row__month=month,
+            ).values_list('schedule_row_id', flat=True)
+        )
+
         # Unmatched schedule rows (both COMMERCIAL BENEFITS and SPONSORSHIP)
         unmatched_schedule = list(
             ScheduleRow.objects.filter(
@@ -3746,7 +3867,8 @@ def manual_reconciliation(request):
                 ad_type__in=['COMMERCIAL BENEFITS', 'SPONSORSHIP'],
                 is_matched=False,
                 is_manual_matched=False,
-            ).order_by('date', 'start_time', 'brand')
+            ).exclude(id__in=matched_spon_sr_ids)
+            .order_by('date', 'start_time', 'brand')
         )
 
         # Determine schedule date range for display purposes
@@ -3756,13 +3878,16 @@ def manual_reconciliation(request):
         ).aggregate(mn=_Min('date'), mx=_Max('date'))
         sch_date_range = (dr['mn'], dr['mx'])
 
-        # Unmatched TC rows — no ManualMatch tc_row pointing to them yet
+        # Unmatched TC rows — exclude auto-matched and extra rows, and rows
+        # that already have a ManualMatch linking them.
         unmatched_tc = list(
             TCRow.objects.filter(
                 account_id=account_id,
                 channel=channel,
                 tc_report__month=month,
                 manual_match__isnull=True,
+                is_schedule_matched=False,
+                is_extra=False,
             ).select_related('tc_report')
             .order_by('tc_theme', 'duration', 'date', 'aired_time')[:500]
         )

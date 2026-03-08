@@ -32,6 +32,23 @@
   .lmrb-tc-highlight { background: rgba(251,191,36,.18) !important; outline: 2px solid #f59e0b; outline-offset: -2px; }
   .badge-commercial { background:#dbeafe; color:#1d4ed8; }
   .badge-sponsorship { background:#fef3c7; color:#92400e; }
+
+  /* ── Mobile panel tab switcher ── */
+  #mobile-panel-tabs { display: none; }
+  .mob-panel-btn {
+    background: #f8fafc; color: #64748b;
+    cursor: pointer; border: none; transition: background .15s, color .15s;
+  }
+  .mob-panel-btn.active { background: #1d4ed8; color: #fff; }
+  .mob-panel-btn.active i { color: #fff !important; }
+
+  @media (max-width: 768px) {
+    #mobile-panel-tabs  { display: flex; }
+    .panel-table        { font-size: 11px; }
+    .panel-scroll       { max-height: 340px; }
+    /* hide non-active panels */
+    .mobile-panel-hidden { display: none !important; }
+  }
 </style>
 {% endblock %}
 
@@ -124,9 +141,29 @@
   <input type="hidden" name="tc_row_id"       id="hidden-tc" value="">
   <input type="hidden" name="lmrb_row_id"     id="hidden-lr" value="">
 
-  <div class="grid grid-cols-3 gap-3 mb-4" id="panels-grid">
+  <!-- Mobile panel tab switcher (visible only on ≤768px) -->
+  <div id="mobile-panel-tabs" class="flex rounded-xl overflow-hidden border border-slate-200 mb-3">
+    <button type="button" class="mob-panel-btn active flex-1 py-2.5 text-xs font-bold"
+            onclick="switchMobilePanel('panel-sr', this)">
+      <i class="fa-solid fa-calendar-check mr-1 text-blue-500"></i>Schedule
+      <span class="ml-1 inline-flex items-center px-1.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">{{ unmatched_schedule|length }}</span>
+    </button>
+    <button type="button" class="mob-panel-btn flex-1 py-2.5 text-xs font-bold border-l border-slate-200"
+            onclick="switchMobilePanel('panel-lr', this)">
+      <i class="fa-solid fa-satellite-dish mr-1 text-violet-500"></i>LMRB
+      <span class="ml-1 inline-flex items-center px-1.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-700">{{ unmatched_lmrb|length }}</span>
+    </button>
+    <button type="button" class="mob-panel-btn flex-1 py-2.5 text-xs font-bold border-l border-slate-200"
+            onclick="switchMobilePanel('panel-tc', this)">
+      <i class="fa-solid fa-file-certificate mr-1 text-emerald-500"></i>TC
+      <span class="ml-1 inline-flex items-center px-1.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">{{ unmatched_tc|length }}</span>
+    </button>
+  </div>
 
-    <!-- ── Left: Unmatched Schedule Spots ── -->
+  <!-- Vertical stacked panels: Schedule → LMRB → TC -->
+  <div class="space-y-3 mb-4" id="panels-grid">
+
+    <!-- ── 1 (top): Unmatched Schedule Spots ── -->
     <div class="card p-0 overflow-hidden" id="panel-sr">
       <div class="px-4 py-3 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
         <h3 class="text-xs font-bold text-blue-700 uppercase tracking-wide">
@@ -165,7 +202,50 @@
       {% endif %}
     </div>
 
-    <!-- ── Middle: Unmatched TC Spots ── -->
+    <!-- ── 2 (middle): Unmatched LMRB Rows ── -->
+    <div class="card p-0 overflow-hidden" id="panel-lr">
+      <div class="px-4 py-3 bg-violet-50 border-b border-violet-100 flex items-center justify-between">
+        <h3 class="text-xs font-bold text-violet-700 uppercase tracking-wide">
+          <i class="fa-solid fa-satellite-dish mr-1"></i>
+          Unmatched LMRB Rows
+        </h3>
+        <span class="badge bg-violet-100 text-violet-700">{{ unmatched_lmrb|length }}</span>
+      </div>
+      {% if unmatched_lmrb %}
+        <div class="panel-scroll">
+          <table class="panel-table">
+            <colgroup>
+              <col class="col-date"><col class="col-prog">
+              <col class="col-brand"><col class="col-dur">
+            </colgroup>
+            <thead><tr><th>Date</th><th>Programme</th><th>Theme</th><th>Dur</th></tr></thead>
+            <tbody>
+              {% for lr in unmatched_lmrb %}
+              <tr class="row-selectable" data-id="{{ lr.id }}" data-panel="lr"
+                  data-date="{{ lr.date }}" data-time="{{ lr.advt_time }}"
+                  onclick="selectRow(this,'lr')"
+                  title="{{ lr.advt_theme }} | {{ lr.advt_time }}{% if sch_date_range.0 and sch_date_range.1 %} | {% if lr.date >= sch_date_range.0 and lr.date <= sch_date_range.1 %}In range{% else %}Out of range{% endif %}{% endif %}">
+                <td class="text-slate-600">{{ lr.date }}</td>
+                <td class="text-slate-500">{{ lr.program|default:"-" }}</td>
+                <td class="font-medium text-slate-800">{{ lr.advt_theme }}</td>
+                <td class="text-slate-500">{{ lr.duration }}s</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if unmatched_lmrb|length == 500 %}
+          <p class="text-xs text-slate-400 text-center py-2">Showing first 500 rows.</p>
+        {% endif %}
+      {% else %}
+        <div class="text-center text-slate-400 py-10 text-sm">
+          <i class="fa-solid fa-circle-check text-2xl mb-2 block text-emerald-400"></i>
+          No unmatched LMRB rows.
+        </div>
+      {% endif %}
+    </div>
+
+    <!-- ── 3 (bottom): Unmatched TC Spots ── -->
     <div class="card p-0 overflow-hidden" id="panel-tc">
       <div class="px-4 py-3 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between">
         <h3 class="text-xs font-bold text-emerald-700 uppercase tracking-wide">
@@ -208,49 +288,7 @@
       {% endif %}
     </div>
 
-    <!-- ── Right: Unmatched LMRB Rows ── -->
-    <div class="card p-0 overflow-hidden" id="panel-lr">
-      <div class="px-4 py-3 bg-violet-50 border-b border-violet-100 flex items-center justify-between">
-        <h3 class="text-xs font-bold text-violet-700 uppercase tracking-wide">
-          <i class="fa-solid fa-satellite-dish mr-1"></i>
-          Unmatched LMRB Rows
-        </h3>
-        <span class="badge bg-violet-100 text-violet-700">{{ unmatched_lmrb|length }}</span>
-      </div>
-      {% if unmatched_lmrb %}
-        <div class="panel-scroll">
-          <table class="panel-table">
-            <colgroup>
-              <col class="col-date"><col class="col-prog">
-              <col class="col-brand"><col class="col-dur">
-            </colgroup>
-            <thead><tr><th>Date</th><th>Programme</th><th>Theme</th><th>Dur</th></tr></thead>
-            <tbody>
-              {% for lr in unmatched_lmrb %}
-              <tr class="row-selectable" data-id="{{ lr.id }}" data-panel="lr"
-                  data-date="{{ lr.date }}" data-time="{{ lr.advt_time }}"
-                  onclick="selectRow(this,'lr')"
-                  title="{{ lr.advt_theme }} | {{ lr.advt_time }}{% if sch_date_range.0 and sch_date_range.1 %} | {% if lr.date >= sch_date_range.0 and lr.date <= sch_date_range.1 %}In range{% else %}Out of range{% endif %}{% endif %}">
-                <td class="text-slate-600">{{ lr.date }}</td>
-                <td class="text-slate-500">{{ lr.program|default:"-" }}</td>
-                <td class="font-medium text-slate-800">{{ lr.advt_theme }}</td>
-                <td class="text-slate-500">{{ lr.duration }}s</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% if unmatched_lmrb|length == 500 %}
-          <p class="text-xs text-slate-400 text-center py-2">Showing first 500 rows.</p>
-        {% endif %}
-      {% else %}
-        <div class="text-center text-slate-400 py-10 text-sm">
-          <i class="fa-solid fa-circle-check text-2xl mb-2 block text-emerald-400"></i>
-          No unmatched LMRB rows.
-        </div>
-      {% endif %}
-    </div>
-  </div><!-- /grid -->
+  </div><!-- /panels -->
 
   <!-- ── Match action bar ── -->
   <div id="match-bar" class="card mb-5 hidden bg-slate-50 border border-slate-200">
@@ -365,6 +403,35 @@
 
 {% block extra_js %}
 <script>
+// ── Mobile panel tab switching ────────────────────────────────────────────
+window.switchMobilePanel = function (targetId, btn) {
+  const PANELS = ['panel-sr', 'panel-lr', 'panel-tc'];
+  PANELS.forEach(id => {
+    document.getElementById(id).classList.toggle('mobile-panel-hidden', id !== targetId);
+  });
+  document.querySelectorAll('.mob-panel-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+};
+
+// On load: apply mobile tab hiding for Schedule panel as default active
+(function initMobilePanels() {
+  if (window.innerWidth <= 768) {
+    ['panel-lr', 'panel-tc'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('mobile-panel-hidden');
+    });
+  }
+  // Re-apply on resize if crossing breakpoint
+  window.addEventListener('resize', function () {
+    if (window.innerWidth > 768) {
+      ['panel-sr', 'panel-lr', 'panel-tc'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.remove('mobile-panel-hidden');
+      });
+    }
+  });
+})();
+
 (function () {
   // ── State ────────────────────────────────────────────────────────────────
   let currentMode = 'schedule_lmrb';
