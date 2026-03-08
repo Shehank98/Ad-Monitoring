@@ -709,6 +709,55 @@
           <p class="text-xs text-slate-500">Programme tie-in</p>
         </div>
       </div>
+      {% if spon_kw_breakdown %}
+      <!-- ── Sponsorship Type Deep Dive ──────────────────────────────────── -->
+      <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 mt-2">
+        <i class="fa-solid fa-chart-bar text-indigo-500 mr-1"></i> Sponsorship Type Breakdown (LMRB)
+      </h4>
+      <!-- Planned PT/Non-PT reference row -->
+      <div class="flex gap-3 mb-3">
+        <div class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs">
+          <span class="font-semibold text-slate-600">Planned Sponsorship —</span>
+          <span class="ml-2 text-violet-700 font-bold">PT: {{ spon_planned_pt }}</span>
+          <span class="ml-2 text-sky-700 font-bold">Non-PT: {{ spon_planned_non_pt }}</span>
+          <span class="ml-2 text-slate-500">Total: {{ spon_planned_pt|add:spon_planned_non_pt }}</span>
+        </div>
+      </div>
+      <!-- Bar chart: one grouped bar per keyword type -->
+      <div class="bg-white border border-slate-100 rounded-xl p-4 mb-4 shadow-sm" style="max-height:320px;">
+        <canvas id="sponKwChart" style="max-height:280px;"></canvas>
+      </div>
+      <!-- Detail table -->
+      <div class="tab-table-wrap mb-4">
+        <table class="data-table w-full text-xs">
+          <thead>
+            <tr>
+              <th>Type (Keyword)</th>
+              <th class="text-right">Total Aired</th>
+              <th class="text-right text-violet-700">PT Aired</th>
+              <th class="text-right text-sky-700">Non-PT Aired</th>
+              <th>Top Programmes Aired</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for kb in spon_kw_breakdown %}
+            <tr>
+              <td class="font-bold text-slate-800">{{ kb.kw }}</td>
+              <td class="text-right font-bold text-slate-700">{{ kb.total }}</td>
+              <td class="text-right font-bold text-violet-700">{{ kb.pt }}</td>
+              <td class="text-right font-bold text-sky-700">{{ kb.non_pt }}</td>
+              <td class="text-slate-600">
+                {% for p in kb.progs %}
+                  <span class="inline-block bg-slate-100 rounded px-1 mr-0.5 mb-0.5 text-[10px]">{{ p.program }} ({{ p.cnt }})</span>
+                {% endfor %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
       {% if sponsorship_brand_summary %}
       <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
         <i class="fa-solid fa-star text-yellow-500 mr-1"></i> By Brand
@@ -1288,6 +1337,63 @@ function buildDonut(id, labels, data, colors) {
   const labels = raw.map(r => r.advt_theme + (r.duration ? ' (' + r.duration + 's)' : ''));
   const data   = raw.map(r => r.count);
   buildBarChart('lmrbChart', labels, data, labels);
+})();
+{% endif %}
+
+{% if spon_kw_breakdown %}
+/* ── Sponsorship Keyword Type Chart ───────────────────────────── */
+(function() {
+  const raw = {{ spon_kw_breakdown_json|safe }};
+  if (!raw.length) return;
+  const el = document.getElementById('sponKwChart');
+  if (!el) return;
+  const labels  = raw.map(r => r.kw);
+  const ptData  = raw.map(r => r.pt);
+  const nptData = raw.map(r => r.non_pt);
+  new Chart(el, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'PT Aired',
+          data: ptData,
+          backgroundColor: '#7c3aedcc',
+          borderColor: '#7c3aed',
+          borderWidth: 1,
+          borderRadius: 4,
+        },
+        {
+          label: 'Non-PT Aired',
+          data: nptData,
+          backgroundColor: '#0891b2cc',
+          borderColor: '#0891b2',
+          borderWidth: 1,
+          borderRadius: 4,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 10 }, boxWidth: 12 } },
+        tooltip: {
+          callbacks: {
+            afterBody: function(ctx) {
+              const idx = ctx[0].dataIndex;
+              const total = raw[idx].total;
+              return ['Total: ' + total];
+            }
+          }
+        }
+      },
+      scales: {
+        x: { stacked: false, ticks: { font: { size: 10 } }, grid: { color: '#f1f5f9' } },
+        y: { ticks: { font: { size: 10 }, stepSize: 1 }, grid: { color: '#f1f5f9' } },
+      },
+    },
+  });
 })();
 {% endif %}
 

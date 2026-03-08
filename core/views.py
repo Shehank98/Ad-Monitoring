@@ -1420,6 +1420,44 @@ def monitoring_dashboard(request):
             lmrb_qs.filter(is_matched=False).order_by('date', 'advt_time')
         )
 
+        # ── Sponsorship Keyword-Type Breakdown ────────────────────────────────
+        # For each keyword in lmrb_sponsorship_keywords, count LMRB rows that
+        # contain that keyword (case-insensitive) grouped by PT / Non-PT, and
+        # list the top programmes they aired in.
+        spon_kw_breakdown = []
+        if spon_kw:
+            for kw in spon_kw:
+                if not kw:
+                    continue
+                kw_qs = lmrb_qs.filter(advt_theme__icontains=kw)
+                kw_total = kw_qs.count()
+                if kw_total == 0:
+                    continue
+                kw_pt = kw_non_pt = 0
+                for r in kw_qs.values('advt_time'):
+                    b = _time_bucket(r['advt_time'])
+                    if b == 'prime':
+                        kw_pt += 1
+                    elif b == 'non_prime':
+                        kw_non_pt += 1
+                progs = list(
+                    kw_qs.exclude(program='').exclude(program__isnull=True)
+                    .values('program').annotate(cnt=Count('id')).order_by('-cnt')[:8]
+                )
+                spon_kw_breakdown.append({
+                    'kw':      kw,
+                    'total':   kw_total,
+                    'pt':      kw_pt,
+                    'non_pt':  kw_non_pt,
+                    'progs':   progs,
+                })
+
+        # Planned sponsorship PT/Non-PT for comparison
+        spon_planned_pt     = _sch_pt_spon.get('prime', 0)
+        spon_planned_non_pt = _sch_pt_spon.get('non_prime', 0)
+
+        spon_kw_breakdown_json = _to_js(spon_kw_breakdown)
+
         # ── Advt_Theme Analysis tab data ──────────────────────────────────────
         # For each unique Advt_Theme: daily airings, programme breakdown, PT split
         theme_analysis = []
@@ -1457,6 +1495,10 @@ def monitoring_dashboard(request):
     else:
         theme_analysis = []
         theme_analysis_json = '[]'
+        spon_kw_breakdown = []
+        spon_kw_breakdown_json = '[]'
+        spon_planned_pt = 0
+        spon_planned_non_pt = 0
 
     return render(request, 'monitoring/dashboard.html', {
         'accounts':                  account_qs,
@@ -1490,6 +1532,10 @@ def monitoring_dashboard(request):
         'lmrb_unmatched_rows':       lmrb_unmatched_rows,
         'theme_analysis':            theme_analysis,
         'theme_analysis_json':       theme_analysis_json,
+        'spon_kw_breakdown':         spon_kw_breakdown if selected_account and channel and month else [],
+        'spon_kw_breakdown_json':    spon_kw_breakdown_json if selected_account and channel and month else '[]',
+        'spon_planned_pt':           spon_planned_pt if selected_account and channel and month else 0,
+        'spon_planned_non_pt':       spon_planned_non_pt if selected_account and channel and month else 0,
     })
 
 

@@ -505,9 +505,22 @@ def match_ads(
             # Pick the candidate closest to the planned window end
             if pool_has_air_secs and same_day['_air_secs'].notna().any():
                 ref_secs = sch_end if sch_end is not None else 0
-                best_idx = (same_day['_air_secs'] - ref_secs).abs().idxmin()
+                air_diff = (same_day['_air_secs'] - ref_secs).abs()
+                best_idx = air_diff.idxmin()
+                # Only accept if within 2 hours (7200s) of the nearest window boundary.
+                # Gaps larger than this (e.g. 08:00-11:00 window but ad aired at 19:20)
+                # are a completely different slot — let it fall to Not Aired rather than
+                # creating a misleading Programme Mismatch entry.
+                _air = same_day.at[best_idx, '_air_secs']
+                _lo  = sch_start if sch_start is not None else ref_secs
+                _hi  = sch_end   if sch_end   is not None else ref_secs
+                _gap = max(0, _lo - _air) if _air < _lo else max(0, _air - _hi)
+                if _gap > 7200:
+                    same_day = same_day.iloc[0:0]   # reject — treat as no same-day match
             else:
                 best_idx = same_day.index[0]
+
+        if not same_day.empty:
             matched_idx.add(best_idx)
             mon_row = mon_pool.loc[best_idx]
             fp = lmrb_fingerprint(mon_row)
