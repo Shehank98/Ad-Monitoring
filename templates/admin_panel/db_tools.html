@@ -1,0 +1,203 @@
+{% extends 'base.html' %}
+{% block title %}Database Tools{% endblock %}
+{% block page_title %}Database Tools{% endblock %}
+{% block page_subtitle %}Reset, clean, and back up data — admin access only{% endblock %}
+
+{% block extra_head %}
+<style>
+  .tool-card { background:#fff; border-radius:1rem; border:1px solid #f1f5f9;
+               box-shadow:0 1px 3px rgba(0,0,0,.05); padding:1.5rem; }
+  .danger-zone { border-color:#fca5a5; background:#fff5f5; }
+  .count-pill { display:inline-flex; align-items:center; gap:.35rem;
+                background:#f8fafc; border:1px solid #e2e8f0; border-radius:.5rem;
+                padding:.25rem .65rem; font-size:.8rem; }
+  .count-num { font-weight:700; color:#1e293b; }
+  .count-label { color:#64748b; }
+  .confirm-input { border:1px solid #fca5a5; border-radius:.5rem; padding:.4rem .75rem;
+                   font-size:.85rem; font-family:monospace; width:14rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if msg %}
+<div class="mb-5 px-4 py-3 rounded-xl text-sm font-medium
+  {% if msg_type == 'error' %}bg-red-50 border border-red-200 text-red-700
+  {% elif msg_type == 'info' %}bg-sky-50 border border-sky-200 text-sky-700
+  {% else %}bg-emerald-50 border border-emerald-200 text-emerald-700{% endif %}">
+  <i class="fa-solid {% if msg_type == 'error' %}fa-circle-exclamation{% elif msg_type == 'info' %}fa-circle-info{% else %}fa-circle-check{% endif %} mr-1.5"></i>
+  {{ msg }}
+</div>
+{% endif %}
+
+<!-- ── Current data counts ── -->
+<div class="tool-card mb-6">
+  <h3 class="font-bold text-slate-700 text-sm mb-3 uppercase tracking-wide">
+    <i class="fa-solid fa-database mr-1.5 text-slate-400"></i> Current Database Contents
+  </h3>
+  <div class="flex flex-wrap gap-2">
+    <span class="count-pill"><span class="count-num">{{ counts.schedules }}</span><span class="count-label">Schedules</span></span>
+    <span class="count-pill"><span class="count-num">{{ counts.schedule_rows }}</span><span class="count-label">Schedule Rows</span></span>
+    <span class="count-pill"><span class="count-num">{{ counts.lmrb_rows }}</span><span class="count-label">LMRB Rows</span></span>
+    <span class="count-pill"><span class="count-num">{{ counts.monitoring }}</span><span class="count-label">Monitoring Files</span></span>
+    <span class="count-pill"><span class="count-num">{{ counts.match_results }}</span><span class="count-label">Match Results</span></span>
+    <span class="count-pill"><span class="count-num">{{ counts.tc_reports }}</span><span class="count-label">TC Reports</span></span>
+    <span class="count-pill"><span class="count-num">{{ counts.tc_rows }}</span><span class="count-label">TC Rows</span></span>
+  </div>
+</div>
+
+<!-- ── Safe operations ── -->
+<div class="space-y-4 mb-6">
+  <h3 class="font-bold text-slate-500 text-xs uppercase tracking-widest">Safe Operations</h3>
+
+  <!-- Reset match results -->
+  <div class="tool-card">
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div>
+        <p class="font-semibold text-slate-800 text-sm">Reset Verification Results</p>
+        <p class="text-xs text-slate-500 mt-0.5">
+          Deletes all MatchResult records and clears is_matched locks on ScheduleRow/LMRBRow.
+          Fixes duplicate results caused by repeated verification runs.
+          All schedule and monitoring data is preserved — re-run verification to rebuild results.
+        </p>
+      </div>
+      <form method="post" onsubmit="return confirm('Reset all verification results? This cannot be undone.')">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="reset_match_results">
+        <button type="submit" class="btn-secondary text-sm px-4 py-2 flex-shrink-0">
+          <i class="fa-solid fa-rotate-right text-amber-500"></i> Reset Match Results
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Deduplicate schedules -->
+  <div class="tool-card">
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div>
+        <p class="font-semibold text-slate-800 text-sm">Remove Duplicate Schedule Uploads</p>
+        <p class="text-xs text-slate-500 mt-0.5">
+          Keeps only the latest version of each schedule number per (account, channel, month).
+          Deletes extra duplicates created before the duplicate-detection feature was added.
+          Matching data linked to removed duplicates will also be cleaned up.
+        </p>
+      </div>
+      <form method="post" onsubmit="return confirm('Remove duplicate schedule records? Only the latest version of each schedule number will be kept.')">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="delete_duplicate_schedules">
+        <button type="submit" class="btn-secondary text-sm px-4 py-2 flex-shrink-0">
+          <i class="fa-solid fa-broom text-blue-500"></i> Remove Duplicates
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Backup -->
+  <div class="tool-card">
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div>
+        <p class="font-semibold text-slate-800 text-sm">Download Database Backup</p>
+        <p class="text-xs text-slate-500 mt-0.5">
+          Download a copy of the SQLite database file (development/local only).
+          For Railway/PostgreSQL deployments, use Railway's built-in database backups.
+        </p>
+      </div>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="backup_db">
+        <button type="submit" class="btn-secondary text-sm px-4 py-2 flex-shrink-0">
+          <i class="fa-solid fa-download text-emerald-500"></i> Download Backup
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ── Danger zone ── -->
+<div class="space-y-4">
+  <h3 class="font-bold text-red-500 text-xs uppercase tracking-widest">
+    <i class="fa-solid fa-triangle-exclamation mr-1"></i> Danger Zone — Irreversible Actions
+  </h3>
+
+  <!-- Delete schedules -->
+  <div class="tool-card danger-zone">
+    <p class="font-semibold text-red-700 text-sm mb-1">Delete All Schedule Data</p>
+    <p class="text-xs text-slate-500 mb-3">
+      Permanently deletes all Schedule records, ScheduleRow records, and all MatchResult records. LMRB and TC data is preserved.
+    </p>
+    <form method="post" class="flex items-center gap-3 flex-wrap" onsubmit="return validateConfirm(this,'DELETE')">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="delete_schedules">
+      <input type="text" name="confirm" placeholder='Type "DELETE" to confirm' class="confirm-input">
+      <button type="submit" class="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-4 py-2 rounded-lg">
+        Delete All Schedules
+      </button>
+    </form>
+  </div>
+
+  <!-- Delete LMRB -->
+  <div class="tool-card danger-zone">
+    <p class="font-semibold text-red-700 text-sm mb-1">Delete All LMRB / Monitoring Data</p>
+    <p class="text-xs text-slate-500 mb-3">
+      Permanently deletes all LMRBRow and MonitoringData records. Schedule and TC data is preserved.
+    </p>
+    <form method="post" class="flex items-center gap-3 flex-wrap" onsubmit="return validateConfirm(this,'DELETE')">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="delete_lmrb">
+      <input type="text" name="confirm" placeholder='Type "DELETE" to confirm' class="confirm-input">
+      <button type="submit" class="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-4 py-2 rounded-lg">
+        Delete All LMRB Data
+      </button>
+    </form>
+  </div>
+
+  <!-- Delete TC -->
+  <div class="tool-card danger-zone">
+    <p class="font-semibold text-red-700 text-sm mb-1">Delete All TC Data</p>
+    <p class="text-xs text-slate-500 mb-3">
+      Permanently deletes all TCRow and TransmissionReport records. Schedule and LMRB data is preserved.
+    </p>
+    <form method="post" class="flex items-center gap-3 flex-wrap" onsubmit="return validateConfirm(this,'DELETE')">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="delete_tc">
+      <input type="text" name="confirm" placeholder='Type "DELETE" to confirm' class="confirm-input">
+      <button type="submit" class="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-4 py-2 rounded-lg">
+        Delete All TC Data
+      </button>
+    </form>
+  </div>
+
+  <!-- Nuclear: delete everything -->
+  <div class="tool-card border-2 border-red-500 bg-red-50">
+    <div class="flex items-center gap-2 mb-1">
+      <i class="fa-solid fa-skull text-red-600"></i>
+      <p class="font-bold text-red-700 text-sm">Delete ALL Data (Nuclear Option)</p>
+    </div>
+    <p class="text-xs text-slate-500 mb-3">
+      Permanently deletes ALL records — schedules, LMRB, TC, match results. Users, accounts, channels, and brand mappings are preserved.
+    </p>
+    <form method="post" class="flex items-center gap-3 flex-wrap" onsubmit="return validateConfirm(this,'DELETE_ALL')">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="delete_all">
+      <input type="text" name="confirm" placeholder='Type "DELETE_ALL" to confirm' class="confirm-input" style="width:16rem">
+      <button type="submit" class="bg-red-700 hover:bg-red-800 text-white text-xs font-bold px-4 py-2 rounded-lg">
+        <i class="fa-solid fa-trash mr-1"></i> Delete Everything
+      </button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function validateConfirm(form, expected) {
+  const val = form.querySelector('input[name="confirm"]').value.trim();
+  if (val !== expected) {
+    alert(`Please type "${expected}" exactly to confirm.`);
+    return false;
+  }
+  return true;
+}
+</script>
+{% endblock %}

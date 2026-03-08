@@ -247,6 +247,11 @@ def _active_schedules_for_scope(account_id, channel, month):
     return active   # already in schedule_number ascending order
 
 
+def active_schedule_ids(account_id, channel, month):
+    """Return the list of Schedule PKs that are active for this scope (public helper)."""
+    return [s.id for s in _active_schedules_for_scope(account_id, channel, month)]
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def run_scope(account_id, channel, month, mode='smart'):
@@ -437,6 +442,22 @@ def run_scope(account_id, channel, month, mode='smart'):
 
     # ── Lock matched rows in DB ────────────────────────────────────────────────
     _lock_matched_rows(matched_df, prog_mis_df, late_df)
+
+    # ── Dedup: delete stale MatchResult rows for the ScheduleRows we just
+    #    processed, then re-create them fresh.  Without this, repeated smart-mode
+    #    runs keep appending new not_aired / no_mapping records for the same rows
+    #    (because those rows stay is_matched=False and are re-processed every time).
+    processed_sch_ids = set()
+    for df in (matched_df, prog_mis_df, late_df, not_aired_df):
+        if df is not None and not df.empty and '_sch_row_id' in df.columns:
+            processed_sch_ids.update(
+                int(v) for v in df['_sch_row_id'].dropna() if v == v
+            )
+    if processed_sch_ids:
+        MatchResult.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+            schedule_row_id__in=processed_sch_ids,
+        ).exclude(status='manual_match').delete()
 
     # ── Persist MatchResult records ────────────────────────────────────────────
     account_obj = Account.objects.get(pk=account_id)

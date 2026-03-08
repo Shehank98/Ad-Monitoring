@@ -60,6 +60,9 @@ urlpatterns = [
     path('settings/',                           views.system_settings, name='system_settings'),
     path('settings/branding/',                  views.branding_upload, name='branding_upload'),
 
+    # Database Tools (admin+)
+    path('db-tools/',                           views.db_tools,        name='db_tools'),
+
     # Sponsorship Reconciliation
     path('sponsorship/reconcile/',  views.sponsorship_reconcile,  name='sponsorship_reconcile'),
     path('sponsorship/candidates/', views.sponsorship_candidates, name='sponsorship_candidates'),

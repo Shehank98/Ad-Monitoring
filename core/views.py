@@ -1201,8 +1201,12 @@ def monitoring_dashboard(request):
         # Programme mismatch counts as a valid match (same day, brand, theme — time offset only)
         compliance   = round((n_matched + n_prog_mis) / total * 100, 1) if total else 0
 
-        _sr_base = ScheduleRow.objects.filter(account_id=account_id, channel=channel, month=month)
-        if schedule_id:
+        # Use active schedules only (highest version per schedule_number) so
+        # duplicate uploads don't inflate commercial / sponsorship counts.
+        from verification.engine import active_schedule_ids as _active_ids
+        _active_sch_ids = _active_ids(account_id, channel, month)
+        _sr_base = ScheduleRow.objects.filter(schedule_id__in=_active_sch_ids)
+        if schedule_id and int(schedule_id) in _active_sch_ids:
             _sr_base = _sr_base.filter(schedule_id=schedule_id)
         n_sponsorship = _sr_base.filter(ad_type='SPONSORSHIP').count()
 
@@ -1245,20 +1249,16 @@ def monitoring_dashboard(request):
                 'compliance': round(bm / bt * 100, 1) if bt else 0,
             })
 
-        # Sponsorship rows for the separate sponsorship tab
-        sponsorship_rows = list(ScheduleRow.objects.filter(
-            account_id=account_id, channel=channel, month=month, ad_type='SPONSORSHIP',
-        ).order_by('date', 'start_time'))
+        # Sponsorship rows for the separate sponsorship tab (active schedules only)
+        sponsorship_rows = list(
+            _sr_base.filter(ad_type='SPONSORSHIP').order_by('date', 'start_time')
+        )
 
-        # Sponsorship brand breakdown
+        # Sponsorship brand breakdown (active schedules only)
         sponsorship_brand_summary = []
-        for br in ScheduleRow.objects.filter(
-            account_id=account_id, channel=channel, month=month, ad_type='SPONSORSHIP',
-        ).values_list('brand', flat=True).distinct().order_by('brand'):
-            sq = ScheduleRow.objects.filter(
-                account_id=account_id, channel=channel, month=month,
-                ad_type='SPONSORSHIP', brand=br,
-            )
+        for br in (_sr_base.filter(ad_type='SPONSORSHIP')
+                   .values_list('brand', flat=True).distinct().order_by('brand')):
+            sq = _sr_base.filter(ad_type='SPONSORSHIP', brand=br)
             st = sq.count()
             sm = sq.filter(is_matched=True).count()
             sponsorship_brand_summary.append({
@@ -1268,11 +1268,8 @@ def monitoring_dashboard(request):
                 'not_matched': st - sm,
             })
 
-        # ── Commercial / Sponsorship counts from schedule ────────────────────
-        n_commercial = ScheduleRow.objects.filter(
-            account_id=account_id, channel=channel, month=month,
-            ad_type='COMMERCIAL BENEFITS',
-        ).count()
+        # ── Commercial / Sponsorship counts from schedule (active schedules only) ──
+        n_commercial = _sr_base.filter(ad_type='COMMERCIAL BENEFITS').count()
         stats['commercial'] = n_commercial
 
         # ── Chart data 1: Schedule spots grouped by Brand × Duration ─────────
@@ -4336,3 +4333,122 @@ def commercial_assign(request):
         created += 1
 
     return JsonResponse({'created': created, 'skipped': skipped})
+
+
+# ── Database Admin Tools ───────────────────────────────────────────────────────
+
+@login_required
+@role_required(['super_admin', 'admin'])
+def db_tools(request):
+    """
+    Database management page — admin/super_admin only.
+    Provides data reset, selective delete, and database backup tools.
+    """
+    from django.db import connection
+    from django.db.models import Count as _Count
+
+    def _counts():
+        return {
+            'schedules':    Schedule.objects.count(),
+            'schedule_rows': ScheduleRow.objects.count(),
+            'lmrb_rows':    LMRBRow.objects.count(),
+            'monitoring':   MonitoringData.objects.count(),
+            'match_results': MatchResult.objects.count(),
+            'tc_rows':      TCRow.objects.count(),
+            'tc_reports':   TransmissionReport.objects.count(),
+        }
+
+    msg = None
+    msg_type = 'success'
+
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        confirm = request.POST.get('confirm', '')
+
+        if action == 'reset_match_results':
+            n = MatchResult.objects.exclude(status='manual_match').delete()[0]
+            # Also reset is_matched flags on ScheduleRow and LMRBRow
+            ScheduleRow.objects.filter(is_matched=True).update(
+                is_matched=False, matched_lmrb=None, matched_at=None
+            )
+            LMRBRow.objects.filter(is_matched=True).update(
+                is_matched=False, matched_schedule=None, matched_at=None
+            )
+            msg = f'Reset complete: {n} MatchResult records deleted and row locks cleared. Re-run verification to rebuild results.'
+
+        elif action == 'delete_duplicate_schedules':
+            # Keep only the highest-version Schedule per (account, channel, month, schedule_number)
+            from django.db.models import Max as _Max
+            keeper_ids = set()
+            for combo in Schedule.objects.values('account_id', 'channel', 'month', 'schedule_number').distinct():
+                best = Schedule.objects.filter(**combo).order_by('-version').values_list('id', flat=True).first()
+                if best:
+                    keeper_ids.add(best)
+            dupes = Schedule.objects.exclude(id__in=keeper_ids)
+            n_schedules = dupes.count()
+            if n_schedules == 0:
+                msg = 'No duplicate schedules found — database is already clean.'
+                msg_type = 'info'
+            else:
+                # Delete ScheduleRows belonging to duplicate schedules, then the schedules
+                n_rows = ScheduleRow.objects.filter(schedule__in=dupes).count()
+                MatchResult.objects.filter(schedule_row__schedule__in=dupes).delete()
+                ScheduleRow.objects.filter(schedule__in=dupes).delete()
+                dupes.delete()
+                msg = (f'Removed {n_schedules} duplicate Schedule record(s) and {n_rows} ScheduleRow(s). '
+                       f'Only the latest version of each schedule number is kept.')
+
+        elif action == 'delete_schedules' and confirm == 'DELETE':
+            MatchResult.objects.all().delete()
+            ScheduleRow.objects.all().delete()
+            Schedule.objects.all().delete()
+            msg = 'All schedule data deleted.'
+
+        elif action == 'delete_lmrb' and confirm == 'DELETE':
+            LMRBRow.objects.all().delete()
+            MonitoringData.objects.all().delete()
+            msg = 'All LMRB / monitoring data deleted.'
+
+        elif action == 'delete_tc' and confirm == 'DELETE':
+            TCRow.objects.all().delete()
+            TransmissionReport.objects.all().delete()
+            msg = 'All TC data deleted.'
+
+        elif action == 'delete_all' and confirm == 'DELETE_ALL':
+            MatchResult.objects.all().delete()
+            ScheduleRow.objects.all().delete()
+            Schedule.objects.all().delete()
+            LMRBRow.objects.all().delete()
+            MonitoringData.objects.all().delete()
+            TCRow.objects.all().delete()
+            TransmissionReport.objects.all().delete()
+            # Reset row locks
+            ScheduleRow.objects.update(is_matched=False, matched_lmrb=None, matched_at=None)
+            LMRBRow.objects.update(is_matched=False, matched_schedule=None, matched_at=None)
+            msg = 'ALL data deleted. The system is now empty.'
+
+        elif action in ('delete_schedules', 'delete_lmrb', 'delete_tc', 'delete_all'):
+            msg = 'Delete cancelled — confirmation text did not match.'
+            msg_type = 'error'
+
+        elif action == 'backup_db':
+            # Serve the SQLite file directly if running SQLite
+            db_path = django_settings.DATABASES['default'].get('NAME', '')
+            if db_path and db_path.endswith('.sqlite3') and os.path.exists(db_path):
+                import mimetypes
+                return FileResponse(
+                    open(db_path, 'rb'),
+                    as_attachment=True,
+                    filename='ad_monitor_backup.sqlite3',
+                    content_type='application/octet-stream',
+                )
+            else:
+                msg = ('This deployment uses PostgreSQL. Use Railway\'s built-in backup feature '
+                       'or run `pg_dump` from the CLI to export your database.')
+                msg_type = 'info'
+
+    return render(request, 'admin_panel/db_tools.html', {
+        'counts': _counts(),
+        'msg': msg,
+        'msg_type': msg_type,
+    })

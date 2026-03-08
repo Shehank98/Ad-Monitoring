@@ -19,7 +19,7 @@ from django.shortcuts import render
 from django.db.models import Min, Max
 
 from core.models import Account, LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow
-from .engine import run_scope
+from .engine import run_scope, active_schedule_ids
 
 
 # ── Auth helpers ───────────────────────────────────────────────────────────────
@@ -180,9 +180,12 @@ def _build_campaign_rows(user):
         channel = c['channel']
         month   = c['month']
 
-        # --- Schedule row count — COMMERCIAL BENEFITS only (engine skips SPONSORSHIP) ---
+        # --- Schedule row count — COMMERCIAL BENEFITS only, active schedules only ---
+        # Use the same active-schedule logic as the engine (highest version per
+        # schedule_number) so duplicate uploads don't inflate the planned count.
+        active_ids = active_schedule_ids(a_id, channel, month)
         planned = ScheduleRow.objects.filter(
-            account_id=a_id, channel=channel, month=month,
+            schedule_id__in=active_ids,
             ad_type='COMMERCIAL BENEFITS',
         ).count()
 
@@ -277,7 +280,8 @@ def verify_row(request):
     mr_qs     = MatchResult.objects.filter(account_id=account_id, channel=channel, month=month)
     n_matched = mr_qs.filter(status='matched').count()
     n_missed  = mr_qs.filter(status='not_aired').count()
-    planned   = ScheduleRow.objects.filter(account_id=account_id, channel=channel, month=month, ad_type='COMMERCIAL BENEFITS').count()
+    active_ids = active_schedule_ids(account_id, channel, month)
+    planned    = ScheduleRow.objects.filter(schedule_id__in=active_ids, ad_type='COMMERCIAL BENEFITS').count()
     dot       = _status_dot(account_id, channel, month)
     last_run  = mr_qs.order_by('-run_at').values_list('run_at', flat=True).first()
 
