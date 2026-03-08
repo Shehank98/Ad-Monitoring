@@ -17,8 +17,9 @@ Matching algorithm (two passes):
       The schedule row proceeds to Pass 2 so Late Telecast / Not Aired can be assigned.
 
   Pass 2 — for schedule rows still unmatched after Pass 1:
-    6. Same brand+theme+duration on a LATER date (Rule 7: aired_date > sch_date) → LATE TELECAST
-    7. No candidate anywhere → NOT AIRED
+    6. Same brand+theme+duration on a LATER date (Rule 7: aired_date > sch_date)
+       AND aired time falls within the planned [start_time, end_time] window → LATE TELECAST
+    7. No qualifying candidate → NOT AIRED
 
   Programme name matching uses word-overlap scoring: score = (matching words) / (scheduled
   programme words). Score ≥ 0.5 → MATCHED; score < 0.5 → PROGRAMME MISMATCH.
@@ -471,6 +472,8 @@ def match_ads(
         sch_brand      = row.get('Brand', sch_brand_norm)
         sch_dur        = row.get('_dur')
         sch_programme  = row.get('Programme', '')
+        sch_start      = row.get('_start_secs')
+        sch_end        = row.get('_end_secs')
         start_time_str = str(row.get('Start_Time', ''))
         end_time_str   = str(row.get('End_Time', ''))
         dur_val        = row.get('Duration', sch_dur)
@@ -492,6 +495,21 @@ def match_ads(
             candidates = candidates[candidates['Date'] > sch_date]
         else:
             candidates = candidates[candidates['Date'] != sch_date]
+
+        # Rule: Late Telecast must also fall within the planned time window —
+        # same requirement as Matched / Programme Mismatch (different date only).
+        # An airing outside the window (e.g. 12:14 vs planned 20:00–20:30) is not
+        # considered a valid late airing; the schedule row becomes Not Aired instead.
+        if sch_start is not None and sch_end is not None:
+            time_col = None
+            if pool_has_prog_secs and candidates['_prog_secs'].notna().any():
+                time_col = '_prog_secs'
+            elif pool_has_air_secs and candidates['_air_secs'].notna().any():
+                time_col = '_air_secs'
+            if time_col:
+                candidates = candidates[
+                    (candidates[time_col] >= sch_start) & (candidates[time_col] <= sch_end)
+                ]
 
         if not candidates.empty:
             best_idx = candidates.index[0]
