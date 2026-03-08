@@ -187,6 +187,11 @@
       <div class="text-5xl font-black my-2 leading-none">{{ stats.compliance }}%</div>
       <div class="text-xs opacity-70">
         {{ stats.matched }} of {{ stats.total }} spots matched
+        {% if stats.unverified %}
+          <span class="block opacity-80 text-[10px] mt-0.5">
+            {{ stats.unverified }} spot{{ stats.unverified|pluralize }} pending LMRB data
+          </span>
+        {% endif %}
       </div>
     </div>
 
@@ -199,11 +204,11 @@
           <div class="text-2xl font-black text-slate-800">{{ stats.total }}</div>
           <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">Total Spots</div>
         </div>
-        {% if stats.total %}
+        {% if stats.total_all %}
         <div class="mt-3">
           <div class="h-2 rounded-full bg-amber-200 overflow-hidden">
             <div class="h-full bg-blue-500 rounded-full"
-                 style="width:{% widthratio stats.commercial stats.total 100 %}%"></div>
+                 style="width:{% widthratio stats.commercial stats.total_all 100 %}%"></div>
           </div>
           <div class="flex justify-between text-[9px] font-semibold mt-1">
             <span class="text-blue-600">{{ stats.commercial }} Commercial</span>

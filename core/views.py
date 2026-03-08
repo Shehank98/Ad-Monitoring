@@ -1198,8 +1198,6 @@ def monitoring_dashboard(request):
         n_not_aired  = qs.filter(status__in=['not_aired', 'no_mapping']).count()
         n_no_map     = qs.filter(status='no_mapping').count()
         n_aired      = n_matched + n_prog_mis + n_late
-        # Programme mismatch counts as a valid match (same day, brand, theme — time offset only)
-        compliance   = round((n_matched + n_prog_mis) / total * 100, 1) if total else 0
 
         # Use active schedules only (highest version per schedule_number) so
         # duplicate uploads don't inflate commercial / sponsorship counts.
@@ -1209,17 +1207,25 @@ def monitoring_dashboard(request):
         if schedule_id and int(schedule_id) in _active_sch_ids:
             _sr_base = _sr_base.filter(schedule_id=schedule_id)
         n_sponsorship = _sr_base.filter(ad_type='SPONSORSHIP').count()
+        n_commercial  = _sr_base.filter(ad_type='COMMERCIAL BENEFITS').count()
+
+        # Compliance is against the planned commercial rows, not just the verified
+        # subset — rows past the LMRB date cap are counted as unverified (not ignored).
+        compliance = round((n_matched + n_prog_mis) / n_commercial * 100, 1) if n_commercial else 0
 
         stats = {
-            'total':      total,
-            'matched':    n_matched,
-            'prog_mis':   n_prog_mis,
-            'late':       n_late,
-            'not_aired':  n_not_aired,
-            'no_map':     n_no_map,
-            'aired':      n_aired,
-            'compliance': compliance,
-            'sponsorship': n_sponsorship,
+            'total':        n_commercial,                  # planned commercial rows = real denominator
+            'total_all':    n_commercial + n_sponsorship,  # combined for split-bar denominator
+            'verified':     total,                         # MatchResult count
+            'unverified':   max(0, n_commercial - total),  # rows past LMRB date cap
+            'matched':      n_matched,
+            'prog_mis':     n_prog_mis,
+            'late':         n_late,
+            'not_aired':    n_not_aired,
+            'no_map':       n_no_map,
+            'aired':        n_aired,
+            'compliance':   compliance,
+            'sponsorship':  n_sponsorship,
         }
 
         tab_data = {
@@ -1268,8 +1274,7 @@ def monitoring_dashboard(request):
                 'not_matched': st - sm,
             })
 
-        # ── Commercial / Sponsorship counts from schedule (active schedules only) ──
-        n_commercial = _sr_base.filter(ad_type='COMMERCIAL BENEFITS').count()
+        # commercial count already computed above; expose it in stats
         stats['commercial'] = n_commercial
 
         # ── Chart data 1: Schedule spots grouped by Brand × Duration ─────────
