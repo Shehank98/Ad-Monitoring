@@ -189,9 +189,17 @@
 
         <!-- KPI summary bar (populated by JS) -->
         <div id="kpi-bar-{{ idx }}" class="hidden flex flex-wrap gap-2 mb-4">
+          <div class="kpi-pill bg-blue-50 border border-blue-200">
+            <span class="text-[10px] text-blue-600 font-semibold uppercase">Planned</span>
+            <span class="text-lg font-bold text-blue-700" id="kb-planned-{{ idx }}">—</span>
+          </div>
           <div class="kpi-pill bg-slate-50 border border-slate-200">
-            <span class="text-[10px] text-slate-500 font-semibold uppercase">Scheduled</span>
+            <span class="text-[10px] text-slate-500 font-semibold uppercase">Verified</span>
             <span class="text-lg font-bold text-slate-800" id="kb-total-{{ idx }}">—</span>
+          </div>
+          <div id="kb-pending-pill-{{ idx }}" class="kpi-pill bg-yellow-50 border border-yellow-300 hidden">
+            <span class="text-[10px] text-yellow-600 font-semibold uppercase">Pending LMRB</span>
+            <span class="text-lg font-bold text-yellow-700" id="kb-pending-{{ idx }}">—</span>
           </div>
           <div class="kpi-pill bg-emerald-50 border border-emerald-200">
             <span class="text-[10px] text-emerald-600 font-semibold uppercase">Matched</span>
@@ -352,6 +360,7 @@ function renderResults(idx, data) {
 
   // KPI bar
   kpiBar.classList.remove('hidden');
+  document.getElementById('kb-planned-' + idx).textContent  = data.summary.planned ?? data.summary.total;
   document.getElementById('kb-total-' + idx).textContent    = data.summary.total;
   document.getElementById('kb-matched-' + idx).textContent  = data.summary.matched;
   document.getElementById('kb-mis-' + idx).textContent      = data.summary.prog_mismatch;
@@ -359,9 +368,18 @@ function renderResults(idx, data) {
   document.getElementById('kb-notaired-' + idx).textContent = data.summary.not_aired;
   document.getElementById('kb-extra-' + idx).textContent    = data.summary.extra;
   document.getElementById('kb-nomap-' + idx).textContent    = data.summary.no_mapping;
+  // Show Pending pill only when some rows are awaiting LMRB data
+  const pending = data.summary.pending || 0;
+  const pendingPill = document.getElementById('kb-pending-pill-' + idx);
+  if (pending > 0) {
+    document.getElementById('kb-pending-' + idx).textContent = pending;
+    pendingPill.classList.remove('hidden');
+  } else {
+    pendingPill.classList.add('hidden');
+  }
 
   // Tab counters
-  document.getElementById('tc-all-' + idx).textContent     = data.summary.total;
+  document.getElementById('tc-all-' + idx).textContent     = data.summary.planned ?? data.summary.total;
   document.getElementById('tc-matched-' + idx).textContent = data.summary.matched;
   document.getElementById('tc-mis-' + idx).textContent     = data.summary.prog_mismatch;
   document.getElementById('tc-late-' + idx).textContent    = data.summary.late_telecast;

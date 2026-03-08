@@ -337,6 +337,14 @@ def load_results(request):
     no_mapping     = [r for r in all_rows if r['status'] == 'No Brand Mapping']
     last_run = qs.order_by('-run_at').values_list('run_at', flat=True).first()
 
+    # Planned = actual schedule rows (active version only); may exceed len(all_rows)
+    # when some rows are past the LMRB date cap and have no MatchResult yet.
+    active_ids = active_schedule_ids(account_id, channel, month)
+    planned    = ScheduleRow.objects.filter(
+        schedule_id__in=active_ids, ad_type='COMMERCIAL BENEFITS',
+    ).count()
+    pending = max(0, planned - len(all_rows))  # rows awaiting LMRB data
+
     return JsonResponse({
         'ok':            True,
         'has_results':   bool(all_rows),
@@ -349,6 +357,8 @@ def load_results(request):
         'no_mapping':    no_mapping,
         'summary': {
             'total':         len(all_rows),
+            'planned':       planned,
+            'pending':       pending,
             'matched':       len(matched),
             'prog_mismatch': len(prog_mismatch),
             'late_telecast': len(late_telecast),
