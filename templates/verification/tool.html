@@ -213,6 +213,10 @@
             <span class="text-[10px] text-sky-600 font-semibold uppercase">Extra Aired</span>
             <span class="text-lg font-bold text-sky-700" id="kb-extra-{{ idx }}">—</span>
           </div>
+          <div class="kpi-pill bg-slate-100 border border-slate-200">
+            <span class="text-[10px] text-slate-500 font-semibold uppercase">No Mapping</span>
+            <span class="text-lg font-bold text-slate-600" id="kb-nomap-{{ idx }}">—</span>
+          </div>
         </div>
 
         <!-- Result tabs -->
@@ -242,6 +246,9 @@
               <button class="vtab-btn" onclick="switchVtab({{ idx }},'extra',this)">
                 Extra Aired <span class="ml-1 text-[10px] font-bold text-sky-500" id="tc-extra-{{ idx }}"></span>
               </button>
+              <button class="vtab-btn" onclick="switchVtab({{ idx }},'nomap',this)">
+                No Mapping <span class="ml-1 text-[10px] font-bold text-slate-400" id="tc-nomap-{{ idx }}"></span>
+              </button>
               <a href="/verify/export/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
                  class="ml-auto text-xs text-blue-600 hover:underline flex-shrink-0 self-center pr-2" target="_blank">
                 <i class="fa-solid fa-download mr-0.5"></i> Export Excel
@@ -255,6 +262,7 @@
             <div id="vtab-late-{{ idx }}"     class="vtab-panel overflow-x-auto"></div>
             <div id="vtab-notaired-{{ idx }}" class="vtab-panel overflow-x-auto"></div>
             <div id="vtab-extra-{{ idx }}"    class="vtab-panel overflow-x-auto"></div>
+            <div id="vtab-nomap-{{ idx }}"    class="vtab-panel overflow-x-auto"></div>
           </div>
 
           <div id="results-empty-{{ idx }}" class="hidden text-xs text-slate-400 py-8 text-center">
@@ -350,6 +358,7 @@ function renderResults(idx, data) {
   document.getElementById('kb-late-' + idx).textContent     = data.summary.late_telecast;
   document.getElementById('kb-notaired-' + idx).textContent = data.summary.not_aired;
   document.getElementById('kb-extra-' + idx).textContent    = data.summary.extra;
+  document.getElementById('kb-nomap-' + idx).textContent    = data.summary.no_mapping;
 
   // Tab counters
   document.getElementById('tc-all-' + idx).textContent     = data.summary.total;
@@ -358,6 +367,7 @@ function renderResults(idx, data) {
   document.getElementById('tc-late-' + idx).textContent    = data.summary.late_telecast;
   document.getElementById('tc-notaired-'+idx).textContent  = data.summary.not_aired;
   document.getElementById('tc-extra-' + idx).textContent   = data.summary.extra;
+  document.getElementById('tc-nomap-' + idx).textContent   = data.summary.no_mapping;
 
   // Tab panels
   const allRows = [
@@ -370,6 +380,7 @@ function renderResults(idx, data) {
   document.getElementById('vtab-late-' + idx).innerHTML    = buildTable(data.late_telecast, false);
   document.getElementById('vtab-notaired-'+idx).innerHTML  = buildTable(data.not_aired,    false);
   document.getElementById('vtab-extra-' + idx).innerHTML   = buildTable(data.extra,        false);
+  document.getElementById('vtab-nomap-' + idx).innerHTML   = buildTable(data.no_mapping,   false);
 
   tabsEl.classList.remove('hidden');
 }
@@ -453,7 +464,7 @@ function runVerify(e, idx, accountId, channel, month) {
       // Reset and reload detail panel
       delete _loaded[idx];
       // Clear tab content
-      ['all','matched','mis','late','notaired','extra'].forEach(t => {
+      ['all','matched','mis','late','notaired','extra','nomap'].forEach(t => {
         const el = document.getElementById(`vtab-${t}-${idx}`);
         if (el) el.innerHTML = '';
       });
