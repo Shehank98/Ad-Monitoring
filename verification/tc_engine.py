@@ -396,6 +396,29 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
         tc_themes   = _tc_themes_for_brand(brand, dur, tc_theme_map)
         dur_int     = int(dur) if dur is not None else None
 
+        # FIX 7: If there is no tc_theme mapping for this brand+duration,
+        # ALL three sources (Schedule, TC, LMRB) cannot be reconciled.
+        # Show Aired=0, 3rd Party=0 — do not count unverified matches.
+        if not tc_themes:
+            manual_q = ManualMatch.objects.filter(
+                account_id=account_id, channel=channel, month=month,
+                schedule_row__brand=brand, schedule_row__duration=dur,
+                schedule_row__ad_type='COMMERCIAL BENEFITS',
+            )
+            if schedule_id:
+                manual_q = manual_q.filter(schedule_row__schedule_id=schedule_id)
+            manual_aired = manual_q.count()
+            commercial_rows.append({
+                'product':     brand,
+                'dur':         dur_int,
+                'planned':     planned,
+                'aired':       manual_aired,   # only manual matches count without mapping
+                'missed':      max(0, planned - manual_aired),
+                'extra':       0,
+                'third_party': 0,
+            })
+            continue
+
         # Aired = (TC schedule-matched AND LMRB-confirmed) + manually reconciled
         aired_q = TCRow.objects.filter(
             account_id=account_id, channel=channel,
