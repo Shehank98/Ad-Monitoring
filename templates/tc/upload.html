@@ -102,14 +102,14 @@
       <!-- File upload -->
       <div>
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-          <i class="fa-solid fa-file-excel mr-1 text-slate-400"></i> TC File <span class="text-red-400">*</span>
+          <i class="fa-solid fa-file-arrow-up mr-1 text-slate-400"></i> TC File <span class="text-red-400">*</span>
         </label>
-        <input type="file" name="tc_file" id="tcFile" accept=".xlsx,.xls"
+        <input type="file" name="tc_file" id="tcFile" accept=".xlsx,.xls,.pdf"
                class="block w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-4
                       file:rounded-lg file:border-0 file:bg-amber-50 file:text-amber-700
                       file:font-semibold file:text-xs hover:file:bg-amber-100 cursor-pointer"
                onchange="detectFile(this)" required>
-        <p class="mt-1 text-[10px] text-slate-400">Excel file (.xlsx or .xls)</p>
+        <p class="mt-1 text-[10px] text-slate-400">Excel (.xlsx / .xls) or PDF — PDF parsing is channel-specific</p>
       </div>
 
       <!-- Detection result -->
@@ -148,21 +148,29 @@ function detectFile(input) {
     .then(r => r.json())
     .then(data => {
       if (data.ok) {
-        if (data.channel && !document.getElementById('inpChannel').value) {
-          document.getElementById('inpChannel').value = data.channel;
+        if (data.is_pdf) {
+          // PDF detected — channel and month must be set manually / via schedule selector
+          const el = document.getElementById('detectResult');
+          el.classList.remove('hidden');
+          document.getElementById('detectText').textContent =
+            'PDF file detected. Channel and Month will be taken from the form fields above.';
+        } else {
+          if (data.channel && !document.getElementById('inpChannel').value) {
+            document.getElementById('inpChannel').value = data.channel;
+          }
+          // Auto-populate month from detected start_date
+          const monthEl = document.getElementById('inpMonth');
+          if (data.start_date && (!monthEl.value || monthEl.value.trim() === '')) {
+            monthEl.value = dateToMonthStr(data.start_date);
+          }
+          const el = document.getElementById('detectResult');
+          el.classList.remove('hidden');
+          document.getElementById('detectText').textContent =
+            `Channel: ${data.channel || '(not detected)'} | ` +
+            `Dates: ${data.start_date} → ${data.end_date} | ` +
+            `${data.row_count} rows | ` +
+            `Columns: ${data.columns.join(', ')}`;
         }
-        // Auto-populate month from detected start_date
-        const monthEl = document.getElementById('inpMonth');
-        if (data.start_date && (!monthEl.value || monthEl.value.trim() === '')) {
-          monthEl.value = dateToMonthStr(data.start_date);
-        }
-        const el = document.getElementById('detectResult');
-        el.classList.remove('hidden');
-        document.getElementById('detectText').textContent =
-          `Channel: ${data.channel || '(not detected)'} | ` +
-          `Dates: ${data.start_date} → ${data.end_date} | ` +
-          `${data.row_count} rows | ` +
-          `Columns: ${data.columns.join(', ')}`;
       }
     })
     .catch(() => {});

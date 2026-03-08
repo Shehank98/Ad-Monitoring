@@ -1916,11 +1916,50 @@ def tc_upload(request):
 
         account = get_object_or_404(Account, id=account_id)
 
-        try:
-            df = pd.read_excel(tc_file, header=0)
-        except Exception as e:
-            messages.error(request, f'Could not read TC file: {e}')
-            return redirect('/dashboard/tc/upload/')
+        # ── Detect file type and parse accordingly ────────────────────────────
+        filename_lower = tc_file.name.lower()
+        is_pdf = filename_lower.endswith('.pdf')
+
+        if is_pdf:
+            from verification.tc_converters.dispatch import get_converter
+            converter = get_converter(channel)
+            if converter is None:
+                messages.error(
+                    request,
+                    f'No PDF converter is configured for channel "{channel}". '
+                    f'Please upload an Excel file instead, or contact your administrator.'
+                )
+                return redirect('/dashboard/tc/upload/')
+
+            import tempfile, os
+            try:
+                suffix = '.pdf'
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    for chunk in tc_file.chunks():
+                        tmp.write(chunk)
+                    tmp_path = tmp.name
+                df = converter.parse_pdf(tmp_path)
+            except Exception as e:
+                messages.error(request, f'Could not parse PDF TC file: {e}')
+                return redirect('/dashboard/tc/upload/')
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
+            if df.empty:
+                messages.error(request, 'No data rows could be extracted from the PDF.')
+                return redirect('/dashboard/tc/upload/')
+
+            # PDF parser already returns standard column names; ensure Channel present
+            df['Channel'] = channel
+        else:
+            try:
+                df = pd.read_excel(tc_file, header=0)
+            except Exception as e:
+                messages.error(request, f'Could not read TC file: {e}')
+                return redirect('/dashboard/tc/upload/')
 
         schedule_obj = None
         if schedule_id:
@@ -1968,6 +2007,19 @@ def tc_detect(request):
     tc_file = request.FILES.get('tc_file')
     if not tc_file:
         return JsonResponse({'ok': False, 'error': 'No file'})
+
+    # PDF files: we can't detect metadata at AJAX time without a full parse;
+    # return ok=True with empty fields so the form keeps what the user typed.
+    if tc_file.name.lower().endswith('.pdf'):
+        return JsonResponse({
+            'ok':         True,
+            'channel':    '',
+            'start_date': '',
+            'end_date':   '',
+            'row_count':  0,
+            'columns':    [],
+            'is_pdf':     True,
+        })
 
     try:
         df   = pd.read_excel(tc_file, header=0)
