@@ -4,18 +4,136 @@
 {% block page_subtitle %}Add a new ad schedule - month and date range are detected automatically from the file{% endblock %}
 
 {% block content %}
-<div class="max-w-2xl">
+<div class="max-w-4xl space-y-6">
+
+  <!-- ── Visual format guide ──────────────────────────────────────────────── -->
   <div class="card">
-    <div class="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
-      <i class="fa-solid fa-circle-info mr-2"></i>
-      Upload the Excel schedule file. Expected columns:
-      <span class="font-semibold">Advertisement_Type, Programme, Date, Day, Start_Time, End_Time, Duration, Brand, Spot_Number</span>
-      <br>
-      <span class="text-blue-600 text-xs mt-1 block">
-        <i class="fa-solid fa-wand-magic-sparkles mr-1"></i>
-        Month, start date and end date are auto-detected from the Date column. Version is auto-incremented.
+    <h3 class="text-sm font-bold text-slate-700 mb-1 flex items-center gap-2">
+      <i class="fa-solid fa-table text-blue-500"></i> Expected Schedule File Format
+    </h3>
+    <p class="text-xs text-slate-500 mb-4">
+      The system auto-detects and converts both the <strong>agency pivot format</strong> (shown below)
+      and the flat pre-processed format. Month and date range are detected automatically.
+    </p>
+
+    <!-- Format badges -->
+    <div class="flex flex-wrap gap-3 mb-5">
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200">
+        <i class="fa-solid fa-circle-check"></i> Pivot (agency format) — auto-converted
+      </span>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 border border-blue-200">
+        <i class="fa-solid fa-circle-check"></i> Flat pre-processed — also accepted
       </span>
     </div>
+
+    <!-- Pivot format sample table -->
+    <p class="text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-2">
+      <i class="fa-solid fa-file-excel text-emerald-500 mr-1"></i> Pivot Format Sample (what agencies typically send)
+    </p>
+    <div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm mb-6">
+      <table class="min-w-full text-[11px]">
+        <thead>
+          <tr class="bg-slate-700 text-white">
+            <th class="px-3 py-2 text-left font-semibold whitespace-nowrap">Programme</th>
+            <th class="px-3 py-2 text-center font-semibold">Day</th>
+            <th class="px-3 py-2 text-center font-semibold">Time</th>
+            <th class="px-3 py-2 text-center font-semibold">End Time</th>
+            <th class="px-3 py-2 text-center font-semibold">Dur</th>
+            <th class="px-3 py-2 text-center font-semibold bg-blue-700">01/09/2025</th>
+            <th class="px-3 py-2 text-center font-semibold bg-blue-700">02/09/2025</th>
+            <th class="px-3 py-2 text-center font-semibold bg-blue-700">03/09/2025</th>
+            <th class="px-3 py-2 text-center font-semibold bg-blue-700 opacity-60">…</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <!-- Section header -->
+          <tr class="bg-amber-50">
+            <td colspan="9" class="px-3 py-1.5 font-bold text-amber-800 tracking-wide text-[10px] uppercase">
+              COMMERCIAL BENEFITS
+            </td>
+          </tr>
+          <!-- Brand sub-header -->
+          <tr class="bg-slate-50">
+            <td colspan="9" class="px-3 py-1 text-slate-600 font-semibold pl-5">ENGEX 2025</td>
+          </tr>
+          <!-- Data rows -->
+          <tr class="hover:bg-slate-50">
+            <td class="px-3 py-1.5 text-slate-700 pl-8">Sirasa Superstar</td>
+            <td class="px-3 py-1.5 text-center text-slate-500">MON</td>
+            <td class="px-3 py-1.5 text-center font-mono text-slate-600">20:00:00</td>
+            <td class="px-3 py-1.5 text-center font-mono text-slate-600">21:00:00</td>
+            <td class="px-3 py-1.5 text-center text-slate-600">30</td>
+            <td class="px-3 py-1.5 text-center font-bold text-blue-700 bg-blue-50">1</td>
+            <td class="px-3 py-1.5 text-center text-slate-400 bg-blue-50">0</td>
+            <td class="px-3 py-1.5 text-center font-bold text-blue-700 bg-blue-50">1</td>
+            <td class="px-3 py-1.5 text-center text-slate-300 bg-blue-50">…</td>
+          </tr>
+          <tr class="hover:bg-slate-50">
+            <td class="px-3 py-1.5 text-slate-700 pl-8">Sirasa Lunch Time</td>
+            <td class="px-3 py-1.5 text-center text-slate-500">TUE</td>
+            <td class="px-3 py-1.5 text-center font-mono text-slate-600">13:00:00</td>
+            <td class="px-3 py-1.5 text-center font-mono text-slate-600">14:00:00</td>
+            <td class="px-3 py-1.5 text-center text-slate-600">30</td>
+            <td class="px-3 py-1.5 text-center text-slate-400 bg-blue-50">0</td>
+            <td class="px-3 py-1.5 text-center font-bold text-blue-700 bg-blue-50">2</td>
+            <td class="px-3 py-1.5 text-center text-slate-400 bg-blue-50">0</td>
+            <td class="px-3 py-1.5 text-center text-slate-300 bg-blue-50">…</td>
+          </tr>
+          <!-- Section header -->
+          <tr class="bg-purple-50">
+            <td colspan="9" class="px-3 py-1.5 font-bold text-purple-800 tracking-wide text-[10px] uppercase">
+              SPONSORSHIP BENEFITS
+            </td>
+          </tr>
+          <!-- Brand sub-header -->
+          <tr class="bg-slate-50">
+            <td colspan="9" class="px-3 py-1 text-slate-600 font-semibold pl-5">SPONSOR BRAND XYZ</td>
+          </tr>
+          <tr class="hover:bg-slate-50">
+            <td class="px-3 py-1.5 text-slate-700 pl-8">Evening News</td>
+            <td class="px-3 py-1.5 text-center text-slate-500">WED</td>
+            <td class="px-3 py-1.5 text-center font-mono text-slate-600">19:00:00</td>
+            <td class="px-3 py-1.5 text-center font-mono text-slate-600">19:30:00</td>
+            <td class="px-3 py-1.5 text-center text-slate-600">20</td>
+            <td class="px-3 py-1.5 text-center font-bold text-purple-700 bg-purple-50">1</td>
+            <td class="px-3 py-1.5 text-center font-bold text-purple-700 bg-purple-50">1</td>
+            <td class="px-3 py-1.5 text-center text-slate-400 bg-purple-50">0</td>
+            <td class="px-3 py-1.5 text-center text-slate-300 bg-purple-50">…</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Legend / rules -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
+        <p class="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2">Key Rules</p>
+        <ul class="space-y-1 text-[11px] text-slate-600">
+          <li class="flex items-start gap-1.5"><i class="fa-solid fa-chevron-right text-blue-400 mt-0.5 text-[9px]"></i>Header row must have <strong>PROGRAM</strong> or <strong>PROGRAMME</strong> column</li>
+          <li class="flex items-start gap-1.5"><i class="fa-solid fa-chevron-right text-blue-400 mt-0.5 text-[9px]"></i>Date columns must be actual <strong>date values</strong> in Excel (not text)</li>
+          <li class="flex items-start gap-1.5"><i class="fa-solid fa-chevron-right text-blue-400 mt-0.5 text-[9px]"></i>Section rows: <strong>COMMERCIAL BENEFITS</strong> or <strong>SPONSORSHIP BENEFITS</strong> (or BONUS COMMERCIALS)</li>
+          <li class="flex items-start gap-1.5"><i class="fa-solid fa-chevron-right text-blue-400 mt-0.5 text-[9px]"></i>Brand rows: have a name in Programme col but no Day/Time values</li>
+          <li class="flex items-start gap-1.5"><i class="fa-solid fa-chevron-right text-blue-400 mt-0.5 text-[9px]"></i>Spot count per date = number of individual ad spots on that date</li>
+        </ul>
+      </div>
+      <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
+        <p class="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2">Column Requirements</p>
+        <div class="space-y-1">
+          {% for col, desc, required in schedule_col_guide %}
+          <div class="flex items-center gap-2 text-[11px]">
+            <span class="w-2 h-2 rounded-full flex-shrink-0 {% if required %}bg-red-400{% else %}bg-slate-300{% endif %}"></span>
+            <span class="font-mono font-semibold text-slate-700 w-24 flex-shrink-0">{{ col }}</span>
+            <span class="text-slate-500">{{ desc }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        <p class="mt-2 text-[10px] text-slate-400"><span class="inline-block w-2 h-2 rounded-full bg-red-400 mr-1"></span>Required &nbsp; <span class="inline-block w-2 h-2 rounded-full bg-slate-300 mr-1"></span>Optional</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Upload form ───────────────────────────────────────────────────────── -->
+  <div class="card max-w-2xl">
 
     <form method="post" enctype="multipart/form-data" class="space-y-5" id="upload-form">
       {% csrf_token %}
@@ -108,6 +226,9 @@
         pcont.innerHTML = `<p class="col-span-3 text-red-500">${data.error}</p>`;
         return;
       }
+      const fmtBadge = data.is_pivot
+        ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700"><i class="fa-solid fa-wand-magic-sparkles"></i> Pivot — auto-converted</span>`
+        : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700"><i class="fa-solid fa-table-list"></i> Flat format</span>`;
       pcont.innerHTML = `
         <div class="bg-white rounded-lg border border-slate-200 p-2.5">
           <p class="text-slate-400 text-[10px] uppercase tracking-wider mb-0.5">Month</p>
@@ -118,8 +239,8 @@
           <p class="font-semibold text-slate-800">${data.start_date || '?'} → ${data.end_date || '?'}</p>
         </div>
         <div class="bg-white rounded-lg border border-slate-200 p-2.5">
-          <p class="text-slate-400 text-[10px] uppercase tracking-wider mb-0.5">Total Rows</p>
-          <p class="font-semibold text-slate-800">${data.row_count.toLocaleString()}</p>
+          <p class="text-slate-400 text-[10px] uppercase tracking-wider mb-1">Detected Rows &nbsp; ${fmtBadge}</p>
+          <p class="font-semibold text-slate-800">${data.row_count.toLocaleString()} spot records</p>
         </div>`;
     } catch (e) {
       pcont.innerHTML = `<p class="col-span-3 text-red-500">Detection failed: ${e.message}</p>`;

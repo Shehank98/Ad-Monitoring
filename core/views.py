@@ -322,8 +322,13 @@ def schedule_upload(request):
         if form.is_valid():
             excel_file = request.FILES['file']
             try:
-                df = pd.read_excel(excel_file)
-                df.columns = df.columns.str.strip()
+                from verification.schedule_converter import convert_schedule_excel
+                df = convert_schedule_excel(excel_file)
+                if df is None or df.empty:
+                    # Not pivot format — fall back to plain flat read
+                    excel_file.seek(0)
+                    df = pd.read_excel(excel_file)
+                    df.columns = df.columns.str.strip()
             except Exception as e:
                 messages.error(request, f'Cannot read Excel file: {e}')
                 return render(request, 'schedules/upload.html', {'form': form})
@@ -375,7 +380,16 @@ def schedule_upload(request):
 
             return redirect('/dashboard/schedules/')
 
-    return render(request, 'schedules/upload.html', {'form': form})
+    col_guide = [
+        ('PROGRAMME',   'Programme / show name',              True),
+        ('DAY',         'Day abbreviation (MON, TUE…)',       True),
+        ('TIME',        'Ad start time (HH:MM:SS)',           True),
+        ('End Time',    'Ad end time — column after TIME',    False),
+        ('DUR',         'Duration in seconds',                True),
+        ('BRAND',       'Brand name (optional inline col)',   False),
+        ('[date cols]', 'Date values → spot count per day',   True),
+    ]
+    return render(request, 'schedules/upload.html', {'form': form, 'schedule_col_guide': col_guide})
 
 
 def _parse_schedule_rows(df, schedule, account, channel, month):
@@ -413,14 +427,20 @@ def schedule_detect(request):
     if not excel_file:
         return JsonResponse({'ok': False, 'error': 'No file provided'})
     try:
-        df = pd.read_excel(excel_file)
+        from verification.schedule_converter import convert_schedule_excel
+        df = convert_schedule_excel(excel_file)
+        pivot = df is not None and not df.empty
+        if not pivot:
+            excel_file.seek(0)
+            df = pd.read_excel(excel_file)
         month, start_date, end_date = _detect_schedule_meta(df)
         return JsonResponse({
-            'ok': True,
+            'ok':         True,
             'month':      month,
             'start_date': str(start_date) if start_date else '',
             'end_date':   str(end_date)   if end_date   else '',
             'row_count':  len(df),
+            'is_pivot':   pivot,
         })
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)})
