@@ -440,7 +440,7 @@ function runVerify(e, idx, accountId, channel, month) {
   fd.append('account_id', accountId);
   fd.append('channel',    channel);
   fd.append('month',      month);
-  fd.append('mode',       'smart');
+  fd.append('mode',       'reset');
   fd.append('csrfmiddlewaretoken', CSRF);
 
   fetch('/verify/verify-row/', { method: 'POST', body: fd })
