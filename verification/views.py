@@ -290,6 +290,71 @@ def verify_row(request):
     })
 
 
+# ── AJAX: load existing MatchResult rows for display ────────────────────────────
+
+@login_required
+def load_results(request):
+    """GET — return persisted MatchResult rows for a scope, grouped by status."""
+    account_id = request.GET.get('account_id')
+    channel    = request.GET.get('channel')
+    month      = request.GET.get('month')
+    if not all([account_id, channel, month]):
+        return JsonResponse({'ok': False, 'error': 'Missing params'})
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied'})
+
+    STATUS_LABELS = dict(MatchResult.STATUS_CHOICES)
+    qs = MatchResult.objects.filter(
+        account_id=account_id, channel=channel, month=month
+    ).order_by('brand', 'scheduled_date', 'planned_start')
+
+    def _row(mr):
+        return {
+            'brand':    mr.brand,
+            'theme':    mr.theme,
+            'duration': mr.duration,
+            'programme': mr.programme,
+            'planned_date':  str(mr.scheduled_date) if mr.scheduled_date else '',
+            'planned_start': mr.planned_start or '',
+            'planned_end':   mr.planned_end   or '',
+            'aired_date':    str(mr.aired_date) if mr.aired_date else '',
+            'air_time':      mr.air_time       or '',
+            'source':        mr.source         or '',
+            'status':        STATUS_LABELS.get(mr.status, mr.status),
+        }
+
+    all_rows       = [_row(r) for r in qs]
+    matched        = [r for r in all_rows if r['status'] == 'Matched']
+    prog_mismatch  = [r for r in all_rows if r['status'] == 'Programme Mismatch']
+    late_telecast  = [r for r in all_rows if r['status'] == 'Late Telecast']
+    not_aired      = [r for r in all_rows if r['status'] == 'Not Aired']
+    extra          = [r for r in all_rows if r['status'] == 'Extra Aired']
+    no_mapping     = [r for r in all_rows if r['status'] == 'No Brand Mapping']
+    last_run = qs.order_by('-run_at').values_list('run_at', flat=True).first()
+
+    return JsonResponse({
+        'ok':            True,
+        'has_results':   bool(all_rows),
+        'total':         len(all_rows),
+        'matched':       matched,
+        'prog_mismatch': prog_mismatch,
+        'late_telecast': late_telecast,
+        'not_aired':     not_aired,
+        'extra':         extra,
+        'no_mapping':    no_mapping,
+        'summary': {
+            'total':         len(all_rows),
+            'matched':       len(matched),
+            'prog_mismatch': len(prog_mismatch),
+            'late_telecast': len(late_telecast),
+            'not_aired':     len(not_aired),
+            'extra':         len(extra),
+            'no_mapping':    len(no_mapping),
+        },
+        'last_run': last_run.strftime('%d %b %Y %H:%M') if last_run else None,
+    })
+
+
 # ── AJAX helpers ───────────────────────────────────────────────────────────────
 
 @login_required
