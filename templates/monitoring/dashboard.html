@@ -450,12 +450,10 @@
     <button class="tab-btn" onclick="showTab('brand_summary',this)">
       <i class="fa-solid fa-tag mr-1 text-indigo-500"></i> Brand Summary
     </button>
-    {% if sponsorship_rows %}
     <button class="tab-btn" onclick="showTab('sponsorship',this)">
       <i class="fa-solid fa-star mr-1 text-yellow-500"></i> Sponsorship
-      <span class="ml-1 px-1.5 py-0.5 rounded bg-yellow-50 text-yellow-700 text-[10px] font-bold">{{ sponsorship_rows|length }}</span>
+      {% if sponsorship_rows %}<span class="ml-1 px-1.5 py-0.5 rounded bg-yellow-50 text-yellow-700 text-[10px] font-bold">{{ sponsorship_rows|length }}</span>{% endif %}
     </button>
-    {% endif %}
     <button class="tab-btn" onclick="showTab('lmrb_matched',this)">
       <i class="fa-solid fa-database mr-1 text-teal-500"></i> LMRB Matched
       <span class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 text-[10px] font-bold">{{ lmrb_matched_rows|length }}</span>
@@ -692,7 +690,6 @@
     </div>
 
     <!-- ── Sponsorship Tab ────────────────────────────────── -->
-    {% if sponsorship_rows %}
     <div id="tab-sponsorship" class="tab-pane">
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-center">
@@ -812,7 +809,6 @@
         </table>
       </div>
     </div>
-    {% endif %}
 
     <!-- ── LMRB Matched Tab ───────────────────────────────── -->
     <div id="tab-lmrb_matched" class="tab-pane">
