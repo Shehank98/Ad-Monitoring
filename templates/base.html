@@ -363,14 +363,16 @@
 
     <!-- Nav -->
     <nav class="flex-1 px-2 py-2 overflow-y-auto">
-      {% with path=request.path %}
+      {% with path=request.path ur=request.user.role %}
 
+      <!-- ── Overview ── -->
       <p class="nav-label nav-text">Overview</p>
       <a href="/dashboard/" class="nav-item {% if path == '/dashboard/' %}active{% endif %}">
         <i class="nav-icon fa-solid fa-house"></i><span class="nav-text">Dashboard</span>
       </a>
 
-      {% if request.user.role in 'super_admin,admin' %}
+      <!-- ── Admin (admin + super_admin only) ── -->
+      {% if ur in 'super_admin,admin' %}
         <p class="nav-label nav-text">Admin</p>
         <a href="/dashboard/users/" class="nav-item {% if '/users/' in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-users"></i><span class="nav-text">Users</span>
@@ -381,38 +383,44 @@
         <a href="/dashboard/channels/" class="nav-item {% if '/channels/' in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-tv"></i><span class="nav-text">Channels</span>
         </a>
-        {% if request.user.role == 'super_admin' %}
         <a href="/dashboard/settings/" class="nav-item {% if '/settings/' in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-sliders"></i><span class="nav-text">Settings</span>
         </a>
-        {% endif %}
-      {% endif %}
-
-      {% if request.user.role != 'operations' %}
-        <p class="nav-label nav-text">Schedules</p>
-        <a href="/dashboard/schedules/" class="nav-item {% if '/schedules/' in path and 'upload' not in path %}active{% endif %}">
-          <i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-text">View Schedules</span>
+        <a href="/dashboard/admin-export/" class="nav-item {% if '/admin-export/' in path %}active{% endif %}">
+          <i class="nav-icon fa-solid fa-database"></i><span class="nav-text">Admin Export</span>
         </a>
-        {% if request.user.role in 'planner,super_admin,admin' %}
-          <a href="/dashboard/schedules/upload/" class="nav-item {% if 'schedules/upload' in path %}active{% endif %}">
-            <i class="nav-icon fa-solid fa-file-arrow-up"></i><span class="nav-text">Upload Schedule</span>
-          </a>
-        {% endif %}
       {% endif %}
 
+      <!-- ── Team (team_head only — user management for their account) ── -->
+      {% if ur == 'team_head' %}
+        <p class="nav-label nav-text">My Team</p>
+        <a href="/dashboard/users/" class="nav-item {% if '/users/' in path %}active{% endif %}">
+          <i class="nav-icon fa-solid fa-users"></i><span class="nav-text">Users</span>
+        </a>
+      {% endif %}
+
+      <!-- ── Schedules ── -->
+      <p class="nav-label nav-text">Schedules</p>
+      <a href="/dashboard/schedules/" class="nav-item {% if '/schedules/' in path and 'upload' not in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-text">View Schedules</span>
+      </a>
+      <a href="/dashboard/schedules/upload/" class="nav-item {% if 'schedules/upload' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-file-arrow-up"></i><span class="nav-text">Upload Schedule</span>
+      </a>
+
+      <!-- ── Monitoring ── -->
       <p class="nav-label nav-text">Monitoring</p>
-      <a href="/dashboard/monitoring/" class="nav-item {% if '/monitoring/' in path and 'upload' not in path and '/monitor/' not in path %}active{% endif %}">
+      <a href="/dashboard/monitoring/" class="nav-item {% if '/monitoring/' in path and 'upload' not in path and '/monitor/' not in path and 'matched-lmrb' not in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-chart-bar"></i><span class="nav-text">View Data</span>
       </a>
-      {% if request.user.role in 'operations,super_admin,admin' %}
-        <a href="/dashboard/monitoring/upload/" class="nav-item {% if 'monitoring/upload' in path %}active{% endif %}">
-          <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload Data</span>
-        </a>
-      {% endif %}
+      <a href="/dashboard/monitoring/upload/" class="nav-item {% if 'monitoring/upload' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload Data</span>
+      </a>
       <a href="/dashboard/monitor/" class="nav-item {% if '/monitor/' in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-gauge-high"></i><span class="nav-text">Dashboard</span>
       </a>
 
+      <!-- ── Tools ── -->
       <p class="nav-label nav-text">Tools</p>
       <a href="/verify/" class="nav-item {% if '/verify/' in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-magnifying-glass-chart"></i><span class="nav-text">Verify Ads</span>
@@ -421,28 +429,23 @@
         <i class="nav-icon fa-solid fa-map"></i><span class="nav-text">Brand Mappings</span>
       </a>
 
+      <!-- ── Transmission (TC) ── -->
       <p class="nav-label nav-text">Transmission (TC)</p>
       <a href="/dashboard/tc/" class="nav-item {% if '/tc/' in path and 'upload' not in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-file-invoice"></i><span class="nav-text">TC Reports</span>
       </a>
-      {% if request.user.role in 'operations,super_admin,admin,planner' %}
       <a href="/dashboard/tc/upload/" class="nav-item {% if 'tc/upload' in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload TC</span>
       </a>
-      {% endif %}
+
+      <!-- ── Reconciliation ── -->
+      <p class="nav-label nav-text">Reconciliation</p>
       <a href="/dashboard/summary/" class="nav-item {% if '/summary/' in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-file-contract"></i><span class="nav-text">Summary Sheet</span>
       </a>
-      {% if request.user.role in 'super_admin,admin,operations' %}
       <a href="/dashboard/manual/" class="nav-item {% if '/manual/' in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-link"></i><span class="nav-text">Manual Reconcile</span>
       </a>
-      {% endif %}
-      {% if request.user.role in 'super_admin,admin' %}
-      <a href="/dashboard/admin-export/" class="nav-item {% if '/admin-export/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-database"></i><span class="nav-text">Admin Export</span>
-      </a>
-      {% endif %}
 
       {% endwith %}
     </nav>

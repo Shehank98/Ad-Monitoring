@@ -16,7 +16,9 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 
-from core.models import Account, MatchResult, MonitoringData, Schedule
+from django.db.models import Min, Max
+
+from core.models import Account, LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow
 from .engine import run_scope
 
 
@@ -135,16 +137,157 @@ def _df_to_list(df):
     return df.fillna('').to_dict('records')
 
 
+# ── Verify Ads summary helpers ──────────────────────────────────────────────────
+
+def _status_dot(account_id, channel, month):
+    """Return status indicator: 'none'|'ok'|'missed'|'error'."""
+    qs = MatchResult.objects.filter(account_id=account_id, channel=channel, month=month)
+    if not qs.exists():
+        return 'none'
+    counts = {s: 0 for s, _ in MatchResult.STATUS_CHOICES}
+    for r in qs.values('status'):
+        counts[r['status']] = counts.get(r['status'], 0) + 1
+    if counts.get('not_aired', 0) > 0 or counts.get('programme_mismatch', 0) > 0:
+        return 'missed'
+    return 'ok'
+
+
+def _build_campaign_rows(user):
+    """Build one row per (account, channel, month) campaign that has a schedule."""
+    if _is_admin(user):
+        accounts_qs = Account.objects.all()
+    else:
+        accounts_qs = user.accounts.all()
+
+    account_ids = list(accounts_qs.values_list('id', flat=True))
+
+    # All distinct campaigns (account × channel × month) from Schedule
+    combos = (
+        Schedule.objects
+        .filter(account_id__in=account_ids)
+        .values('account_id', 'account__name', 'channel', 'month')
+        .annotate(
+            sch_start=Min('start_date'),
+            sch_end=Max('end_date'),
+            total_rows=Max('row_count'),  # sum across versions done below
+        )
+        .order_by('-month', 'channel')
+    )
+
+    rows = []
+    for c in combos:
+        a_id    = c['account_id']
+        channel = c['channel']
+        month   = c['month']
+
+        # --- Schedule row count (sum across all non-superseded schedules) ---
+        planned = ScheduleRow.objects.filter(
+            account_id=a_id, channel=channel, month=month
+        ).count()
+
+        # --- Schedule date range ---
+        sch_range = Schedule.objects.filter(
+            account_id=a_id, channel=channel, month=month
+        ).aggregate(s=Min('start_date'), e=Max('end_date'))
+        sch_start = sch_range['s']
+        sch_end   = sch_range['e']
+
+        # --- LMRB date range ---
+        lmrb_range = LMRBRow.objects.filter(
+            account_id=a_id, channel__iexact=channel
+        ).aggregate(s=Min('date'), e=Max('date'))
+        lmrb_start = lmrb_range['s']
+        lmrb_end   = lmrb_range['e']
+
+        # Amber flag: LMRB doesn't fully cover schedule period
+        lmrb_amber = False
+        if sch_start and sch_end and lmrb_start and lmrb_end:
+            lmrb_amber = (lmrb_start > sch_start) or (lmrb_end < sch_end)
+
+        # --- Verification results ---
+        mr_qs = MatchResult.objects.filter(account_id=a_id, channel=channel, month=month)
+        n_matched = mr_qs.filter(status='matched').count()
+        n_missed  = mr_qs.filter(status='not_aired').count()
+        last_run  = mr_qs.order_by('-run_at').values_list('run_at', flat=True).first()
+        dot       = _status_dot(a_id, channel, month)
+
+        # --- Schedule versions ---
+        versions = list(
+            Schedule.objects.filter(account_id=a_id, channel=channel, month=month)
+            .order_by('version')
+            .values('id', 'version', 'schedule_number', 'row_count',
+                    'start_date', 'end_date', 'original_filename', 'is_superseded')
+        )
+
+        rows.append({
+            'account_id':   a_id,
+            'account_name': c['account__name'],
+            'channel':      channel,
+            'month':        month,
+            'planned':      planned,
+            'aired':        n_matched,
+            'missed':       n_missed,
+            'sch_start':    sch_start,
+            'sch_end':      sch_end,
+            'lmrb_start':   lmrb_start,
+            'lmrb_end':     lmrb_end,
+            'lmrb_amber':   lmrb_amber,
+            'last_run':     last_run,
+            'dot':          dot,
+            'versions':     versions,
+        })
+
+    return rows
+
+
 # ── Main tool page ─────────────────────────────────────────────────────────────
 
 @login_required
 def tool(request):
-    user = request.user
-    if _is_admin(user):
-        accounts = Account.objects.all().order_by('name')
-    else:
-        accounts = user.accounts.all().order_by('name')
-    return render(request, 'verification/tool.html', {'accounts': accounts})
+    """Verify Ads — summary dashboard (FIX 24/25/26)."""
+    rows = _build_campaign_rows(request.user)
+    return render(request, 'verification/tool.html', {'campaign_rows': rows})
+
+
+# ── AJAX: run verification for a single campaign row ────────────────────────────
+
+@login_required
+def verify_row(request):
+    """AJAX POST — run verification for one (account, channel, month) and return updated row data."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    account_id = request.POST.get('account_id')
+    channel    = request.POST.get('channel')
+    month      = request.POST.get('month')
+    mode       = request.POST.get('mode', 'smart')
+
+    if not all([account_id, channel, month]):
+        return JsonResponse({'ok': False, 'error': 'Missing parameters.'})
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied.'})
+
+    try:
+        run_scope(account_id, channel, month, mode=mode)
+    except Exception as e:
+        return JsonResponse({'ok': False, 'error': str(e)})
+
+    # Return updated counts for this row
+    mr_qs     = MatchResult.objects.filter(account_id=account_id, channel=channel, month=month)
+    n_matched = mr_qs.filter(status='matched').count()
+    n_missed  = mr_qs.filter(status='not_aired').count()
+    planned   = ScheduleRow.objects.filter(account_id=account_id, channel=channel, month=month).count()
+    dot       = _status_dot(account_id, channel, month)
+    last_run  = mr_qs.order_by('-run_at').values_list('run_at', flat=True).first()
+
+    return JsonResponse({
+        'ok':       True,
+        'planned':  planned,
+        'aired':    n_matched,
+        'missed':   n_missed,
+        'dot':      dot,
+        'last_run': last_run.strftime('%d %b %Y %H:%M') if last_run else None,
+    })
 
 
 # ── AJAX helpers ───────────────────────────────────────────────────────────────

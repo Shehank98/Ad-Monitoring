@@ -45,8 +45,10 @@ class Schedule(models.Model):
     # Auto-detected from file
     start_date        = models.DateField(null=True, blank=True)
     end_date          = models.DateField(null=True, blank=True)
-    # Version — auto-incremented per (account, channel) on each new upload
+    # Version — auto-incremented per (account, channel, month) on each new upload
     version           = models.PositiveIntegerField(default=1)
+    # Superseded by a later replacement upload with the same schedule_number
+    is_superseded     = models.BooleanField(default=False)
     uploaded_by       = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
                                           null=True, related_name='uploaded_schedules')
     uploaded_at       = models.DateTimeField(auto_now_add=True)

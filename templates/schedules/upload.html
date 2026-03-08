@@ -184,12 +184,36 @@
         {{ form.file }}
       </div>
 
+      <!-- Duplicate ref confirmation (shown when server detects same ref number) -->
+      {% if dup_ref_existing %}
+      <div class="p-4 bg-amber-50 border border-amber-300 rounded-xl">
+        <p class="text-sm font-bold text-amber-800 mb-1">
+          <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+          Duplicate Schedule Reference Detected
+        </p>
+        <p class="text-xs text-amber-700 mb-3">
+          A schedule with ref <strong>#{{ dup_ref_existing.schedule_number }}</strong>
+          (v{{ dup_ref_existing.version }}, {{ dup_ref_existing.row_count }} rows,
+          uploaded {{ dup_ref_existing.uploaded_at|date:"d M Y" }}) already exists
+          for <strong>{{ dup_ref_existing.channel }}</strong> — <strong>{{ dup_ref_existing.month }}</strong>.
+        </p>
+        <div class="flex gap-3">
+          <button type="submit" name="duplicate_action" value="replace" class="btn-danger text-sm">
+            <i class="fa-solid fa-rotate-right"></i> Replace (supersede old version)
+          </button>
+          <button type="submit" name="duplicate_action" value="keep_both" class="btn-secondary text-sm">
+            <i class="fa-solid fa-copy"></i> Keep Both (add as new version)
+          </button>
+        </div>
+      </div>
+      {% else %}
       <div class="flex gap-3 pt-2">
         <button type="submit" class="btn-primary" id="submit-btn">
           <i class="fa-solid fa-cloud-arrow-up"></i> Upload Schedule
         </button>
         <a href="/dashboard/schedules/" class="btn-secondary">Cancel</a>
       </div>
+      {% endif %}
     </form>
   </div>
 </div>

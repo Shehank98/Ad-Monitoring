@@ -94,25 +94,47 @@ def change_password_view(request):
     return render(request, 'accounts/change_password.html', {'form': form})
 
 
-# ── User management (admin / super_admin only) ────────────────────────────────
+# ── User management ────────────────────────────────────────────────────────────
 
 @login_required
-@role_required(['super_admin', 'admin'])
+@role_required(['super_admin', 'admin', 'team_head'])
 def user_list(request):
+    me = request.user
     qs = User.objects.select_related('created_by').prefetch_related('accounts')
-    if request.user.role != 'super_admin':
+
+    if me.role == 'super_admin':
+        pass  # sees everyone
+    elif me.role == 'admin':
         qs = qs.exclude(role='super_admin')
-    return render(request, 'admin_panel/users.html', {'users': qs})
+    elif me.role == 'team_head':
+        # Team head sees only planner/operations users assigned to their accounts
+        my_account_ids = me.accounts.values_list('id', flat=True)
+        qs = qs.filter(
+            role__in=['planner', 'operations'],
+            accounts__in=my_account_ids,
+        ).distinct()
+
+    can_create = bool(me.creatable_roles())
+    return render(request, 'admin_panel/users.html', {
+        'users':      qs,
+        'can_create': can_create,
+    })
 
 
 @login_required
-@role_required(['super_admin', 'admin'])
+@role_required(['super_admin', 'admin', 'team_head'])
 def create_user(request):
     me            = request.user
     allowed_roles = me.creatable_roles()
 
+    # team_head: restrict account choices to their own accounts
+    if me.role == 'team_head':
+        account_qs = me.accounts.all()
+    else:
+        account_qs = Account.objects.all()
+
     if request.method == 'POST':
-        form = CreateUserForm(request.POST, allowed_roles=allowed_roles)
+        form = CreateUserForm(request.POST, allowed_roles=allowed_roles, account_qs=account_qs)
         if form.is_valid():
             email  = form.cleaned_data['email'].strip().lower()
             domain = settings.ALLOWED_EMAIL_DOMAIN
@@ -134,20 +156,35 @@ def create_user(request):
                 messages.success(request, f'User {new_user.name} created successfully.')
                 return redirect('/dashboard/users/')
     else:
-        form = CreateUserForm(allowed_roles=allowed_roles)
+        form = CreateUserForm(allowed_roles=allowed_roles, account_qs=account_qs)
 
     return render(request, 'admin_panel/create_user.html', {'form': form})
 
 
 @login_required
-@role_required(['super_admin', 'admin'])
+@role_required(['super_admin', 'admin', 'team_head'])
 def edit_user(request, user_id):
     me          = request.user
     target_user = get_object_or_404(User, id=user_id)
 
+    # super_admin protection
     if me.role != 'super_admin' and target_user.role == 'super_admin':
         messages.error(request, 'You cannot modify super admin accounts.')
         return redirect('/dashboard/users/')
+
+    # team_head can only edit planner/operations in their own accounts
+    if me.role == 'team_head':
+        if target_user.role not in ('planner', 'operations'):
+            return render(request, '403.html', status=403)
+        my_account_ids = set(me.accounts.values_list('id', flat=True))
+        target_acct_ids = set(target_user.accounts.values_list('id', flat=True))
+        if not my_account_ids & target_acct_ids:
+            return render(request, '403.html', status=403)
+
+    if me.role == 'team_head':
+        account_qs = me.accounts.all()
+    else:
+        account_qs = Account.objects.all()
 
     if request.method == 'POST':
         action = request.POST.get('action')
@@ -170,6 +207,10 @@ def edit_user(request, user_id):
 
         elif action == 'update_accounts':
             ids = request.POST.getlist('accounts')
+            # team_head can only assign their own accounts
+            if me.role == 'team_head':
+                my_ids = set(me.accounts.values_list('id', flat=True))
+                ids = [i for i in ids if int(i) in my_ids]
             target_user.accounts.set(ids)
             messages.success(request, f'Accounts updated for {target_user.name}.')
 
@@ -177,6 +218,6 @@ def edit_user(request, user_id):
 
     return render(request, 'admin_panel/edit_user.html', {
         'target_user':   target_user,
-        'all_accounts':  Account.objects.all(),
+        'all_accounts':  account_qs,
         'user_accounts': list(target_user.accounts.values_list('id', flat=True)),
     })

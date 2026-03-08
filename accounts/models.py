@@ -81,6 +81,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     CAN_CREATE = {
         'super_admin': ['admin', 'team_head', 'planner', 'operations'],
         'admin':       ['team_head', 'planner', 'operations'],
+        'team_head':   ['planner', 'operations'],
     }
 
     def can_create_role(self, role: str) -> bool:

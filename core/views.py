@@ -307,7 +307,7 @@ def schedule_list(request):
 
 
 @login_required
-@role_required(['planner', 'super_admin', 'admin'])
+@role_required(['planner', 'super_admin', 'admin', 'team_head', 'operations'])
 def schedule_upload(request):
     user = request.user
     form = ScheduleUploadForm()
@@ -341,9 +341,57 @@ def schedule_upload(request):
             if not month:
                 month = 'Unknown'
 
+            sched_number   = form.cleaned_data['schedule_number'].strip()
+            channel_name   = channel_obj.name
+            dup_action     = request.POST.get('duplicate_action', '')
+
+            # Check for duplicate ref number within same (account, channel, month)
+            existing_same_ref = Schedule.objects.filter(
+                account=account, channel=channel_name,
+                month=month, schedule_number=sched_number,
+                is_superseded=False,
+            ).first()
+
+            if existing_same_ref and dup_action not in ('replace', 'keep_both'):
+                # Re-render the form with a confirmation prompt
+                return render(request, 'schedules/upload.html', {
+                    'form':          form,
+                    'schedule_col_guide': [
+                        ('PROGRAMME',   'Programme / show name',              True),
+                        ('DAY',         'Day abbreviation (MON, TUE…)',       True),
+                        ('TIME',        'Ad start time (HH:MM:SS)',           True),
+                        ('End Time',    'Ad end time — column after TIME',    False),
+                        ('DUR',         'Duration in seconds',                True),
+                        ('BRAND',       'Brand name (optional inline col)',   False),
+                        ('[date cols]', 'Date values → spot count per day',   True),
+                    ],
+                    'dup_ref_existing': existing_same_ref,
+                    'dup_ref_form_data': request.POST,
+                    'dup_ref_file_key':  excel_file.name,
+                })
+
+            # Handle replacement: mark existing as superseded + release matched LMRB
+            if existing_same_ref and dup_action == 'replace':
+                from core.models import LMRBRow as _LR, ScheduleRow as _SR
+                # Release matched LMRB rows linked to superseded schedule rows
+                sr_ids = list(existing_same_ref.rows.values_list('id', flat=True))
+                _LR.objects.filter(schedule_matches__in=sr_ids).update(
+                    is_matched=False, matched_at=None
+                )
+                existing_same_ref.rows.update(
+                    is_matched=False, matched_lmrb=None, matched_at=None,
+                    is_manual_matched=False,
+                )
+                existing_same_ref.is_superseded = True
+                existing_same_ref.save(update_fields=['is_superseded'])
+                messages.warning(request,
+                    f'Schedule #{sched_number} (v{existing_same_ref.version}) '
+                    f'was superseded. Previously matched LMRB rows have been released for re-matching.')
+
+            # Version = next version per (account, channel, month)
             last_ver = (
                 Schedule.objects
-                .filter(account=account, channel=channel_obj.name)
+                .filter(account=account, channel=channel_name, month=month)
                 .aggregate(Max('version'))['version__max'] or 0
             )
             version = last_ver + 1
@@ -351,9 +399,9 @@ def schedule_upload(request):
             excel_file.seek(0)
             schedule = Schedule(
                 account           = account,
-                channel           = channel_obj.name,
+                channel           = channel_name,
                 month             = month,
-                schedule_number   = form.cleaned_data['schedule_number'],
+                schedule_number   = sched_number,
                 original_filename = excel_file.name,
                 row_count         = row_count,
                 start_date        = start_date,
@@ -365,7 +413,7 @@ def schedule_upload(request):
             schedule.save()
 
             # ── Parse Schedule rows into DB ────────────────────────────────────
-            _parse_schedule_rows(df, schedule, account, channel_obj.name, month)
+            _parse_schedule_rows(df, schedule, account, channel_name, month)
 
             messages.success(request,
                 f'Schedule #{schedule.schedule_number} v{version} for {account} '
@@ -586,7 +634,7 @@ def monitoring_list(request):
 
 
 @login_required
-@role_required(['operations', 'super_admin', 'admin'])
+@role_required(['operations', 'super_admin', 'admin', 'team_head', 'planner'])
 def monitoring_upload(request):
     """
     Upload a MapOnline or LMRB file.
@@ -3530,7 +3578,7 @@ def admin_export(request):
 # ── System Settings (super_admin only) ────────────────────────────────────────
 
 @login_required
-@role_required(['super_admin'])
+@role_required(['super_admin', 'admin'])
 def system_settings(request):
     """
     Site-wide configuration page — super_admin only.
@@ -3580,7 +3628,7 @@ def system_settings(request):
 # ── Branding upload ─────────────────────────────────────────────────────────────
 
 @login_required
-@role_required(['super_admin'])
+@role_required(['super_admin', 'admin'])
 def branding_upload(request):
     """Upload logo or tartan pattern image for the login page / sidebar."""
     if request.method == 'POST':
@@ -3615,7 +3663,7 @@ def branding_upload(request):
 # ── Sponsorship Reconciliation ─────────────────────────────────────────────────
 
 @login_required
-@role_required(['super_admin', 'admin', 'operations'])
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
 @require_POST
 def sponsorship_reconcile(request):
     """
@@ -3710,7 +3758,7 @@ def sponsorship_candidates(request):
 
 
 @login_required
-@role_required(['super_admin', 'admin', 'operations'])
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
 @require_POST
 def sponsorship_assign(request):
     """
@@ -3745,7 +3793,7 @@ def sponsorship_assign(request):
 
 
 @login_required
-@role_required(['super_admin', 'admin'])
+@role_required(['super_admin', 'admin', 'team_head', 'planner'])
 @require_POST
 def sponsorship_reset(request):
     """POST: Delete all SponsorshipLmrbAssignments for a scope and unlock LMRBRows."""
@@ -3810,7 +3858,7 @@ def sponsorship_unmatched_rows(request):
 # ── Manual Reconciliation ──────────────────────────────────────────────────────
 
 @login_required
-@role_required(['super_admin', 'admin', 'operations', 'team_head'])
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
 def manual_reconciliation(request):
     """
     Three-panel view: unmatched schedule rows (left), unmatched TC spots (middle),
@@ -3926,7 +3974,7 @@ def manual_reconciliation(request):
 
 
 @login_required
-@role_required(['super_admin', 'admin', 'operations'])
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
 @require_POST
 def manual_match_create(request):
     """
@@ -4045,7 +4093,7 @@ def manual_match_create(request):
 
 
 @login_required
-@role_required(['super_admin', 'admin', 'operations'])
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
 @require_POST
 def manual_dematch(request, pk):
     """
@@ -4212,7 +4260,7 @@ def commercial_unmatched_rows(request):
 
 
 @login_required
-@role_required(['super_admin', 'admin', 'operations'])
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
 @require_POST
 def commercial_assign(request):
     """
