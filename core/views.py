@@ -2472,7 +2472,7 @@ def summary_excel(request):
     left   = Alignment(horizontal='left',   vertical='center', wrap_text=True)
     right  = Alignment(horizontal='right',  vertical='center')
 
-    # Column widths
+    # Column widths (7 data columns — Avg 30s removed)
     ws.column_dimensions['A'].width = 36
     ws.column_dimensions['B'].width = 8
     ws.column_dimensions['C'].width = 10
@@ -2480,12 +2480,11 @@ def summary_excel(request):
     ws.column_dimensions['E'].width = 10
     ws.column_dimensions['F'].width = 10
     ws.column_dimensions['G'].width = 12
-    ws.column_dimensions['H'].width = 14
 
     row = 1
 
     # ── Title ─────────────────────────────────────────────────────────────────
-    ws.merge_cells(f'A{row}:H{row}')
+    ws.merge_cells(f'A{row}:G{row}')
     c = ws.cell(row, 1, 'SUMMARY SHEET REPORT')
     c.font = title_font; c.alignment = centre; c.fill = LGRAY
     ws.row_dimensions[row].height = 28
@@ -2501,18 +2500,18 @@ def summary_excel(request):
         ('',                        'INVOICE NO',            meta.invoice_no if meta else ''),
     ]
     for addr, label, value in company_info:
-        ws.merge_cells(f'A{row}:D{row}')
+        ws.merge_cells(f'A{row}:C{row}')
         c = ws.cell(row, 1, addr); c.font = norm10; c.alignment = left
-        ws.merge_cells(f'E{row}:F{row}')
-        c = ws.cell(row, 5, label + '  :'); c.font = bold10; c.alignment = right
-        ws.merge_cells(f'G{row}:H{row}')
-        c = ws.cell(row, 7, value); c.font = norm10; c.alignment = left
+        ws.merge_cells(f'D{row}:E{row}')
+        c = ws.cell(row, 4, label + '  :'); c.font = bold10; c.alignment = right
+        ws.merge_cells(f'F{row}:G{row}')
+        c = ws.cell(row, 6, value); c.font = norm10; c.alignment = left
         row += 1
 
     row += 1  # blank
 
     # ── Column headers ────────────────────────────────────────────────────────
-    headers = ['PRODUCT', 'DUR', 'PLANNED', 'AIRED', 'MISSED', 'EXTRA', '3RD PARTY', 'Avg 30s']
+    headers = ['PRODUCT', 'DUR', 'PLANNED', 'AIRED', 'MISSED', 'EXTRA', '3RD PARTY']
     for col_i, h in enumerate(headers, start=1):
         c = ws.cell(row, col_i, h)
         c.font = hdr_font; c.fill = NAVY; c.alignment = centre
@@ -2522,14 +2521,14 @@ def summary_excel(request):
 
     # ── Commercial Benefits section ───────────────────────────────────────────
     if data['commercial']:
-        ws.merge_cells(f'A{row}:H{row}')
+        ws.merge_cells(f'A{row}:G{row}')
         c = ws.cell(row, 1, 'Commercial Benefits'); c.font = bold10; c.fill = LBLUE
         c.alignment = left
         row += 1
 
         for item in data['commercial']:
             vals = [item['product'], item['dur'], item['planned'], item['aired'],
-                    item['missed'], item['extra'], item['third_party'], item['avg_30']]
+                    item['missed'], item['extra'], item['third_party']]
             fill = REDFILL if item['missed'] > 0 else None
             for col_i, v in enumerate(vals, start=1):
                 c = ws.cell(row, col_i, v)
@@ -2543,65 +2542,48 @@ def summary_excel(request):
         # Grand Total
         t = data['commercial_total']
         total_vals = ['Grand Total', '', t['planned'], t['aired'], t['missed'],
-                      t['extra'], t['third_party'], t['avg_30']]
+                      t['extra'], t['third_party']]
         for col_i, v in enumerate(total_vals, start=1):
             c = ws.cell(row, col_i, v)
             c.font = bold10; c.fill = DGRAY; c.alignment = centre if col_i > 1 else left
             c.border = border()
         row += 1
 
-        # Total avg 30s (whole row)
-        ws.merge_cells(f'A{row}:G{row}')
-        ws.cell(row, 1, '').fill = LGRAY
-        c = ws.cell(row, 8, round(t['avg_30'] * 2, 2))
-        c.font = bold11; c.fill = GOLD; c.alignment = centre; c.border = border()
-        row += 1
-
     row += 1  # blank
 
     # ── Sponsorship Benefits section ──────────────────────────────────────────
     if data['sponsorship']:
-        ws.merge_cells(f'A{row}:H{row}')
+        ws.merge_cells(f'A{row}:G{row}')
         c = ws.cell(row, 1, 'Sponsorship Benefits'); c.font = bold11; c.fill = GOLD
         c.alignment = left
         row += 1
 
         for section in data['sponsorship']:
             # Programme heading
-            ws.merge_cells(f'A{row}:H{row}')
+            ws.merge_cells(f'A{row}:G{row}')
             c = ws.cell(row, 1, section['programme'].upper())
             c.font = bold10; c.fill = LBLUE; c.alignment = left
             row += 1
 
             for item in section['rows']:
                 vals = [item['product'], item['dur'], item['planned'], item['aired'],
-                        item['missed'], item['extra'], item['third_party'], item['avg_30']]
+                        item['missed'], item['extra'], item['third_party']]
                 for col_i, v in enumerate(vals, start=1):
                     c = ws.cell(row, col_i, v)
                     c.font = norm10
                     c.alignment = centre if col_i > 1 else left
                     c.border = border()
                 row += 1
-
-            # Subtotal
-            st = section['subtotal']
-            st_vals = ['Grand Total', '', st['planned'], st['aired'], st['missed'],
-                       st['extra'], st['third_party'], st['avg_30']]
-            for col_i, v in enumerate(st_vals, start=1):
-                c = ws.cell(row, col_i, v)
-                c.font = bold10; c.fill = DGRAY; c.alignment = centre if col_i > 1 else left
-                c.border = border()
-            row += 1
-            row += 1  # blank between programmes
+            # No per-programme subtotal — only grand total at end
 
         # Sponsorship Grand Total
         st = data['sponsorship_total']
-        ws.merge_cells(f'A{row}:H{row}')
+        ws.merge_cells(f'A{row}:G{row}')
         c = ws.cell(row, 1, 'SPONSORSHIP GRAND TOTAL'); c.font = bold11; c.fill = GOLD
         c.alignment = left
         row += 1
         total_vals = ['Grand Total', '', st['planned'], st['aired'], st['missed'],
-                      st['extra'], st['third_party'], st['avg_30']]
+                      st['extra'], st['third_party']]
         for col_i, v in enumerate(total_vals, start=1):
             c = ws.cell(row, col_i, v)
             c.font = bold10; c.fill = DGRAY; c.alignment = centre if col_i > 1 else left
@@ -2611,27 +2593,26 @@ def summary_excel(request):
     row += 1  # blank
 
     # ── Notes ─────────────────────────────────────────────────────────────────
-    ws.merge_cells(f'A{row}:H{row}')
+    ws.merge_cells(f'A{row}:G{row}')
     ws.cell(row, 1, 'NOTE:').font = bold10
     row += 1
     notes_text = meta.notes if meta and meta.notes else 'Channel transmission attached\nSponsorship Benefits confirmation email attached'
     for line in notes_text.split('\n'):
-        ws.merge_cells(f'A{row}:H{row}')
+        ws.merge_cells(f'A{row}:G{row}')
         c = ws.cell(row, 1, line.strip()); c.font = norm10
         row += 1
 
     row += 2  # blank
 
-    # ── Signatures ────────────────────────────────────────────────────────────
+    # ── Signatures (3 across 7 columns: A-B, C-D-E, F-G) ─────────────────────
     sig_labels = ['PREPARED BY', 'CHECKED BY', 'AUTHORISED BY']
     sig_values = [
         meta.prepared_by if meta else '',
         meta.checked_by  if meta else '',
         meta.authorised_by if meta else '',
     ]
-    for col_i, (lbl, val) in enumerate(zip(sig_labels, sig_values)):
-        start_col = col_i * 3 + 1
-        end_col   = start_col + 2
+    sig_ranges = [(1, 2), (3, 5), (6, 7)]
+    for (start_col, end_col), lbl in zip(sig_ranges, sig_labels):
         ws.merge_cells(
             start_row=row, start_column=start_col,
             end_row=row,   end_column=end_col,
@@ -2776,9 +2757,9 @@ def summary_pdf(request):
     ))
     story.append(HRFlowable(width='100%', thickness=1, color=BLUE, spaceAfter=8))
 
-    # Column headers for summary tables
-    SUM_HEADERS = ['Product', 'Dur', 'Planned', 'Aired', 'Missed', 'Extra', '3rd Party', 'Avg 30s']
-    SUM_WIDTHS  = [5*cm, 1.5*cm, 1.8*cm, 1.8*cm, 1.8*cm, 1.8*cm, 2*cm, 2*cm]
+    # Column headers for summary tables (Avg 30s removed)
+    SUM_HEADERS = ['Product', 'Dur', 'Planned', 'Aired', 'Missed', 'Extra', '3rd Party']
+    SUM_WIDTHS  = [5.5*cm, 1.5*cm, 2*cm, 2*cm, 2*cm, 2*cm, 2.2*cm]
 
     def _summary_table(rows, total_row):
         """Build a ReportLab Table for summary data rows."""
@@ -2792,7 +2773,6 @@ def summary_pdf(request):
                 Paragraph(str(r.get('missed', 0)), h_cell),
                 Paragraph(str(r.get('extra', 0)), h_cell),
                 Paragraph(str(r.get('third_party', 0)), h_cell),
-                Paragraph(str(r.get('avg_30', 0)), h_cell),
             ])
         # Total row
         t = total_row
@@ -2804,7 +2784,6 @@ def summary_pdf(request):
             Paragraph(str(t.get('missed', 0)), h_cell),
             Paragraph(str(t.get('extra', 0)), h_cell),
             Paragraph(str(t.get('third_party', 0)), h_cell),
-            Paragraph(str(t.get('avg_30', 0)), h_cell),
         ])
         tbl = Table(tdata, colWidths=SUM_WIDTHS, repeatRows=1)
         tbl.setStyle(TableStyle([
@@ -2832,17 +2811,50 @@ def summary_pdf(request):
         story.append(_summary_table(data['commercial'], data['commercial_total']))
         story.append(Spacer(1, 0.4*cm))
 
-    # Sponsorship Benefits
+    # Sponsorship Benefits — one table per programme, grand total at end only
     if data.get('sponsorship'):
         story.append(Paragraph('Sponsorship Benefits', h_sect))
         story.append(Spacer(1, 0.2*cm))
+        prog_label_style = ParagraphStyle('prog', fontSize=8, fontName='Helvetica-Bold',
+                                          textColor=BLUE)
+        all_spon_rows = []
         for section in data['sponsorship']:
-            prog_label = ParagraphStyle('prog', fontSize=8, fontName='Helvetica-Bold',
-                                        textColor=BLUE)
-            story.append(Paragraph(section['programme'].upper(), prog_label))
+            story.append(Paragraph(section['programme'].upper(), prog_label_style))
             story.append(Spacer(1, 0.1*cm))
-            story.append(_summary_table(section['rows'], section['subtotal']))
+            # Render rows without individual subtotal
+            tdata_spon = [[Paragraph(h, h_hdr) for h in SUM_HEADERS]]
+            for r in section['rows']:
+                tdata_spon.append([
+                    Paragraph(str(r.get('product', '')), h_cell),
+                    Paragraph(str(r.get('dur') or '—'), h_cell),
+                    Paragraph(str(r.get('planned', 0)), h_cell),
+                    Paragraph(str(r.get('aired', 0)), h_cell),
+                    Paragraph(str(r.get('missed', 0)), h_cell),
+                    Paragraph(str(r.get('extra', 0)), h_cell),
+                    Paragraph(str(r.get('third_party', 0)), h_cell),
+                ])
+            spon_tbl = Table(tdata_spon, colWidths=SUM_WIDTHS, repeatRows=1)
+            spon_tbl.setStyle(TableStyle([
+                ('BACKGROUND',  (0, 0), (-1, 0),  NAVY),
+                ('TEXTCOLOR',   (0, 0), (-1, 0),  colors.white),
+                ('FONTSIZE',    (0, 0), (-1, -1), 7.5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [LGRAY, colors.white]),
+                ('VALIGN',      (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING',  (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ('GRID',        (0, 0), (-1, -1), 0.3, MGRAY),
+                ('LINEBELOW',   (0, 0), (-1, 0),  1,   BLUE),
+            ]))
+            story.append(spon_tbl)
             story.append(Spacer(1, 0.3*cm))
+        # Sponsorship Grand Total (all programmes combined)
+        grand_label = ParagraphStyle('grand', fontSize=8, fontName='Helvetica-Bold',
+                                     textColor=NAVY)
+        story.append(Paragraph('SPONSORSHIP GRAND TOTAL', grand_label))
+        story.append(Spacer(1, 0.1*cm))
+        story.append(_summary_table([], data['sponsorship_total']))
 
     # Signatures
     if meta and any([meta.prepared_by, meta.checked_by, meta.authorised_by]):
@@ -3019,6 +3031,255 @@ def summary_pdf(request):
     response = HttpResponse(buf.read(), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{fname}"'
     return response
+
+
+@login_required
+def matched_lmrb_excel(request):
+    """
+    FIX 3 — Export matched LMRB rows for the selected scope as an Excel file.
+
+    Includes ALL LMRBRow columns.  Filtered to the selected channel only
+    (not all channels in the LMRB data).  Only rows where is_matched=True
+    (consumed by the Schedule↔LMRB engine).
+    """
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill
+    from django.db.models import Min, Max
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+
+    if not (account_id and channel and month):
+        return HttpResponse('Missing parameters: account_id, channel, month', status=400)
+    if not _account_access(request.user, account_id):
+        return HttpResponse('Access denied', status=403)
+
+    account = get_object_or_404(Account, id=account_id)
+
+    # Date range from schedule
+    sch_dates = Schedule.objects.filter(
+        account_id=account_id, channel=channel, month=month
+    ).aggregate(d_min=Min('start_date'), d_max=Max('end_date'))
+    date_min = sch_dates.get('d_min')
+    date_max = sch_dates.get('d_max')
+
+    qs = LMRBRow.objects.filter(
+        account_id=account_id, channel__iexact=channel, is_matched=True,
+    ).order_by('date', 'advt_time')
+    if date_min and date_max:
+        qs = qs.filter(date__range=(date_min, date_max))
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Matched LMRB'
+
+    HDR_FILL = PatternFill('solid', fgColor='0F2340')
+    hdr_font = Font(bold=True, color='FFFFFF', size=10)
+    norm     = Font(size=10)
+    centre   = Alignment(horizontal='center', vertical='center')
+    left_al  = Alignment(horizontal='left',   vertical='center')
+
+    headers = [
+        'Date', 'Channel', 'Advt_Theme', 'Advt_Time', 'Duration', 'Source',
+        'Product_Group', 'Advertiser', 'Product', 'Ads', 'Program', 'Prog_Time',
+        'Ad_Pos', 'Tot_Ads', 'Brk_No', 'Pos_In_Brk', 'Ads_In_Brk',
+        'Lng', 'Cost', 'Day',
+    ]
+    for col_i, h in enumerate(headers, start=1):
+        c = ws.cell(1, col_i, h)
+        c.font = hdr_font; c.fill = HDR_FILL; c.alignment = centre
+
+    for row_i, lr in enumerate(qs, start=2):
+        ws.cell(row_i,  1, str(lr.date) if lr.date else '').font = norm
+        ws.cell(row_i,  2, lr.channel or '').font = norm
+        ws.cell(row_i,  3, lr.advt_theme or '').font = norm
+        ws.cell(row_i,  4, lr.advt_time or '').font = norm
+        ws.cell(row_i,  5, lr.duration).font = norm
+        ws.cell(row_i,  6, lr.source or '').font = norm
+        ws.cell(row_i,  7, lr.product_group or '').font = norm
+        ws.cell(row_i,  8, lr.advertiser or '').font = norm
+        ws.cell(row_i,  9, lr.product or '').font = norm
+        ws.cell(row_i, 10, lr.ads or '').font = norm
+        ws.cell(row_i, 11, lr.program or '').font = norm
+        ws.cell(row_i, 12, lr.prog_time or '').font = norm
+        ws.cell(row_i, 13, lr.ad_pos).font = norm
+        ws.cell(row_i, 14, lr.tot_ads).font = norm
+        ws.cell(row_i, 15, lr.brk_no).font = norm
+        ws.cell(row_i, 16, lr.pos_in_brk).font = norm
+        ws.cell(row_i, 17, lr.ads_in_brk).font = norm
+        ws.cell(row_i, 18, lr.lng or '').font = norm
+        ws.cell(row_i, 19, float(lr.cost) if lr.cost is not None else '').font = norm
+        ws.cell(row_i, 20, lr.day or '').font = norm
+
+    buf = io.BytesIO()
+    wb.save(buf); buf.seek(0)
+    fname = f'Matched_LMRB_{account.name}_{channel}_{month}.xlsx'.replace(' ', '_')
+    resp = HttpResponse(
+        buf.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    resp['Content-Disposition'] = f'attachment; filename="{fname}"'
+    return resp
+
+
+@login_required
+@role_required(['super_admin', 'admin'])
+def admin_export(request):
+    """
+    FIX 6 — Admin-only full database export.
+
+    GET:  Show the filter form.
+    POST: Generate and download the Excel file.
+
+    Exports to Excel with separate sheets:
+      - Matched LMRB (is_matched=True)
+      - Unmatched LMRB (is_matched=False)
+      - Summary (build_summary_data output)
+
+    Filters: account, channel, brand, date_from, date_to.
+    Each sheet has a metadata row at the top with row count.
+    """
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from django.db.models import Min, Max
+
+    user       = request.user
+    account_qs = _account_qs(user)
+
+    if request.method == 'GET':
+        # Collect available channels for the dropdown (filtered by account if selected)
+        account_id = request.GET.get('account_id', '')
+        channels = []
+        if account_id and _account_access(user, account_id):
+            channels = sorted(set(
+                LMRBRow.objects.filter(account_id=account_id)
+                .values_list('channel', flat=True)
+            ))
+        return render(request, 'admin_export.html', {
+            'accounts': account_qs,
+            'account_id': account_id,
+            'channels': channels,
+        })
+
+    # POST — build export
+    account_id = request.POST.get('account_id', '').strip()
+    channel    = request.POST.get('channel', '').strip()
+    brand      = request.POST.get('brand', '').strip()
+    date_from  = request.POST.get('date_from', '').strip()
+    date_to    = request.POST.get('date_to', '').strip()
+    scope      = request.POST.get('scope', 'both')  # 'matched' | 'unmatched' | 'both'
+
+    if not account_id or not _account_access(user, account_id):
+        messages.error(request, 'Select a valid account.')
+        return redirect('/dashboard/admin-export/')
+
+    account = get_object_or_404(Account, id=account_id)
+
+    # Base queryset
+    base_qs = LMRBRow.objects.filter(account_id=account_id)
+    if channel:
+        base_qs = base_qs.filter(channel__iexact=channel)
+    if brand:
+        # Filter by advt_theme containing brand (case-insensitive)
+        base_qs = base_qs.filter(advt_theme__icontains=brand)
+    if date_from:
+        try:
+            from datetime import date as _date
+            from_d = _date.fromisoformat(date_from)
+            base_qs = base_qs.filter(date__gte=from_d)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            from datetime import date as _date
+            to_d = _date.fromisoformat(date_to)
+            base_qs = base_qs.filter(date__lte=to_d)
+        except ValueError:
+            pass
+
+    matched_qs   = base_qs.filter(is_matched=True).order_by('date', 'advt_time')
+    unmatched_qs = base_qs.filter(is_matched=False).order_by('date', 'advt_time')
+
+    wb = openpyxl.Workbook()
+
+    HDR_FILL  = PatternFill('solid', fgColor='0F2340')
+    META_FILL = PatternFill('solid', fgColor='FEF9C3')
+    hdr_font  = Font(bold=True, color='FFFFFF', size=10)
+    meta_font = Font(bold=True, size=10)
+    norm_font = Font(size=10)
+    centre_al = Alignment(horizontal='center', vertical='center')
+
+    LMRB_HEADERS = [
+        'Date', 'Channel', 'Advt_Theme', 'Advt_Time', 'Duration', 'Source',
+        'Product_Group', 'Advertiser', 'Product', 'Ads', 'Program', 'Prog_Time',
+        'Ad_Pos', 'Tot_Ads', 'Brk_No', 'Pos_In_Brk', 'Ads_In_Brk',
+        'Lng', 'Cost', 'Day', 'Is_Matched', 'Is_Sponsorship_Matched',
+    ]
+
+    def _write_lmrb_sheet(ws_sheet, qs, label):
+        rows = list(qs)
+        # Row 1: metadata
+        ws_sheet.merge_cells(f'A1:V1')
+        c = ws_sheet.cell(1, 1, f'{label} | Account: {account.name}'
+                                f'{" | Channel: " + channel if channel else ""}'
+                                f' | Total rows: {len(rows)}')
+        c.font = meta_font; c.fill = META_FILL
+        # Row 2: headers
+        for col_i, h in enumerate(LMRB_HEADERS, start=1):
+            c = ws_sheet.cell(2, col_i, h)
+            c.font = hdr_font; c.fill = HDR_FILL; c.alignment = centre_al
+        # Data rows
+        for row_i, lr in enumerate(rows, start=3):
+            ws_sheet.cell(row_i,  1, str(lr.date) if lr.date else '')
+            ws_sheet.cell(row_i,  2, lr.channel or '')
+            ws_sheet.cell(row_i,  3, lr.advt_theme or '')
+            ws_sheet.cell(row_i,  4, lr.advt_time or '')
+            ws_sheet.cell(row_i,  5, lr.duration)
+            ws_sheet.cell(row_i,  6, lr.source or '')
+            ws_sheet.cell(row_i,  7, lr.product_group or '')
+            ws_sheet.cell(row_i,  8, lr.advertiser or '')
+            ws_sheet.cell(row_i,  9, lr.product or '')
+            ws_sheet.cell(row_i, 10, lr.ads or '')
+            ws_sheet.cell(row_i, 11, lr.program or '')
+            ws_sheet.cell(row_i, 12, lr.prog_time or '')
+            ws_sheet.cell(row_i, 13, lr.ad_pos)
+            ws_sheet.cell(row_i, 14, lr.tot_ads)
+            ws_sheet.cell(row_i, 15, lr.brk_no)
+            ws_sheet.cell(row_i, 16, lr.pos_in_brk)
+            ws_sheet.cell(row_i, 17, lr.ads_in_brk)
+            ws_sheet.cell(row_i, 18, lr.lng or '')
+            ws_sheet.cell(row_i, 19, float(lr.cost) if lr.cost is not None else '')
+            ws_sheet.cell(row_i, 20, lr.day or '')
+            ws_sheet.cell(row_i, 21, 'Yes' if lr.is_matched else 'No')
+            ws_sheet.cell(row_i, 22, 'Yes' if lr.is_sponsorship_matched else 'No')
+        for row_i in range(3, len(rows) + 3):
+            for col_i in range(1, len(LMRB_HEADERS) + 1):
+                ws_sheet.cell(row_i, col_i).font = norm_font
+
+    if scope in ('matched', 'both'):
+        ws_matched = wb.active
+        ws_matched.title = 'Matched LMRB'
+        _write_lmrb_sheet(ws_matched, matched_qs, 'Matched LMRB')
+
+    if scope in ('unmatched', 'both'):
+        ws_unmatched = wb.create_sheet('Unmatched LMRB')
+        _write_lmrb_sheet(ws_unmatched, unmatched_qs, 'Unmatched LMRB')
+    elif scope == 'unmatched':
+        # Only unmatched requested — rename the default sheet
+        ws_un = wb.active
+        ws_un.title = 'Unmatched LMRB'
+        _write_lmrb_sheet(ws_un, unmatched_qs, 'Unmatched LMRB')
+
+    buf = io.BytesIO()
+    wb.save(buf); buf.seek(0)
+    fname = f'AdminExport_{account.name}{"_" + channel if channel else ""}.xlsx'.replace(' ', '_')
+    resp = HttpResponse(
+        buf.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    resp['Content-Disposition'] = f'attachment; filename="{fname}"'
+    return resp
 
 
 # ── System Settings (super_admin only) ────────────────────────────────────────

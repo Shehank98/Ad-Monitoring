@@ -393,6 +393,11 @@
         <i class="nav-icon fa-solid fa-link"></i><span class="nav-text">Manual Reconcile</span>
       </a>
       {% endif %}
+      {% if request.user.role in 'super_admin,admin' %}
+      <a href="/dashboard/admin-export/" class="nav-item {% if '/admin-export/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-database"></i><span class="nav-text">Admin Export</span>
+      </a>
+      {% endif %}
 
       {% endwith %}
     </nav>

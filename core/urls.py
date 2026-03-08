@@ -50,9 +50,11 @@ urlpatterns = [
     path('tc/detail/',                          views.tc_three_way,   name='tc_three_way'),
 
     # Summary Sheet Report
-    path('summary/',                            views.summary_report, name='summary_report'),
-    path('summary/excel/',                      views.summary_excel,  name='summary_excel'),
-    path('summary/pdf/',                        views.summary_pdf,    name='summary_pdf'),
+    path('summary/',                            views.summary_report,      name='summary_report'),
+    path('summary/excel/',                      views.summary_excel,       name='summary_excel'),
+    path('summary/pdf/',                        views.summary_pdf,         name='summary_pdf'),
+    path('monitoring/matched-lmrb-excel/',      views.matched_lmrb_excel,  name='matched_lmrb_excel'),
+    path('admin-export/',                       views.admin_export,        name='admin_export'),
 
     # System Settings (super_admin only)
     path('settings/',                           views.system_settings, name='system_settings'),

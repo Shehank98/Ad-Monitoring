@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+{% block title %}Admin Database Export{% endblock %}
+{% block page_title %}Admin Database Export{% endblock %}
+{% block page_subtitle %}Full LMRB database export with filters — admin only{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+
+    <div class="flex items-center gap-2 mb-5">
+      <span class="inline-flex items-center gap-1.5 text-xs font-bold bg-red-50 text-red-600 border border-red-200 rounded-lg px-3 py-1">
+        <i class="fa-solid fa-shield-halved"></i> Admin Only
+      </span>
+      <p class="text-sm text-slate-500">Export all LMRB records with optional filters.</p>
+    </div>
+
+    <form method="post" action="/dashboard/admin-export/">
+      {% csrf_token %}
+
+      <div class="space-y-4">
+
+        <!-- Account -->
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Account <span class="text-red-500">*</span></label>
+          <select name="account_id" class="select-field" required onchange="this.form.submit()">
+            <option value="">Select account…</option>
+            {% for acc in accounts %}
+              <option value="{{ acc.id }}" {% if acc.id|stringformat:"s" == account_id %}selected{% endif %}>{{ acc.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Channel -->
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel <span class="text-slate-400 font-normal">(optional)</span></label>
+          <select name="channel" class="select-field" {% if not channels %}disabled{% endif %}>
+            <option value="">All channels</option>
+            {% for ch in channels %}
+              <option value="{{ ch }}">{{ ch }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Brand / Theme keyword -->
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Brand / Theme keyword <span class="text-slate-400 font-normal">(optional — searches Advt_Theme)</span></label>
+          <input type="text" name="brand" class="input-field" placeholder="e.g. MOBITEL, DIALOG…">
+        </div>
+
+        <!-- Date range -->
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Date From</label>
+            <input type="date" name="date_from" class="input-field">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Date To</label>
+            <input type="date" name="date_to" class="input-field">
+          </div>
+        </div>
+
+        <!-- Export scope -->
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Export Scope</label>
+          <div class="flex gap-4">
+            <label class="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="radio" name="scope" value="both" checked class="accent-blue-600"> Both (Matched + Unmatched)
+            </label>
+            <label class="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="radio" name="scope" value="matched" class="accent-emerald-600"> Matched only
+            </label>
+            <label class="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="radio" name="scope" value="unmatched" class="accent-rose-600"> Unmatched only
+            </label>
+          </div>
+        </div>
+
+      </div><!-- /space-y-4 -->
+
+      <!-- Info box -->
+      <div class="mt-5 p-3 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-700 space-y-1">
+        <p><i class="fa-solid fa-circle-info mr-1"></i> The Excel file will contain separate sheets per scope type.</p>
+        <p>Each sheet has a metadata row at the top showing the row count and filter parameters.</p>
+        <p>All original LMRB columns are included. No data is truncated regardless of dataset size.</p>
+      </div>
+
+      <div class="mt-5 flex gap-3">
+        <button type="submit" class="btn-primary">
+          <i class="fa-solid fa-file-excel"></i> Export Excel
+        </button>
+        <a href="/dashboard/" class="btn-secondary">Cancel</a>
+      </div>
+
+    </form>
+  </div>
+</div>
+{% endblock %}

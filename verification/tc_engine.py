@@ -394,7 +394,6 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
         planned = group['cnt']
 
         tc_themes   = _tc_themes_for_brand(brand, dur, tc_theme_map)
-        lmrb_themes = _lmrb_themes_for_brand(brand, dur, lmrb_theme_map)
         dur_int     = int(dur) if dur is not None else None
 
         # Aired = (TC schedule-matched AND LMRB-confirmed) + manually reconciled
@@ -425,15 +424,27 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
 
         aired = tc_aired + manual_aired
 
-        # 3rd Party = LMRB count excluding rows already claimed as sponsorship,
-        # so sponsorship tags are not double-counted in the commercial extra column.
-        third_party = _lmrb_row_count(lmrb_themes, dur_int, exclude_spon=True)
+        # 3rd Party = TC rows confirmed by LMRB (is_lmrb_confirmed=True),
+        # includes both schedule-matched and extra TC rows.
+        # This represents spots appearing in BOTH TC and LMRB (TC↔LMRB matched pairs).
+        third_party_q = TCRow.objects.filter(
+            account_id=account_id, channel=channel,
+            tc_report__month=month,
+            is_lmrb_confirmed=True,
+        )
+        if tc_themes:
+            theme_q = Q()
+            for t in tc_themes:
+                theme_q |= Q(tc_theme__iexact=t)
+            third_party_q = third_party_q.filter(theme_q)
+        if dur_int is not None:
+            third_party_q = third_party_q.filter(duration=dur_int)
+        third_party = third_party_q.count()
 
-        # Extra / Missed based on LMRB vs Planned
+        # Missed = Planned − Aired (in Schedule but not confirmed by TC+LMRB)
+        missed = max(0, planned - aired)
+        # Extra = TC+LMRB confirmed − Planned (more confirmed than planned)
         extra  = max(0, third_party - planned)
-        missed = max(0, planned - third_party)
-
-        avg_30 = round(aired * (dur_int or 0) / 30, 2) if dur_int else 0
 
         commercial_rows.append({
             'product':     brand,
@@ -443,7 +454,6 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
             'missed':      missed,
             'extra':       extra,
             'third_party': third_party,
-            'avg_30':      avg_30,
         })
 
     # Commercial totals
@@ -453,7 +463,6 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
         'missed':      sum(r['missed']      for r in commercial_rows),
         'extra':       sum(r['extra']       for r in commercial_rows),
         'third_party': sum(r['third_party'] for r in commercial_rows),
-        'avg_30':      round(sum(r['avg_30'] for r in commercial_rows), 2),
     }
 
     # ── Sponsorship Benefits ──────────────────────────────────────────────────
@@ -539,7 +548,6 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
 
             missed = max(0, planned - aired)
             extra  = max(0, aired - planned)
-            avg_30 = round(aired * (dur_int or 0) / 30, 2) if dur_int else 0
 
             prog_rows.append({
                 'product':     brand,
@@ -549,7 +557,6 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
                 'missed':      missed,
                 'extra':       extra,
                 'third_party': third_party,
-                'avg_30':      avg_30,
                 'status':      status,
             })
 
@@ -559,7 +566,6 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
             'missed':      sum(r['missed']      for r in prog_rows),
             'extra':       sum(r['extra']       for r in prog_rows),
             'third_party': sum(r['third_party'] for r in prog_rows),
-            'avg_30':      round(sum(r['avg_30'] for r in prog_rows), 2),
         }
         sponsorship_sections.append({
             'programme': prog,
@@ -573,7 +579,6 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
         'missed':      sum(s['subtotal']['missed']      for s in sponsorship_sections),
         'extra':       sum(s['subtotal']['extra']       for s in sponsorship_sections),
         'third_party': sum(s['subtotal']['third_party'] for s in sponsorship_sections),
-        'avg_30':      round(sum(s['subtotal']['avg_30'] for s in sponsorship_sections), 2),
     }
 
     return {
