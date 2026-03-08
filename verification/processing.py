@@ -396,13 +396,17 @@ def match_ads(
             continue
 
         # ── Time-window split ────────────────────────────────────────────────
-        # Rule 3: use Prog_time (programme start time) for window check.
-        # Fall back to Advt_time when Prog_time is absent or all-null.
+        # Use Advt_time (actual ad air time) for the window check — this is the
+        # time the specific ad spot aired.  Prog_time is the programme *start*
+        # time, which can be before the planned window even when the ad itself
+        # falls inside it (e.g. programme starts at 11:55 but ad airs at 12:14
+        # within a 12:00–12:30 window).  Prog_time is kept only as a last resort
+        # when _air_secs is entirely absent from the pool.
         time_col = None
-        if pool_has_prog_secs and candidates['_prog_secs'].notna().any():
-            time_col = '_prog_secs'
-        elif pool_has_air_secs and candidates['_air_secs'].notna().any():
+        if pool_has_air_secs and candidates['_air_secs'].notna().any():
             time_col = '_air_secs'
+        elif pool_has_prog_secs and candidates['_prog_secs'].notna().any():
+            time_col = '_prog_secs'
 
         # ── Time-window: only in-window candidates qualify for Pass 1 ──────────
         # Rule (corrected):
@@ -500,12 +504,14 @@ def match_ads(
         # same requirement as Matched / Programme Mismatch (different date only).
         # An airing outside the window (e.g. 12:14 vs planned 20:00–20:30) is not
         # considered a valid late airing; the schedule row becomes Not Aired instead.
+        # Use _air_secs (actual ad time) not _prog_secs (programme start) — same
+        # reasoning as Pass 1: programme can start before window but ad airs inside it.
         if sch_start is not None and sch_end is not None:
             time_col = None
-            if pool_has_prog_secs and candidates['_prog_secs'].notna().any():
-                time_col = '_prog_secs'
-            elif pool_has_air_secs and candidates['_air_secs'].notna().any():
+            if pool_has_air_secs and candidates['_air_secs'].notna().any():
                 time_col = '_air_secs'
+            elif pool_has_prog_secs and candidates['_prog_secs'].notna().any():
+                time_col = '_prog_secs'
             if time_col:
                 candidates = candidates[
                     (candidates[time_col] >= sch_start) & (candidates[time_col] <= sch_end)
