@@ -1339,6 +1339,18 @@ def monitoring_dashboard(request):
                     account_id=account_id, channel=channel, month=month,
                     brand=bm.brand,
                 ).aggregate(d=Min('date'))['d']
+            # PT split for this theme+duration
+            t_prime = t_non = 0
+            for r in tqs.values_list('advt_time', flat=True):
+                b = _time_bucket(r)
+                if b == 'prime':
+                    t_prime += 1
+                else:
+                    t_non += 1
+            # Daily airings count
+            daily = list(
+                tqs.values('date').annotate(cnt=Count('id')).order_by('date')
+            )
             lmrb_theme_detail.append({
                 'theme':       t_theme,
                 'duration':    t_dur,
@@ -1348,6 +1360,10 @@ def monitoring_dashboard(request):
                 'last_aired':  dates['last'].isoformat()  if dates['last']  else None,
                 'sch_start':   sch_start.isoformat()      if sch_start      else None,
                 'avg_per_day': avg_per_day,
+                'prime':       t_prime,
+                'non_prime':   t_non,
+                'prime_pct':   round(t_prime / td['count'] * 100) if td['count'] else 0,
+                'daily':       [{'date': str(r['date']), 'cnt': r['cnt']} for r in daily],
             })
 
         # ── Prime-time distribution (planned vs LMRB) ────────────────────────

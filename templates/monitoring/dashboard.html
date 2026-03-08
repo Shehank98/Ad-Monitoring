@@ -1445,6 +1445,41 @@ function openLmrbDrawer(idx) {
     progHtml = `<p class="text-xs text-slate-400">No programme data available</p>`;
   }
 
+  // PT/Non-PT visual bar
+  const prime    = d.prime    ?? 0;
+  const nonPrime = d.non_prime ?? 0;
+  const ptPct    = d.prime_pct ?? (d.count ? Math.round(prime / d.count * 100) : 0);
+  const ptBarHtml = `
+    <div class="bg-white rounded-xl border border-slate-100 p-4">
+      <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">
+        <i class="fa-solid fa-clock mr-1"></i> Prime Time Split
+      </p>
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-xs text-violet-700 font-bold w-16">${prime} PT</span>
+        <div class="flex-1 h-4 rounded-full overflow-hidden bg-sky-100 flex">
+          <div style="width:${ptPct}%" class="h-full bg-violet-500 transition-all duration-500"></div>
+          <div style="width:${100 - ptPct}%" class="h-full bg-sky-400 transition-all duration-500"></div>
+        </div>
+        <span class="text-xs text-sky-700 font-bold w-20 text-right">${nonPrime} Non-PT</span>
+      </div>
+      <div class="flex justify-between text-[10px] text-slate-400 px-1">
+        <span class="text-violet-600 font-semibold">${ptPct}% Prime Time</span>
+        <span class="text-sky-600 font-semibold">${100 - ptPct}% Non-Prime</span>
+      </div>
+    </div>`;
+
+  // Daily airings mini-chart
+  const daily = d.daily || [];
+  const dailyChartHtml = daily.length > 0 ? `
+    <div class="bg-white rounded-xl border border-slate-100 p-4">
+      <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+        <i class="fa-solid fa-chart-column mr-1"></i> Daily Airings
+      </p>
+      <div style="height:90px;">
+        <canvas id="drawerDailyChart"></canvas>
+      </div>
+    </div>` : '';
+
   document.getElementById('drawerContent').innerHTML = `
     <!-- Key metrics -->
     <div class="grid grid-cols-3 gap-3">
@@ -1452,15 +1487,18 @@ function openLmrbDrawer(idx) {
         <p class="text-2xl font-black text-indigo-700">${d.count}</p>
         <p class="text-[10px] font-bold text-indigo-500 uppercase tracking-wider">Total Aired</p>
       </div>
-      <div class="bg-slate-50 rounded-xl p-3 text-center">
-        <p class="text-2xl font-black text-slate-700">${d.avg_per_day}</p>
-        <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Avg / Day</p>
+      <div class="bg-violet-50 rounded-xl p-3 text-center">
+        <p class="text-2xl font-black text-violet-700">${prime}</p>
+        <p class="text-[10px] font-bold text-violet-500 uppercase tracking-wider">Prime Time</p>
       </div>
-      <div class="bg-slate-50 rounded-xl p-3 text-center">
-        <p class="text-lg font-black text-slate-700">${d.duration ? d.duration + 's' : '-'}</p>
-        <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Duration</p>
+      <div class="bg-sky-50 rounded-xl p-3 text-center">
+        <p class="text-2xl font-black text-sky-700">${nonPrime}</p>
+        <p class="text-[10px] font-bold text-sky-500 uppercase tracking-wider">Non-Prime</p>
       </div>
     </div>
+
+    <!-- PT visual bar -->
+    ${ptBarHtml}
 
     <!-- Dates -->
     <div class="bg-white rounded-xl border border-slate-100 p-4 space-y-2">
@@ -1491,7 +1529,44 @@ function openLmrbDrawer(idx) {
       </p>
       ${progHtml}
     </div>
+
+    <!-- Daily airings chart -->
+    ${dailyChartHtml}
   `;
+
+  // Build daily chart after DOM is updated
+  if (daily.length > 0) {
+    requestAnimationFrame(() => {
+      const canvas = document.getElementById('drawerDailyChart');
+      if (!canvas) return;
+      new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: daily.map(r => {
+            const d = new Date(r.date);
+            return (d.getDate()).toString().padStart(2,'0') + ' ' +
+              d.toLocaleString('en-GB', {month:'short'});
+          }),
+          datasets: [{
+            data: daily.map(r => r.cnt),
+            backgroundColor: '#6366f1cc',
+            borderColor: '#6366f1',
+            borderWidth: 1,
+            borderRadius: 3,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { font: { size: 9 }, maxRotation: 45 }, grid: { display: false } },
+            y: { ticks: { font: { size: 9 }, stepSize: 1 }, grid: { color: '#f1f5f9' } },
+          },
+        },
+      });
+    });
+  }
 
   document.getElementById('drawerOverlay').classList.add('open');
   document.getElementById('lmrbDrawer').classList.add('open');
