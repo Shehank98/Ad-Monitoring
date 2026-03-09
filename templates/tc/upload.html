@@ -47,6 +47,7 @@
       </div>
     </div>
 
+    <!-- Excel upload form (used when file is .xlsx/.xls) -->
     <form method="post" enctype="multipart/form-data" class="px-6 py-6 space-y-5" id="tc-upload-form">
       {% csrf_token %}
 
@@ -69,7 +70,6 @@
           <i class="fa-solid fa-tv mr-1 text-slate-400"></i> Channel <span class="text-red-400">*</span>
         </label>
         <input type="text" name="channel" id="inpChannel" placeholder="e.g. Sirasa TV - Voice" class="input-field" required>
-        <p class="mt-1 text-[10px] text-slate-400">Will be auto-populated from file if Channel column is detected</p>
       </div>
 
       <!-- Month -->
@@ -97,7 +97,6 @@
             </option>
           {% endfor %}
         </select>
-        <p class="mt-1 text-[10px] text-slate-400">Linking helps identify the correct schedule - channel &amp; month will be auto-filled</p>
       </div>
 
       <!-- File upload -->
@@ -110,27 +109,38 @@
                       file:rounded-lg file:border-0 file:bg-amber-50 file:text-amber-700
                       file:font-semibold file:text-xs hover:file:bg-amber-100 cursor-pointer"
                onchange="onFileChange(this)" required>
-        <p class="mt-1 text-[10px] text-slate-400">Excel (.xlsx / .xls) or PDF — PDF parsing is automatic for all channels</p>
+        <p class="mt-1 text-[10px] text-slate-400">Excel (.xlsx / .xls) or PDF — PDF is parsed locally in your browser</p>
       </div>
 
-      <!-- Detection result (for excel quick-detect) -->
+      <!-- Excel detect result -->
       <div id="detectResult" class="hidden p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800">
         <p class="font-semibold mb-1"><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> File detected</p>
         <p id="detectText"></p>
       </div>
 
-      <!-- Submit button -->
+      <!-- Preview button -->
       <button type="button" id="btnPreview" onclick="runPreview()"
               class="btn-primary w-full justify-center">
         <i class="fa-solid fa-magnifying-glass"></i> Preview &amp; Verify Data
       </button>
     </form>
+
+    <!-- Hidden PDF-upload form (posts parsed JSON, no file) -->
+    <form method="post" action="/dashboard/tc/upload-parsed/" id="pdf-upload-form" class="hidden">
+      {% csrf_token %}
+      <input type="hidden" name="account_id"  id="pdf_account_id">
+      <input type="hidden" name="channel"     id="pdf_channel">
+      <input type="hidden" name="month"       id="pdf_month">
+      <input type="hidden" name="schedule_id" id="pdf_schedule_id">
+      <input type="hidden" name="filename"    id="pdf_filename">
+      <input type="hidden" name="rows_json"   id="pdf_rows_json">
+    </form>
   </div>
 
-  <!-- ── Preview Panel (hidden until preview runs) ──────────────────────────── -->
+  <!-- ── Preview Panel ──────────────────────────────────────────────────────── -->
   <div id="previewPanel" class="hidden mt-6">
 
-    <!-- Loading state -->
+    <!-- Loading -->
     <div id="previewLoading" class="hidden bg-white rounded-2xl border border-slate-100 shadow-sm p-8 text-center">
       <div class="inline-flex items-center gap-3 text-slate-500">
         <svg class="animate-spin h-5 w-5 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -141,7 +151,7 @@
       </div>
     </div>
 
-    <!-- Error state -->
+    <!-- Error -->
     <div id="previewError" class="hidden bg-red-50 border border-red-200 rounded-2xl p-5">
       <p class="font-semibold text-red-700 flex items-center gap-2 mb-1">
         <i class="fa-solid fa-circle-xmark"></i> Could not parse file
@@ -149,7 +159,7 @@
       <p id="previewErrorMsg" class="text-sm text-red-600"></p>
     </div>
 
-    <!-- Summary card -->
+    <!-- Content -->
     <div id="previewContent" class="hidden bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
 
       <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -165,7 +175,7 @@
         <span id="previewBadge" class="text-xs font-bold bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full"></span>
       </div>
 
-      <!-- Stats row -->
+      <!-- Stats -->
       <div class="px-6 py-4 grid grid-cols-3 gap-4 border-b border-slate-50">
         <div class="text-center">
           <p class="text-2xl font-bold text-slate-800" id="pRowCount">—</p>
@@ -187,7 +197,7 @@
         <div id="durBreakdown" class="flex flex-wrap gap-2"></div>
       </div>
 
-      <!-- Theme breakdown table -->
+      <!-- Theme table -->
       <div class="px-6 py-4 border-b border-slate-50">
         <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Themes / Ad Names</p>
         <div class="overflow-x-auto">
@@ -241,11 +251,23 @@
 {% endblock %}
 
 {% block extra_js %}
+<!-- PDF.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
 <script>
+window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
 const csrfToken = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
-let previewOk = false;  // true once a successful preview has been shown
+
+// Holds parsed rows when file is a PDF (set after client-side parse)
+let pdfParsedRows = null;
+let previewOk = false;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
 function dateToMonthStr(dateStr) {
   if (!dateStr) return '';
@@ -254,19 +276,13 @@ function dateToMonthStr(dateStr) {
   return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 }
 
-function esc(s) {
-  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
 // ── Schedule / account helpers ────────────────────────────────────────────────
 
 function scheduleSelected(sel) {
   const opt = sel.options[sel.selectedIndex];
   if (!opt.value) return;
-  const ch    = opt.dataset.channel || '';
-  const month = opt.dataset.month   || '';
-  if (ch)    document.getElementById('inpChannel').value = ch;
-  if (month) document.getElementById('inpMonth').value   = month;
+  if (opt.dataset.channel) document.getElementById('inpChannel').value = opt.dataset.channel;
+  if (opt.dataset.month)   document.getElementById('inpMonth').value   = opt.dataset.month;
 }
 
 function loadSchedules() {
@@ -279,25 +295,24 @@ function loadSchedules() {
 }
 loadSchedules();
 
-// ── File change: quick Excel detect for channel/month auto-fill ───────────────
+// ── File change ───────────────────────────────────────────────────────────────
 
 function onFileChange(input) {
-  previewOk = false;        // reset any prior preview state
+  pdfParsedRows = null;
+  previewOk = false;
   hidePreview();
+  document.getElementById('detectResult').classList.add('hidden');
 
   if (!input.files.length) return;
   const file = input.files[0];
+  const isPdf = file.name.toLowerCase().endsWith('.pdf');
 
-  if (file.name.toLowerCase().endsWith('.pdf')) {
-    document.getElementById('detectResult').classList.add('hidden');
-    return;
-  }
+  if (isPdf) return;   // PDF preview is triggered on "Preview" click
 
-  // Excel: run quick detect to auto-fill channel / month
+  // Excel: server-side quick detect to auto-fill channel / month
   const fd = new FormData();
   fd.append('tc_file', file);
   fd.append('csrfmiddlewaretoken', csrfToken);
-
   fetch('/dashboard/tc/detect/', { method: 'POST', body: fd })
     .then(r => r.json())
     .then(data => {
@@ -305,19 +320,17 @@ function onFileChange(input) {
       if (data.channel && !document.getElementById('inpChannel').value)
         document.getElementById('inpChannel').value = data.channel;
       const monthEl = document.getElementById('inpMonth');
-      if (data.start_date && (!monthEl.value || !monthEl.value.trim()))
+      if (data.start_date && !monthEl.value)
         monthEl.value = dateToMonthStr(data.start_date);
       const el = document.getElementById('detectResult');
       el.classList.remove('hidden');
       document.getElementById('detectText').textContent =
-        `Channel: ${data.channel || '(not detected)'} | ` +
-        `Dates: ${data.start_date} → ${data.end_date} | ` +
-        `${data.row_count} rows`;
+        `Channel: ${data.channel||'(not detected)'} | Dates: ${data.start_date} → ${data.end_date} | ${data.row_count} rows`;
     })
     .catch(() => {});
 }
 
-// ── Preview flow ──────────────────────────────────────────────────────────────
+// ── Preview / loading helpers ─────────────────────────────────────────────────
 
 function hidePreview() {
   document.getElementById('previewPanel').classList.add('hidden');
@@ -344,8 +357,168 @@ function showError(msg) {
   document.getElementById('btnPreview').disabled = false;
 }
 
-function runPreview() {
-  // Basic validation
+// ── PDF.js heuristic parser (same logic as standalone TC Converter) ────────────
+
+const PDF_SKIP_RE = /\b(VAT No|Invoice No|Invoice Details|Date\s*:|From\s*:|To\s*:|Contractor Number|Contract No|Schedule No|Client\s*:|Agent\s*:|Ref No|Client Code|Agent Code|Total Value|Certified By|Checked By|Prepared By|POWER HOUSE|UNLESS OBJECTIONS|Page \d+ of \d+|Prog\. Date|Caption\/Copy Title|Duration \(sec\)|Channel\s*:|Sr\.No\.|MTV Channel|Braybrooke|TELECAST CERTIFICATE|Advertiser\s*:|Address\s*:|Campaign Period|Account Executive|Co\/Agency|Release Order Ref|Traffic Order No|Brand\s*:|TOTAL SPOTS|AUTHORISED SIGNATORY|System Generated|Digitally Signed|Day Time|Duration Lan Mat|Cut No|Product Details|Posi|Net Rate|Remarks|Bill Number|Booking Number|Deal Number|Total Spot|We certify|Net Rate 1|Agency Name|Printed Date|Printed Time|Printed By|Client Name|Agent Name|Client \/ Contract Debits)\b/i;
+
+async function parsePdfClientSide(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const extractedRows = [];
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    const items = textContent.items;
+
+    items.sort((a, b) => {
+      const yDiff = b.transform[5] - a.transform[5];
+      if (Math.abs(yDiff) > 5) return yDiff;
+      return a.transform[4] - b.transform[4];
+    });
+
+    let currentLine = [], currentY = null, lastEndX = null;
+    items.forEach(item => {
+      const y = item.transform[5], x = item.transform[4], str = item.str;
+      if (!str.trim()) return;
+      const charWidth = item.width / Math.max(1, str.length);
+      const parts = str.split(/(\s{2,})/);
+      let cursorX = x;
+      parts.forEach(part => {
+        if (part.trim() === '') { cursorX += part.length * charWidth; return; }
+        const chunkX = cursorX, text = part.trim(), chunkWidth = text.length * charWidth;
+        cursorX += part.length * charWidth;
+        if (currentY === null || Math.abs(currentY - y) > 5) {
+          if (currentLine.length > 0) extractedRows.push(currentLine);
+          currentLine = [{ text, x: chunkX, endX: chunkX + chunkWidth }];
+          currentY = y; lastEndX = chunkX + chunkWidth;
+        } else {
+          const gap = chunkX - lastEndX;
+          if (gap > 4) {
+            currentLine.push({ text, x: chunkX, endX: chunkX + chunkWidth });
+          } else {
+            const addSpace = (gap > 1.5 && !currentLine[currentLine.length-1].text.endsWith(' ')) ? ' ' : '';
+            currentLine[currentLine.length-1].text += addSpace + text;
+            currentLine[currentLine.length-1].endX = chunkX + chunkWidth;
+          }
+          lastEndX = currentLine[currentLine.length-1].endX;
+        }
+      });
+    });
+    if (currentLine.length > 0) extractedRows.push(currentLine);
+  }
+
+  // Group by date-containing lines
+  const records = [];
+  extractedRows.forEach(line => {
+    const textLine = line.map(i => i.text).join(' ');
+    if (PDF_SKIP_RE.test(textLine) || /Rs\s*:/i.test(textLine) || /\.{4,}/.test(textLine) || /^\s*[\d,]+\.\d{2}\s*$/.test(textLine)) return;
+    if (/\b(\d{2}[-/]\d{2}[-/]\d{4})\b/.test(textLine)) {
+      records.push({ mainLine: line, allItems: [...line] });
+    } else if (records.length > 0 && textLine.length > 2) {
+      records[records.length-1].allItems.push(...line);
+    }
+  });
+
+  const parsedData = [];
+  records.forEach(record => {
+    const mainText = record.mainLine.map(i => i.text).join(' ');
+    const allText  = record.allItems.map(i => i.text).join(' ');
+    const dateMatch = mainText.match(/\b(\d{2}[-/]\d{2}[-/]\d{4})\b/);
+    const allTimes = [...allText.matchAll(/\b(\d{2}:\d{2}:\d{2}(?::\d{2})?)\b/g)].map(m => m[1]);
+
+    if (!dateMatch || !allTimes.length) return;
+
+    const rawDate = dateMatch[1];
+    const parts = rawDate.split(/[-/]/);
+    // Always DD/MM/YYYY → ISO YYYY-MM-DD (unambiguous for server)
+    const isoDate = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+
+    const durationTime = allTimes.find(t => t.startsWith('00:00:'));
+    const advtTime     = allTimes.find(t => !t.startsWith('00:00:')) || allTimes[0];
+    const time = advtTime ? advtTime.split(':').slice(0,3).join(':') : '';
+
+    let duration = '';
+    if (durationTime) {
+      duration = parseInt(durationTime.split(':')[2], 10).toString();
+    } else {
+      const ti = allText.search(/\b\d{2}:\d{2}:\d{2}/);
+      if (ti > 0) {
+        const before = allText.substring(0, ti).trim();
+        const lw = before.match(/\b(\d+)\b$/);
+        if (lw && ['5','10','15','20','25','30','45','60'].includes(lw[1])) duration = lw[1];
+      }
+      if (!duration) {
+        const dm = allText.match(/\b(10|15|20|25|30|45|60)\b/);
+        if (dm) duration = dm[1];
+      }
+    }
+
+    // Filter out noise items
+    const keepItems = record.allItems.filter(item => {
+      const c = item.text.trim();
+      return c.length > 1
+        && !c.includes(rawDate)
+        && !/\b\d{2}:\d{2}:\d{2}(?::\d{2})?\b/.test(c)
+        && !/^(Mon|Tue|Wed|We|Thu|Fri|Sat|Sun|BS|PO|PD|OTHERS|Rs\.?:?|[STE])$/i.test(c)
+        && !/^CB\s*\d*$/i.test(c)
+        && !/^[\d,]+\.\d+$/.test(c)
+        && !/^\.+$/.test(c)
+        && c !== duration
+        && (!durationTime || c !== durationTime)
+        && !(/^\d{1,4}$/.test(c) && item.x < 50)
+        && !/^(ITNCOMM|VTVCOMM|ITNOPCL)\w+$/i.test(c)
+        && !/^\d{5,}$/.test(c);
+    });
+
+    if (!keepItems.length) return;
+
+    // Split programme (left column) vs theme (right column) by largest gap
+    const sorted = [...keepItems].sort((a,b) => a.x - b.x);
+    let maxGap = 0, splitIdx = -1;
+    for (let i = 0; i < sorted.length-1; i++) {
+      const gap = sorted[i+1].x - sorted[i].endX;
+      if (gap > maxGap) { maxGap = gap; splitIdx = i; }
+    }
+    const threshold = (maxGap > 4 && splitIdx !== -1)
+      ? sorted[splitIdx].endX + maxGap / 2
+      : 9999;
+
+    const progParts = [], themeParts = [];
+    keepItems.forEach(item => {
+      if (item.x >= threshold) { themeParts.push(item.text); return; }
+      const isCrossed = threshold !== 9999 && item.endX > threshold + 5;
+      const sm = item.text.match(/^(.*?)\s+-\s*(.*)$/);
+      if (sm && (threshold === 9999 || isCrossed) && sm[1].trim().length > 2 && sm[2].trim().length > 2) {
+        progParts.push(sm[1].trim()); themeParts.push(sm[2].trim());
+      } else {
+        progParts.push(item.text);
+      }
+    });
+
+    let programme = progParts.join(' ').trim().replace(/-\s*$/, '').trim();
+    let theme     = themeParts.join(' ').trim().replace(/^-\s*/, '').trim();
+
+    if (programme && !theme) {
+      const sm = programme.match(/^(.*?)\s+-\s+(.+)$/);
+      if (sm && sm[1].trim().length > 2) { programme = sm[1].trim(); theme = sm[2].trim(); }
+    } else if (!programme && theme) {
+      const sm = theme.match(/^(.*?)\s+-\s+(.+)$/);
+      if (sm && sm[1].trim().length > 2) { programme = sm[1].trim(); theme = sm[2].trim(); }
+    }
+    if (duration && theme.endsWith(duration)) theme = theme.slice(0, -duration.length).trim();
+
+    if (programme || theme) {
+      parsedData.push({ date: isoDate, programme, time, theme, duration: duration ? parseInt(duration,10) : null });
+    }
+  });
+
+  return parsedData;
+}
+
+// ── Main preview trigger ──────────────────────────────────────────────────────
+
+async function runPreview() {
   const accountId = document.getElementById('selAccount').value;
   const channel   = document.getElementById('inpChannel').value.trim();
   const month     = document.getElementById('inpMonth').value.trim();
@@ -354,92 +527,110 @@ function runPreview() {
   if (!accountId) { alert('Please select an account first.'); return; }
   if (!channel)   { alert('Please enter a channel name.'); return; }
   if (!month)     { alert('Please enter a month (e.g. January 2025).'); return; }
-  if (!fileInput.files.length) { alert('Please choose a TC file to upload.'); return; }
+  if (!fileInput.files.length) { alert('Please choose a TC file.'); return; }
 
-  const isPdf = fileInput.files[0].name.toLowerCase().endsWith('.pdf');
-  showLoading(isPdf ? 'Parsing PDF TC file… this may take a moment.' : 'Reading TC file…');
+  const file  = fileInput.files[0];
+  const isPdf = file.name.toLowerCase().endsWith('.pdf');
 
-  const fd = new FormData();
-  fd.append('tc_file', fileInput.files[0]);
-  fd.append('account_id', accountId);
-  fd.append('channel', channel);
-  fd.append('month', month);
-  fd.append('csrfmiddlewaretoken', csrfToken);
-
-  fetch('/dashboard/tc/preview/', { method: 'POST', body: fd })
-    .then(r => r.json())
-    .then(data => {
+  if (isPdf) {
+    // ── Client-side PDF parsing ──────────────────────────────────────────────
+    showLoading('Parsing PDF in browser… this may take a moment.');
+    try {
+      const rows = await parsePdfClientSide(file);
       document.getElementById('btnPreview').disabled = false;
-      if (!data.ok) {
-        showError(data.error || 'Unknown error.');
+      if (!rows || rows.length === 0) {
+        showError('No data rows could be extracted from the PDF. Check that it is a valid TC file.');
         return;
       }
-      renderPreview(data);
-    })
-    .catch(err => {
-      showError('Network error: ' + err.message);
-    });
+      pdfParsedRows = rows;
+      renderPreview(buildPreviewSummary(rows), 'pdf');
+    } catch(err) {
+      showError('Error reading PDF: ' + err.message);
+    }
+  } else {
+    // ── Server-side Excel preview ────────────────────────────────────────────
+    pdfParsedRows = null;
+    showLoading('Reading TC file…');
+    const fd = new FormData();
+    fd.append('tc_file', file);
+    fd.append('account_id', accountId);
+    fd.append('channel', channel);
+    fd.append('month', month);
+    fd.append('csrfmiddlewaretoken', csrfToken);
+    fetch('/dashboard/tc/preview/', { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById('btnPreview').disabled = false;
+        if (!data.ok) { showError(data.error || 'Unknown error.'); return; }
+        renderPreview(data, 'excel');
+      })
+      .catch(err => showError('Network error: ' + err.message));
+  }
 }
 
-function renderPreview(data) {
-  previewOk = true;
+// Build summary object from client-side parsed rows (same shape as server response)
+function buildPreviewSummary(rows) {
+  const dates = rows.map(r => r.date).filter(Boolean).sort();
+  const themeMap = {};
+  const durMap = {};
+  rows.forEach(r => {
+    const key = `${r.theme}||${r.duration}`;
+    themeMap[key] = (themeMap[key] || 0) + 1;
+    const dk = r.duration ?? 'unknown';
+    durMap[dk] = (durMap[dk] || 0) + 1;
+  });
+  const themes = Object.entries(themeMap)
+    .map(([k,c]) => { const [theme,dur]=k.split('||'); return {theme, duration: dur==='null'||dur==='undefined'?null:parseInt(dur), count:c}; })
+    .sort((a,b) => b.count - a.count);
+  const dur_breakdown = Object.entries(durMap)
+    .map(([d,c]) => ({duration: d==='unknown'?null:parseInt(d), count:c}))
+    .sort((a,b) => b.count - a.count);
+  return {
+    ok: true,
+    row_count:    rows.length,
+    skipped:      0,
+    date_range:   dates.length ? `${dates[0]} → ${dates[dates.length-1]}` : '—',
+    themes,
+    dur_breakdown,
+    sample_rows:  rows.slice(0, 10),
+  };
+}
 
-  // Stats
+function renderPreview(data, method) {
+  previewOk = true;
   document.getElementById('pRowCount').textContent  = data.row_count;
   document.getElementById('pDateRange').textContent  = data.date_range;
   document.getElementById('pSkipped').textContent    = data.skipped;
   document.getElementById('previewBadge').textContent =
-    data.parse_method === 'pdf' ? 'PDF parsed' : 'Excel parsed';
+    method === 'pdf' ? 'PDF parsed (browser)' : 'Excel parsed';
 
-  // Duration breakdown chips
   const durEl = document.getElementById('durBreakdown');
   durEl.innerHTML = '';
   (data.dur_breakdown || []).forEach(({duration, count}) => {
-    durEl.innerHTML +=
-      `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200
-                    rounded-full text-xs font-semibold text-amber-700">
-         ${esc(duration ?? '?')}s
-         <span class="bg-amber-200 text-amber-800 rounded-full px-1.5 py-0.5 text-[10px]">${count}</span>
-       </span>`;
+    durEl.innerHTML += `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 rounded-full text-xs font-semibold text-amber-700">${esc(duration??'?')}s <span class="bg-amber-200 text-amber-800 rounded-full px-1.5 py-0.5 text-[10px]">${count}</span></span>`;
   });
 
-  // Theme table
   const themeBody = document.getElementById('themeTableBody');
   themeBody.innerHTML = '';
   (data.themes || []).forEach(({theme, duration, count}) => {
-    themeBody.innerHTML +=
-      `<tr class="hover:bg-slate-50">
-         <td class="py-1.5 pr-3 text-slate-700 max-w-xs truncate" title="${esc(theme)}">${esc(theme)}</td>
-         <td class="py-1.5 text-center text-slate-500">${duration ?? '—'}s</td>
-         <td class="py-1.5 text-center font-semibold text-slate-800">${count}</td>
-       </tr>`;
+    themeBody.innerHTML += `<tr class="hover:bg-slate-50"><td class="py-1.5 pr-3 text-slate-700 max-w-xs truncate" title="${esc(theme)}">${esc(theme)}</td><td class="py-1.5 text-center text-slate-500">${duration??'—'}s</td><td class="py-1.5 text-center font-semibold text-slate-800">${count}</td></tr>`;
   });
 
-  // Sample rows
   const sampleBody = document.getElementById('sampleTableBody');
   sampleBody.innerHTML = '';
   (data.sample_rows || []).forEach(r => {
-    sampleBody.innerHTML +=
-      `<tr class="hover:bg-slate-50">
-         <td class="py-1.5 pr-2 text-slate-600">${esc(r.date)}</td>
-         <td class="py-1.5 pr-2 text-slate-600 whitespace-nowrap">${esc(r.time)}</td>
-         <td class="py-1.5 pr-2 text-slate-700 max-w-[180px] truncate" title="${esc(r.theme)}">${esc(r.theme)}</td>
-         <td class="py-1.5 pr-2 text-slate-500 max-w-[120px] truncate" title="${esc(r.programme)}">${esc(r.programme) || '—'}</td>
-         <td class="py-1.5 text-center text-slate-500">${r.duration ?? '—'}s</td>
-       </tr>`;
+    sampleBody.innerHTML += `<tr class="hover:bg-slate-50"><td class="py-1.5 pr-2 text-slate-600">${esc(r.date)}</td><td class="py-1.5 pr-2 text-slate-600 whitespace-nowrap">${esc(r.time||r.Advt_time||'')}</td><td class="py-1.5 pr-2 text-slate-700 max-w-[180px] truncate" title="${esc(r.theme||r.Advt_theme||'')}">${esc(r.theme||r.Advt_theme||'')}</td><td class="py-1.5 pr-2 text-slate-500 max-w-[120px] truncate">${esc(r.programme||r.PROGRAMME||'—')}</td><td class="py-1.5 text-center text-slate-500">${r.duration??'—'}s</td></tr>`;
   });
 
-  // Show content
   document.getElementById('previewLoading').classList.add('hidden');
   document.getElementById('previewError').classList.add('hidden');
   document.getElementById('previewContent').classList.remove('hidden');
-
-  // Scroll to preview
   document.getElementById('previewPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function cancelPreview() {
   previewOk = false;
+  pdfParsedRows = null;
   hidePreview();
   document.getElementById('btnPreview').disabled = false;
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -450,7 +641,21 @@ function confirmUpload() {
   const btn = document.getElementById('btnConfirmUpload');
   btn.disabled = true;
   btn.innerHTML = '<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Uploading…';
-  document.getElementById('tc-upload-form').submit();
+
+  if (pdfParsedRows) {
+    // PDF: fill hidden form and submit
+    const fileInput = document.getElementById('tcFile');
+    document.getElementById('pdf_account_id').value  = document.getElementById('selAccount').value;
+    document.getElementById('pdf_channel').value     = document.getElementById('inpChannel').value.trim();
+    document.getElementById('pdf_month').value       = document.getElementById('inpMonth').value.trim();
+    document.getElementById('pdf_schedule_id').value = document.getElementById('selSchedule').value;
+    document.getElementById('pdf_filename').value    = fileInput.files[0]?.name || 'tc.pdf';
+    document.getElementById('pdf_rows_json').value   = JSON.stringify(pdfParsedRows);
+    document.getElementById('pdf-upload-form').submit();
+  } else {
+    // Excel: submit the regular file-upload form
+    document.getElementById('tc-upload-form').submit();
+  }
 }
 </script>
 {% endblock %}

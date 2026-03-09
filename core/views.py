@@ -2136,6 +2136,92 @@ def tc_preview(request):
 
 
 @login_required
+@require_POST
+def tc_upload_parsed(request):
+    """
+    Accept pre-parsed TC rows from the client-side PDF.js converter and save them.
+    Rows arrive as a JSON array in POST['rows_json'].
+    Each row: {date: "YYYY-MM-DD", programme, time, theme, duration}
+    """
+    account_id  = request.POST.get('account_id', '').strip()
+    channel     = request.POST.get('channel', '').strip()
+    month       = request.POST.get('month', '').strip()
+    schedule_id = request.POST.get('schedule_id', '').strip()
+    filename    = request.POST.get('filename', 'tc_upload.pdf')
+    rows_json   = request.POST.get('rows_json', '[]')
+
+    if not (account_id and channel and month):
+        messages.error(request, 'Account, Channel and Month are required.')
+        return redirect('/dashboard/tc/upload/')
+
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return redirect('/dashboard/tc/upload/')
+
+    try:
+        raw_rows = json.loads(rows_json)
+    except Exception:
+        messages.error(request, 'Invalid row data received.')
+        return redirect('/dashboard/tc/upload/')
+
+    if not raw_rows:
+        messages.error(request, 'No rows to upload.')
+        return redirect('/dashboard/tc/upload/')
+
+    account = get_object_or_404(Account, id=account_id)
+
+    schedule_obj = None
+    if schedule_id:
+        try:
+            schedule_obj = Schedule.objects.get(id=schedule_id, account=account)
+        except Schedule.DoesNotExist:
+            pass
+
+    # Build DataFrame from the pre-parsed JSON rows
+    records = []
+    for r in raw_rows:
+        date_val = _safe_date(r.get('date'))
+        if date_val is None:
+            continue
+        records.append({
+            'Date':       date_val,
+            'Channel':    channel,
+            'Programme':  str(r.get('programme') or ''),
+            'Aired_Time': str(r.get('time') or ''),
+            'TC_Theme':   str(r.get('theme') or ''),
+            'Duration':   _safe_int(r.get('duration')),
+        })
+
+    if not records:
+        messages.error(request, 'No valid rows found — all rows were missing a valid date.')
+        return redirect('/dashboard/tc/upload/')
+
+    df = pd.DataFrame(records)
+    meta = _detect_tc_meta(df)
+
+    tc_report = TransmissionReport.objects.create(
+        account           = account,
+        channel           = channel,
+        month             = month,
+        schedule          = schedule_obj,
+        original_filename = filename,
+        start_date        = meta.get('start_date'),
+        end_date          = meta.get('end_date'),
+        uploaded_by       = request.user,
+    )
+
+    rows_count = _parse_tc_rows(df, account, tc_report)
+    tc_report.row_count = rows_count
+    tc_report.save()
+
+    messages.success(
+        request,
+        f'TC Report uploaded successfully: {rows_count} rows from "{filename}".'
+    )
+    return redirect('/dashboard/tc/')
+
+
+@login_required
 def tc_list(request):
     user       = request.user
     account_qs = _account_qs(user)
