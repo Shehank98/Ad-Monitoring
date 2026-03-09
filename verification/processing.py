@@ -3,30 +3,33 @@ Core ad-matching engine.
 
 Five-category output: Matched, Programme Mismatch, Late Telecast, Not Aired, Extra Aired.
 
-Matching algorithm (two passes):
-  Pass 1 — for each schedule row, find LMRB candidates by:
-    1. Brand → Theme lookup (respecting optional duration on the mapping)
-    2. Exact calendar date match
-    3. Exact duration match (if both sides have it)
-    4. Time-window: advt_time (or prog_time) must fall within planned Start_Time–End_Time
-       (Rule 3: Prog_time is the primary signal; falls back to Advt_time)
-    5a. In-window candidate found + programme name word overlap ≥ 50% → MATCHED
-    5b. In-window candidate found + programme name word overlap < 50% → PROGRAMME MISMATCH
-        (ad aired within the planned slot but in a different programme)
-    — Candidates that exist only OUTSIDE the time window are NOT consumed in Pass 1.
-      The schedule row proceeds to Pass 2 so Late Telecast / Not Aired can be assigned.
+Matching algorithm (four passes — all schedule spots complete each pass before the next):
 
-  Pass 2 — for schedule rows still unmatched after Pass 1:
-    6. Same brand+theme+duration on a LATER date (Rule 7: aired_date > sch_date)
-       AND aired time falls within the planned [start_time, end_time] window → LATE TELECAST
-    7. No qualifying candidate → NOT AIRED
+  Pass 1 — Exact Match
+    For every schedule row find LMRB candidates with:
+      • same date  • same theme (via BrandMapping)  • same duration
+      • advt_time falls within planned [start_time, end_time] window
+    If found → MATCHED.  Lock both records.
 
-  Programme name matching uses word-overlap scoring: score = (matching words) / (scheduled
-  programme words). Score ≥ 0.5 → MATCHED; score < 0.5 → PROGRAMME MISMATCH.
+  Pass 2 — Programme Mismatch (only rows still unmatched after Pass 1)
+    Candidates must satisfy:
+      • same date  • same theme  • same duration
+      • advt_time is AFTER end_time  • (advt_time − end_time) ≤ 10 minutes (600s)
+    If found → PROGRAMME MISMATCH.  Lock both records.
 
-Locking: any LMRB row consumed by Matched/Programme Mismatch/Late Telecast is
-locked (cannot be reused), preventing double-counting.
-Extra Aired: LMRB rows not consumed by any schedule row.
+  Pass 3 — Late Telecast (only rows still unmatched after Pass 2)
+    Candidates must satisfy:
+      • aired_date > scheduled date  • same theme  • same duration
+      (no time-window constraint — ad can air at any time on a later date)
+    If found → LATE TELECAST.  Lock both records.
+
+  Pass 4 — Not Aired
+    Any schedule row still unmatched → NOT AIRED.
+
+Processing rules
+  • All schedule rows complete Pass 1 before any row enters Pass 2.
+  • Locked records (is_matched=True) cannot be claimed by a later pass or row.
+  • Matching occurs within the same channel (enforced by the caller).
 
 brand_theme_map format supplied by the caller:
   {norm_brand: [(norm_theme, duration_or_None), ...]}
@@ -281,6 +284,9 @@ def _word_overlap_score(sch_prog: str, lmrb_prog) -> float:
     return len(sch_words & lmrb_words) / len(sch_words)
 
 
+_PROG_MISMATCH_TOLERANCE = 600   # 10 minutes in seconds
+
+
 def match_ads(
     sch_df: pd.DataFrame,
     mon_pool: pd.DataFrame,
@@ -293,36 +299,34 @@ def match_ads(
     """
     Match schedule rows against monitoring pool using brand mapping.
 
+    Four-pass algorithm — ALL schedule rows complete each pass before any row
+    enters the next pass (strict ordering: Exact Match → Programme Mismatch →
+    Late Telecast → Not Aired).
+
     brand_theme_map: {norm_brand: [(norm_theme, duration_or_None), ...]}
 
     pre_matched_fp:
         Set of LMRB fingerprints already locked in a previous run.
-        Those monitoring rows will be treated as consumed from the start.
-
     skip_sch_keys:
         Set of (norm_brand, date, start_time, end_time, dur) tuples for schedule
-        rows that already have a 'matched' MatchResult — skip them in smart re-run.
-
+        rows already matched in a prior smart re-run — skip them here.
     pre_matched_idx:
         Set of mon_pool integer indices already consumed by a previous schedule
-        run.  Used for multi-schedule processing on the same shared LMRB pool.
-
+        run (multi-schedule shared-pool support).
     max_verify_date:
         pandas Timestamp (or None).  Schedule rows whose date is strictly after
-        this value are skipped — LMRB data is not yet available for those dates.
-        They will be processed automatically when new monitoring data is uploaded.
+        this value are skipped — no LMRB data available yet.
 
     Returns (matched_df, prog_mismatch_df, late_telecast_df, not_aired_df,
              extra_df, consumed_idx).
-    consumed_idx is the complete set of mon_pool integer indices consumed by
-    this call (includes pre_matched_idx entries).
+    consumed_idx is the full set of mon_pool integer indices consumed by this call.
     """
     if pre_matched_fp is None:
         pre_matched_fp = set()
     if skip_sch_keys is None:
         skip_sch_keys = set()
 
-    # Initialise consumed index set from both pre-consumed sources
+    # ── Seed consumed-index set from prior runs ───────────────────────────────
     matched_idx: set = set()
     if pre_matched_idx:
         matched_idx.update(pre_matched_idx)
@@ -331,36 +335,46 @@ def match_ads(
             if lmrb_fingerprint(row) in pre_matched_fp:
                 matched_idx.add(idx)
 
-    matched_rows   = []
-    prog_mis_rows  = []
-    late_rows      = []
+    pool_has_air_secs = '_air_secs' in mon_pool.columns
+
+    # ── Helper: build a consistent result record ──────────────────────────────
+    def _make_record(sch_row, mon_row, status, sch_key):
+        fp = lmrb_fingerprint(mon_row)
+        return {
+            'Brand':          sch_row.get('Brand', sch_row.get('_norm_brand', '')),
+            'Theme':          mon_row.get('Advt_Theme', ''),
+            'Programme':      sch_row.get('Programme', ''),
+            'Scheduled_Date': sch_row.get('Date'),
+            'Aired_Date':     mon_row.get('Date', ''),
+            'Planned_Start':  str(sch_row.get('Start_Time', '')),
+            'Planned_End':    str(sch_row.get('End_Time', '')),
+            'Air_Time':       mon_row.get('Advt_time', ''),
+            'Duration':       mon_row.get('Dur', sch_row.get('_dur')),
+            'Source':         mon_row.get('_source', ''),
+            'Status':         status,
+            '_lmrb_fp':       fp,
+            '_sch_key':       sch_key,
+            '_sch_row_id':    sch_row.get('_sch_db_id'),
+            '_lmrb_row_id':   mon_row.get('_lmrb_db_id'),
+        }
+
+    # ── Pre-process schedule rows: skip/no-mapping/date-cap checks ────────────
+    # Each entry: (sch_series, sch_key, themes)
+    # Rows with no brand mapping or beyond max_verify_date go straight to not_aired.
+    active_rows   = []   # rows that will enter the passes
     not_aired_rows = []
-    unmatched_sched = []
 
-    # Determine which time column the pool has for programme-start matching
-    # Rule 3: prefer Prog_time (programme start time); fall back to Advt_time
-    pool_has_prog_secs = '_prog_secs' in mon_pool.columns
-    pool_has_air_secs  = '_air_secs'  in mon_pool.columns
-
-    # ── PASS 1 ────────────────────────────────────────────────────────────────
     for _, row in sch_df.iterrows():
         sch_date       = row.get('Date')
         sch_brand_norm = row.get('_norm_brand', '')
-        sch_brand      = row.get('Brand', sch_brand_norm)
         sch_dur        = row.get('_dur')
-        sch_start      = row.get('_start_secs')
-        sch_end        = row.get('_end_secs')
-        sch_programme  = row.get('Programme', '')
         start_time_str = str(row.get('Start_Time', ''))
         end_time_str   = str(row.get('End_Time', ''))
-        dur_val        = row.get('Duration', sch_dur)
 
-        # Smart re-run: skip rows already matched in a prior run
         sch_key = (sch_brand_norm, str(sch_date), start_time_str, end_time_str, str(sch_dur))
         if sch_key in skip_sch_keys:
             continue
 
-        # Rule 8: skip rows beyond the latest available LMRB data date
         if max_verify_date is not None and sch_date is not None:
             try:
                 if pd.notna(sch_date) and sch_date > max_verify_date:
@@ -371,234 +385,156 @@ def match_ads(
         themes = _get_themes_for_dur(brand_theme_map, sch_brand_norm, sch_dur)
         if not themes:
             not_aired_rows.append({
-                'Brand':          sch_brand,
-                'Programme':      sch_programme,
+                'Brand':          row.get('Brand', sch_brand_norm),
+                'Programme':      row.get('Programme', ''),
                 'Scheduled_Date': sch_date,
                 'Start_Time':     start_time_str,
                 'End_Time':       end_time_str,
-                'Duration':       dur_val,
+                'Duration':       row.get('Duration', sch_dur),
                 'Status':         'No Brand Mapping',
                 '_lmrb_fp':       '',
                 '_sch_row_id':    row.get('_sch_db_id'),
             })
             continue
 
-        theme_mask = _build_theme_mask(mon_pool, themes)
-        date_mask  = mon_pool['Date'] == sch_date
-        used_mask  = ~mon_pool.index.isin(matched_idx)
-        candidates = mon_pool[theme_mask & date_mask & used_mask]
+        active_rows.append((row, sch_key, themes))
 
-        if pd.notna(sch_dur) and 'Dur' in candidates.columns:
-            candidates = candidates[candidates['Dur'] == sch_dur]
-
-        if candidates.empty:
-            unmatched_sched.append(row)
-            continue
-
-        # ── Time-window split ────────────────────────────────────────────────
-        # Use Advt_time (actual ad air time) for the window check — this is the
-        # time the specific ad spot aired.  Prog_time is the programme *start*
-        # time, which can be before the planned window even when the ad itself
-        # falls inside it (e.g. programme starts at 11:55 but ad airs at 12:14
-        # within a 12:00–12:30 window).  Prog_time is kept only as a last resort
-        # when _air_secs is entirely absent from the pool.
-        time_col = None
-        if pool_has_air_secs and candidates['_air_secs'].notna().any():
-            time_col = '_air_secs'
-        elif pool_has_prog_secs and candidates['_prog_secs'].notna().any():
-            time_col = '_prog_secs'
-
-        # ── Time-window: only in-window candidates qualify for Pass 1 ──────────
-        # Rule (corrected):
-        #   MATCHED          — advt_time within [start, end] AND programme name matches
-        #   PROGRAMME MISMATCH — advt_time within [start, end] BUT programme name differs
-        #   Outside window on same day → NOT consumed here; schedule row goes to Pass 2
-        if sch_start is not None and sch_end is not None and time_col:
-            in_window = (candidates[time_col] >= sch_start) & (candidates[time_col] <= sch_end)
-            cands_in  = candidates[in_window]
-        else:
-            # No time-window info available — treat all same-day candidates as in-window
-            cands_in = candidates
-
-        if not cands_in.empty:
-            # Pick best candidate by programme-name word overlap (highest score wins
-            # when multiple in-window rows exist for the same theme+duration).
-            has_prog_col = 'Program' in cands_in.columns
-            if has_prog_col and sch_programme:
-                overlap_scores = cands_in['Program'].apply(
-                    lambda p: _word_overlap_score(sch_programme, p)
-                )
-                best_idx   = overlap_scores.idxmax()
-                prog_score = float(overlap_scores[best_idx])
-            else:
-                best_idx   = cands_in.index[0]
-                prog_score = 1.0  # no programme column or no planned name → treat as match
-
-            matched_idx.add(best_idx)
-            mon_row = mon_pool.loc[best_idx]
-            fp = lmrb_fingerprint(mon_row)
-            base_record = {
-                'Brand':          sch_brand,
-                'Theme':          mon_row.get('Advt_Theme', ''),
-                'Programme':      sch_programme,
-                'Scheduled_Date': sch_date,
-                'Aired_Date':     mon_row.get('Date', ''),
-                'Planned_Start':  start_time_str,
-                'Planned_End':    end_time_str,
-                'Air_Time':       mon_row.get('Advt_time', ''),
-                'Duration':       mon_row.get('Dur', sch_dur),
-                'Source':         mon_row.get('_source', ''),
-                '_lmrb_fp':       fp,
-                '_sch_key':       sch_key,
-                '_sch_row_id':    row.get('_sch_db_id'),
-                '_lmrb_row_id':   mon_row.get('_lmrb_db_id'),
-            }
-
-            # ≥ 50 % of planned programme words match → full match
-            # < 50 % word overlap → programme mismatch (aired in wrong programme)
-            if prog_score >= 0.5:
-                base_record['Status'] = 'Matched'
-                matched_rows.append(base_record)
-            else:
-                base_record['Status'] = 'Programme Mismatch'
-                prog_mis_rows.append(base_record)
-
-        else:
-            # No in-window candidate on this date.
-            # Out-of-window same-day rows are intentionally left unconsumed so the
-            # schedule row can be reconsidered in Pass 2 (same-date mismatch first,
-            # then Late Telecast / Not Aired).
-            unmatched_sched.append(row)
-
-    # ── PASS 2: same-date out-of-window → Programme Mismatch, then Late Telecast / Not Aired ──
-    for row in unmatched_sched:
-        sch_date       = row.get('Date')
-        sch_brand_norm = row.get('_norm_brand', '')
-        sch_brand      = row.get('Brand', sch_brand_norm)
-        sch_dur        = row.get('_dur')
-        sch_programme  = row.get('Programme', '')
-        sch_start      = row.get('_start_secs')
-        sch_end        = row.get('_end_secs')
-        start_time_str = str(row.get('Start_Time', ''))
-        end_time_str   = str(row.get('End_Time', ''))
-        dur_val        = row.get('Duration', sch_dur)
-        sch_key        = (sch_brand_norm, str(sch_date), start_time_str, end_time_str, str(sch_dur))
-
-        themes = _get_themes_for_dur(brand_theme_map, sch_brand_norm, sch_dur)
-
+    # ── Helper: get candidates (theme + duration filtered, not consumed) ───────
+    def _candidates(themes, extra_mask=None):
         theme_mask = _build_theme_mask(mon_pool, themes)
         used_mask  = ~mon_pool.index.isin(matched_idx)
-        candidates = mon_pool[theme_mask & used_mask]
+        mask = theme_mask & used_mask
+        if extra_mask is not None:
+            mask = mask & extra_mask
+        cands = mon_pool[mask]
+        return cands
 
-        if pd.notna(sch_dur) and 'Dur' in candidates.columns:
-            candidates = candidates[candidates['Dur'] == sch_dur]
+    def _dur_filter(cands, sch_dur):
+        if pd.notna(sch_dur) and 'Dur' in cands.columns:
+            return cands[cands['Dur'] == sch_dur]
+        return cands
 
-        # ── Sub-pass 2a: same-date out-of-window ─────────────────────────────
-        # An ad that aired on the scheduled date but outside the planned time
-        # window (e.g. 20:36 vs a 20:00–20:30 window) is a better match than
-        # an ad on a completely different date.  Consume it here as Programme
-        # Mismatch so it is not lost and does not cause a later date's row to be
-        # incorrectly tagged as Late Telecast.
-        same_day = candidates[candidates['Date'] == sch_date] if sch_date is not None and pd.notna(sch_date) else candidates.iloc[0:0]
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PASS 1 — Exact Match
+    #   • Same date  • In-window  • Theme  • Duration
+    # ═══════════════════════════════════════════════════════════════════════════
+    matched_rows      = []
+    after_pass1: list = []   # rows that did not match in Pass 1
 
-        if not same_day.empty:
-            # Pick the candidate closest to the planned window end
-            if pool_has_air_secs and same_day['_air_secs'].notna().any():
-                ref_secs = sch_end if sch_end is not None else 0
-                air_diff = (same_day['_air_secs'] - ref_secs).abs()
-                best_idx = air_diff.idxmin()
-                # Only accept if within 2 hours (7200s) of the nearest window boundary.
-                # Gaps larger than this (e.g. 08:00-11:00 window but ad aired at 19:20)
-                # are a completely different slot — let it fall to Not Aired rather than
-                # creating a misleading Programme Mismatch entry.
-                _air = same_day.at[best_idx, '_air_secs']
-                _lo  = sch_start if sch_start is not None else ref_secs
-                _hi  = sch_end   if sch_end   is not None else ref_secs
-                _gap = max(0, _lo - _air) if _air < _lo else max(0, _air - _hi)
-                if _gap > 7200:
-                    same_day = same_day.iloc[0:0]   # reject — treat as no same-day match
-            else:
-                best_idx = same_day.index[0]
+    for row, sch_key, themes in active_rows:
+        sch_date  = row.get('Date')
+        sch_dur   = row.get('_dur')
+        sch_start = row.get('_start_secs')
+        sch_end   = row.get('_end_secs')
 
-        if not same_day.empty:
-            matched_idx.add(best_idx)
-            mon_row = mon_pool.loc[best_idx]
-            fp = lmrb_fingerprint(mon_row)
-            prog_mis_rows.append({
-                'Brand':          sch_brand,
-                'Theme':          mon_row.get('Advt_Theme', ''),
-                'Programme':      sch_programme,
-                'Scheduled_Date': sch_date,
-                'Aired_Date':     mon_row.get('Date', ''),
-                'Planned_Start':  start_time_str,
-                'Planned_End':    end_time_str,
-                'Air_Time':       mon_row.get('Advt_time', ''),
-                'Duration':       mon_row.get('Dur', sch_dur),
-                'Source':         mon_row.get('_source', ''),
-                'Status':         'Programme Mismatch',
-                '_lmrb_fp':       fp,
-                '_sch_key':       sch_key,
-                '_sch_row_id':    row.get('_sch_db_id'),
-                '_lmrb_row_id':   mon_row.get('_lmrb_db_id'),
-            })
+        date_mask = mon_pool['Date'] == sch_date
+        cands     = _dur_filter(_candidates(themes, date_mask), sch_dur)
+
+        if cands.empty:
+            after_pass1.append((row, sch_key, themes))
             continue
 
-        # ── Sub-pass 2b: later date, in-window → Late Telecast ───────────────
-        # Rule 7: ad can only be a Late Telecast if it aired AFTER the scheduled date.
-        later = candidates[candidates['Date'] > sch_date] if sch_date is not None and pd.notna(sch_date) else candidates[candidates['Date'] != sch_date]
-
-        # Rule: Late Telecast must also fall within the planned time window —
-        # same requirement as Matched / Programme Mismatch (different date only).
-        # An airing outside the window (e.g. 12:14 vs planned 20:00–20:30) is not
-        # considered a valid late airing; the schedule row becomes Not Aired instead.
-        # Use _air_secs (actual ad time) not _prog_secs (programme start) — same
-        # reasoning as Pass 1: programme can start before window but ad airs inside it.
-        if sch_start is not None and sch_end is not None:
-            time_col = None
-            if pool_has_air_secs and later['_air_secs'].notna().any():
-                time_col = '_air_secs'
-            elif pool_has_prog_secs and later['_prog_secs'].notna().any():
-                time_col = '_prog_secs'
-            if time_col:
-                later = later[
-                    (later[time_col] >= sch_start) & (later[time_col] <= sch_end)
-                ]
-
-        if not later.empty:
-            best_idx = later.index[0]
-            matched_idx.add(best_idx)
-            mon_row = mon_pool.loc[best_idx]
-            fp = lmrb_fingerprint(mon_row)
-            late_rows.append({
-                'Brand':          sch_brand,
-                'Theme':          mon_row.get('Advt_Theme', ''),
-                'Programme':      sch_programme,
-                'Scheduled_Date': sch_date,
-                'Aired_Date':     mon_row.get('Date', ''),
-                'Planned_Start':  start_time_str,
-                'Planned_End':    end_time_str,
-                'Air_Time':       mon_row.get('Advt_time', ''),
-                'Duration':       mon_row.get('Dur', sch_dur),
-                'Source':         mon_row.get('_source', ''),
-                'Status':         'Late Telecast',
-                '_lmrb_fp':       fp,
-                '_sch_key':       sch_key,
-                '_sch_row_id':    row.get('_sch_db_id'),
-                '_lmrb_row_id':   mon_row.get('_lmrb_db_id'),
-            })
+        # In-window: advt_time within [start_time, end_time]
+        if sch_start is not None and sch_end is not None and pool_has_air_secs:
+            in_win = cands[
+                (cands['_air_secs'] >= sch_start) & (cands['_air_secs'] <= sch_end)
+            ]
         else:
+            in_win = cands   # no time info → treat all same-day as in-window
+
+        if in_win.empty:
+            after_pass1.append((row, sch_key, themes))
+            continue
+
+        best_idx = in_win.index[0]
+        matched_idx.add(best_idx)
+        matched_rows.append(_make_record(row, mon_pool.loc[best_idx], 'Matched', sch_key))
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PASS 2 — Programme Mismatch
+    #   • Same date  • advt_time AFTER end_time  • Within 10 minutes  • Theme  • Duration
+    # ═══════════════════════════════════════════════════════════════════════════
+    prog_mis_rows = []
+    after_pass2: list = []
+
+    for row, sch_key, themes in after_pass1:
+        sch_date  = row.get('Date')
+        sch_dur   = row.get('_dur')
+        sch_end   = row.get('_end_secs')
+
+        date_mask = mon_pool['Date'] == sch_date if sch_date is not None and pd.notna(sch_date) else (mon_pool['Date'] != mon_pool['Date'])
+        cands     = _dur_filter(_candidates(themes, date_mask), sch_dur)
+
+        if cands.empty or not pool_has_air_secs or sch_end is None:
+            after_pass2.append((row, sch_key, themes))
+            continue
+
+        # After end_time, within 10-minute tolerance
+        after_window = cands[
+            (cands['_air_secs'] > sch_end) &
+            (cands['_air_secs'] - sch_end <= _PROG_MISMATCH_TOLERANCE)
+        ]
+
+        if after_window.empty:
+            after_pass2.append((row, sch_key, themes))
+            continue
+
+        # Pick the closest one (smallest overshoot)
+        best_idx = (after_window['_air_secs'] - sch_end).idxmin()
+        matched_idx.add(best_idx)
+        prog_mis_rows.append(
+            _make_record(row, mon_pool.loc[best_idx], 'Programme Mismatch', sch_key)
+        )
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PASS 3 — Late Telecast
+    #   • aired_date > scheduled_date  • Theme  • Duration  (any time)
+    # ═══════════════════════════════════════════════════════════════════════════
+    late_rows      = []
+
+    for row, sch_key, themes in after_pass2:
+        sch_date = row.get('Date')
+        sch_dur  = row.get('_dur')
+
+        if sch_date is None or pd.isna(sch_date):
             not_aired_rows.append({
-                'Brand':          sch_brand,
-                'Programme':      sch_programme,
+                'Brand':          row.get('Brand', row.get('_norm_brand', '')),
+                'Programme':      row.get('Programme', ''),
                 'Scheduled_Date': sch_date,
-                'Start_Time':     start_time_str,
-                'End_Time':       end_time_str,
-                'Duration':       dur_val,
+                'Start_Time':     str(row.get('Start_Time', '')),
+                'End_Time':       str(row.get('End_Time', '')),
+                'Duration':       row.get('Duration', sch_dur),
                 'Status':         'Not Aired',
                 '_lmrb_fp':       '',
                 '_sch_key':       sch_key,
                 '_sch_row_id':    row.get('_sch_db_id'),
             })
+            continue
+
+        later_mask = mon_pool['Date'] > sch_date
+        cands      = _dur_filter(_candidates(themes, later_mask), sch_dur)
+
+        if cands.empty:
+            not_aired_rows.append({
+                'Brand':          row.get('Brand', row.get('_norm_brand', '')),
+                'Programme':      row.get('Programme', ''),
+                'Scheduled_Date': sch_date,
+                'Start_Time':     str(row.get('Start_Time', '')),
+                'End_Time':       str(row.get('End_Time', '')),
+                'Duration':       row.get('Duration', sch_dur),
+                'Status':         'Not Aired',
+                '_lmrb_fp':       '',
+                '_sch_key':       sch_key,
+                '_sch_row_id':    row.get('_sch_db_id'),
+            })
+            continue
+
+        # Pick the earliest available date
+        best_idx = cands['Date'].idxmin()
+        matched_idx.add(best_idx)
+        late_rows.append(
+            _make_record(row, mon_pool.loc[best_idx], 'Late Telecast', sch_key)
+        )
 
     # ── Extra aired ────────────────────────────────────────────────────────────
     extra_rows = []
@@ -621,5 +557,5 @@ def match_ads(
         _to_df(late_rows),
         _to_df(not_aired_rows),
         _to_df(extra_rows),
-        matched_idx,          # 6th value — full set of consumed pool indices
+        matched_idx,
     )
