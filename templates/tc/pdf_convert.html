@@ -1,0 +1,465 @@
+{% extends 'base.html' %}
+{% block title %}TC PDF Converter{% endblock %}
+
+{% block content %}
+<!-- React + PDF.js + SheetJS (client-side only, no server round-trip for parsing) -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.19.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+
+<div class="max-w-5xl mx-auto px-4 py-6">
+  <!-- Page title -->
+  <div class="mb-6">
+    <h1 class="text-2xl font-extrabold text-slate-900 flex items-center gap-2">
+      <span class="bg-blue-600 text-white rounded-lg p-1.5 text-sm">
+        <i class="fa-solid fa-file-pdf"></i>
+      </span>
+      TC PDF Converter
+    </h1>
+    <p class="text-sm text-slate-500 mt-1">Upload a TV station Transmission Certificate PDF, preview the parsed data, then upload to the system.</p>
+  </div>
+
+  <!-- React app mount point -->
+  <div id="pdf-converter-root"></div>
+</div>
+
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+const CSRF = '{{ csrf_token }}';
+const ACCOUNTS = [
+  {% for acc in accounts %}
+  { id: '{{ acc.id }}', name: '{{ acc.name|escapejs }}' },
+  {% endfor %}
+];
+
+const ACTIVE_CHANNELS   = ["TV Derana","Sirasa TV","Swarnawahini TV","ITN","Vasantham TV"];
+const DISABLED_CHANNELS = ["Hiru TV","Siyatha TV","Rupavahini","Supreme TV","Shakthi TV","Star Tamil","Channel Eye"];
+
+/* ── Icons ─────────────────────────────────────────────────────── */
+const Ico = ({ d, size=16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d={d}/>
+  </svg>
+);
+const IcoZap      = ({size=16}) => <Ico size={size} d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>;
+const IcoDownload = ({size=16}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>;
+const IcoX        = ({size=16}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
+const IcoCheck    = ({size=14}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>;
+const IcoUpload   = ({size=16}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;
+
+/* ── PDF heuristic parser (unchanged from standalone) ────────────────────── */
+async function parsePDF(file, selectedChannel) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const extractedRows = [];
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    const items = textContent.items;
+
+    items.sort((a, b) => {
+      const yDiff = b.transform[5] - a.transform[5];
+      if (Math.abs(yDiff) > 5) return yDiff;
+      return a.transform[4] - b.transform[4];
+    });
+
+    let currentLine = [], currentY = null, lastEndX = null;
+    items.forEach(item => {
+      const y = item.transform[5], x = item.transform[4], str = item.str;
+      if (!str.trim()) return;
+      const charWidth = item.width / Math.max(1, str.length);
+      const parts = str.split(/(\s{2,})/);
+      let cursorX = x;
+      parts.forEach(part => {
+        if (part.trim() === '') { cursorX += part.length * charWidth; return; }
+        const chunkX = cursorX, text = part.trim(), chunkWidth = text.length * charWidth;
+        cursorX += part.length * charWidth;
+        if (currentY === null || Math.abs(currentY - y) > 5) {
+          if (currentLine.length > 0) extractedRows.push(currentLine);
+          currentLine = [{ text, x: chunkX, endX: chunkX + chunkWidth }];
+          currentY = y; lastEndX = chunkX + chunkWidth;
+        } else {
+          const gap = chunkX - lastEndX;
+          if (gap > 4) {
+            currentLine.push({ text, x: chunkX, endX: chunkX + chunkWidth });
+          } else {
+            const addSpace = (gap > 1.5 && !currentLine[currentLine.length-1].text.endsWith(' ')) ? ' ' : '';
+            currentLine[currentLine.length-1].text += addSpace + text;
+            currentLine[currentLine.length-1].endX = chunkX + chunkWidth;
+          }
+          lastEndX = currentLine[currentLine.length-1].endX;
+        }
+      });
+    });
+    if (currentLine.length > 0) extractedRows.push(currentLine);
+  }
+
+  const extractedRecords = [];
+  extractedRows.forEach(line => {
+    const textLine = line.map(i => i.text).join(' ');
+    if (/\b(VAT No|Invoice No|Invoice Details|Date\s*:|From\s*:|To\s*:|Contractor Number|Contract No|Schedule No|Client\s*:|Agent\s*:|Ref No|Client Code|Agent Code|Total Value|Certified By|Checked By|Prepared By|POWER HOUSE|UNLESS OBJECTIONS|Page \d+ of \d+|Prog\. Date|Caption\/Copy Title|Duration \(sec\)|Channel\s*:|Sr\.No\.|MTV Channel|Braybrooke|TELECAST CERTIFICATE|Advertiser\s*:|Address\s*:|Telecast Certificate dt|Campaign Period|Account Executive|Co\/Agency|Release Order Ref|Traffic Order No|Brand\s*:|TOTAL SPOTS|AUTHORISED SIGNATORY|System Generated|Digitally Signed|Day Time|Duration Lan Mat|Cut No|Product Details|Posi|Net Rate|Remarks|Bill Number|Booking Number|Deal Number|Agency Reference No|Total Spot|We certify the commercials|Net Rate 1|Agency Name|Printed Date|Printed Time|Printed By|Client Name|Agent Name|Client \/ Contract Debits)\b/i.test(textLine) ||
+        /Rs\s*:/i.test(textLine) || /\.{4,}/.test(textLine) || /^\s*(Rs\.?\s*:?\s*)?[\d,]+\.\d{2}\s*$/i.test(textLine)) return;
+    const dateMatch = textLine.match(/\b(\d{2}[-/]\d{2}[-/]\d{4})\b/);
+    if (dateMatch) {
+      extractedRecords.push({ mainLine: line, allItems: [...line] });
+    } else if (extractedRecords.length > 0 && textLine.length > 2) {
+      extractedRecords[extractedRecords.length-1].allItems.push(...line);
+    }
+  });
+
+  const parsedData = [];
+  extractedRecords.forEach(record => {
+    const mainTextLine = record.mainLine.map(i => i.text).join(' ');
+    const allTextLine  = record.allItems.map(i => i.text).join(' ');
+    const dateMatch    = mainTextLine.match(/\b(\d{2}[-/]\d{2}[-/]\d{4})\b/);
+    const allTimes     = [...allTextLine.matchAll(/\b(\d{2}:\d{2}:\d{2}(?::\d{2})?)\b/g)].map(m => m[1]);
+
+    if (!dateMatch || allTimes.length === 0) return;
+
+    let rawDate   = dateMatch[1];
+    let dateParts = rawDate.split(/[-/]/);
+    let date = selectedChannel === 'Sirasa TV'
+      ? `${parseInt(dateParts[0],10)}/${parseInt(dateParts[1],10)}/${dateParts[2]}`
+      : `${parseInt(dateParts[1],10)}/${parseInt(dateParts[0],10)}/${dateParts[2]}`;
+
+    const durationTime = allTimes.find(t => t.startsWith('00:00:'));
+    const advtTime     = allTimes.find(t => !t.startsWith('00:00:')) || allTimes[0];
+    const time         = advtTime ? advtTime.split(':').slice(0,3).join(':') : '';
+    let duration = '';
+    if (durationTime) {
+      duration = durationTime.replace('00:00:','');
+    } else {
+      let ti = allTextLine.search(/\b\d{2}:\d{2}:\d{2}/);
+      if (ti > 0) {
+        const lw = allTextLine.substring(0,ti).trim().match(/\b(\d+)\b$/);
+        if (lw && ['5','10','15','20','25','30','45','60'].includes(lw[1])) duration = lw[1];
+      }
+      if (!duration) {
+        const dm = allTextLine.match(/\b(\d{2})\b(?=\s*$)/) || allTextLine.match(/\b(10|15|20|25|30)\b/);
+        if (dm) duration = dm[1];
+      }
+    }
+
+    let remainingItems = record.allItems.filter(item => {
+      const c = item.text.trim();
+      return !c.includes(rawDate) &&
+             !/\b\d{2}:\d{2}:\d{2}(?::\d{2})?\b/.test(c) &&
+             !/^(Mon|Tue|Wed|We|Thu|Fri|Sat|Sun|BS|PO|PD|OTHERS|Rs\.?:?|[STE])$/i.test(c) &&
+             !/^CB\s*\d*$/i.test(c) &&
+             !/^[\d,]+\.\d+$/.test(c) &&
+             !/^\.+$/.test(c) &&
+             c !== duration &&
+             (!durationTime || c !== durationTime) &&
+             !(/^\d{1,4}$/.test(c) && item.x < 50) &&
+             !(/^(ITNCOMM|VTVCOMM|ITNOPCL)\w+$/i.test(c) || /^\d{5,}$/.test(c)) &&
+             c.length > 1;
+    });
+
+    let program = '', commercial = '';
+    if (remainingItems.length > 0) {
+      const sortedItems = [...remainingItems].sort((a,b) => a.x - b.x);
+      let maxGap = 0, splitIndex = -1;
+      for (let i = 0; i < sortedItems.length-1; i++) {
+        const gap = sortedItems[i+1].x - sortedItems[i].endX;
+        if (gap > maxGap) { maxGap = gap; splitIndex = i; }
+      }
+      const commXThreshold = (maxGap > 4 && splitIndex !== -1)
+        ? sortedItems[splitIndex].endX + maxGap/2
+        : 9999;
+      const programParts = [], commercialParts = [];
+      remainingItems.forEach(item => {
+        if (item.x >= commXThreshold) { commercialParts.push(item.text); return; }
+        const isCrossed  = commXThreshold !== 9999 && item.endX > commXThreshold+5;
+        const splitMatch = item.text.match(/^(.*?)\s+-\s*(.*)$/);
+        if (splitMatch && (commXThreshold===9999||isCrossed) && splitMatch[1].trim().length>2 && splitMatch[2].trim().length>2) {
+          programParts.push(splitMatch[1].trim()); commercialParts.push(splitMatch[2].trim());
+        } else { programParts.push(item.text); }
+      });
+      program    = programParts.join(' ').trim();
+      commercial = commercialParts.join(' ').trim();
+      if (program.endsWith('-')) program = program.slice(0,-1).trim();
+      if (commercial.startsWith('-')) commercial = commercial.slice(1).trim();
+      if (program && !commercial) {
+        const sm = program.match(/^(.*?)\s+-\s*(.*)$/);
+        if (sm && sm[1].trim().length>2) { program = sm[1].trim(); commercial = sm[2].trim(); }
+      } else if (!program && commercial) {
+        const sm = commercial.match(/^(.*?)\s+-\s*(.*)$/);
+        if (sm && sm[1].trim().length>2) { program = sm[1].trim(); commercial = sm[2].trim(); }
+      }
+      if (duration && commercial.endsWith(duration)) commercial = commercial.slice(0,-duration.length).trim();
+    }
+    if (program || commercial) {
+      parsedData.push({ DATE: date, PROGRAMME: program.trim(), Advt_time: time, Advt_theme: commercial.trim(), Duration: duration });
+    }
+  });
+  return parsedData;
+}
+
+/* ── Main App ───────────────────────────────────────────────────── */
+function App() {
+  const [accountId,      setAccountId]      = useState(ACCOUNTS.length ? ACCOUNTS[0].id : '');
+  const [selectedChannel,setSelectedChannel] = useState('TV Derana');
+  const [file,           setFile]           = useState(null);
+  const [isConverting,   setIsConverting]   = useState(false);
+  const [isUploading,    setIsUploading]    = useState(false);
+  const [rows,           setRows]           = useState([]);
+  const [errorMsg,       setErrorMsg]       = useState('');
+  const [uploadResult,   setUploadResult]   = useState(null);
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+  }, []);
+
+  const handleFile = (f) => {
+    if (!f) return;
+    if (f.type !== 'application/pdf') { setErrorMsg('Please upload a valid PDF file.'); return; }
+    setFile(f); setRows([]); setErrorMsg(''); setUploadResult(null);
+  };
+
+  const convert = async () => {
+    if (!file) return;
+    setIsConverting(true); setErrorMsg('');
+    try {
+      const data = await parsePDF(file, selectedChannel);
+      if (!data.length) { setErrorMsg('Could not find tabular data. Check the PDF is a valid TC.'); }
+      else setRows(data);
+    } catch(e) { setErrorMsg('Error reading PDF: ' + e.message); }
+    setIsConverting(false);
+  };
+
+  const downloadExcel = () => {
+    if (!rows.length) return;
+    const ws = window.XLSX.utils.json_to_sheet(rows);
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, 'TC Data');
+    window.XLSX.writeFile(wb, `${selectedChannel}_TC_Converted.xlsx`);
+  };
+
+  const uploadToSystem = async () => {
+    if (!rows.length || !accountId) return;
+    setIsUploading(true); setErrorMsg('');
+    try {
+      const res = await fetch('{% url "tc_pdf_convert" %}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+        body: JSON.stringify({ account_id: accountId, channel: selectedChannel, rows }),
+      });
+      const data = await res.json();
+      if (!data.ok) { setErrorMsg(data.error || 'Upload failed.'); }
+      else setUploadResult(data);
+    } catch(e) { setErrorMsg('Network error: ' + e.message); }
+    setIsUploading(false);
+  };
+
+  /* ── Pill button ─────────────────────────────────────────────── */
+  const ChannelBtn = ({ ch, disabled=false }) => (
+    <button
+      onClick={() => { if(!disabled){ setSelectedChannel(ch); setRows([]); setUploadResult(null); }}}
+      disabled={disabled}
+      className={`relative px-2 py-3 rounded-lg text-xs font-bold border transition-all flex items-center justify-center text-center
+        ${disabled ? 'bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed'
+          : selectedChannel===ch
+            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+            : 'bg-white text-gray-700 border-gray-200 hover:border-blue-300'}`}
+    >
+      {ch}
+      {selectedChannel===ch && !disabled && (
+        <span className="absolute -top-1.5 -right-1.5 bg-white text-blue-600 rounded-full p-0.5 shadow border border-gray-100">
+          <IcoCheck />
+        </span>
+      )}
+    </button>
+  );
+
+  return (
+    <div className="space-y-5">
+
+      {/* ── Account + Channel ─────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+        <h2 className="text-sm font-bold text-slate-700 mb-3">1. Select Account &amp; Channel</h2>
+        <div className="mb-4">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1 block">Account</label>
+          <select
+            value={accountId}
+            onChange={e => setAccountId(e.target.value)}
+            className="select-field w-full max-w-xs"
+          >
+            {ACCOUNTS.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 block">Channel</label>
+        <div className="grid grid-cols-5 gap-2 mb-2">
+          {ACTIVE_CHANNELS.map(ch => <ChannelBtn key={ch} ch={ch} />)}
+        </div>
+        <div className="grid grid-cols-5 gap-2">
+          {DISABLED_CHANNELS.map(ch => <ChannelBtn key={ch} ch={ch} disabled />)}
+        </div>
+      </div>
+
+      {/* ── Upload & Convert ──────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+        <h2 className="text-sm font-bold text-slate-700 mb-1">2. Upload TC PDF</h2>
+        <p className="text-xs text-slate-400 mb-4">Upload your <strong>{selectedChannel}</strong> Transmission Certificate</p>
+
+        <div
+          className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center transition-colors
+            ${file ? 'border-blue-200 bg-blue-50/40' : 'border-slate-300 bg-slate-50 hover:bg-slate-100'}`}
+          onDragOver={e => e.preventDefault()}
+          onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}
+        >
+          {file ? (
+            <div className="bg-white px-4 py-3 rounded-xl flex items-center gap-4 shadow-sm border border-blue-100 min-w-72">
+              <div className="bg-blue-50 p-2 rounded-lg text-blue-600">
+                <i className="fa-solid fa-file-pdf text-lg"></i>
+              </div>
+              <div className="flex-1 text-left">
+                <p className="text-sm font-semibold text-slate-800 truncate w-48">{file.name}</p>
+                <p className="text-xs text-slate-400">{(file.size/1024).toFixed(1)} KB</p>
+              </div>
+              <button onClick={() => { setFile(null); setRows([]); setUploadResult(null); }}
+                      className="text-slate-400 hover:text-slate-700"><IcoX /></button>
+            </div>
+          ) : (
+            <div className="text-center py-4">
+              <i className="fa-solid fa-cloud-arrow-up text-3xl text-slate-300 mb-3 block"></i>
+              <p className="text-sm text-slate-500">
+                Drag & drop PDF or{' '}
+                <label className="text-blue-600 font-semibold cursor-pointer hover:underline">
+                  browse
+                  <input type="file" className="hidden" accept=".pdf" ref={fileInputRef}
+                         onChange={e => handleFile(e.target.files[0])} />
+                </label>
+              </p>
+            </div>
+          )}
+        </div>
+
+        {errorMsg && <p className="text-red-500 text-xs mt-3 font-medium">{errorMsg}</p>}
+
+        <button
+          onClick={convert}
+          disabled={!file || isConverting}
+          className="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 disabled:opacity-40 transition-colors"
+        >
+          <IcoZap size={15}/> {isConverting ? 'Converting…' : 'Convert PDF'}
+        </button>
+      </div>
+
+      {/* ── Preview + actions ─────────────────────────────────── */}
+      {rows.length > 0 && !uploadResult && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-sm font-bold text-slate-700 mb-1">3. Preview &amp; Upload</h2>
+              <span className="bg-blue-50 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-full">
+                {rows.length} rows converted
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={downloadExcel}
+                      className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors">
+                <IcoDownload size={14}/> Download Excel
+              </button>
+              <button
+                onClick={uploadToSystem}
+                disabled={isUploading || !accountId}
+                className="flex items-center gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg disabled:opacity-40 transition-colors"
+              >
+                <IcoUpload size={14}/> {isUploading ? 'Uploading…' : 'Upload to System'}
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-100 max-h-96">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-50 sticky top-0 text-slate-600 uppercase font-bold">
+                <tr>
+                  <th className="px-4 py-2 border-b border-slate-200">Date</th>
+                  <th className="px-4 py-2 border-b border-slate-200">Programme</th>
+                  <th className="px-4 py-2 border-b border-slate-200 whitespace-nowrap">Aired Time</th>
+                  <th className="px-4 py-2 border-b border-slate-200">Advt Theme</th>
+                  <th className="px-4 py-2 border-b border-slate-200 text-center">Dur (s)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r,i) => (
+                  <tr key={i} className="border-b last:border-0 hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-2 whitespace-nowrap text-slate-600">{r.DATE}</td>
+                    <td className="px-4 py-2 text-slate-700">{r.PROGRAMME}</td>
+                    <td className="px-4 py-2 whitespace-nowrap text-slate-600">{r.Advt_time}</td>
+                    <td className="px-4 py-2 text-slate-800 font-medium">{r.Advt_theme}</td>
+                    <td className="px-4 py-2 text-center text-slate-600">{r.Duration}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Upload success + summary ───────────────────────────── */}
+      {uploadResult && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+          <div className="flex items-center gap-3 mb-4 p-3 bg-emerald-50 border border-emerald-100 rounded-xl">
+            <span className="text-emerald-600 text-xl"><i className="fa-solid fa-circle-check"></i></span>
+            <div>
+              <p className="text-sm font-bold text-emerald-800">Uploaded successfully</p>
+              <p className="text-xs text-emerald-600">
+                {uploadResult.row_count} rows saved · {uploadResult.month} · {selectedChannel}
+              </p>
+            </div>
+            <a href="/dashboard/tc/" className="ml-auto text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1">
+              View TC List <i className="fa-solid fa-arrow-right text-[10px]"></i>
+            </a>
+          </div>
+
+          {/* Summary table: theme × duration */}
+          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
+            <i className="fa-solid fa-table-cells-large mr-1"></i> Summary — Theme × Duration
+          </h3>
+          <div className="overflow-x-auto rounded-lg border border-slate-100">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-50 text-slate-600 uppercase font-bold">
+                <tr>
+                  <th className="px-4 py-2 border-b border-slate-200 text-left">Advt Theme</th>
+                  <th className="px-4 py-2 border-b border-slate-200 text-center">Duration (s)</th>
+                  <th className="px-4 py-2 border-b border-slate-200 text-center">Count</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uploadResult.summary.map((s,i) => (
+                  <tr key={i} className="border-b last:border-0 hover:bg-slate-50">
+                    <td className="px-4 py-2 font-medium text-slate-800">{s.theme}</td>
+                    <td className="px-4 py-2 text-center text-slate-600">{s.duration ?? '-'}</td>
+                    <td className="px-4 py-2 text-center">
+                      <span className="bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded-full">{s.count}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <button
+            onClick={() => { setRows([]); setFile(null); setUploadResult(null); }}
+            className="mt-4 text-xs text-slate-500 hover:text-slate-700 underline"
+          >
+            Convert another file
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('pdf-converter-root'));
+root.render(<App />);
+</script>
+{% endblock %}

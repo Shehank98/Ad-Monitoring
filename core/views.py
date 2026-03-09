@@ -2027,6 +2027,124 @@ def tc_list(request):
 
 
 @login_required
+@role_required(['super_admin', 'admin', 'operations'])
+def tc_pdf_convert(request):
+    """
+    GET  — render the PDF TC converter page.
+    POST — receive converted rows as JSON, save to DB, return summary.
+    """
+    user       = request.user
+    account_qs = _account_qs(user)
+
+    if request.method == 'POST':
+        import json as _json
+        from datetime import datetime as _dt
+
+        try:
+            body       = _json.loads(request.body)
+            account_id = body.get('account_id', '').strip()
+            channel    = body.get('channel', '').strip()
+            rows       = body.get('rows', [])
+
+            if not (account_id and channel and rows):
+                return JsonResponse({'ok': False, 'error': 'Missing account, channel, or rows.'})
+
+            account = Account.objects.get(pk=account_id)
+            if not _account_access(user, account_id):
+                return JsonResponse({'ok': False, 'error': 'Access denied.'})
+
+            # Parse dates and derive month / date range
+            from datetime import date as _date_t
+            valid_dates = []
+            parsed_rows = []
+            for r in rows:
+                raw_date = r.get('DATE', '')
+                try:
+                    # Converter outputs D/M/YYYY
+                    parts = raw_date.split('/')
+                    d = _date_t(int(parts[2]), int(parts[1]), int(parts[0]))
+                    valid_dates.append(d)
+                    parsed_rows.append({**r, '_date': d})
+                except Exception:
+                    continue
+
+            if not parsed_rows:
+                return JsonResponse({'ok': False, 'error': 'No valid rows with parseable dates.'})
+
+            start_date = min(valid_dates)
+            end_date   = max(valid_dates)
+            month      = start_date.strftime('%B %Y')
+
+            tc_report = TransmissionReport.objects.create(
+                account           = account,
+                channel           = channel,
+                month             = month,
+                file              = None,
+                original_filename = f'PDF_Converted_{channel}_{month}.xlsx',
+                row_count         = 0,
+                start_date        = start_date,
+                end_date          = end_date,
+                uploaded_by       = user,
+            )
+
+            new_rows = []
+            for r in parsed_rows:
+                theme      = (r.get('Advt_theme') or '').strip()
+                aired_time = (r.get('Advt_time')  or '').strip()
+                dur        = _safe_int(r.get('Duration'))
+                date_val   = r['_date']
+                if not (theme and aired_time):
+                    continue
+                dedup_key = TCRow.make_dedup_key(account.id, channel, date_val, aired_time, theme, dur)
+                new_rows.append(TCRow(
+                    account    = account,
+                    tc_report  = tc_report,
+                    channel    = channel,
+                    date       = date_val,
+                    programme  = (r.get('PROGRAMME') or '').strip(),
+                    tc_theme   = theme,
+                    duration   = dur,
+                    aired_time = aired_time,
+                    dedup_key  = dedup_key,
+                ))
+
+            # Dedup + save
+            existing_keys = [rw.dedup_key for rw in new_rows]
+            TCRow.objects.filter(dedup_key__in=existing_keys).delete()
+            TCRow.objects.bulk_create(new_rows, batch_size=500)
+            tc_report.row_count = len(new_rows)
+            tc_report.save(update_fields=['row_count'])
+
+            # Summary: group by theme × duration
+            from collections import Counter
+            summary = {}
+            for rw in new_rows:
+                key = (rw.tc_theme, rw.duration)
+                summary[key] = summary.get(key, 0) + 1
+            summary_list = [
+                {'theme': k[0], 'duration': k[1], 'count': v}
+                for k, v in sorted(summary.items(), key=lambda x: -x[1])
+            ]
+
+            return JsonResponse({
+                'ok':         True,
+                'report_id':  tc_report.id,
+                'month':      month,
+                'row_count':  len(new_rows),
+                'summary':    summary_list,
+            })
+
+        except Account.DoesNotExist:
+            return JsonResponse({'ok': False, 'error': 'Account not found.'})
+        except Exception as e:
+            return JsonResponse({'ok': False, 'error': str(e)})
+
+    return render(request, 'tc/pdf_convert.html', {
+        'accounts': account_qs,
+    })
+
+
+@login_required
 def tc_upload(request):
     user       = request.user
     account_qs = _account_qs(user)

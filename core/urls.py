@@ -48,6 +48,7 @@ urlpatterns = [
     path('tc/<int:pk>/delete/',                 views.tc_delete,      name='tc_delete'),
     path('tc/reconcile/',                       views.tc_reconcile,   name='tc_reconcile'),
     path('tc/detail/',                          views.tc_three_way,   name='tc_three_way'),
+    path('tc/pdf-convert/',                     views.tc_pdf_convert, name='tc_pdf_convert'),
 
     # Summary Sheet Report
     path('summary/',                            views.summary_report,      name='summary_report'),
