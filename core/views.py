@@ -1997,6 +1997,145 @@ def _parse_tc_rows(df, account, tc_report):
 
 
 @login_required
+@require_POST
+def tc_preview(request):
+    """
+    AJAX: Parse a TC file and return a data summary for user review.
+    Does NOT save anything to the database.
+    """
+    account_id = request.POST.get('account_id', '').strip()
+    channel    = request.POST.get('channel', '').strip()
+    tc_file    = request.FILES.get('tc_file')
+
+    if not tc_file:
+        return JsonResponse({'ok': False, 'error': 'No file provided.'})
+
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied.'})
+
+    # ── Parse the file (PDF or Excel) ─────────────────────────────────────────
+    filename_lower = tc_file.name.lower()
+    is_pdf = filename_lower.endswith('.pdf')
+
+    if is_pdf:
+        from verification.tc_converters.dispatch import get_converter
+        converter = get_converter(channel)
+        import tempfile, os
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                for chunk in tc_file.chunks():
+                    tmp.write(chunk)
+                tmp_path = tmp.name
+            df = converter.parse_pdf(tmp_path)
+        except Exception as e:
+            return JsonResponse({'ok': False, 'error': f'Could not parse PDF: {e}'})
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+        if df.empty:
+            return JsonResponse({'ok': False, 'error': 'No rows could be extracted from the PDF.'})
+        df['Channel'] = channel
+        parse_method = 'pdf'
+    else:
+        try:
+            df = pd.read_excel(tc_file, header=0)
+        except Exception as e:
+            return JsonResponse({'ok': False, 'error': f'Could not read file: {e}'})
+        parse_method = 'excel'
+
+    # ── Normalise column names (same logic as _parse_tc_rows) ─────────────────
+    rename = {}
+
+    def _ci_rename_local(standard, alts):
+        if _find_col(df, standard) is not None:
+            return
+        actual = _find_col(df, *alts)
+        if actual is not None:
+            rename[actual] = standard
+
+    _tc_ex_theme = get_setting_list('tc_extra_theme_aliases')
+    _tc_ex_time  = get_setting_list('tc_extra_time_aliases')
+    _tc_ex_date  = get_setting_list('tc_extra_date_aliases')
+    _tc_ex_dur   = get_setting_list('tc_extra_duration_aliases')
+    _tc_ex_prog  = get_setting_list('tc_extra_programme_aliases')
+
+    _ci_rename_local('Channel',    ['Station', 'CHANNEL', 'channel'])
+    _ci_rename_local('Date',       ['Aired Date', 'Prg Date', 'aired_date', 'AiredDate', 'Prg_Date', *_tc_ex_date])
+    _ci_rename_local('Programme',  ['Program', 'Prg Name', 'PrgName', 'programme', *_tc_ex_prog])
+    _ci_rename_local('TC_Theme',   ['Advt_Theme', 'Advt_theme', 'Theme', 'theme',
+                                    'Product', 'Description', 'Ad Name', 'AdName', 'Ad_Name', *_tc_ex_theme])
+    _ci_rename_local('Duration',   ['Dur', 'Seconds', 'Ad Dur', 'Duration_Sec', *_tc_ex_dur])
+    _ci_rename_local('Aired_Time', ['Advt_Time', 'Advt_time', 'advt_Time', 'Time',
+                                    'Aired Time', 'Ad Start', 'AdTime', 'AiredTime', *_tc_ex_time])
+    if rename:
+        df = df.rename(columns=rename)
+
+    # Ensure required columns exist
+    for col, default in [('TC_Theme', ''), ('Aired_Time', ''), ('Duration', None), ('Programme', '')]:
+        if _find_col(df, col) is None:
+            df[col] = default
+
+    # ── Collect valid rows (same filters as _parse_tc_rows) ───────────────────
+    rows = []
+    skipped = 0
+    for _, r in df.iterrows():
+        theme      = _safe_str(r.get('TC_Theme', ''))
+        aired_time = _safe_str(r.get('Aired_Time', ''))
+        dur        = _safe_int(r.get('Duration'))
+        date_val   = _safe_date(r.get('Date'))
+        if not (theme and aired_time and date_val):
+            skipped += 1
+            continue
+        rows.append({
+            'date':      str(date_val),
+            'programme': _safe_str(r.get('Programme', '')),
+            'time':      aired_time,
+            'theme':     theme,
+            'duration':  dur,
+        })
+
+    if not rows:
+        return JsonResponse({
+            'ok': False,
+            'error': f'No valid rows found (all {skipped} rows were missing Theme, Time, or Date). '
+                     f'Check that column names are recognised.',
+        })
+
+    # ── Build summary ──────────────────────────────────────────────────────────
+    from collections import Counter, defaultdict
+    dates   = [r['date'] for r in rows]
+    themes  = Counter()
+    by_theme_dur = defaultdict(Counter)   # theme → {dur: count}
+
+    for r in rows:
+        key = (r['theme'], r['duration'])
+        themes[key] += 1
+        by_theme_dur[r['theme']][r['duration']] += 1
+
+    theme_summary = []
+    for (theme, dur), cnt in sorted(themes.items(), key=lambda x: -x[1]):
+        theme_summary.append({'theme': theme, 'duration': dur, 'count': cnt})
+
+    dur_breakdown = Counter(r['duration'] for r in rows)
+
+    return JsonResponse({
+        'ok':            True,
+        'parse_method':  parse_method,
+        'row_count':     len(rows),
+        'skipped':       skipped,
+        'date_range':    f"{min(dates)} → {max(dates)}",
+        'themes':        theme_summary,
+        'dur_breakdown': [{'duration': d, 'count': c}
+                          for d, c in sorted(dur_breakdown.items(), key=lambda x: -(x[1]))],
+        'sample_rows':   rows[:10],
+    })
+
+
+@login_required
 def tc_list(request):
     user       = request.user
     account_qs = _account_qs(user)
