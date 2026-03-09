@@ -14,10 +14,11 @@ To add a new channel converter:
 2. Add an entry to CHANNEL_CONVERTERS below.
 """
 
-from verification.tc_converters import sirasa_tv
+from verification.tc_converters import sirasa_tv, generic
 
 # Keys are lowercase substrings of the channel name as stored in the DB.
 # The first key that is a substring of the normalised channel name wins.
+# Channels not listed here fall back to the generic heuristic parser.
 CHANNEL_CONVERTERS = {
     'sirasa': sirasa_tv,
     # 'rupavahini': rupavahini,   # future
@@ -26,19 +27,22 @@ CHANNEL_CONVERTERS = {
 
 def get_converter(channel: str):
     """
-    Return the converter module for *channel*, or None if no converter exists.
+    Return the converter module for *channel*.
+
+    Tries specific converters first (keyed by lowercase substring match).
+    Falls back to the generic heuristic parser if no specific converter exists.
 
     Parameters
     ----------
     channel : str
-        The channel string from the TC upload form (e.g. "Tv - Sirasa TV").
+        The channel string from the TC upload form (e.g. "Tv - ITN").
 
     Returns
     -------
-    module or None
+    module  (always non-None — generic is the fallback)
     """
     norm = channel.lower().strip()
     for key, module in CHANNEL_CONVERTERS.items():
         if key in norm:
             return module
-    return None
+    return generic
