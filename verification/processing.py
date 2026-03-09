@@ -20,7 +20,7 @@ Matching algorithm (four passes — all schedule spots complete each pass before
   Pass 3 — Late Telecast (only rows still unmatched after Pass 2)
     Candidates must satisfy:
       • aired_date > scheduled date  • same theme  • same duration
-      (no time-window constraint — ad can air at any time on a later date)
+      • advt_time falls within planned [start_time, end_time] window
     If found → LATE TELECAST.  Lock both records.
 
   Pass 4 — Not Aired
@@ -488,13 +488,15 @@ def match_ads(
 
     # ═══════════════════════════════════════════════════════════════════════════
     # PASS 3 — Late Telecast
-    #   • aired_date > scheduled_date  • Theme  • Duration  (any time)
+    #   • aired_date > scheduled_date  • Theme  • Duration  • In time window
     # ═══════════════════════════════════════════════════════════════════════════
     late_rows      = []
 
     for row, sch_key, themes in after_pass2:
-        sch_date = row.get('Date')
-        sch_dur  = row.get('_dur')
+        sch_date  = row.get('Date')
+        sch_dur   = row.get('_dur')
+        sch_start = row.get('_start_secs')
+        sch_end   = row.get('_end_secs')
 
         if sch_date is None or pd.isna(sch_date):
             not_aired_rows.append({
@@ -513,6 +515,12 @@ def match_ads(
 
         later_mask = mon_pool['Date'] > sch_date
         cands      = _dur_filter(_candidates(themes, later_mask), sch_dur)
+
+        # Must also fall within the planned time window
+        if sch_start is not None and sch_end is not None and pool_has_air_secs and not cands.empty:
+            cands = cands[
+                (cands['_air_secs'] >= sch_start) & (cands['_air_secs'] <= sch_end)
+            ]
 
         if cands.empty:
             not_aired_rows.append({
