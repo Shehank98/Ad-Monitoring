@@ -130,121 +130,165 @@
     .data-table tr:hover td { background: rgba(248,250,252,.8); }
 
     /* ══════════════════════════════════════════════════════════════
-       SIDEBAR  —  expanded (220px) and collapsed (56px)
+       SIDEBAR  —  expanded (230px) and collapsed (60px)
     ══════════════════════════════════════════════════════════════ */
     .sidebar {
-      width: 220px; min-width: 220px;
-      background: #0f0f0f;          /* near-black, not pure black */
-      border-right: 1px solid #1a1a1a;
+      width: 230px; min-width: 230px;
+      background: #0c0e13;
+      border-right: 1px solid rgba(255,255,255,.05);
       transition: width .22s cubic-bezier(.4,0,.2,1),
                   min-width .22s cubic-bezier(.4,0,.2,1);
-      overflow: hidden;             /* clip text during animation */
+      overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+
+    /* ── Logo / brand row ── */
+    .sidebar-logo-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 18px 14px 14px;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+      flex-shrink: 0;
+    }
+    .sidebar-logo-icon {
+      width: 32px; height: 32px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 9px;
+      background: linear-gradient(135deg, #EB3F43 0%, #c42b2e 100%);
+      box-shadow: 0 4px 12px rgba(235,63,67,.35);
+    }
+
+    /* ── User card ── */
+    .user-card {
+      margin: 10px 10px 6px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.07);
+      transition: all .22s;
+      flex-shrink: 0;
+    }
+    .user-card-avatar {
+      width: 32px; height: 32px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; color: #fff;
+      flex-shrink: 0;
+    }
+    .user-card-info { overflow: hidden; transition: opacity .15s, max-width .22s; max-width: 160px; }
+    .user-card-role {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 7px; border-radius: 5px;
+      font-size: 9px; font-weight: 700; letter-spacing: .04em;
+      margin-top: 7px;
+      transition: opacity .15s, max-width .22s; max-width: 200px;
     }
 
     /* ── Section labels ── */
     .nav-label {
-      padding: 1rem .875rem .25rem;
-      font-size: .58rem; font-weight: 700; letter-spacing: .14em;
-      color: #3f3f3f; text-transform: uppercase;
+      padding: 14px 12px 4px;
+      font-size: .58rem; font-weight: 700; letter-spacing: .12em;
+      color: rgba(255,255,255,.2); text-transform: uppercase;
       white-space: nowrap; overflow: hidden;
       transition: opacity .15s, padding .22s;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .nav-label::after {
+      content: ''; flex: 1; height: 1px;
+      background: rgba(255,255,255,.06);
+      min-width: 0;
     }
 
     /* ── Nav items ── */
     .nav-item {
       position: relative;
-      display: flex; align-items: center; gap: .625rem;
-      margin: 1px .5rem;
-      padding: .5rem .625rem;
-      border-radius: .5rem;
-      font-size: .8rem; font-weight: 500; color: #6b7280;
+      display: flex; align-items: center; gap: 9px;
+      margin: 1px 8px;
+      padding: 7px 10px;
+      border-radius: 9px;
+      font-size: .78rem; font-weight: 500;
+      color: rgba(255,255,255,.38);
       text-decoration: none; cursor: pointer; white-space: nowrap;
       transition: background .15s, color .15s;
     }
-    .nav-item:hover { background: rgba(235,63,67,.1); color: #d1d5db; }
-    .nav-item.active { background: rgba(235,63,67,.14); color: #fff; font-weight: 600; }
+    .nav-item:hover {
+      background: rgba(255,255,255,.05);
+      color: rgba(255,255,255,.8);
+    }
+    .nav-item.active {
+      background: rgba(235,63,67,.12);
+      color: #fff;
+      font-weight: 600;
+    }
     .nav-item.active::before {
       content: ''; position: absolute; left: 0; top: 50%;
       transform: translateY(-50%);
-      width: 3px; height: 60%; border-radius: 0 3px 3px 0;
+      width: 3px; height: 55%; border-radius: 0 3px 3px 0;
       background: var(--og-red);
     }
 
-    /* Icon wrapper — always a fixed-size box so icons are consistent */
+    /* ── Nav icon ── */
     .nav-icon {
-      width: 1.75rem; height: 1.75rem;
+      width: 28px; height: 28px;
       display: inline-flex; align-items: center; justify-content: center;
       flex-shrink: 0;
-      border-radius: .375rem;
-      font-size: .75rem; color: #6b7280;
+      border-radius: 8px;
+      font-size: .7rem;
+      color: rgba(255,255,255,.3);
       transition: color .15s, background .15s;
     }
-    .nav-item:hover .nav-icon { color: #e2e8f0; }
-    .nav-item.active .nav-icon { color: var(--og-red); }
+    .nav-item:hover .nav-icon  { color: rgba(255,255,255,.7); }
+    .nav-item.active .nav-icon {
+      color: var(--og-red);
+      background: rgba(235,63,67,.12);
+    }
 
-    /* nav text span */
+    /* ── Nav text ── */
     .nav-text {
       overflow: hidden; white-space: nowrap;
       transition: opacity .15s, max-width .22s;
       max-width: 160px;
     }
 
-    /* User pill */
-    .user-pill {
-      margin: .5rem .625rem; padding: .625rem .75rem;
-      border-radius: .625rem;
-      background: rgba(255,255,255,.04);
-      border: 1px solid rgba(255,255,255,.07);
-      overflow: hidden;
-      transition: margin .22s, padding .22s;
+    /* ── Footer / sign out ── */
+    .sidebar-footer {
+      padding: 8px 8px 12px;
+      border-top: 1px solid rgba(255,255,255,.05);
+      flex-shrink: 0;
     }
-    .user-pill-detail { overflow: hidden; transition: opacity .15s, max-width .22s; max-width: 200px; }
 
     /* ════════════════════════════
-       COLLAPSED STATE  (56px)
+       COLLAPSED STATE  (60px)
     ════════════════════════════ */
-    body.sidebar-collapsed .sidebar { width: 56px; min-width: 56px; }
+    body.sidebar-collapsed .sidebar { width: 60px; min-width: 60px; }
 
-    /* Hide text/labels */
-    body.sidebar-collapsed .nav-label   { opacity: 0; padding-top: .35rem; padding-bottom: .1rem; pointer-events: none; }
-    body.sidebar-collapsed .nav-text    { opacity: 0; max-width: 0; pointer-events: none; }
+    body.sidebar-collapsed .nav-label       { opacity: 0; padding-top: .3rem; padding-bottom: .1rem; pointer-events: none; }
+    body.sidebar-collapsed .nav-label::after { display: none; }
+    body.sidebar-collapsed .nav-text        { opacity: 0; max-width: 0; pointer-events: none; }
     body.sidebar-collapsed .sidebar-brand-text { opacity: 0; max-width: 0; pointer-events: none; overflow: hidden; }
-    body.sidebar-collapsed .user-pill-detail   { opacity: 0; max-width: 0; pointer-events: none; }
+    body.sidebar-collapsed .user-card-info  { opacity: 0; max-width: 0; pointer-events: none; }
+    body.sidebar-collapsed .user-card-role  { opacity: 0; max-width: 0; pointer-events: none; }
 
-    /* Collapsed user pill — just show the avatar circle compactly */
-    body.sidebar-collapsed .user-pill {
-      margin: .5rem .375rem; padding: .375rem;
+    body.sidebar-collapsed .user-card {
+      margin: 10px 7px 6px; padding: 6px;
       display: flex; justify-content: center;
     }
 
-    /* Collapsed nav items — full-width, icon centered */
     body.sidebar-collapsed .nav-item {
-      margin: 1px .375rem;
-      padding: 0;
-      height: 36px;
-      justify-content: center;
-      gap: 0;
+      margin: 1px 7px; padding: 0;
+      height: 38px; justify-content: center; gap: 0;
     }
     body.sidebar-collapsed .nav-item.active::before { display: none; }
 
-    /* Icon gets a pill background in collapsed */
-    body.sidebar-collapsed .nav-icon {
-      width: 2rem; height: 2rem;
-      border-radius: .5rem;
-    }
+    body.sidebar-collapsed .nav-icon { width: 34px; height: 34px; border-radius: 9px; font-size: .75rem; }
     body.sidebar-collapsed .nav-item.active .nav-icon {
-      background: rgba(235,63,67,.18);
-      color: var(--og-red);
+      background: rgba(235,63,67,.15); color: var(--og-red);
     }
     body.sidebar-collapsed .nav-item:hover .nav-icon {
-      background: rgba(255,255,255,.07);
-      color: #d1d5db;
+      background: rgba(255,255,255,.07); color: rgba(255,255,255,.8);
     }
 
-    /* Footer sign-out in collapsed */
     body.sidebar-collapsed .sidebar-footer-text { opacity: 0; max-width: 0; pointer-events: none; overflow: hidden; }
 
-    /* ── Sidebar toggle btn (lives in topbar) ── */
+    /* ── Sidebar toggle btn ── */
     #sidebar-toggle {
       background: none; border: none; cursor: pointer;
       color: #94a3b8; padding: .375rem .5rem; border-radius: .375rem;
@@ -309,71 +353,71 @@
 <div class="flex h-screen overflow-hidden">
 
   <!-- ════════ SIDEBAR ════════════════════════════════════════════ -->
-  <aside class="sidebar flex flex-col w-56 min-h-screen flex-shrink-0 shadow-2xl" id="app-sidebar">
+  <aside class="sidebar flex-shrink-0 shadow-2xl" id="app-sidebar">
 
-    <!-- Logo row -->
-    <div class="flex items-center gap-2 px-3 py-4 border-b border-white/[.08]">
+    <!-- Brand row -->
+    <div class="sidebar-logo-row">
       {% if sidebar_logo_url %}
-        <img src="{{ sidebar_logo_url }}" alt="Ogilvy" class="h-6 w-auto object-contain flex-shrink-0"
+        <img src="{{ sidebar_logo_url }}" alt="Logo"
+             class="h-7 w-auto object-contain flex-shrink-0"
              style="filter:brightness(0) invert(1);"
              onerror="this.style.display='none'">
       {% else %}
-        <div class="w-7 h-7 flex items-center justify-center flex-shrink-0" style="color:var(--og-red);font-size:1.1rem;font-weight:900;">O</div>
+        <div class="sidebar-logo-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
       {% endif %}
       <div class="min-w-0 flex-1 sidebar-brand-text">
         <p class="text-white font-bold text-sm leading-tight tracking-tight truncate">Ogilvy Nova</p>
-        <p class="text-[9px] font-medium tracking-wide truncate" style="color:#545659;">OGILVY MEDIA</p>
+        <p class="text-[9px] font-semibold tracking-widest truncate mt-0.5" style="color:rgba(255,255,255,.25);letter-spacing:.15em;">OGILVY MEDIA</p>
       </div>
     </div>
 
-    <!-- User pill -->
-    <div class="user-pill mx-3 mt-3 mb-1 px-3 py-2.5 rounded-xl"
-         style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07)">
-      <div class="flex items-center gap-2">
-        <div class="w-7 h-7 rounded-lg flex items-center justify-center text-white font-bold text-[10px] flex-shrink-0
-          {% if request.user.role == 'super_admin' %}bg-gradient-to-br from-purple-500 to-purple-700
+    <!-- User card -->
+    <div class="user-card">
+      <div class="flex items-center gap-2.5">
+        <div class="user-card-avatar
+          {% if request.user.role == 'super_admin' %}bg-gradient-to-br from-violet-500 to-purple-700
           {% elif request.user.role == 'admin' %}bg-gradient-to-br from-blue-500 to-blue-700
-          {% elif request.user.role == 'team_head' %}bg-gradient-to-br from-emerald-500 to-emerald-700
-          {% elif request.user.role == 'planner' %}bg-gradient-to-br from-amber-400 to-amber-600
-          {% else %}bg-gradient-to-br from-orange-400 to-orange-600{% endif %}">
+          {% elif request.user.role == 'team_head' %}bg-gradient-to-br from-emerald-500 to-teal-700
+          {% elif request.user.role == 'planner' %}bg-gradient-to-br from-amber-400 to-orange-600
+          {% else %}bg-gradient-to-br from-rose-400 to-red-600{% endif %}">
           {{ request.user.initials }}
         </div>
-        <div class="min-w-0 flex-1 user-pill-detail">
-          <p class="text-slate-200 text-xs font-semibold truncate leading-tight">{{ request.user.name }}</p>
-          <p class="text-slate-500 text-[9px] truncate mt-0.5">{{ request.user.email }}</p>
+        <div class="min-w-0 flex-1 user-card-info">
+          <p class="text-white text-xs font-semibold truncate leading-tight">{{ request.user.name }}</p>
+          <p class="truncate text-[9px] mt-0.5" style="color:rgba(255,255,255,.3);">{{ request.user.email }}</p>
         </div>
       </div>
-      <div class="mt-2 user-pill-detail">
-        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-semibold
-          {% if request.user.role == 'super_admin' %}bg-purple-500/20 text-purple-300
-          {% elif request.user.role == 'admin' %}bg-blue-500/20 text-blue-300
-          {% elif request.user.role == 'team_head' %}bg-emerald-500/20 text-emerald-300
-          {% elif request.user.role == 'planner' %}bg-amber-500/20 text-amber-300
-          {% else %}bg-orange-500/20 text-orange-300{% endif %}">
-          <i class="fa-solid
-            {% if request.user.role == 'super_admin' %}fa-shield-halved
-            {% elif request.user.role == 'admin' %}fa-user-shield
-            {% elif request.user.role == 'team_head' %}fa-people-group
-            {% elif request.user.role == 'planner' %}fa-pen-ruler
-            {% else %}fa-gear{% endif %} text-[8px]"></i>
-          {{ request.user.role_label }}
-        </span>
+      <div class="user-card-role
+        {% if request.user.role == 'super_admin' %}bg-violet-500/15 text-violet-300
+        {% elif request.user.role == 'admin' %}bg-blue-500/15 text-blue-300
+        {% elif request.user.role == 'team_head' %}bg-emerald-500/15 text-emerald-300
+        {% elif request.user.role == 'planner' %}bg-amber-500/15 text-amber-300
+        {% else %}bg-rose-500/15 text-rose-300{% endif %}">
+        <i class="fa-solid text-[7px]
+          {% if request.user.role == 'super_admin' %}fa-shield-halved
+          {% elif request.user.role == 'admin' %}fa-user-shield
+          {% elif request.user.role == 'team_head' %}fa-people-group
+          {% elif request.user.role == 'planner' %}fa-pen-ruler
+          {% else %}fa-gear{% endif %}"></i>
+        {{ request.user.role_label }}
       </div>
     </div>
 
     <!-- Nav -->
-    <nav class="flex-1 px-2 py-2 overflow-y-auto">
+    <nav class="flex-1 py-1 overflow-y-auto" style="scrollbar-width:none;">
       {% with path=request.path ur=request.user.role %}
 
-      <!-- ── Overview ── -->
-      <p class="nav-label nav-text">Overview</p>
+      <p class="nav-label"><span class="nav-text">Overview</span></p>
       <a href="/dashboard/" class="nav-item {% if path == '/dashboard/' %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-house"></i><span class="nav-text">Dashboard</span>
+        <i class="nav-icon fa-solid fa-house-chimney"></i><span class="nav-text">Dashboard</span>
       </a>
 
-      <!-- ── Admin (admin + super_admin only) ── -->
       {% if ur in 'super_admin,admin' %}
-        <p class="nav-label nav-text">Admin</p>
+        <p class="nav-label"><span class="nav-text">Admin</span></p>
         <a href="/dashboard/users/" class="nav-item {% if '/users/' in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-users"></i><span class="nav-text">Users</span>
         </a>
@@ -394,16 +438,14 @@
         </a>
       {% endif %}
 
-      <!-- ── Team (team_head only — user management for their account) ── -->
       {% if ur == 'team_head' %}
-        <p class="nav-label nav-text">My Team</p>
+        <p class="nav-label"><span class="nav-text">My Team</span></p>
         <a href="/dashboard/users/" class="nav-item {% if '/users/' in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-users"></i><span class="nav-text">Users</span>
         </a>
       {% endif %}
 
-      <!-- ── Schedules ── -->
-      <p class="nav-label nav-text">Schedules</p>
+      <p class="nav-label"><span class="nav-text">Schedules</span></p>
       <a href="/dashboard/schedules/" class="nav-item {% if '/schedules/' in path and 'upload' not in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-text">View Schedules</span>
       </a>
@@ -411,8 +453,7 @@
         <i class="nav-icon fa-solid fa-file-arrow-up"></i><span class="nav-text">Upload Schedule</span>
       </a>
 
-      <!-- ── Monitoring ── -->
-      <p class="nav-label nav-text">Monitoring</p>
+      <p class="nav-label"><span class="nav-text">Monitoring</span></p>
       <a href="/dashboard/monitoring/" class="nav-item {% if '/monitoring/' in path and 'upload' not in path and '/monitor/' not in path and 'matched-lmrb' not in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-chart-bar"></i><span class="nav-text">View Data</span>
       </a>
@@ -423,17 +464,15 @@
         <i class="nav-icon fa-solid fa-gauge-high"></i><span class="nav-text">Dashboard</span>
       </a>
 
-      <!-- ── Tools ── -->
-      <p class="nav-label nav-text">Tools</p>
+      <p class="nav-label"><span class="nav-text">Tools</span></p>
       <a href="/verify/" class="nav-item {% if '/verify/' in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-magnifying-glass-chart"></i><span class="nav-text">Verify Ads</span>
       </a>
       <a href="/dashboard/brand-mappings/" class="nav-item {% if '/brand-mappings/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-map"></i><span class="nav-text">Brand Mappings</span>
+        <i class="nav-icon fa-solid fa-tags"></i><span class="nav-text">Brand Mappings</span>
       </a>
 
-      <!-- ── Transmission (TC) ── -->
-      <p class="nav-label nav-text">Transmission (TC)</p>
+      <p class="nav-label"><span class="nav-text">Transmission (TC)</span></p>
       <a href="/dashboard/tc/" class="nav-item {% if '/tc/' in path and 'upload' not in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-file-invoice"></i><span class="nav-text">TC Reports</span>
       </a>
@@ -441,8 +480,7 @@
         <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload TC</span>
       </a>
 
-      <!-- ── Reconciliation ── -->
-      <p class="nav-label nav-text">Reconciliation</p>
+      <p class="nav-label"><span class="nav-text">Reconciliation</span></p>
       <a href="/dashboard/summary/" class="nav-item {% if '/summary/' in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-file-contract"></i><span class="nav-text">Summary Sheet</span>
       </a>
@@ -453,21 +491,26 @@
       {% endwith %}
     </nav>
 
-    <!-- Sign out -->
-    <div class="px-2 pb-3 pt-2 border-t border-white/[.08]">
+    <!-- Footer -->
+    <div class="sidebar-footer">
       {% if request.user.must_change_password %}
         <a href="/auth/change-password/"
-           class="nav-item text-amber-400 hover:bg-amber-500/10 hover:text-amber-300 mb-1">
-          <i class="nav-icon fa-solid fa-triangle-exclamation"></i>
+           class="nav-item mb-1"
+           style="color:#fbbf24;">
+          <i class="nav-icon fa-solid fa-triangle-exclamation" style="color:#fbbf24;"></i>
           <span class="nav-text sidebar-footer-text">Change Password</span>
         </a>
       {% endif %}
       <a href="/auth/logout/"
-         class="nav-item text-slate-600 hover:text-red-400 hover:bg-red-500/10">
+         class="nav-item"
+         style="color:rgba(255,255,255,.25);"
+         onmouseover="this.style.color='#f87171';this.style.background='rgba(239,68,68,.08)'"
+         onmouseout="this.style.color='rgba(255,255,255,.25)';this.style.background=''">
         <i class="nav-icon fa-solid fa-arrow-right-from-bracket"></i>
         <span class="nav-text sidebar-footer-text">Sign Out</span>
       </a>
     </div>
+
   </aside>
 
   <!-- ════════ MAIN ════════════════════════════════════════════════ -->
