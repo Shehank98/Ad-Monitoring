@@ -89,12 +89,53 @@ def _summary_df(full_df, group_col):
     return pd.DataFrame(rows)
 
 
-def _build_excel_response(qs, filename_base):
+def _build_unmatched_lmrb_df(account_id, channel=None, month=None):
+    """
+    Build a DataFrame of unmatched LMRBRows for the given scope.
+    Filtered to the schedule date range when channel + month are provided.
+    """
+    lmrb_qs = LMRBRow.objects.filter(account_id=account_id, is_matched=False)
+    if channel:
+        lmrb_qs = lmrb_qs.filter(channel__iexact=channel)
+    if channel and month:
+        sch_range = Schedule.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+        ).aggregate(s=Min('start_date'), e=Max('end_date'))
+        if sch_range['s']:
+            lmrb_qs = lmrb_qs.filter(date__gte=sch_range['s'])
+        if sch_range['e']:
+            lmrb_qs = lmrb_qs.filter(date__lte=sch_range['e'])
+
+    records = list(lmrb_qs.order_by('date', 'advt_time').values(
+        'channel', 'date', 'advt_time', 'advt_theme', 'duration',
+        'program', 'prog_time', 'advertiser', 'source',
+    ))
+    if not records:
+        return pd.DataFrame(columns=[
+            'Channel', 'Date', 'Time', 'Theme', 'Duration (s)',
+            'Programme', 'Prog Time', 'Advertiser', 'Source',
+        ])
+    df = pd.DataFrame(records)
+    df.rename(columns={
+        'channel':    'Channel',
+        'date':       'Date',
+        'advt_time':  'Time',
+        'advt_theme': 'Theme',
+        'duration':   'Duration (s)',
+        'program':    'Programme',
+        'prog_time':  'Prog Time',
+        'advertiser': 'Advertiser',
+        'source':     'Source',
+    }, inplace=True)
+    return df
+
+
+def _build_excel_response(qs, filename_base, account_id=None, channel=None, month=None):
     """
     Build a multi-sheet Excel HttpResponse from a MatchResult queryset.
 
     Sheets: Full Report, Matched, Not Aired, Programme Mismatch, Late Telecast,
-            Channel Summary, Brand Summary.
+            Channel Summary, Brand Summary, Unmatched LMRB Report.
     """
     full_df = _qs_to_df(qs)
 
@@ -112,6 +153,10 @@ def _build_excel_response(qs, filename_base):
         _sheet('Late Telecast').to_excel(writer, sheet_name='Late Telecast', index=False)
         _summary_df(full_df, 'Channel').to_excel(writer, sheet_name='Channel Summary', index=False)
         _summary_df(full_df, 'Brand').to_excel(writer, sheet_name='Brand Summary', index=False)
+        if account_id:
+            _build_unmatched_lmrb_df(account_id, channel, month).to_excel(
+                writer, sheet_name='Unmatched LMRB Report', index=False,
+            )
 
     output.seek(0)
     fname = f'{filename_base}.xlsx'.replace(' ', '_')
@@ -559,7 +604,7 @@ def export_excel(request):
         )
 
     filename = f'verification_{channel}_{month}'
-    return _build_excel_response(qs, filename)
+    return _build_excel_response(qs, filename, account_id=account_id, channel=channel, month=month)
 
 
 @login_required
@@ -587,7 +632,7 @@ def export_all(request):
         )
 
     filename = f'verification_all_{account.name}'
-    return _build_excel_response(qs, filename)
+    return _build_excel_response(qs, filename, account_id=account_id)
 
 
 # ── Report page ────────────────────────────────────────────────────────────────

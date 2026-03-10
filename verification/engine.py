@@ -89,6 +89,11 @@ def _build_sch_df(sch_qs):
     df['_norm_brand'] = df['Brand'].apply(normalize)
     df['_start_secs'] = df['Start_Time'].apply(_parse_time_to_seconds)
     df['_end_secs']   = df['End_Time'].apply(_parse_time_to_seconds)
+    # Treat 00:00:00 end_time as midnight (86400s) when the window starts in the
+    # evening (after noon).  A schedule window like 21:00–00:00 means "up to
+    # midnight", not "up to start of day".
+    evening_mask = (df['_end_secs'] == 0) & (df['_start_secs'] > 43200)
+    df.loc[evening_mask, '_end_secs'] = 86400
     df['_dur']        = pd.to_numeric(df['Duration'], errors='coerce')
     return df.reset_index(drop=True)
 
