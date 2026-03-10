@@ -92,13 +92,17 @@ def _build_tc_theme_map(account_id):
     """
     Returns {norm_brand: [(norm_tc_theme, duration_or_None), ...]}
     Only includes mappings that have a tc_theme set.
+    tc_theme may contain multiple pipe-separated values (e.g. "Theme A|Theme B").
+    Each value is added as a separate entry in the map.
     """
     mapping = {}
     for bm in BrandMapping.objects.filter(account_id=account_id).exclude(tc_theme=''):
-        norm_brand    = _normalize(bm.brand)
-        norm_tc_theme = _normalize(bm.tc_theme)
-        dur           = int(bm.duration) if bm.duration is not None else None
-        mapping.setdefault(norm_brand, []).append((norm_tc_theme, dur))
+        norm_brand = _normalize(bm.brand)
+        dur        = int(bm.duration) if bm.duration is not None else None
+        for raw_theme in bm.tc_theme.split('|'):
+            norm_tc_theme = _normalize(raw_theme)
+            if norm_tc_theme:
+                mapping.setdefault(norm_brand, []).append((norm_tc_theme, dur))
     return mapping
 
 

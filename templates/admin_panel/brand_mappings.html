@@ -1,45 +1,47 @@
 {% extends 'base.html' %}
 {% block title %}Brand Mappings{% endblock %}
 {% block page_title %}Brand Mappings{% endblock %}
-{% block page_subtitle %}Map schedule brand names to LMRB monitoring themes and TC transmission themes - optionally restrict by duration{% endblock %}
+{% block page_subtitle %}Connect schedule brand names to LMRB themes and TC theme names{% endblock %}
 
 {% block content %}
 <div class="space-y-5">
 
-  <!-- ── Info banner ───────────────────────────────────────────── -->
-  <div class="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800">
-    <i class="fa-solid fa-circle-info text-blue-400 mt-0.5 flex-shrink-0"></i>
-    <div>
-      <p class="font-semibold mb-0.5">How brand mappings work</p>
-      <p class="text-blue-700 text-xs">
-        The schedule uses <strong>Brand</strong> names. Set <strong>LMRB Theme</strong> to match monitoring
-        data (Advt_Theme / MapOnline Theme). Set <strong>TC Theme</strong> to match Transmission Certificate
-        data (the product/ad name the channel uses in their TC file). One brand can have multiple mappings.
-        <strong>Duration</strong> is optional - restricts the mapping to a specific ad length.
-      </p>
+  <!-- ── How it works (collapsible, compact) ───────────────────────────── -->
+  <details class="group bg-blue-50 border border-blue-200 rounded-xl text-sm">
+    <summary class="flex items-center gap-2 px-4 py-3 cursor-pointer select-none text-blue-700 font-semibold">
+      <i class="fa-solid fa-circle-info text-blue-400"></i>
+      How brand mappings work
+      <i class="fa-solid fa-chevron-down text-blue-400 ml-auto group-open:rotate-180 transition-transform"></i>
+    </summary>
+    <div class="px-4 pb-3 text-xs text-blue-700 leading-relaxed">
+      <p>The schedule uses <strong>Brand</strong> names. <strong>LMRB Theme</strong> connects to monitoring data (Advt_Theme / MapOnline Theme).
+      <strong>TC Theme(s)</strong> connect to the Transmission Certificate — you can now map <em>multiple TC names</em> to a single brand row.
+      <strong>Duration</strong> restricts the mapping to a specific ad length (optional).</p>
     </div>
-  </div>
+  </details>
 
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
 
-    <!-- ── Left: Add form ────────────────────────────────────── -->
-    <div class="lg:col-span-1">
+    <!-- ── Left: Add form ────────────────────────────────────────────── -->
+    <div class="lg:col-span-1 sticky top-4">
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
-          <div class="w-9 h-9 bg-emerald-100 rounded-xl flex items-center justify-center flex-shrink-0">
-            <i class="fa-solid fa-plus text-emerald-600 text-sm"></i>
-          </div>
-          <h2 class="font-bold text-slate-800 text-sm">Add New Mapping</h2>
+
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2.5">
+          <span class="w-8 h-8 bg-emerald-100 rounded-xl flex items-center justify-center flex-shrink-0">
+            <i class="fa-solid fa-plus text-emerald-600 text-xs"></i>
+          </span>
+          <h2 class="font-bold text-slate-800 text-sm">Add Mapping</h2>
         </div>
-        <form method="post" class="px-5 py-5 space-y-4">
+
+        <form method="post" id="addMappingForm" class="px-5 py-4 space-y-4" onsubmit="prepareAddSubmit()">
           {% csrf_token %}
           <input type="hidden" name="action" value="add">
 
+          <!-- Account -->
           <div>
-            <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-              <i class="fa-solid fa-building mr-1 text-slate-400"></i> Account <span class="text-red-400">*</span>
-            </label>
-            <select name="account_id" id="addAccountSelect" class="select-field" required onchange="loadMappingOptions(this.value)">
+            <label class="field-label"><i class="fa-solid fa-building mr-1 text-slate-400"></i> Account <span class="text-red-400">*</span></label>
+            <select name="account_id" id="addAccountSelect" class="select-field" required
+                    onchange="loadMappingOptions(this.value)">
               <option value="">Select account…</option>
               {% for acc in accounts %}
                 <option value="{{ acc.id }}" {% if filters.account == acc.id|stringformat:"s" %}selected{% endif %}>{{ acc.name }}</option>
@@ -47,41 +49,71 @@
             </select>
           </div>
 
+          <!-- Brand -->
           <div>
-            <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-              <i class="fa-solid fa-tag mr-1 text-slate-400"></i> Brand <span class="text-red-400">*</span>
-            </label>
-            <input type="text" name="brand" id="brandInput" list="brandOptions" placeholder="Type or select from schedule…" class="input-field" required autocomplete="off">
+            <label class="field-label"><i class="fa-solid fa-tag mr-1 text-slate-400"></i> Brand <span class="text-red-400">*</span></label>
+            <input type="text" name="brand" id="brandInput" list="brandOptions"
+                   placeholder="Type or select…" class="input-field" required autocomplete="off">
             <datalist id="brandOptions"></datalist>
-            <p class="mt-1 text-[10px] text-slate-400">As it appears in the Schedule file (Brand column)</p>
+            <p class="field-hint">As it appears in the Schedule file</p>
           </div>
 
+          <!-- LMRB Theme -->
           <div>
-            <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-              <i class="fa-solid fa-chart-line mr-1 text-slate-400"></i> LMRB Theme <span class="text-red-400">*</span>
-            </label>
-            <input type="text" name="theme" id="themeInput" list="themeOptions" placeholder="Type or select from LMRB data…" class="input-field" required autocomplete="off">
+            <label class="field-label"><i class="fa-solid fa-chart-line mr-1 text-slate-400"></i> LMRB Theme <span class="text-red-400">*</span></label>
+            <input type="text" name="theme" id="themeInput" list="themeOptions"
+                   placeholder="Type or select…" class="input-field" required autocomplete="off">
             <datalist id="themeOptions"></datalist>
-            <p class="mt-1 text-[10px] text-slate-400">As it appears in LMRB Advt_Theme or MapOnline Theme column</p>
+            <p class="field-hint">Advt_Theme / MapOnline Theme column</p>
           </div>
 
+          <!-- TC Themes — multi-select chip picker -->
           <div>
-            <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-              <i class="fa-solid fa-file-invoice mr-1 text-slate-400"></i> TC Theme
-              <span class="text-slate-400 font-normal normal-case ml-1">optional</span>
+            <label class="field-label">
+              <i class="fa-solid fa-file-invoice mr-1 text-slate-400"></i> TC Theme(s)
+              <span class="text-slate-400 font-normal normal-case ml-1">optional · multiple allowed</span>
             </label>
-            <input type="text" name="tc_theme" id="tcThemeAddInput" list="tcThemeOptions" placeholder="Type or select from TC data…" class="input-field" autocomplete="off">
-            <datalist id="tcThemeOptions"></datalist>
-            <p class="mt-1 text-[10px] text-slate-400">As it appears in the Transmission Certificate (TC) file</p>
+
+            <!-- Selected chips display -->
+            <div id="addTcChips"
+                 class="min-h-[38px] flex flex-wrap gap-1.5 p-2 bg-slate-50 border border-slate-200
+                        rounded-lg mb-2 cursor-text"
+                 onclick="document.getElementById('addTcInput').focus()">
+              <!-- chips injected here by JS -->
+            </div>
+
+            <!-- Input row -->
+            <div class="flex gap-2">
+              <div class="relative flex-1">
+                <input type="text" id="addTcInput" list="tcThemeOptions"
+                       placeholder="Type or pick a TC theme…"
+                       class="input-field pr-8" autocomplete="off"
+                       onkeydown="handleTcInputKey(event,'add')">
+                <datalist id="tcThemeOptions"></datalist>
+              </div>
+              <button type="button" onclick="addTcChip('add')"
+                      class="px-3 py-2 bg-amber-100 text-amber-700 rounded-lg text-xs font-bold
+                             hover:bg-amber-200 transition-colors flex-shrink-0">
+                Add
+              </button>
+            </div>
+
+            <!-- Quick-pick list (populated by AJAX) -->
+            <div id="addTcQuickPick" class="mt-2 hidden">
+              <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">Known TC themes — click to add:</p>
+              <div id="addTcQuickPickItems" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto"></div>
+            </div>
+
+            <!-- Hidden field with pipe-joined values -->
+            <input type="hidden" name="tc_theme" id="addTcHidden">
+            <p class="field-hint">As it appears in TC files. You can add multiple.</p>
           </div>
 
+          <!-- Duration -->
           <div>
-            <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-              <i class="fa-solid fa-clock mr-1 text-slate-400"></i> Duration (seconds)
-              <span class="text-slate-400 font-normal normal-case ml-1">optional</span>
-            </label>
+            <label class="field-label"><i class="fa-solid fa-clock mr-1 text-slate-400"></i> Duration (seconds) <span class="text-slate-400 font-normal normal-case ml-1">optional</span></label>
             <input type="number" name="duration" min="1" placeholder="e.g. 20" class="input-field">
-            <p class="mt-1 text-[10px] text-slate-400">Leave blank to match any duration.</p>
+            <p class="field-hint">Leave blank to match any duration</p>
           </div>
 
           <button type="submit" class="btn-primary w-full justify-center">
@@ -91,13 +123,14 @@
       </div>
     </div>
 
-    <!-- ── Right: Filter + table ─────────────────────────────── -->
-    <div class="lg:col-span-2 space-y-4">
+    <!-- ── Right: Table ──────────────────────────────────────────────── -->
+    <div class="lg:col-span-2 space-y-3">
 
-      <!-- Filter -->
-      <form method="get" class="bg-white rounded-xl border border-slate-100 shadow-sm px-4 py-3 flex flex-wrap gap-3 items-end">
-        <div class="flex-1 min-w-[150px]">
-          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Filter by Account</label>
+      <!-- Filter bar -->
+      <form method="get" class="flex flex-wrap items-end gap-3 bg-white border border-slate-100
+                                 rounded-xl shadow-sm px-4 py-3">
+        <div class="flex-1 min-w-[140px]">
+          <label class="field-label">Filter by Account</label>
           <select name="account" class="select-field">
             <option value="">All accounts</option>
             {% for acc in accounts %}
@@ -105,102 +138,119 @@
             {% endfor %}
           </select>
         </div>
-        <div class="flex gap-2">
+        <div class="flex gap-2 pb-0.5">
           <button type="submit" class="btn-primary"><i class="fa-solid fa-filter"></i> Filter</button>
           <a href="/dashboard/brand-mappings/" class="btn-secondary">Clear</a>
         </div>
       </form>
 
-      <!-- Table -->
+      <!-- Mappings table -->
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        {% if mappings %}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
               <tr class="bg-slate-50 border-b border-slate-100">
-                <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Account</th>
+                <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider w-[110px]">Account</th>
                 <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Brand</th>
                 <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">LMRB Theme</th>
-                <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">TC Theme</th>
-                <th class="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">Dur</th>
-                <th class="px-3 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Action</th>
+                <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">TC Theme(s)</th>
+                <th class="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider w-16">Dur</th>
+                <th class="px-3 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider w-20">Action</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-100">
+            <tbody class="divide-y divide-slate-50">
               {% for m in mappings %}
-              <tr class="hover:bg-slate-50/70 transition-colors" id="row-{{ m.id }}">
+              <tr class="hover:bg-slate-50/60 transition-colors group" id="row-{{ m.id }}">
+
+                <!-- Account -->
                 <td class="px-3 py-2.5">
-                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs font-semibold">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-semibold">
                     {{ m.account.name }}
                   </span>
                 </td>
+
+                <!-- Brand -->
                 <td class="px-3 py-2.5">
-                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold ring-1 ring-blue-200">
-                    <i class="fa-solid fa-tag text-[9px]"></i> {{ m.brand }}
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50
+                               text-blue-700 text-[11px] font-semibold ring-1 ring-blue-200 max-w-[160px]">
+                    <i class="fa-solid fa-tag text-[9px] flex-shrink-0"></i>
+                    <span class="truncate" title="{{ m.brand }}">{{ m.brand }}</span>
                   </span>
                 </td>
+
+                <!-- LMRB Theme -->
                 <td class="px-3 py-2.5">
-                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold ring-1 ring-emerald-200 max-w-[160px] truncate" title="{{ m.theme }}">
-                    <i class="fa-solid fa-arrow-right text-[9px] flex-shrink-0"></i> {{ m.theme }}
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50
+                               text-emerald-700 text-[11px] font-semibold ring-1 ring-emerald-200 max-w-[180px]">
+                    <i class="fa-solid fa-arrow-right text-[9px] flex-shrink-0"></i>
+                    <span class="truncate" title="{{ m.theme }}">{{ m.theme }}</span>
                   </span>
                 </td>
-                <!-- TC Theme: inline editable -->
+
+                <!-- TC Theme(s) — multiple chips + edit button -->
                 <td class="px-3 py-2.5" id="tc-cell-{{ m.id }}">
-                  {% if m.tc_theme %}
-                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700 text-xs font-semibold ring-1 ring-amber-200 max-w-[140px] truncate" title="{{ m.tc_theme }}">
-                      <i class="fa-solid fa-file-invoice text-[9px] flex-shrink-0"></i> {{ m.tc_theme }}
+                  <div class="flex flex-wrap items-center gap-1">
+                    {% for t in m.tc_themes_list %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50
+                                 text-amber-700 text-[11px] font-semibold ring-1 ring-amber-200
+                                 max-w-[150px]" title="{{ t }}">
+                      <span class="truncate">{{ t }}</span>
                     </span>
-                  {% else %}
-                    <span class="text-[10px] text-slate-400 italic">not set</span>
-                  {% endif %}
-                  <button onclick="editTcTheme({{ m.id }}, '{{ m.tc_theme|escapejs }}')"
-                          class="ml-1 text-[10px] text-slate-400 hover:text-amber-600 transition-colors"
-                          title="Edit TC Theme">
-                    <i class="fa-solid fa-pencil"></i>
-                  </button>
+                    {% empty %}
+                    <span class="text-[11px] text-slate-400 italic">not set</span>
+                    {% endfor %}
+                    <button onclick="openEditTcModal({{ m.id }}, '{{ m.tc_theme|escapejs }}')"
+                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md
+                                   text-[10px] text-slate-400 hover:text-amber-600 hover:bg-amber-50
+                                   transition-colors border border-transparent hover:border-amber-200"
+                            title="Edit TC themes">
+                      <i class="fa-solid fa-pencil"></i>
+                    </button>
+                  </div>
                 </td>
+
+                <!-- Duration -->
                 <td class="px-3 py-2.5 text-center">
                   {% if m.duration %}
-                    <span class="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-xs font-bold ring-1 ring-violet-200">{{ m.duration }}s</span>
+                    <span class="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-[11px] font-bold ring-1 ring-violet-200">{{ m.duration }}s</span>
                   {% else %}
-                    <span class="text-xs text-slate-400 italic">any</span>
+                    <span class="text-[11px] text-slate-400">any</span>
                   {% endif %}
                 </td>
+
+                <!-- Delete -->
                 <td class="px-3 py-2.5 text-right">
                   <form method="post" class="inline"
-                        onsubmit="return confirm('Delete mapping: {{ m.brand }} → {{ m.theme }}?')">
+                        onsubmit="return confirm('Delete mapping: {{ m.brand|escapejs }} → {{ m.theme|escapejs }}?')">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="mapping_id" value="{{ m.id }}">
                     <button type="submit"
                             class="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200
-                                   text-xs font-semibold text-slate-500 hover:border-red-300 hover:text-red-600
-                                   hover:bg-red-50 transition-all">
-                      <i class="fa-solid fa-trash"></i>
+                                   text-xs text-slate-400 hover:border-red-300 hover:text-red-500
+                                   hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100">
+                      <i class="fa-solid fa-trash text-[10px]"></i>
                     </button>
                   </form>
-                </td>
-              </tr>
-              {% empty %}
-              <tr>
-                <td colspan="6" class="px-5 py-14 text-center">
-                  <div class="flex flex-col items-center gap-3">
-                    <div class="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
-                      <i class="fa-solid fa-map text-slate-400 text-2xl"></i>
-                    </div>
-                    <p class="text-slate-500 font-medium">No brand mappings yet</p>
-                    <p class="text-slate-400 text-xs max-w-xs">Use the form on the left to map schedule brand names to monitoring and TC theme names.</p>
-                  </div>
                 </td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
-
-        {% if mappings %}
-        <div class="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
+        <div class="px-4 py-2.5 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
           <i class="fa-solid fa-layer-group text-slate-400 text-xs"></i>
-          <span class="text-xs text-slate-500 font-medium">{{ mappings|length }} mapping{{ mappings|length|pluralize }}</span>
+          <span class="text-xs text-slate-500">{{ mappings|length }} mapping{{ mappings|length|pluralize }}</span>
+        </div>
+
+        {% else %}
+        <div class="py-16 text-center">
+          <div class="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+            <i class="fa-solid fa-map text-slate-400 text-2xl"></i>
+          </div>
+          <p class="text-slate-600 font-semibold text-sm">No brand mappings yet</p>
+          <p class="text-slate-400 text-xs mt-1">Use the form on the left to add mappings.</p>
         </div>
         {% endif %}
       </div>
@@ -208,40 +258,95 @@
   </div>
 </div>
 
-<!-- TC Theme inline edit modal -->
-<div id="tcModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-  <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 w-full max-w-sm">
-    <h3 class="font-bold text-slate-800 mb-1 text-sm">Edit TC Theme</h3>
-    <p class="text-[11px] text-slate-400 mb-3">Enter the theme/product name exactly as it appears in the TC file.</p>
-    <input type="text" id="tcThemeInput" class="input-field mb-4" placeholder="e.g. MOBITEL- 1298">
-    <form method="post" id="tcThemeForm">
+
+<!-- ── Edit TC Theme modal ────────────────────────────────────────────────── -->
+<div id="editTcModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl border border-slate-100 p-6 w-full max-w-md mx-4">
+
+    <div class="flex items-center gap-3 mb-4">
+      <span class="w-9 h-9 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
+        <i class="fa-solid fa-file-invoice text-amber-600 text-sm"></i>
+      </span>
+      <div>
+        <h3 class="font-bold text-slate-800 text-sm">Edit TC Theme(s)</h3>
+        <p class="text-[11px] text-slate-400">Add or remove TC theme names for this mapping</p>
+      </div>
+    </div>
+
+    <!-- Selected chips -->
+    <div class="mb-2">
+      <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Selected TC themes:</p>
+      <div id="editTcChips"
+           class="min-h-[42px] flex flex-wrap gap-1.5 p-2 bg-slate-50 border border-slate-200
+                  rounded-lg cursor-text"
+           onclick="document.getElementById('editTcInput').focus()">
+        <!-- chips injected by JS -->
+      </div>
+    </div>
+
+    <!-- Input row -->
+    <div class="flex gap-2 mb-3">
+      <div class="relative flex-1">
+        <input type="text" id="editTcInput" list="editTcThemeOptions"
+               placeholder="Type or pick a TC theme…"
+               class="input-field" autocomplete="off"
+               onkeydown="handleTcInputKey(event,'edit')">
+        <datalist id="editTcThemeOptions"></datalist>
+      </div>
+      <button type="button" onclick="addTcChip('edit')"
+              class="px-3 py-2 bg-amber-100 text-amber-700 rounded-lg text-xs font-bold
+                     hover:bg-amber-200 transition-colors flex-shrink-0">
+        Add
+      </button>
+    </div>
+
+    <!-- Quick-pick list -->
+    <div id="editTcQuickPick" class="mb-4 hidden">
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">Known TC themes — click to add:</p>
+      <div id="editTcQuickPickItems" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto"></div>
+    </div>
+
+    <form method="post" id="editTcForm">
       {% csrf_token %}
       <input type="hidden" name="action" value="edit_tc_theme">
-      <input type="hidden" name="mapping_id" id="tcMappingId">
-      <input type="hidden" name="tc_theme" id="tcThemeHidden">
+      <input type="hidden" name="mapping_id" id="editMappingId">
+      <input type="hidden" name="tc_theme" id="editTcHidden">
       <div class="flex gap-2">
-        <button type="submit" class="btn-primary flex-1 justify-center" onclick="submitTcForm()">
+        <button type="submit" class="btn-primary flex-1 justify-center" onclick="prepareEditSubmit()">
           <i class="fa-solid fa-check"></i> Save
         </button>
-        <button type="button" onclick="closeTcModal()" class="btn-secondary flex-1 justify-center">Cancel</button>
+        <button type="button" onclick="closeEditTcModal()" class="btn-secondary flex-1 justify-center">Cancel</button>
       </div>
     </form>
   </div>
 </div>
 
+<!-- Helper style for field labels / hints -->
+<style>
+  .field-label { @apply block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5; }
+  .field-hint  { @apply mt-1 text-[10px] text-slate-400; }
+</style>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
-// ── Dropdown options loader ────────────────────────────────────────────────
+// ── State ────────────────────────────────────────────────────────────────────
+let _addTcSelected  = [];   // array of strings for the add form
+let _editTcSelected = [];   // array of strings for the edit modal
+let _knownTcThemes  = [];   // loaded from AJAX for current account
+
+// ── AJAX: load options when account changes ───────────────────────────────────
 function loadMappingOptions(accountId) {
   if (!accountId) return;
   fetch(`/dashboard/brand-mappings/options/?account_id=${encodeURIComponent(accountId)}`)
     .then(r => r.json())
     .then(data => {
-      _fillDatalist('brandOptions',   data.brands    || []);
-      _fillDatalist('themeOptions',   data.themes    || []);
-      _fillDatalist('tcThemeOptions', data.tc_themes || []);
+      _fillDatalist('brandOptions',   data.brands  || []);
+      _fillDatalist('themeOptions',   data.themes  || []);
+      _knownTcThemes = data.tc_themes || [];
+      _fillDatalist('tcThemeOptions', _knownTcThemes);
+      _renderQuickPick('add', _knownTcThemes);
     })
     .catch(() => {});
 }
@@ -249,30 +354,130 @@ function loadMappingOptions(accountId) {
 function _fillDatalist(id, items) {
   const dl = document.getElementById(id);
   if (!dl) return;
-  dl.innerHTML = items.map(v => `<option value="${v.replace(/"/g, '&quot;')}"></option>`).join('');
+  dl.innerHTML = items.map(v => `<option value="${_esc(v)}"></option>`).join('');
 }
 
-// Auto-load if account is pre-selected
+function _esc(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+function _escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// Auto-load if pre-selected account
 (function() {
   const sel = document.getElementById('addAccountSelect');
   if (sel && sel.value) loadMappingOptions(sel.value);
 })();
 
-// ── TC Theme inline edit modal ─────────────────────────────────────────────
-function editTcTheme(mappingId, currentValue) {
-  document.getElementById('tcMappingId').value = mappingId;
-  document.getElementById('tcThemeInput').value = currentValue;
-  document.getElementById('tcModal').classList.remove('hidden');
-  document.getElementById('tcThemeInput').focus();
+// ── Quick-pick rendering ─────────────────────────────────────────────────────
+function _renderQuickPick(ctx, themes) {
+  const wrap  = document.getElementById(`${ctx}TcQuickPick`);
+  const items = document.getElementById(`${ctx}TcQuickPickItems`);
+  if (!wrap || !items || !themes.length) { if (wrap) wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+  const selected = ctx === 'add' ? _addTcSelected : _editTcSelected;
+  items.innerHTML = themes.map(t => {
+    const already = selected.map(s=>s.toLowerCase()).includes(t.toLowerCase());
+    return `<button type="button"
+              onclick="_pickTcTheme('${ctx}','${_esc(t)}')"
+              class="px-2 py-0.5 rounded-md text-[11px] font-semibold border transition-all
+                     ${already
+                       ? 'bg-amber-100 text-amber-700 border-amber-300 opacity-60 cursor-default'
+                       : 'bg-white text-slate-600 border-slate-200 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700'}"
+              ${already ? 'disabled' : ''}>${_escHtml(t)}</button>`;
+  }).join('');
 }
-function closeTcModal() {
-  document.getElementById('tcModal').classList.add('hidden');
+
+function _pickTcTheme(ctx, theme) {
+  const selected = ctx === 'add' ? _addTcSelected : _editTcSelected;
+  if (!selected.map(s=>s.toLowerCase()).includes(theme.toLowerCase())) {
+    selected.push(theme);
+    _renderChips(ctx);
+    _renderQuickPick(ctx, _knownTcThemes);
+  }
 }
-function submitTcForm() {
-  document.getElementById('tcThemeHidden').value = document.getElementById('tcThemeInput').value;
+
+// ── Chip rendering ───────────────────────────────────────────────────────────
+function _renderChips(ctx) {
+  const container = document.getElementById(`${ctx}TcChips`);
+  const selected  = ctx === 'add' ? _addTcSelected : _editTcSelected;
+  if (!container) return;
+  if (!selected.length) {
+    container.innerHTML = '<span class="text-[11px] text-slate-400 italic px-1">No TC themes selected</span>';
+    return;
+  }
+  container.innerHTML = selected.map((t, i) =>
+    `<span class="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md bg-amber-100
+                  text-amber-800 text-[11px] font-semibold border border-amber-200">
+       ${_escHtml(t)}
+       <button type="button" onclick="_removeTcChip('${ctx}',${i})"
+               class="text-amber-600 hover:text-red-600 transition-colors ml-0.5">
+         <i class="fa-solid fa-xmark text-[9px]"></i>
+       </button>
+     </span>`
+  ).join('');
 }
-document.getElementById('tcModal').addEventListener('click', function(e) {
-  if (e.target === this) closeTcModal();
+
+function _removeTcChip(ctx, idx) {
+  const selected = ctx === 'add' ? _addTcSelected : _editTcSelected;
+  selected.splice(idx, 1);
+  _renderChips(ctx);
+  _renderQuickPick(ctx, _knownTcThemes);
+}
+
+// ── Add from text input ──────────────────────────────────────────────────────
+function addTcChip(ctx) {
+  const inputId = ctx === 'add' ? 'addTcInput' : 'editTcInput';
+  const inp     = document.getElementById(inputId);
+  const val     = inp.value.trim();
+  if (!val) return;
+  const selected = ctx === 'add' ? _addTcSelected : _editTcSelected;
+  if (!selected.map(s=>s.toLowerCase()).includes(val.toLowerCase())) {
+    selected.push(val);
+    _renderChips(ctx);
+    _renderQuickPick(ctx, _knownTcThemes);
+  }
+  inp.value = '';
+  inp.focus();
+}
+
+function handleTcInputKey(e, ctx) {
+  if (e.key === 'Enter') { e.preventDefault(); addTcChip(ctx); }
+}
+
+// ── Form submit preparation ──────────────────────────────────────────────────
+function prepareAddSubmit() {
+  document.getElementById('addTcHidden').value = _addTcSelected.join('|');
+}
+
+function prepareEditSubmit() {
+  document.getElementById('editTcHidden').value = _editTcSelected.join('|');
+}
+
+// ── Edit TC modal ────────────────────────────────────────────────────────────
+function openEditTcModal(mappingId, currentValue) {
+  document.getElementById('editMappingId').value = mappingId;
+  // Parse current pipe-separated value into chips
+  _editTcSelected = currentValue
+    ? currentValue.split('|').map(t => t.trim()).filter(Boolean)
+    : [];
+  _renderChips('edit');
+
+  // Mirror known TC themes to edit datalist
+  _fillDatalist('editTcThemeOptions', _knownTcThemes);
+  _renderQuickPick('edit', _knownTcThemes);
+
+  document.getElementById('editTcModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('editTcInput').focus(), 100);
+}
+
+function closeEditTcModal() {
+  document.getElementById('editTcModal').classList.add('hidden');
+}
+
+// Close modal on backdrop click
+document.getElementById('editTcModal').addEventListener('click', function(e) {
+  if (e.target === this) closeEditTcModal();
 });
+
+// Init add form chips display
+_renderChips('add');
 </script>
 {% endblock %}

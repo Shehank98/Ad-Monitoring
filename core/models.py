@@ -230,9 +230,12 @@ class BrandMapping(models.Model):
     account   = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='brand_mappings')
     brand     = models.CharField(max_length=200, help_text='Brand name as it appears in the Schedule file')
     theme     = models.CharField(max_length=200, help_text='Theme name as it appears in LMRB (Advt_Theme) or MapOnline (Theme)')
-    tc_theme  = models.CharField(
-        max_length=200, blank=True, default='',
-        help_text='Theme/Product name as it appears in the Transmission Certificate (TC) file',
+    tc_theme  = models.TextField(
+        blank=True, default='',
+        help_text=(
+            'Theme/Product name(s) as they appear in the Transmission Certificate (TC) file. '
+            'Separate multiple TC theme names with a pipe character: Theme A|Theme B|Theme C'
+        ),
     )
     duration  = models.PositiveIntegerField(
         null=True, blank=True,
@@ -245,6 +248,13 @@ class BrandMapping(models.Model):
     def __str__(self):
         dur_str = f' ({self.duration}s)' if self.duration is not None else ''
         return f'{self.account.name}: {self.brand} → {self.theme}{dur_str}'
+
+    @property
+    def tc_themes_list(self):
+        """Return tc_theme split by pipe as a list, stripping blanks."""
+        if not self.tc_theme:
+            return []
+        return [t.strip() for t in self.tc_theme.split('|') if t.strip()]
 
 
 class TransmissionReport(models.Model):
