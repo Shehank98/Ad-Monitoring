@@ -257,10 +257,18 @@
               <button class="vtab-btn" onclick="switchVtab({{ idx }},'nomap',this)">
                 No Mapping <span class="ml-1 text-[10px] font-bold text-slate-400" id="tc-nomap-{{ idx }}"></span>
               </button>
-              <a href="/verify/export/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
-                 class="ml-auto text-xs text-blue-600 hover:underline flex-shrink-0 self-center pr-2" target="_blank">
-                <i class="fa-solid fa-download mr-0.5"></i> Export Excel
-              </a>
+              <div class="ml-auto flex items-center gap-2 flex-shrink-0 pr-2">
+                <a href="/verify/export-missed/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
+                   class="text-xs text-red-600 hover:text-red-800 hover:underline flex items-center gap-1" target="_blank"
+                   title="Export confirmed missed ads (planned date within LMRB coverage) — send to channel requesting makeup spots">
+                  <i class="fa-solid fa-file-circle-exclamation"></i> Missed Ad Report
+                </a>
+                <span class="text-slate-300">|</span>
+                <a href="/verify/export/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
+                   class="text-xs text-blue-600 hover:underline flex items-center gap-1" target="_blank">
+                  <i class="fa-solid fa-download"></i> Export Excel
+                </a>
+              </div>
             </div>
 
             <!-- Tab panels -->

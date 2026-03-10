@@ -10,7 +10,8 @@ urlpatterns = [
     path('run/',        views.run_verification,      name='run_verification'),
     path('verify-row/',   views.verify_row,            name='verify_row'),
     path('load-results/', views.load_results,          name='load_results'),
-    path('export/',     views.export_excel,          name='export_excel'),
-    path('export-all/', views.export_all,            name='export_all'),
+    path('export/',        views.export_excel,  name='export_excel'),
+    path('export-missed/', views.export_missed, name='export_missed'),
+    path('export-all/',    views.export_all,    name='export_all'),
     path('report/',     views.report,                name='verification_report'),
 ]
