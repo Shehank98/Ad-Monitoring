@@ -1748,8 +1748,18 @@ def monitoring_pdf(request):
         status__in=['not_aired', 'no_mapping', 'programme_mismatch', 'late_telecast'],
     ).order_by('scheduled_date', 'brand')
 
+    sch_numbers = list(
+        Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+        .order_by('version')
+        .values_list('schedule_number', flat=True)
+    )
+    schedule_number = ' / '.join(str(s) for s in sch_numbers if s)
+
     try:
-        pdf_bytes = _build_missed_ad_pdf(account.name, channel, month, list(missed_qs))
+        pdf_bytes = _build_missed_ad_pdf(
+            account.name, channel, month, list(missed_qs),
+            schedule_number=schedule_number,
+        )
     except Exception as e:
         return HttpResponse(f'PDF generation failed: {e}', status=500)
 
@@ -1759,7 +1769,7 @@ def monitoring_pdf(request):
     return response
 
 
-def _build_missed_ad_pdf(account_name, channel, month, rows):
+def _build_missed_ad_pdf(account_name, channel, month, rows, schedule_number=''):
     """Build a professional PDF bytes object using ReportLab."""
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
@@ -1805,10 +1815,14 @@ def _build_missed_ad_pdf(account_name, channel, month, rows):
 
     # ── Header ────────────────────────────────────────────────────────────────
     story.append(Paragraph(f'Missed Ad Report — {channel}', h_title))
-    story.append(Paragraph(f'Account: {account_name}  |  Month: {month}', h_sub))
+    meta_parts = [f'Account: {account_name}']
+    if schedule_number:
+        meta_parts.append(f'Schedule No: {schedule_number}')
+    meta_parts.append(f'Month: {month}')
+    story.append(Paragraph('  |  '.join(meta_parts), h_sub))
     story.append(Paragraph(
         f'Generated: {datetime.now().strftime("%d %B %Y %H:%M")}  |  '
-        f'Total missed rows: {len(rows)}',
+        f'Total rows: {len(rows)}',
         h_sub,
     ))
     story.append(HRFlowable(width='100%', thickness=1, color=BLUE, spaceAfter=10))

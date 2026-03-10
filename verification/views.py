@@ -643,15 +643,18 @@ def export_excel(request):
 @login_required
 def export_missed(request):
     """
-    Export a 'Missed Ad Report' for a specific scope.
+    Export a 'Missed Ad Report' PDF for a specific scope.
 
     Only includes Not Aired spots whose planned date is on or before the last
     date that LMRB data covers — i.e. ads we can confirm were not aired, not
     ads that are simply waiting for future monitoring data.
 
-    This is the sheet agencies send to channels requesting makeup spots.
+    PDF format matches the dashboard Missed Ads PDF.
     """
     from django.db.models import Max as _Max
+    from core.views import _build_missed_ad_pdf
+    from core.models import Account as _Account
+
     account_id = request.GET.get('account_id')
     channel    = request.GET.get('channel', '')
     month      = request.GET.get('month', '')
@@ -660,6 +663,18 @@ def export_missed(request):
         return HttpResponse('Missing parameters', status=400)
     if not _account_access(request.user, account_id):
         return HttpResponse('Access denied', status=403)
+
+    try:
+        account = _Account.objects.get(pk=account_id)
+    except _Account.DoesNotExist:
+        return HttpResponse('Account not found', status=404)
+
+    # Schedule number(s) for the header
+    sch_numbers = list(
+        Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+        .order_by('version').values_list('schedule_number', flat=True)
+    )
+    schedule_number = ' / '.join(str(s) for s in sch_numbers if s)
 
     # Determine how far LMRB data extends for this scope
     lmrb_max = LMRBRow.objects.filter(
@@ -672,52 +687,26 @@ def export_missed(request):
     ).order_by('scheduled_date', 'brand', 'planned_start')
 
     if lmrb_max:
-        # Only include spots whose planned date is within the LMRB coverage window —
-        # ads planned after lmrb_max may still air; we cannot yet confirm them as missed.
+        # Only include spots whose planned date is within the LMRB coverage window.
         qs = qs.filter(scheduled_date__lte=lmrb_max)
 
-    rows = []
-    for mr in qs:
-        rows.append({
-            'Brand':         mr.brand,
-            'Duration (s)':  mr.duration,
-            'Programme':     mr.programme,
-            'Planned Date':  mr.scheduled_date,
-            'Planned Start': mr.planned_start,
-            'Planned End':   mr.planned_end,
-        })
-
+    rows = list(qs)
     if not rows:
         return HttpResponse(
             'No confirmed missed ads for this scope within the LMRB coverage period.',
             status=404,
         )
 
-    df = pd.DataFrame(rows)
+    try:
+        pdf_bytes = _build_missed_ad_pdf(
+            account.name, channel, month, rows,
+            schedule_number=schedule_number,
+        )
+    except Exception as e:
+        return HttpResponse(f'PDF generation failed: {e}', status=500)
 
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Missed Ads')
-        # Style the header row
-        ws = writer.sheets['Missed Ads']
-        from openpyxl.styles import Font, PatternFill, Alignment
-        hdr_fill = PatternFill('solid', fgColor='C0392B')
-        hdr_font = Font(bold=True, color='FFFFFF', size=10)
-        for cell in ws[1]:
-            cell.font = hdr_font
-            cell.fill = hdr_fill
-            cell.alignment = Alignment(horizontal='center', vertical='center')
-        # Auto-width columns
-        for col in ws.columns:
-            max_len = max(len(str(cell.value or '')) for cell in col)
-            ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
-
-    output.seek(0)
-    fname = f'Missed_Ads_{channel}_{month}.xlsx'.replace(' ', '_')
-    resp = HttpResponse(
-        output.read(),
-        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    )
+    fname = f'Missed_Ads_{channel}_{month}.pdf'.replace(' ', '_')
+    resp = HttpResponse(pdf_bytes, content_type='application/pdf')
     resp['Content-Disposition'] = f'attachment; filename="{fname}"'
     return resp
 

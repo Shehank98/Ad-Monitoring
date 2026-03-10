@@ -260,8 +260,8 @@
               <div class="ml-auto flex items-center gap-2 flex-shrink-0 pr-2">
                 <a href="/verify/export-missed/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
                    class="text-xs text-red-600 hover:text-red-800 hover:underline flex items-center gap-1" target="_blank"
-                   title="Export confirmed missed ads (planned date within LMRB coverage) — send to channel requesting makeup spots">
-                  <i class="fa-solid fa-file-circle-exclamation"></i> Missed Ad Report
+                   title="Missed Ad Report PDF — confirmed not-aired spots within LMRB coverage (send to channel for makeup)">
+                  <i class="fa-solid fa-file-pdf"></i> Missed Ad Report
                 </a>
                 <span class="text-slate-300">|</span>
                 <a href="/verify/export/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
