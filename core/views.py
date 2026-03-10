@@ -3754,36 +3754,43 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month):
     centre   = Alignment(horizontal='center', vertical='center')
 
     headers = [
-        'Date', 'Channel', 'Advt_Theme', 'Advt_Time', 'Duration', 'Source',
-        'Product_Group', 'Advertiser', 'Product', 'Ads', 'Program', 'Prog_Time',
-        'Ad_Pos', 'Tot_Ads', 'Brk_No', 'Pos_In_Brk', 'Ads_In_Brk',
-        'Lng', 'Cost', 'Day',
+        'Product_Group', 'Advertiser', 'Product', 'Advt_Theme', 'Ads',
+        'Channel', 'Program',
+        'Dd', 'Mn', 'Yr', 'Day', 'Prog_time', 'Advt_time',
+        'AdPos', 'TotAds', 'BrkNo', 'PosinBrk', 'AdsinBrk',
+        'Lng', 'Dur', 'Cost',
     ]
     for col_i, h in enumerate(headers, start=1):
         c = ws.cell(1, col_i, h)
         c.font = hdr_font; c.fill = HDR_FILL; c.alignment = centre
 
     for row_i, lr in enumerate(combined, start=2):
-        ws.cell(row_i,  1, str(lr.date) if lr.date else '').font = norm
-        ws.cell(row_i,  2, lr.channel or '').font = norm
-        ws.cell(row_i,  3, lr.advt_theme or '').font = norm
-        ws.cell(row_i,  4, lr.advt_time or '').font = norm
-        ws.cell(row_i,  5, lr.duration).font = norm
-        ws.cell(row_i,  6, lr.source or '').font = norm
-        ws.cell(row_i,  7, lr.product_group or '').font = norm
-        ws.cell(row_i,  8, lr.advertiser or '').font = norm
-        ws.cell(row_i,  9, lr.product or '').font = norm
-        ws.cell(row_i, 10, lr.ads or '').font = norm
-        ws.cell(row_i, 11, lr.program or '').font = norm
-        ws.cell(row_i, 12, lr.prog_time or '').font = norm
-        ws.cell(row_i, 13, lr.ad_pos).font = norm
-        ws.cell(row_i, 14, lr.tot_ads).font = norm
-        ws.cell(row_i, 15, lr.brk_no).font = norm
-        ws.cell(row_i, 16, lr.pos_in_brk).font = norm
-        ws.cell(row_i, 17, lr.ads_in_brk).font = norm
-        ws.cell(row_i, 18, lr.lng or '').font = norm
-        ws.cell(row_i, 19, float(lr.cost) if lr.cost is not None else '').font = norm
-        ws.cell(row_i, 20, lr.day or '').font = norm
+        dd = lr.date.day   if lr.date else ''
+        mn = lr.date.month if lr.date else ''
+        yr = lr.date.year  if lr.date else ''
+        vals = [
+            lr.product_group or '',
+            lr.advertiser or '',
+            lr.product or '',
+            lr.advt_theme or '',
+            lr.ads or '',
+            lr.channel or '',
+            lr.program or '',
+            dd, mn, yr,
+            lr.day or '',
+            lr.prog_time or '',
+            lr.advt_time or '',
+            lr.ad_pos     if lr.ad_pos     is not None else '',
+            lr.tot_ads    if lr.tot_ads    is not None else '',
+            lr.brk_no     if lr.brk_no     is not None else '',
+            lr.pos_in_brk if lr.pos_in_brk is not None else '',
+            lr.ads_in_brk if lr.ads_in_brk is not None else '',
+            lr.lng or '',
+            lr.duration   if lr.duration   is not None else '',
+            float(lr.cost) if lr.cost is not None else '',
+        ]
+        for col_i, v in enumerate(vals, start=1):
+            ws.cell(row_i, col_i, v).font = norm
 
     return len(combined)
 

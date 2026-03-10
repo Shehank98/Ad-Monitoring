@@ -92,6 +92,52 @@ def _summary_df(full_df, group_col):
     return pd.DataFrame(rows)
 
 
+_LMRB_COLS = [
+    'Product_Group', 'Advertiser', 'Product', 'Advt_Theme', 'Ads',
+    'Channel', 'Program',
+    'Dd', 'Mn', 'Yr', 'Day', 'Prog_time', 'Advt_time',
+    'AdPos', 'TotAds', 'BrkNo', 'PosinBrk', 'AdsinBrk',
+    'Lng', 'Dur', 'Cost',
+]
+
+
+def _lmrb_qs_to_df(qs):
+    """Convert a LMRBRow queryset to a DataFrame using the canonical column order."""
+    records = list(qs.order_by('date', 'advt_time').values(
+        'product_group', 'advertiser', 'product', 'advt_theme', 'ads',
+        'channel', 'program', 'date', 'day', 'prog_time', 'advt_time',
+        'ad_pos', 'tot_ads', 'brk_no', 'pos_in_brk', 'ads_in_brk',
+        'lng', 'duration', 'cost',
+    ))
+    if not records:
+        return pd.DataFrame(columns=_LMRB_COLS)
+    df = pd.DataFrame(records)
+    df['Dd'] = df['date'].apply(lambda d: d.day   if d else '')
+    df['Mn'] = df['date'].apply(lambda d: d.month if d else '')
+    df['Yr'] = df['date'].apply(lambda d: d.year  if d else '')
+    df.rename(columns={
+        'product_group': 'Product_Group',
+        'advertiser':    'Advertiser',
+        'product':       'Product',
+        'advt_theme':    'Advt_Theme',
+        'ads':           'Ads',
+        'channel':       'Channel',
+        'program':       'Program',
+        'day':           'Day',
+        'prog_time':     'Prog_time',
+        'advt_time':     'Advt_time',
+        'ad_pos':        'AdPos',
+        'tot_ads':       'TotAds',
+        'brk_no':        'BrkNo',
+        'pos_in_brk':    'PosinBrk',
+        'ads_in_brk':    'AdsinBrk',
+        'lng':           'Lng',
+        'duration':      'Dur',
+        'cost':          'Cost',
+    }, inplace=True)
+    return df[_LMRB_COLS]
+
+
 def _build_unmatched_lmrb_df(account_id, channel=None, month=None):
     """
     Build a DataFrame of unmatched LMRBRows for the given scope.
@@ -108,29 +154,7 @@ def _build_unmatched_lmrb_df(account_id, channel=None, month=None):
             lmrb_qs = lmrb_qs.filter(date__gte=sch_range['s'])
         if sch_range['e']:
             lmrb_qs = lmrb_qs.filter(date__lte=sch_range['e'])
-
-    records = list(lmrb_qs.order_by('date', 'advt_time').values(
-        'channel', 'date', 'advt_time', 'advt_theme', 'duration',
-        'program', 'prog_time', 'advertiser', 'source',
-    ))
-    if not records:
-        return pd.DataFrame(columns=[
-            'Channel', 'Date', 'Time', 'Theme', 'Duration (s)',
-            'Programme', 'Prog Time', 'Advertiser', 'Source',
-        ])
-    df = pd.DataFrame(records)
-    df.rename(columns={
-        'channel':    'Channel',
-        'date':       'Date',
-        'advt_time':  'Time',
-        'advt_theme': 'Theme',
-        'duration':   'Duration (s)',
-        'program':    'Programme',
-        'prog_time':  'Prog Time',
-        'advertiser': 'Advertiser',
-        'source':     'Source',
-    }, inplace=True)
-    return df
+    return _lmrb_qs_to_df(lmrb_qs)
 
 
 def _build_excel_response(qs, filename_base, account_id=None, channel=None, month=None):
