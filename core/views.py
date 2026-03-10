@@ -1211,7 +1211,8 @@ def monitoring_dashboard(request):
 
         # Compliance is against the planned commercial rows, not just the verified
         # subset — rows past the LMRB date cap are counted as unverified (not ignored).
-        compliance = round((n_matched + n_prog_mis) / n_commercial * 100, 1) if n_commercial else 0
+        # Programme Mismatch and Late Telecast both count as "aired" for compliance.
+        compliance = round((n_matched + n_prog_mis + n_late) / n_commercial * 100, 1) if n_commercial else 0
 
         stats = {
             'total':        n_commercial,                  # planned commercial rows = real denominator

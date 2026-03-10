@@ -76,15 +76,18 @@ def _summary_df(full_df, group_col):
     for val, grp in full_df.groupby(group_col):
         total      = len(grp)
         n_matched  = (grp['Status'] == 'Matched').sum()
+        n_prog_mis = (grp['Status'] == 'Programme Mismatch').sum()
+        n_late     = (grp['Status'] == 'Late Telecast').sum()
+        n_aired    = n_matched + n_prog_mis + n_late
         rows.append({
             group_col:             val,
             'Total Scheduled':     total,
             'Matched':             n_matched,
-            'Programme Mismatch':  (grp['Status'] == 'Programme Mismatch').sum(),
-            'Late Telecast':       (grp['Status'] == 'Late Telecast').sum(),
+            'Programme Mismatch':  n_prog_mis,
+            'Late Telecast':       n_late,
             'Not Aired':           (grp['Status'] == 'Not Aired').sum(),
             'No Mapping':          (grp['Status'] == 'No Brand Mapping').sum(),
-            'Compliance %':        round(n_matched / total * 100, 1) if total else 0,
+            'Compliance %':        round(n_aired / total * 100, 1) if total else 0,
         })
     return pd.DataFrame(rows)
 
@@ -192,7 +195,7 @@ def _status_dot(account_id, channel, month):
     counts = {s: 0 for s, _ in MatchResult.STATUS_CHOICES}
     for r in qs.values('status'):
         counts[r['status']] = counts.get(r['status'], 0) + 1
-    if counts.get('not_aired', 0) > 0 or counts.get('programme_mismatch', 0) > 0:
+    if counts.get('not_aired', 0) > 0:
         return 'missed'
     return 'ok'
 
@@ -254,11 +257,14 @@ def _build_campaign_rows(user):
             lmrb_amber = (lmrb_start > sch_start) or (lmrb_end < sch_end)
 
         # --- Verification results ---
-        mr_qs = MatchResult.objects.filter(account_id=a_id, channel=channel, month=month)
-        n_matched = mr_qs.filter(status='matched').count()
-        n_missed  = mr_qs.filter(status='not_aired').count()
-        last_run  = mr_qs.order_by('-run_at').values_list('run_at', flat=True).first()
-        dot       = _status_dot(a_id, channel, month)
+        mr_qs      = MatchResult.objects.filter(account_id=a_id, channel=channel, month=month)
+        n_matched  = mr_qs.filter(status='matched').count()
+        n_prog_mis = mr_qs.filter(status='programme_mismatch').count()
+        n_late     = mr_qs.filter(status='late_telecast').count()
+        n_aired    = n_matched + n_prog_mis + n_late
+        n_missed   = mr_qs.filter(status='not_aired').count()
+        last_run   = mr_qs.order_by('-run_at').values_list('run_at', flat=True).first()
+        dot        = _status_dot(a_id, channel, month)
 
         # --- Schedule versions ---
         versions = list(
@@ -274,7 +280,7 @@ def _build_campaign_rows(user):
             'channel':      channel,
             'month':        month,
             'planned':      planned,
-            'aired':        n_matched,
+            'aired':        n_aired,
             'missed':       n_missed,
             'sch_start':    sch_start,
             'sch_end':      sch_end,
@@ -322,18 +328,21 @@ def verify_row(request):
         return JsonResponse({'ok': False, 'error': str(e)})
 
     # Return updated counts for this row
-    mr_qs     = MatchResult.objects.filter(account_id=account_id, channel=channel, month=month)
-    n_matched = mr_qs.filter(status='matched').count()
-    n_missed  = mr_qs.filter(status='not_aired').count()
+    mr_qs      = MatchResult.objects.filter(account_id=account_id, channel=channel, month=month)
+    n_matched  = mr_qs.filter(status='matched').count()
+    n_prog_mis = mr_qs.filter(status='programme_mismatch').count()
+    n_late     = mr_qs.filter(status='late_telecast').count()
+    n_aired    = n_matched + n_prog_mis + n_late
+    n_missed   = mr_qs.filter(status='not_aired').count()
     active_ids = active_schedule_ids(account_id, channel, month)
     planned    = ScheduleRow.objects.filter(schedule_id__in=active_ids, ad_type='COMMERCIAL BENEFITS').count()
-    dot       = _status_dot(account_id, channel, month)
-    last_run  = mr_qs.order_by('-run_at').values_list('run_at', flat=True).first()
+    dot        = _status_dot(account_id, channel, month)
+    last_run   = mr_qs.order_by('-run_at').values_list('run_at', flat=True).first()
 
     return JsonResponse({
         'ok':       True,
         'planned':  planned,
-        'aired':    n_matched,
+        'aired':    n_aired,
         'missed':   n_missed,
         'dot':      dot,
         'last_run': last_run.strftime('%d %b %Y %H:%M') if last_run else None,
@@ -556,7 +565,7 @@ def run_verification(request):
         n_extra     = len(extra_df)     if extra_df is not None and not extra_df.empty     else 0
 
         n_aired    = n_matched + n_prog_mis + n_late
-        compliance = round(n_matched / total_sch * 100, 1) if total_sch else 0
+        compliance = round(n_aired / total_sch * 100, 1) if total_sch else 0
 
         return JsonResponse({
             'ok':            True,
@@ -677,7 +686,9 @@ def report(request):
                 counts[r['status']] = counts.get(r['status'], 0) + 1
             last_run   = qs.order_by('-run_at').values_list('run_at', flat=True).first()
             n_matched  = counts.get('matched', 0)
-            compliance = round(n_matched / total * 100, 1) if total else 0
+            n_prog_mis = counts.get('programme_mismatch', 0)
+            n_late     = counts.get('late_telecast', 0)
+            compliance = round((n_matched + n_prog_mis + n_late) / total * 100, 1) if total else 0
             scopes.append({
                 'channel':    ch,
                 'month':      mo,
@@ -703,7 +714,9 @@ def report(request):
                 'no_map':     sum(s['no_map']    for s in scopes),
             }
             t = totals['total']
-            totals['compliance'] = round(totals['matched'] / t * 100, 1) if t else 0
+            totals['compliance'] = round(
+                (totals['matched'] + totals['prog_mis'] + totals['late']) / t * 100, 1
+            ) if t else 0
 
     return render(request, 'verification/report.html', {
         'accounts':         accounts,
