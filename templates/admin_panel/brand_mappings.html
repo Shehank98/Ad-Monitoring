@@ -452,11 +452,12 @@ function onScheduleChange(scheduleId) {
 function _loadOptions() {
   if (!_curAccountId) return;
   let url = `/dashboard/brand-mappings/options/?account_id=${enc(_curAccountId)}`;
+  // Always send channel when available so LMRB/TC theme filtering is channel-scoped
+  if (_curChannel) url += `&channel=${enc(_curChannel)}`;
   if (_curScheduleId) {
     url += `&schedule_id=${enc(_curScheduleId)}`;
   } else {
-    if (_curChannel) url += `&channel=${enc(_curChannel)}`;
-    if (_curMonth)   url += `&month=${enc(_curMonth)}`;
+    if (_curMonth) url += `&month=${enc(_curMonth)}`;
   }
   fetch(url)
     .then(r => r.json())
