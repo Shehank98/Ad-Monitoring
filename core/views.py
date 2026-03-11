@@ -1097,36 +1097,143 @@ def brand_mapping_list(request):
             return redirect(f'/dashboard/brand-mappings/?account={account_id or saved_acc}')
 
     mappings = BrandMapping.objects.filter(account__in=account_qs).select_related('account')
+    channel_filter = request.GET.get('channel', '')
+    month_filter   = request.GET.get('month', '')
     if account_id:
         mappings = mappings.filter(account_id=account_id)
+    if channel_filter:
+        mappings = mappings.filter(
+            brand__in=ScheduleRow.objects.filter(
+                account_id=account_id, schedule__channel=channel_filter,
+            ).values_list('brand', flat=True)
+        ) if account_id else mappings
+    if month_filter:
+        mappings = mappings.filter(
+            brand__in=ScheduleRow.objects.filter(
+                account_id=account_id, schedule__month=month_filter,
+            ).values_list('brand', flat=True)
+        ) if account_id else mappings
+
+    # Channels available for the selected account (for table filter)
+    channels_for_account = sorted(set(
+        Schedule.objects.filter(account_id=account_id).values_list('channel', flat=True)
+    )) if account_id else []
+    months_for_channel = sorted(set(
+        Schedule.objects.filter(
+            account_id=account_id, channel=channel_filter,
+        ).values_list('month', flat=True)
+    )) if account_id and channel_filter else []
 
     return render(request, 'admin_panel/brand_mappings.html', {
-        'mappings': mappings,
-        'accounts': account_qs,
-        'filters':  {'account': account_id},
+        'mappings':             mappings,
+        'accounts':             account_qs,
+        'filters':              {
+            'account': account_id,
+            'channel': channel_filter,
+            'month':   month_filter,
+        },
+        'channels_for_account': channels_for_account,
+        'months_for_channel':   months_for_channel,
     })
 
 
 @login_required
 def brand_mapping_options(request):
-    """AJAX: Return unique brands (from Schedule), LMRB themes, and TC themes for an account."""
-    account_id = request.GET.get('account_id', '').strip()
+    """
+    AJAX: Return unique brands, LMRB themes, and TC themes for an account.
+    Narrows results when channel / month / schedule_id are also provided.
+    """
+    account_id  = request.GET.get('account_id', '').strip()
+    channel     = request.GET.get('channel', '').strip()
+    month       = request.GET.get('month', '').strip()
+    schedule_id = request.GET.get('schedule_id', '').strip()
     if not account_id or not _account_access(request.user, account_id):
         return JsonResponse({'brands': [], 'themes': [], 'tc_themes': []})
 
-    brands = sorted(set(
-        ScheduleRow.objects.filter(account_id=account_id)
-        .exclude(brand='').values_list('brand', flat=True)
-    ))
-    themes = sorted(set(
-        LMRBRow.objects.filter(account_id=account_id)
-        .exclude(advt_theme='').values_list('advt_theme', flat=True)
-    ))
-    tc_themes = sorted(set(
-        TCRow.objects.filter(account_id=account_id)
-        .exclude(tc_theme='').values_list('tc_theme', flat=True)
-    ))
+    # ── Brands (from Schedule) ──────────────────────────────────────────────
+    brands_qs = ScheduleRow.objects.filter(account_id=account_id).exclude(brand='')
+    if schedule_id:
+        brands_qs = brands_qs.filter(schedule_id=schedule_id)
+    elif channel and month:
+        brands_qs = brands_qs.filter(schedule__channel=channel, schedule__month=month)
+    elif channel:
+        brands_qs = brands_qs.filter(schedule__channel=channel)
+    brands = sorted(set(brands_qs.values_list('brand', flat=True)))
+
+    # ── Schedule date range for LMRB / TC filtering ─────────────────────────
+    sch_filter = {'account_id': account_id}
+    if schedule_id:
+        sch_filter['id'] = schedule_id
+    elif channel and month:
+        sch_filter['channel'] = channel
+        sch_filter['month']   = month
+    elif channel:
+        sch_filter['channel'] = channel
+    sch_dates = Schedule.objects.filter(**sch_filter).aggregate(s=Min('start_date'), e=Max('end_date'))
+
+    # ── LMRB themes ────────────────────────────────────────────────────────
+    themes_qs = LMRBRow.objects.filter(account_id=account_id).exclude(advt_theme='')
+    if channel:
+        themes_qs = themes_qs.filter(channel__iexact=channel)
+    if sch_dates['s']:
+        themes_qs = themes_qs.filter(date__gte=sch_dates['s'])
+    if sch_dates['e']:
+        themes_qs = themes_qs.filter(date__lte=sch_dates['e'])
+    themes = sorted(set(themes_qs.values_list('advt_theme', flat=True)))
+
+    # ── TC themes ─────────────────────────────────────────────────────────
+    tc_qs = TCRow.objects.filter(account_id=account_id).exclude(tc_theme='')
+    if channel:
+        tc_qs = tc_qs.filter(channel__iexact=channel)
+    if sch_dates['s']:
+        tc_qs = tc_qs.filter(date__gte=sch_dates['s'])
+    if sch_dates['e']:
+        tc_qs = tc_qs.filter(date__lte=sch_dates['e'])
+    tc_themes = sorted(set(tc_qs.values_list('tc_theme', flat=True)))
+
     return JsonResponse({'brands': brands, 'themes': themes, 'tc_themes': tc_themes})
+
+
+@login_required
+def brand_mapping_channels(request):
+    """AJAX: Return distinct channels from Schedules for an account."""
+    account_id = request.GET.get('account_id', '').strip()
+    if not account_id or not _account_access(request.user, account_id):
+        return JsonResponse({'channels': []})
+    channels = sorted(set(
+        Schedule.objects.filter(account_id=account_id).values_list('channel', flat=True)
+    ))
+    return JsonResponse({'channels': channels})
+
+
+@login_required
+def brand_mapping_months(request):
+    """AJAX: Return distinct months from Schedules for an account + channel."""
+    account_id = request.GET.get('account_id', '').strip()
+    channel    = request.GET.get('channel', '').strip()
+    if not account_id or not _account_access(request.user, account_id):
+        return JsonResponse({'months': []})
+    months = sorted(set(
+        Schedule.objects.filter(account_id=account_id, channel=channel)
+        .values_list('month', flat=True)
+    ))
+    return JsonResponse({'months': months})
+
+
+@login_required
+def brand_mapping_schedules(request):
+    """AJAX: Return schedules for an account + channel + month."""
+    account_id = request.GET.get('account_id', '').strip()
+    channel    = request.GET.get('channel', '').strip()
+    month      = request.GET.get('month', '').strip()
+    if not account_id or not _account_access(request.user, account_id):
+        return JsonResponse({'schedules': []})
+    schedules = list(
+        Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+        .order_by('version')
+        .values('id', 'schedule_number', 'version', 'row_count')
+    )
+    return JsonResponse({'schedules': schedules})
 
 
 # ── Monitoring Dashboard (Items 3 + 4) ───────────────────────────────────────

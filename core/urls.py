@@ -25,8 +25,11 @@ urlpatterns = [
     path('schedules/<int:pk>/delete/',          views.schedule_delete,   name='schedule_delete'),
 
     # Brand mappings
-    path('brand-mappings/',          views.brand_mapping_list,    name='brand_mapping_list'),
-    path('brand-mappings/options/',  views.brand_mapping_options, name='brand_mapping_options'),
+    path('brand-mappings/',           views.brand_mapping_list,      name='brand_mapping_list'),
+    path('brand-mappings/options/',   views.brand_mapping_options,   name='brand_mapping_options'),
+    path('brand-mappings/channels/',  views.brand_mapping_channels,  name='brand_mapping_channels'),
+    path('brand-mappings/months/',    views.brand_mapping_months,    name='brand_mapping_months'),
+    path('brand-mappings/schedules/', views.brand_mapping_schedules, name='brand_mapping_schedules'),
 
     # Monitoring data
     path('monitoring/',                         views.monitoring_list,     name='monitoring_list'),

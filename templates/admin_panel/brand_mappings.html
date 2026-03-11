@@ -6,7 +6,7 @@
 {% block content %}
 <div class="space-y-5">
 
-  <!-- ── How it works (collapsible, compact) ───────────────────────────── -->
+  <!-- ── How it works (collapsible) ───────────────────────────────────────── -->
   <details class="group bg-blue-50 border border-blue-200 rounded-xl text-sm">
     <summary class="flex items-center gap-2 px-4 py-3 cursor-pointer select-none text-blue-700 font-semibold">
       <i class="fa-solid fa-circle-info text-blue-400"></i>
@@ -14,15 +14,15 @@
       <i class="fa-solid fa-chevron-down text-blue-400 ml-auto group-open:rotate-180 transition-transform"></i>
     </summary>
     <div class="px-4 pb-3 text-xs text-blue-700 leading-relaxed">
-      <p>The schedule uses <strong>Brand</strong> names. <strong>LMRB Theme</strong> connects to monitoring data (Advt_Theme / MapOnline Theme).
-      <strong>TC Theme(s)</strong> connect to the Transmission Certificate — you can now map <em>multiple TC names</em> to a single brand row.
-      <strong>Duration</strong> restricts the mapping to a specific ad length (optional).</p>
+      <p>The schedule uses <strong>Brand</strong> names. <strong>LMRB Theme</strong> connects to monitoring data.
+      <strong>TC Theme(s)</strong> connect to the Transmission Certificate — multiple TC names can map to one brand row.
+      Select <strong>Channel → Month → Schedule</strong> to filter the dropdowns to just the data you need.</p>
     </div>
   </details>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
 
-    <!-- ── Left: Add form ────────────────────────────────────────────── -->
+    <!-- ── Left: Add form ────────────────────────────────────────────────── -->
     <div class="lg:col-span-1 sticky top-4">
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
 
@@ -33,21 +33,53 @@
           <h2 class="font-bold text-slate-800 text-sm">Add Mapping</h2>
         </div>
 
-        <form method="post" id="addMappingForm" class="px-5 py-4 space-y-4" onsubmit="prepareAddSubmit()">
+        <form method="post" id="addMappingForm" class="px-5 py-4 space-y-3" onsubmit="prepareAddSubmit()">
           {% csrf_token %}
           <input type="hidden" name="action" value="add">
 
-          <!-- Account -->
-          <div>
-            <label class="field-label"><i class="fa-solid fa-building mr-1 text-slate-400"></i> Account <span class="text-red-400">*</span></label>
-            <select name="account_id" id="addAccountSelect" class="select-field" required
-                    onchange="loadMappingOptions(this.value)">
-              <option value="">Select account…</option>
-              {% for acc in accounts %}
-                <option value="{{ acc.id }}" {% if filters.account == acc.id|stringformat:"s" %}selected{% endif %}>{{ acc.name }}</option>
-              {% endfor %}
-            </select>
+          <!-- ── Scope filter strip ─────────────────────────────────────── -->
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2.5">
+            <p class="field-label text-slate-500 mb-0.5">
+              <i class="fa-solid fa-filter mr-1"></i> Filter options by scope
+            </p>
+
+            <!-- Account -->
+            <div>
+              <label class="field-label">Account <span class="text-red-400">*</span></label>
+              <select name="account_id" id="addAccountSelect" class="select-field" required
+                      onchange="onAccountChange(this.value)">
+                <option value="">Select account…</option>
+                {% for acc in accounts %}
+                  <option value="{{ acc.id }}" {% if filters.account == acc.id|stringformat:"s" %}selected{% endif %}>{{ acc.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <!-- Channel (cascade) -->
+            <div>
+              <label class="field-label">Channel</label>
+              <select id="addChannelSelect" class="select-field" onchange="onChannelChange(this.value)">
+                <option value="">All channels</option>
+              </select>
+            </div>
+
+            <!-- Month (cascade) -->
+            <div>
+              <label class="field-label">Month</label>
+              <select id="addMonthSelect" class="select-field" onchange="onMonthChange(this.value)">
+                <option value="">All months</option>
+              </select>
+            </div>
+
+            <!-- Schedule (cascade) -->
+            <div>
+              <label class="field-label">Schedule <span class="text-slate-400 font-normal normal-case">(optional)</span></label>
+              <select id="addScheduleSelect" class="select-field" onchange="onScheduleChange(this.value)">
+                <option value="">All schedules</option>
+              </select>
+            </div>
           </div>
+          <!-- ── end scope filter ───────────────────────────────────────── -->
 
           <!-- Brand -->
           <div>
@@ -73,16 +105,11 @@
               <i class="fa-solid fa-file-invoice mr-1 text-slate-400"></i> TC Theme(s)
               <span class="text-slate-400 font-normal normal-case ml-1">optional · multiple allowed</span>
             </label>
-
-            <!-- Selected chips display -->
             <div id="addTcChips"
                  class="min-h-[38px] flex flex-wrap gap-1.5 p-2 bg-slate-50 border border-slate-200
                         rounded-lg mb-2 cursor-text"
                  onclick="document.getElementById('addTcInput').focus()">
-              <!-- chips injected here by JS -->
             </div>
-
-            <!-- Input row -->
             <div class="flex gap-2">
               <div class="relative flex-1">
                 <input type="text" id="addTcInput" list="tcThemeOptions"
@@ -93,18 +120,12 @@
               </div>
               <button type="button" onclick="addTcChip('add')"
                       class="px-3 py-2 bg-amber-100 text-amber-700 rounded-lg text-xs font-bold
-                             hover:bg-amber-200 transition-colors flex-shrink-0">
-                Add
-              </button>
+                             hover:bg-amber-200 transition-colors flex-shrink-0">Add</button>
             </div>
-
-            <!-- Quick-pick list (populated by AJAX) -->
             <div id="addTcQuickPick" class="mt-2 hidden">
               <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">Known TC themes — click to add:</p>
               <div id="addTcQuickPickItems" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto"></div>
             </div>
-
-            <!-- Hidden field with pipe-joined values -->
             <input type="hidden" name="tc_theme" id="addTcHidden">
             <p class="field-hint">As it appears in TC files. You can add multiple.</p>
           </div>
@@ -123,28 +144,55 @@
       </div>
     </div>
 
-    <!-- ── Right: Table ──────────────────────────────────────────────── -->
+    <!-- ── Right: Filter + Table ─────────────────────────────────────────── -->
     <div class="lg:col-span-2 space-y-3">
 
       <!-- Filter bar -->
-      <form method="get" class="flex flex-wrap items-end gap-3 bg-white border border-slate-100
-                                 rounded-xl shadow-sm px-4 py-3">
-        <div class="flex-1 min-w-[140px]">
-          <label class="field-label">Filter by Account</label>
-          <select name="account" class="select-field">
-            <option value="">All accounts</option>
-            {% for acc in accounts %}
-              <option value="{{ acc.id }}" {% if filters.account == acc.id|stringformat:"s" %}selected{% endif %}>{{ acc.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="flex gap-2 pb-0.5">
-          <button type="submit" class="btn-primary"><i class="fa-solid fa-filter"></i> Filter</button>
-          <a href="/dashboard/brand-mappings/" class="btn-secondary">Clear</a>
+      <form method="get" class="bg-white border border-slate-100 rounded-xl shadow-sm px-4 py-3 space-y-3">
+        <div class="flex flex-wrap items-end gap-3">
+          <!-- Account -->
+          <div class="min-w-[140px] flex-1">
+            <label class="field-label">Account</label>
+            <select name="account" id="filterAccountSelect" class="select-field"
+                    onchange="loadFilterChannels(this.value)">
+              <option value="">All accounts</option>
+              {% for acc in accounts %}
+                <option value="{{ acc.id }}"
+                  {% if filters.account == acc.id|stringformat:"s" %}selected{% endif %}>
+                  {{ acc.name }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <!-- Channel -->
+          <div class="min-w-[140px] flex-1">
+            <label class="field-label">Channel</label>
+            <select name="channel" id="filterChannelSelect" class="select-field"
+                    onchange="loadFilterMonths(document.getElementById('filterAccountSelect').value, this.value)">
+              <option value="">All channels</option>
+              {% for ch in channels_for_account %}
+                <option value="{{ ch }}" {% if filters.channel == ch %}selected{% endif %}>{{ ch }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <!-- Month -->
+          <div class="min-w-[130px] flex-1">
+            <label class="field-label">Month</label>
+            <select name="month" id="filterMonthSelect" class="select-field">
+              <option value="">All months</option>
+              {% for mo in months_for_channel %}
+                <option value="{{ mo }}" {% if filters.month == mo %}selected{% endif %}>{{ mo }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="flex gap-2 pb-0.5">
+            <button type="submit" class="btn-primary"><i class="fa-solid fa-filter"></i> Filter</button>
+            <a href="/dashboard/brand-mappings/" class="btn-secondary">Clear</a>
+          </div>
         </div>
       </form>
 
-      <!-- Mappings table -->
+      <!-- Table -->
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {% if mappings %}
         <div class="overflow-x-auto">
@@ -162,55 +210,37 @@
             <tbody class="divide-y divide-slate-50">
               {% for m in mappings %}
               <tr class="hover:bg-slate-50/60 transition-colors group" id="row-{{ m.id }}">
-
-                <!-- Account -->
                 <td class="px-3 py-2.5">
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-semibold">
-                    {{ m.account.name }}
-                  </span>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-semibold">{{ m.account.name }}</span>
                 </td>
-
-                <!-- Brand -->
                 <td class="px-3 py-2.5">
-                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50
-                               text-blue-700 text-[11px] font-semibold ring-1 ring-blue-200 max-w-[160px]">
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700 text-[11px] font-semibold ring-1 ring-blue-200 max-w-[160px]">
                     <i class="fa-solid fa-tag text-[9px] flex-shrink-0"></i>
                     <span class="truncate" title="{{ m.brand }}">{{ m.brand }}</span>
                   </span>
                 </td>
-
-                <!-- LMRB Theme -->
                 <td class="px-3 py-2.5">
-                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50
-                               text-emerald-700 text-[11px] font-semibold ring-1 ring-emerald-200 max-w-[180px]">
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 text-[11px] font-semibold ring-1 ring-emerald-200 max-w-[180px]">
                     <i class="fa-solid fa-arrow-right text-[9px] flex-shrink-0"></i>
                     <span class="truncate" title="{{ m.theme }}">{{ m.theme }}</span>
                   </span>
                 </td>
-
-                <!-- TC Theme(s) — multiple chips + edit button -->
                 <td class="px-3 py-2.5" id="tc-cell-{{ m.id }}">
                   <div class="flex flex-wrap items-center gap-1">
                     {% for t in m.tc_themes_list %}
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50
-                                 text-amber-700 text-[11px] font-semibold ring-1 ring-amber-200
-                                 max-w-[150px]" title="{{ t }}">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[11px] font-semibold ring-1 ring-amber-200 max-w-[150px]" title="{{ t }}">
                       <span class="truncate">{{ t }}</span>
                     </span>
                     {% empty %}
                     <span class="text-[11px] text-slate-400 italic">not set</span>
                     {% endfor %}
                     <button onclick="openEditTcModal({{ m.id }}, '{{ m.tc_theme|escapejs }}')"
-                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md
-                                   text-[10px] text-slate-400 hover:text-amber-600 hover:bg-amber-50
-                                   transition-colors border border-transparent hover:border-amber-200"
+                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors border border-transparent hover:border-amber-200"
                             title="Edit TC themes">
                       <i class="fa-solid fa-pencil"></i>
                     </button>
                   </div>
                 </td>
-
-                <!-- Duration -->
                 <td class="px-3 py-2.5 text-center">
                   {% if m.duration %}
                     <span class="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-[11px] font-bold ring-1 ring-violet-200">{{ m.duration }}s</span>
@@ -218,8 +248,6 @@
                     <span class="text-[11px] text-slate-400">any</span>
                   {% endif %}
                 </td>
-
-                <!-- Delete -->
                 <td class="px-3 py-2.5 text-right">
                   <form method="post" class="inline"
                         onsubmit="return confirm('Delete mapping: {{ m.brand|escapejs }} → {{ m.theme|escapejs }}?')">
@@ -243,14 +271,13 @@
           <i class="fa-solid fa-layer-group text-slate-400 text-xs"></i>
           <span class="text-xs text-slate-500">{{ mappings|length }} mapping{{ mappings|length|pluralize }}</span>
         </div>
-
         {% else %}
         <div class="py-16 text-center">
           <div class="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
             <i class="fa-solid fa-map text-slate-400 text-2xl"></i>
           </div>
-          <p class="text-slate-600 font-semibold text-sm">No brand mappings yet</p>
-          <p class="text-slate-400 text-xs mt-1">Use the form on the left to add mappings.</p>
+          <p class="text-slate-600 font-semibold text-sm">No brand mappings found</p>
+          <p class="text-slate-400 text-xs mt-1">Use the form on the left to add mappings, or adjust the filter.</p>
         </div>
         {% endif %}
       </div>
@@ -262,7 +289,6 @@
 <!-- ── Edit TC Theme modal ────────────────────────────────────────────────── -->
 <div id="editTcModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl border border-slate-100 p-6 w-full max-w-md mx-4">
-
     <div class="flex items-center gap-3 mb-4">
       <span class="w-9 h-9 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
         <i class="fa-solid fa-file-invoice text-amber-600 text-sm"></i>
@@ -272,19 +298,14 @@
         <p class="text-[11px] text-slate-400">Add or remove TC theme names for this mapping</p>
       </div>
     </div>
-
-    <!-- Selected chips -->
     <div class="mb-2">
       <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Selected TC themes:</p>
       <div id="editTcChips"
            class="min-h-[42px] flex flex-wrap gap-1.5 p-2 bg-slate-50 border border-slate-200
                   rounded-lg cursor-text"
            onclick="document.getElementById('editTcInput').focus()">
-        <!-- chips injected by JS -->
       </div>
     </div>
-
-    <!-- Input row -->
     <div class="flex gap-2 mb-3">
       <div class="relative flex-1">
         <input type="text" id="editTcInput" list="editTcThemeOptions"
@@ -295,17 +316,12 @@
       </div>
       <button type="button" onclick="addTcChip('edit')"
               class="px-3 py-2 bg-amber-100 text-amber-700 rounded-lg text-xs font-bold
-                     hover:bg-amber-200 transition-colors flex-shrink-0">
-        Add
-      </button>
+                     hover:bg-amber-200 transition-colors flex-shrink-0">Add</button>
     </div>
-
-    <!-- Quick-pick list -->
     <div id="editTcQuickPick" class="mb-4 hidden">
       <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">Known TC themes — click to add:</p>
       <div id="editTcQuickPickItems" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto"></div>
     </div>
-
     <form method="post" id="editTcForm">
       {% csrf_token %}
       <input type="hidden" name="action" value="edit_tc_theme">
@@ -321,7 +337,6 @@
   </div>
 </div>
 
-<!-- Helper style for field labels / hints -->
 <style>
   .field-label {
     display: block;
@@ -343,24 +358,152 @@
 
 {% block extra_js %}
 <script>
-// ── State ────────────────────────────────────────────────────────────────────
-let _addTcSelected  = [];   // array of strings for the add form
-let _editTcSelected = [];   // array of strings for the edit modal
-let _knownTcThemes  = [];   // loaded from AJAX for current account
+// ── State ─────────────────────────────────────────────────────────────────────
+let _addTcSelected  = [];
+let _editTcSelected = [];
+let _knownTcThemes  = [];
 
-// ── AJAX: load options when account changes ───────────────────────────────────
-function loadMappingOptions(accountId) {
+// Current scope selections in the add form
+let _curAccountId  = '';
+let _curChannel    = '';
+let _curMonth      = '';
+let _curScheduleId = '';
+
+// ── Cascade: Account → Channel → Month → Schedule ────────────────────────────
+function onAccountChange(accountId) {
+  _curAccountId  = accountId;
+  _curChannel    = '';
+  _curMonth      = '';
+  _curScheduleId = '';
+  _resetSelect('addChannelSelect',  'All channels');
+  _resetSelect('addMonthSelect',    'All months');
+  _resetSelect('addScheduleSelect', 'All schedules');
+  _clearOptions();
   if (!accountId) return;
-  fetch(`/dashboard/brand-mappings/options/?account_id=${encodeURIComponent(accountId)}`)
+  fetch(`/dashboard/brand-mappings/channels/?account_id=${enc(accountId)}`)
+    .then(r => r.json())
+    .then(d => _populateSelect('addChannelSelect', d.channels || [], 'All channels'))
+    .catch(() => {});
+  // Load all options (no scope filter yet)
+  _loadOptions();
+}
+
+function onChannelChange(channel) {
+  _curChannel    = channel;
+  _curMonth      = '';
+  _curScheduleId = '';
+  _resetSelect('addMonthSelect',    'All months');
+  _resetSelect('addScheduleSelect', 'All schedules');
+  if (!_curAccountId) return;
+  if (channel) {
+    fetch(`/dashboard/brand-mappings/months/?account_id=${enc(_curAccountId)}&channel=${enc(channel)}`)
+      .then(r => r.json())
+      .then(d => _populateSelect('addMonthSelect', d.months || [], 'All months'))
+      .catch(() => {});
+  }
+  _loadOptions();
+}
+
+function onMonthChange(month) {
+  _curMonth      = month;
+  _curScheduleId = '';
+  _resetSelect('addScheduleSelect', 'All schedules');
+  if (!_curAccountId) return;
+  if (_curChannel && month) {
+    fetch(`/dashboard/brand-mappings/schedules/?account_id=${enc(_curAccountId)}&channel=${enc(_curChannel)}&month=${enc(month)}`)
+      .then(r => r.json())
+      .then(d => {
+        const sel = document.getElementById('addScheduleSelect');
+        sel.innerHTML = '<option value="">All schedules</option>';
+        (d.schedules || []).forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.id;
+          opt.textContent = `#${s.schedule_number || s.id}  (v${s.version}, ${s.row_count} rows)`;
+          sel.appendChild(opt);
+        });
+      })
+      .catch(() => {});
+  }
+  _loadOptions();
+}
+
+function onScheduleChange(scheduleId) {
+  _curScheduleId = scheduleId;
+  _loadOptions();
+}
+
+// ── Load brands / themes via AJAX ─────────────────────────────────────────────
+function _loadOptions() {
+  if (!_curAccountId) return;
+  let url = `/dashboard/brand-mappings/options/?account_id=${enc(_curAccountId)}`;
+  if (_curScheduleId) {
+    url += `&schedule_id=${enc(_curScheduleId)}`;
+  } else {
+    if (_curChannel) url += `&channel=${enc(_curChannel)}`;
+    if (_curMonth)   url += `&month=${enc(_curMonth)}`;
+  }
+  fetch(url)
     .then(r => r.json())
     .then(data => {
-      _fillDatalist('brandOptions',   data.brands  || []);
-      _fillDatalist('themeOptions',   data.themes  || []);
+      _fillDatalist('brandOptions',   data.brands   || []);
+      _fillDatalist('themeOptions',   data.themes   || []);
       _knownTcThemes = data.tc_themes || [];
       _fillDatalist('tcThemeOptions', _knownTcThemes);
       _renderQuickPick('add', _knownTcThemes);
     })
     .catch(() => {});
+}
+
+function _clearOptions() {
+  _fillDatalist('brandOptions',  []);
+  _fillDatalist('themeOptions',  []);
+  _knownTcThemes = [];
+  _fillDatalist('tcThemeOptions', []);
+  _renderQuickPick('add', []);
+}
+
+// ── Filter bar: account → channel → month ─────────────────────────────────────
+function loadFilterChannels(accountId) {
+  const chSel = document.getElementById('filterChannelSelect');
+  const moSel = document.getElementById('filterMonthSelect');
+  chSel.innerHTML = '<option value="">All channels</option>';
+  moSel.innerHTML = '<option value="">All months</option>';
+  if (!accountId) return;
+  fetch(`/dashboard/brand-mappings/channels/?account_id=${enc(accountId)}`)
+    .then(r => r.json())
+    .then(d => _populateSelect('filterChannelSelect', d.channels || [], 'All channels'))
+    .catch(() => {});
+}
+
+function loadFilterMonths(accountId, channel) {
+  const moSel = document.getElementById('filterMonthSelect');
+  moSel.innerHTML = '<option value="">All months</option>';
+  if (!accountId || !channel) return;
+  fetch(`/dashboard/brand-mappings/months/?account_id=${enc(accountId)}&channel=${enc(channel)}`)
+    .then(r => r.json())
+    .then(d => _populateSelect('filterMonthSelect', d.months || [], 'All months'))
+    .catch(() => {});
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function enc(s) { return encodeURIComponent(s); }
+function _esc(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+function _escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function _resetSelect(id, placeholder) {
+  const sel = document.getElementById(id);
+  if (sel) sel.innerHTML = `<option value="">${placeholder}</option>`;
+}
+
+function _populateSelect(id, items, placeholder) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  sel.innerHTML = `<option value="">${placeholder}</option>`;
+  items.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v;
+    sel.appendChild(opt);
+  });
 }
 
 function _fillDatalist(id, items) {
@@ -369,16 +512,7 @@ function _fillDatalist(id, items) {
   dl.innerHTML = items.map(v => `<option value="${_esc(v)}"></option>`).join('');
 }
 
-function _esc(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
-function _escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-// Auto-load if pre-selected account
-(function() {
-  const sel = document.getElementById('addAccountSelect');
-  if (sel && sel.value) loadMappingOptions(sel.value);
-})();
-
-// ── Quick-pick rendering ─────────────────────────────────────────────────────
+// ── Quick-pick rendering ──────────────────────────────────────────────────────
 function _renderQuickPick(ctx, themes) {
   const wrap  = document.getElementById(`${ctx}TcQuickPick`);
   const items = document.getElementById(`${ctx}TcQuickPickItems`);
@@ -387,12 +521,9 @@ function _renderQuickPick(ctx, themes) {
   const selected = ctx === 'add' ? _addTcSelected : _editTcSelected;
   items.innerHTML = themes.map(t => {
     const already = selected.map(s=>s.toLowerCase()).includes(t.toLowerCase());
-    return `<button type="button"
-              onclick="_pickTcTheme('${ctx}','${_esc(t)}')"
+    return `<button type="button" onclick="_pickTcTheme('${ctx}','${_esc(t)}')"
               class="px-2 py-0.5 rounded-md text-[11px] font-semibold border transition-all
-                     ${already
-                       ? 'bg-amber-100 text-amber-700 border-amber-300 opacity-60 cursor-default'
-                       : 'bg-white text-slate-600 border-slate-200 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700'}"
+                     ${already ? 'bg-amber-100 text-amber-700 border-amber-300 opacity-60 cursor-default' : 'bg-white text-slate-600 border-slate-200 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700'}"
               ${already ? 'disabled' : ''}>${_escHtml(t)}</button>`;
   }).join('');
 }
@@ -406,7 +537,7 @@ function _pickTcTheme(ctx, theme) {
   }
 }
 
-// ── Chip rendering ───────────────────────────────────────────────────────────
+// ── Chip rendering ────────────────────────────────────────────────────────────
 function _renderChips(ctx) {
   const container = document.getElementById(`${ctx}TcChips`);
   const selected  = ctx === 'add' ? _addTcSelected : _editTcSelected;
@@ -434,11 +565,9 @@ function _removeTcChip(ctx, idx) {
   _renderQuickPick(ctx, _knownTcThemes);
 }
 
-// ── Add from text input ──────────────────────────────────────────────────────
 function addTcChip(ctx) {
-  const inputId = ctx === 'add' ? 'addTcInput' : 'editTcInput';
-  const inp     = document.getElementById(inputId);
-  const val     = inp.value.trim();
+  const inp = document.getElementById(ctx === 'add' ? 'addTcInput' : 'editTcInput');
+  const val = inp.value.trim();
   if (!val) return;
   const selected = ctx === 'add' ? _addTcSelected : _editTcSelected;
   if (!selected.map(s=>s.toLowerCase()).includes(val.toLowerCase())) {
@@ -454,28 +583,16 @@ function handleTcInputKey(e, ctx) {
   if (e.key === 'Enter') { e.preventDefault(); addTcChip(ctx); }
 }
 
-// ── Form submit preparation ──────────────────────────────────────────────────
-function prepareAddSubmit() {
-  document.getElementById('addTcHidden').value = _addTcSelected.join('|');
-}
+function prepareAddSubmit()  { document.getElementById('addTcHidden').value  = _addTcSelected.join('|'); }
+function prepareEditSubmit() { document.getElementById('editTcHidden').value = _editTcSelected.join('|'); }
 
-function prepareEditSubmit() {
-  document.getElementById('editTcHidden').value = _editTcSelected.join('|');
-}
-
-// ── Edit TC modal ────────────────────────────────────────────────────────────
+// ── Edit TC modal ─────────────────────────────────────────────────────────────
 function openEditTcModal(mappingId, currentValue) {
   document.getElementById('editMappingId').value = mappingId;
-  // Parse current pipe-separated value into chips
-  _editTcSelected = currentValue
-    ? currentValue.split('|').map(t => t.trim()).filter(Boolean)
-    : [];
+  _editTcSelected = currentValue ? currentValue.split('|').map(t=>t.trim()).filter(Boolean) : [];
   _renderChips('edit');
-
-  // Mirror known TC themes to edit datalist
   _fillDatalist('editTcThemeOptions', _knownTcThemes);
   _renderQuickPick('edit', _knownTcThemes);
-
   document.getElementById('editTcModal').classList.remove('hidden');
   setTimeout(() => document.getElementById('editTcInput').focus(), 100);
 }
@@ -484,12 +601,25 @@ function closeEditTcModal() {
   document.getElementById('editTcModal').classList.add('hidden');
 }
 
-// Close modal on backdrop click
 document.getElementById('editTcModal').addEventListener('click', function(e) {
   if (e.target === this) closeEditTcModal();
 });
 
-// Init add form chips display
+// ── Init ──────────────────────────────────────────────────────────────────────
 _renderChips('add');
+
+// Auto-load if account is pre-selected (page loaded with ?account=...)
+(function() {
+  const sel = document.getElementById('addAccountSelect');
+  if (sel && sel.value) {
+    _curAccountId = sel.value;
+    // Load channels for pre-selected account
+    fetch(`/dashboard/brand-mappings/channels/?account_id=${enc(sel.value)}`)
+      .then(r => r.json())
+      .then(d => _populateSelect('addChannelSelect', d.channels || [], 'All channels'))
+      .catch(() => {});
+    _loadOptions();
+  }
+})();
 </script>
 {% endblock %}
