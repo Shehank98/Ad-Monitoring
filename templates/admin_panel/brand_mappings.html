@@ -87,6 +87,14 @@
             <input type="text" name="brand" id="brandInput" list="brandOptions"
                    placeholder="Type or select…" class="input-field" required autocomplete="off">
             <datalist id="brandOptions"></datalist>
+            <!-- Quick-pick grid (populated when channel/month/schedule selected) -->
+            <div id="brandQuickPick" class="mt-2 hidden">
+              <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">
+                <i class="fa-solid fa-filter text-[9px] mr-0.5"></i>
+                Brands in this schedule — click to fill:
+              </p>
+              <div id="brandQuickPickItems" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto"></div>
+            </div>
             <p class="field-hint">As it appears in the Schedule file</p>
           </div>
 
@@ -96,6 +104,14 @@
             <input type="text" name="theme" id="themeInput" list="themeOptions"
                    placeholder="Type or select…" class="input-field" required autocomplete="off">
             <datalist id="themeOptions"></datalist>
+            <!-- Quick-pick grid (populated when channel/month selected) -->
+            <div id="lmrbQuickPick" class="mt-2 hidden">
+              <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">
+                <i class="fa-solid fa-filter text-[9px] mr-0.5"></i>
+                Themes for this channel/period — click to fill:
+              </p>
+              <div id="lmrbQuickPickItems" class="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto"></div>
+            </div>
             <p class="field-hint">Advt_Theme / MapOnline Theme column</p>
           </div>
 
@@ -445,10 +461,14 @@ function _loadOptions() {
   fetch(url)
     .then(r => r.json())
     .then(data => {
-      _fillDatalist('brandOptions',   data.brands   || []);
-      _fillDatalist('themeOptions',   data.themes   || []);
+      const brands = data.brands   || [];
+      const themes = data.themes   || [];
       _knownTcThemes = data.tc_themes || [];
+      _fillDatalist('brandOptions',   brands);
+      _fillDatalist('themeOptions',   themes);
       _fillDatalist('tcThemeOptions', _knownTcThemes);
+      _renderBrandQuickPick(brands);
+      _renderLmrbQuickPick(themes);
       _renderQuickPick('add', _knownTcThemes);
     })
     .catch(() => {});
@@ -459,7 +479,53 @@ function _clearOptions() {
   _fillDatalist('themeOptions',  []);
   _knownTcThemes = [];
   _fillDatalist('tcThemeOptions', []);
+  _renderBrandQuickPick([]);
+  _renderLmrbQuickPick([]);
   _renderQuickPick('add', []);
+}
+
+// ── Brand quick-pick ──────────────────────────────────────────────────────────
+function _renderBrandQuickPick(brands) {
+  const wrap  = document.getElementById('brandQuickPick');
+  const items = document.getElementById('brandQuickPickItems');
+  if (!wrap || !items) return;
+  if (!brands.length || !(_curChannel || _curScheduleId)) {
+    wrap.classList.add('hidden'); return;
+  }
+  wrap.classList.remove('hidden');
+  items.innerHTML = brands.map(b =>
+    `<button type="button" onclick="_pickBrand('${_esc(b)}')"
+       class="px-2 py-0.5 rounded-md text-[11px] font-semibold border bg-white
+              text-blue-700 border-blue-200 hover:bg-blue-50 hover:border-blue-400
+              transition-all">${_escHtml(b)}</button>`
+  ).join('');
+}
+
+function _pickBrand(brand) {
+  const inp = document.getElementById('brandInput');
+  if (inp) { inp.value = brand; inp.focus(); }
+}
+
+// ── LMRB Theme quick-pick ─────────────────────────────────────────────────────
+function _renderLmrbQuickPick(themes) {
+  const wrap  = document.getElementById('lmrbQuickPick');
+  const items = document.getElementById('lmrbQuickPickItems');
+  if (!wrap || !items) return;
+  if (!themes.length || !(_curChannel || _curScheduleId)) {
+    wrap.classList.add('hidden'); return;
+  }
+  wrap.classList.remove('hidden');
+  items.innerHTML = themes.map(t =>
+    `<button type="button" onclick="_pickLmrbTheme('${_esc(t)}')"
+       class="px-2 py-0.5 rounded-md text-[11px] font-semibold border bg-white
+              text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-400
+              transition-all">${_escHtml(t)}</button>`
+  ).join('');
+}
+
+function _pickLmrbTheme(theme) {
+  const inp = document.getElementById('themeInput');
+  if (inp) { inp.value = theme; inp.focus(); }
 }
 
 // ── Filter bar: account → channel → month ─────────────────────────────────────
