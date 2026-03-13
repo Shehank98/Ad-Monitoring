@@ -431,6 +431,7 @@
               <th class="text-right">Duration (s)</th>
               <th class="text-right">Planned</th>
               <th class="text-right">LMRB Count</th>
+              <th class="text-right">Details</th>
             </tr>
           </thead>
           <tbody>
@@ -447,6 +448,24 @@
               <td class="text-right font-semibold text-amber-700">{{ row.planned }}</td>
               <td class="text-right font-semibold {% if row.lmrb_count >= row.planned %}text-emerald-700{% elif row.lmrb_count > 0 %}text-amber-600{% else %}text-red-500{% endif %}">
                 {{ row.lmrb_count }}
+              </td>
+              <td class="text-right">
+                {% if row.programmes %}
+                <button onclick="toggleCommDetails(this)"
+                        data-programmes='{{ row.programmes_json|escapejs }}'
+                        data-pt="{{ row.pt_count }}" data-npt="{{ row.non_pt_count }}"
+                        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px]
+                               font-semibold bg-slate-100 text-slate-600 hover:bg-amber-100
+                               hover:text-amber-700 transition">
+                  <i class="fa-solid fa-circle-info"></i> Details
+                </button>
+                {% else %}—{% endif %}
+              </td>
+            </tr>
+            <!-- Expandable detail row (reuses same toggleCommDetails handler) -->
+            <tr class="comm-detail-row hidden">
+              <td colspan="6" class="bg-amber-50 px-4 py-3">
+                <div class="comm-detail-content"></div>
               </td>
             </tr>
             {% endfor %}

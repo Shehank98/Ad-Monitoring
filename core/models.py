@@ -108,6 +108,8 @@ class ScheduleRow(models.Model):
     month       = models.CharField(max_length=50)
 
     brand       = models.CharField(max_length=200)
+    product     = models.CharField(max_length=200, blank=True, default='',
+                    help_text='Product name — should match LMRB Product field')
     programme   = models.CharField(max_length=200, blank=True)
     date        = models.DateField(null=True, blank=True)
     start_time  = models.CharField(max_length=30, blank=True)
@@ -228,6 +230,8 @@ class BrandMapping(models.Model):
     tc_theme maps the brand to how it appears in Transmission Certificate (TC) files.
     """
     account   = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='brand_mappings')
+    product   = models.CharField(max_length=200, blank=True, default='',
+                  help_text='LMRB Product name this brand/theme belongs to (used for grouping in reports)')
     brand     = models.CharField(max_length=200, help_text='Brand name as it appears in the Schedule file')
     theme     = models.CharField(max_length=200, help_text='Theme name as it appears in LMRB (Advt_Theme) or MapOnline (Theme)')
     tc_theme  = models.TextField(

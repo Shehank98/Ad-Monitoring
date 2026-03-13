@@ -456,6 +456,7 @@ def _parse_schedule_rows(df, schedule, account, channel, month):
             channel    = channel,
             month      = month,
             brand      = _safe_str(r.get('Brand', '')),
+            product    = _safe_str(r.get('Product', '')),
             programme  = _safe_str(r.get('Programme', '')),
             date       = _safe_date(r.get('Date')),
             start_time = _safe_str(r.get('Start_Time', '')),
@@ -1050,6 +1051,7 @@ def brand_mapping_list(request):
             brand    = request.POST.get('brand', '').strip()
             theme    = request.POST.get('theme', '').strip()
             tc_theme = request.POST.get('tc_theme', '').strip()
+            product  = request.POST.get('product', '').strip()
             dur_raw  = request.POST.get('duration', '').strip()
             duration = int(dur_raw) if dur_raw.isdigit() else None
 
@@ -1068,7 +1070,7 @@ def brand_mapping_list(request):
                     else:
                         BrandMapping.objects.create(
                             account=account, brand=brand, theme=theme,
-                            tc_theme=tc_theme, duration=duration)
+                            tc_theme=tc_theme, duration=duration, product=product)
                         dur_str = f' ({duration}s)' if duration else ''
                         messages.success(request, f'Mapping added: {brand} → {theme}{dur_str}')
             return redirect(f'/dashboard/brand-mappings/?account={acc_id}')
@@ -1140,15 +1142,16 @@ def brand_mapping_list(request):
 @login_required
 def brand_mapping_options(request):
     """
-    AJAX: Return unique brands, LMRB themes, and TC themes for an account.
-    Narrows results when channel / month / schedule_id are also provided.
+    AJAX: Return unique brands, LMRB themes, TC themes, and LMRB products for an account.
+    Narrows results when channel / month / schedule_id / product are also provided.
     """
     account_id  = request.GET.get('account_id', '').strip()
     channel     = request.GET.get('channel', '').strip()
     month       = request.GET.get('month', '').strip()
     schedule_id = request.GET.get('schedule_id', '').strip()
+    product     = request.GET.get('product', '').strip()
     if not account_id or not _account_access(request.user, account_id):
-        return JsonResponse({'brands': [], 'themes': [], 'tc_themes': []})
+        return JsonResponse({'brands': [], 'themes': [], 'tc_themes': [], 'products': []})
 
     # ── Brands (from Schedule) ──────────────────────────────────────────────
     brands_qs = ScheduleRow.objects.filter(account_id=account_id).exclude(brand='')
@@ -1171,14 +1174,25 @@ def brand_mapping_options(request):
         sch_filter['channel'] = channel
     sch_dates = Schedule.objects.filter(**sch_filter).aggregate(s=Min('start_date'), e=Max('end_date'))
 
-    # ── LMRB themes ────────────────────────────────────────────────────────
-    themes_qs = LMRBRow.objects.filter(account_id=account_id).exclude(advt_theme='')
+    # ── LMRB base queryset (channel + date scoped) ─────────────────────────
+    lmrb_base = LMRBRow.objects.filter(account_id=account_id)
     if channel:
-        themes_qs = themes_qs.filter(channel__iexact=channel)
+        lmrb_base = lmrb_base.filter(channel__iexact=channel)
     if sch_dates['s']:
-        themes_qs = themes_qs.filter(date__gte=sch_dates['s'])
+        lmrb_base = lmrb_base.filter(date__gte=sch_dates['s'])
     if sch_dates['e']:
-        themes_qs = themes_qs.filter(date__lte=sch_dates['e'])
+        lmrb_base = lmrb_base.filter(date__lte=sch_dates['e'])
+
+    # ── LMRB products ──────────────────────────────────────────────────────
+    products = sorted(set(
+        lmrb_base.exclude(product='').exclude(product__isnull=True)
+        .values_list('product', flat=True)
+    ))
+
+    # ── LMRB themes (filtered by product if provided) ─────────────────────
+    themes_qs = lmrb_base.exclude(advt_theme='')
+    if product:
+        themes_qs = themes_qs.filter(product__iexact=product)
     themes = sorted(set(themes_qs.values_list('advt_theme', flat=True)))
 
     # ── TC themes ─────────────────────────────────────────────────────────
@@ -1191,7 +1205,7 @@ def brand_mapping_options(request):
         tc_qs = tc_qs.filter(date__lte=sch_dates['e'])
     tc_themes = sorted(set(tc_qs.values_list('tc_theme', flat=True)))
 
-    return JsonResponse({'brands': brands, 'themes': themes, 'tc_themes': tc_themes})
+    return JsonResponse({'brands': brands, 'themes': themes, 'tc_themes': tc_themes, 'products': products})
 
 
 @login_required
@@ -1447,7 +1461,11 @@ def monitoring_dashboard(request):
                 _theme_product_map[t] = lr['product']
 
         def _build_chart_rows(ad_type_val):
-            """Return flat list of dicts for one ad_type ('COMMERCIAL BENEFITS' or 'SPONSORSHIP')."""
+            """Return flat list of dicts for one ad_type ('COMMERCIAL BENEFITS' or 'SPONSORSHIP').
+
+            Product priority: BrandMapping.product → ScheduleRow.product →
+                              LMRBRow.product (via _theme_product_map) → brand name.
+            """
             rows = []
             brands = sorted(set(
                 _sr_base.filter(ad_type=ad_type_val).values_list('brand', flat=True)
@@ -1458,8 +1476,13 @@ def monitoring_dashboard(request):
                 ).order_by('theme'))
                 if not mappings:
                     planned = _sr_base.filter(ad_type=ad_type_val, brand=brand).count()
+                    # Use ScheduleRow.product if available for unmapped brands
+                    sr_product = (
+                        _sr_base.filter(ad_type=ad_type_val, brand=brand)
+                        .exclude(product='').values_list('product', flat=True).first() or ''
+                    )
                     rows.append({
-                        'product': brand,
+                        'product': sr_product.strip() or brand,
                         'brand': brand,
                         'theme': brand,
                         'duration': None,
@@ -1490,24 +1513,60 @@ def monitoring_dashboard(request):
                             mr_q = mr_q.filter(duration=bm.duration)
                         aired = mr_q.count()
                         lmrb_count = aired
+                        progs_raw = _theme_prog_details.get(t_lower, {})
+                        progs = sorted(
+                            [{'name': k, 'count': v['count'],
+                              'prime': v['prime'], 'non_prime': v['non_prime']}
+                             for k, v in progs_raw.items()],
+                            key=lambda x: -x['count'],
+                        )
                     else:
-                        # Sponsorship aired = SponsorshipLmrbAssignment count
+                        # Sponsorship: count from SponsorshipLmrbAssignment
                         aired = 0
-                        lmrb_count = SponsorshipLmrbAssignment.objects.filter(
-                            account_id=account_id,
-                            schedule_row__in=sr_q,
-                        ).count()
+                        spon_assigns = list(
+                            SponsorshipLmrbAssignment.objects.filter(
+                                account_id=account_id,
+                                schedule_row__in=sr_q,
+                            ).select_related('lmrb_row')
+                        )
+                        lmrb_count = len(spon_assigns)
+                        # Build programme details from matched LMRB rows
+                        progs_raw = {}
+                        for sa in spon_assigns:
+                            if sa.lmrb_row:
+                                prog = sa.lmrb_row.program or 'Unknown'
+                                time_val = sa.lmrb_row.advt_time or ''
+                                bucket = _time_bucket(time_val) if time_val else 'other'
+                                entry = progs_raw.setdefault(
+                                    prog, {'count': 0, 'prime': 0, 'non_prime': 0}
+                                )
+                                entry['count'] += 1
+                                if bucket == 'prime':
+                                    entry['prime'] += 1
+                                else:
+                                    entry['non_prime'] += 1
+                        progs = sorted(
+                            [{'name': k, 'count': v['count'],
+                              'prime': v['prime'], 'non_prime': v['non_prime']}
+                             for k, v in progs_raw.items()],
+                            key=lambda x: -x['count'],
+                        )
 
-                    progs_raw = _theme_prog_details.get(t_lower, {})
-                    progs = sorted(
-                        [{'name': k, 'count': v['count'],
-                          'prime': v['prime'], 'non_prime': v['non_prime']}
-                         for k, v in progs_raw.items()],
-                        key=lambda x: -x['count'],
-                    )
-                    pt_count = sum(p['prime'] for p in progs)
+                    pt_count    = sum(p['prime'] for p in progs)
                     non_pt_count = sum(p['non_prime'] for p in progs)
-                    product = _theme_product_map.get(t_lower) or brand
+
+                    # Product resolution: BrandMapping.product → ScheduleRow.product →
+                    # LMRBRow product → brand
+                    if bm.product.strip():
+                        product = bm.product.strip()
+                    else:
+                        sr_product = (
+                            sr_q.exclude(product='')
+                            .values_list('product', flat=True).first() or ''
+                        )
+                        product = (sr_product.strip()
+                                   or _theme_product_map.get(t_lower)
+                                   or brand)
 
                     if planned == 0 and aired == 0 and lmrb_count == 0:
                         continue
