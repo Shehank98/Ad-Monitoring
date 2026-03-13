@@ -367,6 +367,7 @@
                 {% if row.programmes %}
                 <button onclick="toggleCommDetails(this)"
                         data-programmes="{{ row.programmes_json|escape }}"
+                        data-dates="{{ row.dates_json|escape }}"
                         data-pt="{{ row.pt_count }}" data-npt="{{ row.non_pt_count }}"
                         class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px]
                                font-semibold bg-slate-100 text-slate-600 hover:bg-blue-100
@@ -453,6 +454,7 @@
                 {% if row.programmes %}
                 <button onclick="toggleCommDetails(this)"
                         data-programmes="{{ row.programmes_json|escape }}"
+                        data-dates="{{ row.dates_json|escape }}"
                         data-pt="{{ row.pt_count }}" data-npt="{{ row.non_pt_count }}"
                         class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px]
                                font-semibold bg-slate-100 text-slate-600 hover:bg-amber-100
@@ -1535,12 +1537,22 @@ function toggleCommDetails(btn) {
   if (!detailTr || !detailTr.classList.contains('comm-detail-row')) return;
   const isOpen = !detailTr.classList.contains('hidden');
   if (isOpen) {
+    // Destroy any existing Chart.js instance to avoid canvas reuse errors
+    const existingCanvas = detailTr.querySelector('canvas[data-chartid]');
+    if (existingCanvas) {
+      const cid = existingCanvas.dataset.chartid;
+      if (window._commDetailCharts && window._commDetailCharts[cid]) {
+        window._commDetailCharts[cid].destroy();
+        delete window._commDetailCharts[cid];
+      }
+    }
     detailTr.classList.add('hidden');
     btn.innerHTML = '<i class="fa-solid fa-circle-info"></i> Details';
     return;
   }
   // Build detail content
   const progs = JSON.parse(btn.dataset.programmes || '[]');
+  const dates = JSON.parse(btn.dataset.dates || '[]');
   const pt    = parseInt(btn.dataset.pt || '0');
   const npt   = parseInt(btn.dataset.npt || '0');
   const total = pt + npt;
@@ -1559,6 +1571,60 @@ function toggleCommDetails(btn) {
         <span class="text-cyan-700 font-semibold">${100-ptPct}% Non-PT (${npt})</span>
       </div>
     </div>`;
+  }
+  // Per-date aired bar chart
+  if (dates.length) {
+    const chartId = 'cd_' + Math.random().toString(36).slice(2);
+    html += `<div class="flex-[2] min-w-[260px]">
+      <div class="font-semibold text-slate-600 mb-1">Aired by Date</div>
+      <div style="position:relative;height:100px;">
+        <canvas data-chartid="${chartId}" style="width:100%;height:100%;"></canvas>
+      </div>
+    </div>`;
+    // Render chart after DOM is updated
+    setTimeout(() => {
+      const canvas = detailTr.querySelector(`canvas[data-chartid="${chartId}"]`);
+      if (!canvas) return;
+      if (!window._commDetailCharts) window._commDetailCharts = {};
+      window._commDetailCharts[chartId] = new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: dates.map(d => d.date),
+          datasets: [{
+            label: 'Aired',
+            data: dates.map(d => d.count),
+            backgroundColor: '#3b82f6cc',
+            borderColor: '#2563eb',
+            borderWidth: 1,
+            borderRadius: 3,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                title: items => items[0].label,
+                label: item => `${item.raw} aired`,
+              },
+            },
+          },
+          scales: {
+            x: {
+              ticks: { font: { size: 9 }, maxRotation: 45, minRotation: 30 },
+              grid: { display: false },
+            },
+            y: {
+              beginAtZero: true,
+              ticks: { font: { size: 9 }, stepSize: 1, precision: 0 },
+              grid: { color: '#e2e8f0' },
+            },
+          },
+        },
+      });
+    }, 0);
   }
   // Programme breakdown
   if (progs.length) {

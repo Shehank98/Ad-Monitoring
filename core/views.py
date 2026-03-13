@@ -1472,6 +1472,17 @@ def monitoring_dashboard(request):
             else:
                 entry['non_prime'] += 1
 
+        # theme_lower -> {date_str: count}  (for per-date aired bar chart)
+        _theme_date_details = {}
+        for mr in aired_qs:
+            t = (mr.theme or '').lower().strip()
+            date_str = str(mr.aired_date) if mr.aired_date else (
+                str(mr.scheduled_date) if mr.scheduled_date else ''
+            )
+            if date_str:
+                _theme_date_details.setdefault(t, {})
+                _theme_date_details[t][date_str] = _theme_date_details[t].get(date_str, 0) + 1
+
         # theme_lower -> product name (from LMRBRow.product field)
         _theme_product_map = {}
         for lr in (lmrb_qs.exclude(product='').exclude(product__isnull=True)
@@ -1514,6 +1525,7 @@ def monitoring_dashboard(request):
                         'programmes_json': '[]',
                         'pt_count': 0,
                         'non_pt_count': 0,
+                        'dates_json': '[]',
                     })
                     continue
                 for bm in mappings:
@@ -1540,6 +1552,9 @@ def monitoring_dashboard(request):
                              for k, v in progs_raw.items()],
                             key=lambda x: -x['count'],
                         )
+                        dates_raw = _theme_date_details.get(t_lower, {})
+                        dates_data = [{'date': d, 'count': c}
+                                      for d, c in sorted(dates_raw.items())]
                     else:
                         # Sponsorship: count from SponsorshipLmrbAssignment
                         aired = 0
@@ -1571,6 +1586,13 @@ def monitoring_dashboard(request):
                              for k, v in progs_raw.items()],
                             key=lambda x: -x['count'],
                         )
+                        dates_by_date = {}
+                        for sa in spon_assigns:
+                            if sa.lmrb_row and sa.lmrb_row.date:
+                                d = str(sa.lmrb_row.date)
+                                dates_by_date[d] = dates_by_date.get(d, 0) + 1
+                        dates_data = [{'date': d, 'count': c}
+                                      for d, c in sorted(dates_by_date.items())]
 
                     pt_count    = sum(p['prime'] for p in progs)
                     non_pt_count = sum(p['non_prime'] for p in progs)
@@ -1603,6 +1625,7 @@ def monitoring_dashboard(request):
                         'programmes_json': _to_js(progs),
                         'pt_count': pt_count,
                         'non_pt_count': non_pt_count,
+                        'dates_json': _to_js(dates_data),
                     })
             return rows
 
