@@ -302,107 +302,160 @@
   </div>
 </div>
 
-<!-- ── Charts Row ─────────────────────────────────────────────── -->
-{% if schedule_chart or lmrb_chart %}
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
-
-  <!-- Schedule: Spots by Brand & Duration -->
-  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-    <h3 class="text-sm font-bold text-slate-700 mb-3">
-      <i class="fa-solid fa-calendar-days text-blue-500 mr-1"></i>
-      Schedule Spots - Brand × Duration
+<!-- ── Commercial Overview Chart ───────────────────────────────── -->
+{% if commercial_chart_data %}
+<div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-5">
+  <div class="flex items-center justify-between mb-4">
+    <h3 class="text-sm font-bold text-slate-700">
+      <i class="fa-solid fa-rectangle-ad text-blue-500 mr-1.5"></i>
+      Commercial Benefits — Planned vs Aired by Product &amp; Theme
     </h3>
-    {% if schedule_chart %}
-    <div style="max-height:300px;overflow-y:auto;">
-      <canvas id="scheduleChart" style="max-height:280px;"></canvas>
+    <div class="flex items-center gap-3 text-xs">
+      <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-blue-500"></span>Planned</span>
+      <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-emerald-500"></span>Aired</span>
     </div>
-    <div class="mt-3 overflow-x-auto">
-      <table class="data-table w-full text-xs">
-        <thead>
-          <tr>
-            <th>Brand</th>
-            <th class="text-right">Duration (s)</th>
-            <th class="text-right">Spots</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in schedule_chart %}
-          <tr>
-            <td class="font-medium text-slate-800">{{ row.brand }}</td>
-            <td class="text-right text-slate-600">{{ row.duration|default:"-" }}</td>
-            <td class="text-right font-bold text-blue-700">{{ row.count }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <p class="text-slate-400 text-sm text-center py-6">No schedule data for this scope.</p>
-    {% endif %}
   </div>
 
-  <!-- LMRB: Aired spots by Theme & Duration - chart only, detail button per row -->
-  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-    <div class="flex items-center justify-between mb-3">
-      <h3 class="text-sm font-bold text-slate-700">
-        <i class="fa-solid fa-chart-bar text-indigo-500 mr-1"></i>
-        LMRB Aired - Theme × Duration
-      </h3>
-      {% if lmrb_chart %}
-      <div class="flex items-center gap-2">
-        <button onclick="openAnalyticsModal()"
-                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700
-                       text-xs font-semibold hover:bg-indigo-100 transition border border-indigo-200">
-          <i class="fa-solid fa-chart-pie text-[10px]"></i> Quick View
-        </button>
-        <a href="{% url 'analytics_full' %}?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
-           target="_blank"
-           class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-50 text-violet-700
-                  text-xs font-semibold hover:bg-violet-100 transition border border-violet-200">
-          <i class="fa-solid fa-expand text-[10px]"></i> Full Analytics
-        </a>
+  <!-- Bar chart (all products/themes in one chart) -->
+  <div style="position:relative;{% if commercial_chart_data|length > 3 %}height:{{ commercial_chart_data|length }}00px;min-height:200px;{% else %}height:260px;{% endif %}max-height:600px;overflow-y:auto;">
+    <canvas id="commChart"></canvas>
+  </div>
+
+  <!-- Detailed table per product -->
+  <div class="mt-5 space-y-4">
+    {% for prod in commercial_chart_data %}
+    <div>
+      <!-- Product header -->
+      <div class="flex items-center gap-2 mb-2">
+        <span class="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200">
+          {{ prod.product }}
+        </span>
+        <span class="text-xs text-slate-400">
+          Planned: <strong class="text-blue-700">{{ prod.total_planned }}</strong>
+          &nbsp;·&nbsp; Aired: <strong class="text-emerald-700">{{ prod.total_aired }}</strong>
+        </span>
       </div>
-      {% endif %}
+      <!-- Theme table -->
+      <div class="overflow-x-auto rounded-xl border border-slate-100">
+        <table class="data-table w-full text-xs">
+          <thead>
+            <tr>
+              <th>Brand</th>
+              <th>Advt Theme</th>
+              <th class="text-right">Duration (s)</th>
+              <th class="text-right">Planned</th>
+              <th class="text-right">Aired</th>
+              <th class="text-right">Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in prod.themes %}
+            <tr>
+              <td class="font-medium text-slate-700">{{ row.brand }}</td>
+              <td class="text-slate-800">
+                {{ row.theme }}
+                {% if not row.is_mapped %}
+                  <span class="ml-1 text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700">unmapped</span>
+                {% endif %}
+              </td>
+              <td class="text-right text-slate-500">{{ row.duration|default:"—" }}</td>
+              <td class="text-right font-semibold text-blue-700">{{ row.planned }}</td>
+              <td class="text-right font-semibold {% if row.aired >= row.planned %}text-emerald-700{% elif row.aired > 0 %}text-amber-700{% else %}text-red-500{% endif %}">
+                {{ row.aired }}
+              </td>
+              <td class="text-right">
+                {% if row.programmes %}
+                <button onclick="toggleCommDetails(this)"
+                        data-programmes='{{ row.programmes_json|escapejs }}'
+                        data-pt="{{ row.pt_count }}" data-npt="{{ row.non_pt_count }}"
+                        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px]
+                               font-semibold bg-slate-100 text-slate-600 hover:bg-blue-100
+                               hover:text-blue-700 transition">
+                  <i class="fa-solid fa-circle-info"></i> Details
+                </button>
+                {% else %}—{% endif %}
+              </td>
+            </tr>
+            <!-- Expandable detail row -->
+            <tr class="comm-detail-row hidden">
+              <td colspan="6" class="bg-blue-50 px-4 py-3">
+                <div class="comm-detail-content"></div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
-    {% if lmrb_chart %}
-    <div style="max-height:280px;overflow-y:auto;">
-      <canvas id="lmrbChart" style="max-height:260px;"></canvas>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- ── Sponsorship Overview Chart ────────────────────────────────── -->
+{% if sponsorship_chart_data %}
+<div class="bg-white rounded-2xl border border-amber-100 shadow-sm p-5 mb-5">
+  <div class="flex items-center justify-between mb-4">
+    <h3 class="text-sm font-bold text-slate-700">
+      <i class="fa-solid fa-award text-amber-500 mr-1.5"></i>
+      Sponsorship Benefits — Planned vs LMRB Count by Product &amp; Theme
+    </h3>
+    <div class="flex items-center gap-3 text-xs">
+      <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-amber-500"></span>Planned</span>
+      <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-amber-300"></span>LMRB Count</span>
     </div>
-    <!-- Compact table with Detail buttons -->
-    <div class="mt-3 overflow-x-auto">
-      <table class="data-table w-full text-xs">
-        <thead>
-          <tr>
-            <th>Theme</th>
-            <th class="text-right">Dur (s)</th>
-            <th class="text-right">Aired</th>
-            <th class="text-right">Detail</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in lmrb_chart %}
-          <tr>
-            <td class="font-medium text-slate-800">{{ row.advt_theme }}</td>
-            <td class="text-right text-slate-600">{{ row.duration|default:"-" }}</td>
-            <td class="text-right font-bold text-indigo-700">{{ row.count }}</td>
-            <td class="text-right">
-              <button onclick="openLmrbDrawer({{ forloop.counter0 }})"
-                      class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px]
-                             font-semibold bg-slate-100 text-slate-600 hover:bg-indigo-100
-                             hover:text-indigo-700 transition">
-                <i class="fa-solid fa-circle-info"></i> Detail
-              </button>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <p class="text-slate-400 text-sm text-center py-6">No LMRB data for this schedule period.</p>
-    {% endif %}
   </div>
 
+  <div style="position:relative;{% if sponsorship_chart_data|length > 3 %}height:{{ sponsorship_chart_data|length }}00px;min-height:200px;{% else %}height:220px;{% endif %}max-height:500px;overflow-y:auto;">
+    <canvas id="sponChart"></canvas>
+  </div>
+
+  <div class="mt-5 space-y-4">
+    {% for prod in sponsorship_chart_data %}
+    <div>
+      <div class="flex items-center gap-2 mb-2">
+        <span class="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200">
+          {{ prod.product }}
+        </span>
+        <span class="text-xs text-slate-400">
+          Planned: <strong class="text-amber-700">{{ prod.total_planned }}</strong>
+          &nbsp;·&nbsp; LMRB: <strong class="text-amber-600">{{ prod.total_lmrb }}</strong>
+        </span>
+      </div>
+      <div class="overflow-x-auto rounded-xl border border-amber-100">
+        <table class="data-table w-full text-xs">
+          <thead>
+            <tr>
+              <th>Brand</th>
+              <th>Advt Theme</th>
+              <th class="text-right">Duration (s)</th>
+              <th class="text-right">Planned</th>
+              <th class="text-right">LMRB Count</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in prod.themes %}
+            <tr>
+              <td class="font-medium text-slate-700">{{ row.brand }}</td>
+              <td class="text-slate-800">
+                {{ row.theme }}
+                {% if not row.is_mapped %}
+                  <span class="ml-1 text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700">unmapped</span>
+                {% endif %}
+              </td>
+              <td class="text-right text-slate-500">{{ row.duration|default:"—" }}</td>
+              <td class="text-right font-semibold text-amber-700">{{ row.planned }}</td>
+              <td class="text-right font-semibold {% if row.lmrb_count >= row.planned %}text-emerald-700{% elif row.lmrb_count > 0 %}text-amber-600{% else %}text-red-500{% endif %}">
+                {{ row.lmrb_count }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
 </div>
 {% endif %}
 
@@ -1014,15 +1067,15 @@
       <!-- Section 1: Charts side by side -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-        <!-- Schedule chart copy -->
+        <!-- Commercial chart in modal -->
         <div class="bg-slate-50 rounded-xl p-4">
           <h4 class="text-xs font-bold text-slate-600 uppercase tracking-wider mb-3">
-            <i class="fa-solid fa-calendar-days text-blue-500 mr-1"></i>Schedule Spots - Brand × Duration
+            <i class="fa-solid fa-rectangle-ad text-blue-500 mr-1"></i>Commercial — Planned vs Aired
           </h4>
-          {% if schedule_chart %}
-          <canvas id="scheduleChartModal" style="max-height:260px;"></canvas>
+          {% if commercial_chart_data %}
+          <canvas id="commChartModal" style="max-height:260px;"></canvas>
           {% else %}
-          <p class="text-xs text-slate-400 text-center py-8">No schedule data.</p>
+          <p class="text-xs text-slate-400 text-center py-8">No commercial data.</p>
           {% endif %}
         </div>
 
@@ -1314,23 +1367,189 @@ function buildDonut(id, labels, data, colors) {
   });
 }
 
-{% if schedule_chart %}
+/* ── Commercial Planned vs Aired grouped bar chart ─────────────── */
+{% if commercial_chart_data %}
 (function() {
-  const raw    = {{ schedule_chart_json|safe }};
-  const labels = raw.map(r => r.brand + (r.duration ? ' (' + r.duration + 's)' : ''));
-  const data   = raw.map(r => r.count);
-  buildBarChart('scheduleChart', labels, data, labels);
+  const products = {{ commercial_chart_json|safe }};
+  const labels = [], plannedVals = [], airedVals = [], bgColors = [];
+  const PROD_COLORS = [
+    '#2563eb','#7c3aed','#0891b2','#059669','#d97706',
+    '#dc2626','#db2777','#65a30d','#ea580c','#0284c7',
+  ];
+  products.forEach((prod, pi) => {
+    const c = PROD_COLORS[pi % PROD_COLORS.length];
+    prod.themes.forEach(t => {
+      labels.push(t.theme + (t.duration ? ' (' + t.duration + 's)' : ''));
+      plannedVals.push(t.planned);
+      airedVals.push(t.aired);
+      bgColors.push(c);
+    });
+  });
+  const el = document.getElementById('commChart');
+  if (!el) return;
+  new Chart(el, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Planned',
+          data: plannedVals,
+          backgroundColor: '#2563ebaa',
+          borderColor: '#2563eb',
+          borderWidth: 1,
+          borderRadius: 4,
+        },
+        {
+          label: 'Aired',
+          data: airedVals,
+          backgroundColor: '#059669aa',
+          borderColor: '#059669',
+          borderWidth: 1,
+          borderRadius: 4,
+        },
+      ],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'top', labels: { font: { size: 10 }, boxWidth: 12 } },
+        tooltip: {
+          callbacks: {
+            afterBody: function(ctx) {
+              const di = ctx[0].dataIndex;
+              // Find matching product/theme for this bar index
+              let idx = 0;
+              for (const prod of products) {
+                for (const t of prod.themes) {
+                  if (idx === di) {
+                    return ['Product: ' + prod.product, 'Brand: ' + t.brand];
+                  }
+                  idx++;
+                }
+              }
+              return [];
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { font: { size: 10 } }, grid: { color: '#f1f5f9' }, beginAtZero: true },
+        y: { ticks: { font: { size: 9 } } },
+      },
+    },
+  });
 })();
 {% endif %}
 
-{% if lmrb_chart %}
+/* ── Sponsorship Planned vs LMRB grouped bar chart ──────────────── */
+{% if sponsorship_chart_data %}
 (function() {
-  const raw    = {{ lmrb_chart_json|safe }};
-  const labels = raw.map(r => r.advt_theme + (r.duration ? ' (' + r.duration + 's)' : ''));
-  const data   = raw.map(r => r.count);
-  buildBarChart('lmrbChart', labels, data, labels);
+  const products = {{ sponsorship_chart_json|safe }};
+  const labels = [], plannedVals = [], lmrbVals = [];
+  products.forEach(prod => {
+    prod.themes.forEach(t => {
+      labels.push(t.theme + (t.duration ? ' (' + t.duration + 's)' : ''));
+      plannedVals.push(t.planned);
+      lmrbVals.push(t.lmrb_count);
+    });
+  });
+  const el = document.getElementById('sponChart');
+  if (!el) return;
+  new Chart(el, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Planned',
+          data: plannedVals,
+          backgroundColor: '#f59e0baa',
+          borderColor: '#f59e0b',
+          borderWidth: 1,
+          borderRadius: 4,
+        },
+        {
+          label: 'LMRB Count',
+          data: lmrbVals,
+          backgroundColor: '#fbbf24aa',
+          borderColor: '#fbbf24',
+          borderWidth: 1,
+          borderRadius: 4,
+        },
+      ],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'top', labels: { font: { size: 10 }, boxWidth: 12 } },
+      },
+      scales: {
+        x: { ticks: { font: { size: 10 } }, grid: { color: '#fef3c7' }, beginAtZero: true },
+        y: { ticks: { font: { size: 9 } } },
+      },
+    },
+  });
 })();
 {% endif %}
+
+/* ── Commercial Details toggler ─────────────────────────────────── */
+function toggleCommDetails(btn) {
+  const tr = btn.closest('tr');
+  const detailTr = tr.nextElementSibling;
+  if (!detailTr || !detailTr.classList.contains('comm-detail-row')) return;
+  const isOpen = !detailTr.classList.contains('hidden');
+  if (isOpen) {
+    detailTr.classList.add('hidden');
+    btn.innerHTML = '<i class="fa-solid fa-circle-info"></i> Details';
+    return;
+  }
+  // Build detail content
+  const progs = JSON.parse(btn.dataset.programmes || '[]');
+  const pt    = parseInt(btn.dataset.pt || '0');
+  const npt   = parseInt(btn.dataset.npt || '0');
+  const total = pt + npt;
+  let html = '<div class="flex flex-wrap gap-6 text-xs">';
+  // PT / Non-PT bar
+  if (total > 0) {
+    const ptPct = Math.round(pt / total * 100);
+    html += `<div class="flex-1 min-w-[180px]">
+      <div class="font-semibold text-slate-600 mb-1">Prime-time Split</div>
+      <div class="pt-bar mb-1">
+        <div class="pt-prime" style="width:${ptPct}%"></div>
+        <div class="pt-nonprime" style="width:${100-ptPct}%"></div>
+      </div>
+      <div class="flex justify-between text-[10px] text-slate-500">
+        <span class="text-violet-700 font-semibold">${ptPct}% Prime (${pt})</span>
+        <span class="text-cyan-700 font-semibold">${100-ptPct}% Non-PT (${npt})</span>
+      </div>
+    </div>`;
+  }
+  // Programme breakdown
+  if (progs.length) {
+    html += '<div class="flex-1 min-w-[200px]"><div class="font-semibold text-slate-600 mb-1">Programmes Aired</div><ul class="space-y-0.5">';
+    progs.slice(0, 8).forEach(p => {
+      const isPt = p.prime > p.non_prime;
+      html += `<li class="flex items-center justify-between gap-2">
+        <span class="truncate max-w-[200px]">${p.name}</span>
+        <span class="flex items-center gap-1">
+          <span class="font-bold text-slate-700">${p.count}</span>
+          ${isPt ? '<span class="text-[9px] px-1 py-0.5 rounded bg-violet-100 text-violet-700">PT</span>'
+                 : '<span class="text-[9px] px-1 py-0.5 rounded bg-cyan-50 text-cyan-700">Non-PT</span>'}
+        </span>
+      </li>`;
+    });
+    html += '</ul></div>';
+  }
+  html += '</div>';
+  detailTr.querySelector('.comm-detail-content').innerHTML = html;
+  detailTr.classList.remove('hidden');
+  btn.innerHTML = '<i class="fa-solid fa-chevron-up"></i> Close';
+}
 
 {% if spon_kw_breakdown %}
 /* ── Sponsorship Keyword Type Chart ───────────────────────────── */
@@ -1597,11 +1816,34 @@ function handleModalClick(e) {
 }
 
 function buildModalCharts() {
-  {% if schedule_chart %}
+  {% if commercial_chart_data %}
   (function() {
-    const raw    = {{ schedule_chart_json|safe }};
-    const labels = raw.map(r => r.brand + (r.duration ? ' (' + r.duration + 's)' : ''));
-    buildBarChart('scheduleChartModal', labels, raw.map(r => r.count), labels);
+    const products = {{ commercial_chart_json|safe }};
+    const labels = [], plannedVals = [], airedVals = [];
+    products.forEach(prod => {
+      prod.themes.forEach(t => {
+        labels.push(t.theme + (t.duration ? ' (' + t.duration + 's)' : ''));
+        plannedVals.push(t.planned);
+        airedVals.push(t.aired);
+      });
+    });
+    const el = document.getElementById('commChartModal');
+    if (!el) return;
+    new Chart(el, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Planned', data: plannedVals, backgroundColor: '#2563ebaa', borderColor: '#2563eb', borderWidth: 1, borderRadius: 4 },
+          { label: 'Aired',   data: airedVals,   backgroundColor: '#059669aa', borderColor: '#059669', borderWidth: 1, borderRadius: 4 },
+        ],
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: true, position: 'top', labels: { font: { size: 9 }, boxWidth: 10 } } },
+        scales: { x: { ticks: { font: { size: 9 } }, beginAtZero: true }, y: { ticks: { font: { size: 9 } } } },
+      },
+    });
   })();
   {% endif %}
 

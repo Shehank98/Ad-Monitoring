@@ -1264,8 +1264,11 @@ def monitoring_dashboard(request):
     brand_summary  = []
     sponsorship_rows = []
     sponsorship_brand_summary = []
-    schedule_chart = []
     lmrb_chart     = []
+    commercial_chart_data  = []
+    sponsorship_chart_data = []
+    commercial_chart_json  = '[]'
+    sponsorship_chart_json = '[]'
     lmrb_matched_rows   = []
     lmrb_unmatched_rows = []
 
@@ -1385,17 +1388,7 @@ def monitoring_dashboard(request):
         # commercial count already computed above; expose it in stats
         stats['commercial'] = n_commercial
 
-        # ── Chart data 1: Schedule spots grouped by Brand × Duration ─────────
-        sch_rows = (
-            ScheduleRow.objects
-            .filter(account_id=account_id, channel=channel, month=month)
-            .values('brand', 'duration')
-            .annotate(count=Count('id'))
-            .order_by('brand', 'duration')
-        )
-        schedule_chart = list(sch_rows)
-
-        # ── Chart data 2: LMRB rows grouped by Theme × Duration ──────────────
+        # ── LMRB queryset (scoped to schedule date range) ────────────────────
         sch_dates = ScheduleRow.objects.filter(
             account_id=account_id, channel=channel, month=month
         ).aggregate(d_min=Min('date'), d_max=Max('date'))
@@ -1404,6 +1397,146 @@ def monitoring_dashboard(request):
             lmrb_qs = lmrb_qs.filter(date__gte=sch_dates['d_min'])
         if sch_dates['d_max']:
             lmrb_qs = lmrb_qs.filter(date__lte=sch_dates['d_max'])
+
+        # ── Commercial chart data: Product → Brand → Theme (Planned vs Aired) ─
+        # Only show chart data when verification results exist (MatchResult records).
+        # Aired = MatchResult status in matched / programme_mismatch / late_telecast.
+        aired_qs = qs.filter(
+            status__in=['matched', 'programme_mismatch', 'late_telecast']
+        ).select_related('lmrb_row', 'schedule_row')
+
+        # theme_lower -> {prog: {count, prime, non_prime}}
+        _theme_prog_details = {}
+        for mr in aired_qs:
+            t = (mr.theme or '').lower().strip()
+            prog = ''
+            time_val = ''
+            if mr.lmrb_row:
+                prog = mr.lmrb_row.program or ''
+                time_val = mr.lmrb_row.advt_time or ''
+            if not prog:
+                prog = mr.programme or 'Unknown'
+            bucket = _time_bucket(time_val) if time_val else 'other'
+            entry = _theme_prog_details.setdefault(t, {}).setdefault(
+                prog, {'count': 0, 'prime': 0, 'non_prime': 0}
+            )
+            entry['count'] += 1
+            if bucket == 'prime':
+                entry['prime'] += 1
+            else:
+                entry['non_prime'] += 1
+
+        # theme_lower -> product name (from LMRBRow.product field)
+        _theme_product_map = {}
+        for lr in (lmrb_qs.exclude(product='').exclude(product__isnull=True)
+                   .values('advt_theme', 'product').distinct()):
+            t = (lr['advt_theme'] or '').lower().strip()
+            if t not in _theme_product_map:
+                _theme_product_map[t] = lr['product']
+
+        def _build_chart_rows(ad_type_val):
+            """Return flat list of dicts for one ad_type ('COMMERCIAL BENEFITS' or 'SPONSORSHIP')."""
+            rows = []
+            brands = sorted(set(
+                _sr_base.filter(ad_type=ad_type_val).values_list('brand', flat=True)
+            ))
+            for brand in brands:
+                mappings = list(BrandMapping.objects.filter(
+                    account_id=account_id, brand=brand
+                ).order_by('theme'))
+                if not mappings:
+                    planned = _sr_base.filter(ad_type=ad_type_val, brand=brand).count()
+                    rows.append({
+                        'product': brand,
+                        'brand': brand,
+                        'theme': brand,
+                        'duration': None,
+                        'planned': planned,
+                        'aired': 0,
+                        'lmrb_count': 0,
+                        'is_mapped': False,
+                        'programmes': [],
+                        'programmes_json': '[]',
+                        'pt_count': 0,
+                        'non_pt_count': 0,
+                    })
+                    continue
+                for bm in mappings:
+                    t_lower = (bm.theme or '').lower().strip()
+                    sr_q = _sr_base.filter(ad_type=ad_type_val, brand=brand)
+                    if bm.duration is not None:
+                        sr_q = sr_q.filter(duration=bm.duration)
+                    planned = sr_q.count()
+
+                    # Commercial aired = MatchResult
+                    if ad_type_val == 'COMMERCIAL BENEFITS':
+                        mr_q = qs.filter(
+                            status__in=['matched', 'programme_mismatch', 'late_telecast'],
+                            theme__iexact=bm.theme,
+                        )
+                        if bm.duration is not None:
+                            mr_q = mr_q.filter(duration=bm.duration)
+                        aired = mr_q.count()
+                        lmrb_count = aired
+                    else:
+                        # Sponsorship aired = SponsorshipLmrbAssignment count
+                        aired = 0
+                        lmrb_count = SponsorshipLmrbAssignment.objects.filter(
+                            account_id=account_id,
+                            schedule_row__in=sr_q,
+                        ).count()
+
+                    progs_raw = _theme_prog_details.get(t_lower, {})
+                    progs = sorted(
+                        [{'name': k, 'count': v['count'],
+                          'prime': v['prime'], 'non_prime': v['non_prime']}
+                         for k, v in progs_raw.items()],
+                        key=lambda x: -x['count'],
+                    )
+                    pt_count = sum(p['prime'] for p in progs)
+                    non_pt_count = sum(p['non_prime'] for p in progs)
+                    product = _theme_product_map.get(t_lower) or brand
+
+                    if planned == 0 and aired == 0 and lmrb_count == 0:
+                        continue
+                    rows.append({
+                        'product': product,
+                        'brand': brand,
+                        'theme': bm.theme,
+                        'duration': bm.duration,
+                        'planned': planned,
+                        'aired': aired,
+                        'lmrb_count': lmrb_count,
+                        'is_mapped': True,
+                        'programmes': progs,
+                        'programmes_json': _to_js(progs),
+                        'pt_count': pt_count,
+                        'non_pt_count': non_pt_count,
+                    })
+            return rows
+
+        def _group_by_product(rows):
+            groups = {}
+            for r in rows:
+                grp = groups.setdefault(r['product'], [])
+                grp.append(r)
+            return [
+                {
+                    'product': p,
+                    'themes': themes,
+                    'total_planned': sum(t['planned'] for t in themes),
+                    'total_aired': sum(t['aired'] for t in themes),
+                    'total_lmrb': sum(t['lmrb_count'] for t in themes),
+                }
+                for p, themes in sorted(groups.items())
+            ]
+
+        commercial_chart_data = _group_by_product(_build_chart_rows('COMMERCIAL BENEFITS'))
+        sponsorship_chart_data = _group_by_product(_build_chart_rows('SPONSORSHIP'))
+        commercial_chart_json = _to_js(commercial_chart_data)
+        sponsorship_chart_json = _to_js(sponsorship_chart_data)
+
+        # Keep legacy lmrb_chart for the LMRB theme detail drawer
         lmrb_chart = list(
             lmrb_qs.values('advt_theme', 'duration')
             .annotate(count=Count('id'))
@@ -1623,6 +1756,10 @@ def monitoring_dashboard(request):
         spon_kw_breakdown_json = '[]'
         spon_planned_pt = 0
         spon_planned_non_pt = 0
+        commercial_chart_data = []
+        sponsorship_chart_data = []
+        commercial_chart_json = '[]'
+        sponsorship_chart_json = '[]'
 
     return render(request, 'monitoring/dashboard.html', {
         'accounts':                  account_qs,
@@ -1640,10 +1777,13 @@ def monitoring_dashboard(request):
         'brand_summary':             brand_summary,
         'sponsorship_rows':          sponsorship_rows,
         'sponsorship_brand_summary': sponsorship_brand_summary,
-        'schedule_chart':            schedule_chart,
         'lmrb_chart':                lmrb_chart,
+        # Commercial / Sponsorship chart data (Product → Theme, Planned vs Aired)
+        'commercial_chart_data':     commercial_chart_data,
+        'sponsorship_chart_data':    sponsorship_chart_data,
+        'commercial_chart_json':     commercial_chart_json,
+        'sponsorship_chart_json':    sponsorship_chart_json,
         # Pre-serialised JSON — safe to emit with |safe in templates (no Python None/True/False)
-        'schedule_chart_json':       _to_js(list(schedule_chart)),
         'lmrb_chart_json':           _to_js(list(lmrb_chart)),
         'lmrb_theme_detail':         lmrb_theme_detail if selected_account and channel and month else [],
         'lmrb_theme_detail_json':    _to_js(lmrb_theme_detail if selected_account and channel and month else []),
