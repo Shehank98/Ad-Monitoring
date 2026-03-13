@@ -366,7 +366,7 @@
               <td class="text-right">
                 {% if row.programmes %}
                 <button onclick="toggleCommDetails(this)"
-                        data-programmes='{{ row.programmes_json|escapejs }}'
+                        data-programmes="{{ row.programmes_json|escape }}"
                         data-pt="{{ row.pt_count }}" data-npt="{{ row.non_pt_count }}"
                         class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px]
                                font-semibold bg-slate-100 text-slate-600 hover:bg-blue-100
@@ -452,7 +452,7 @@
               <td class="text-right">
                 {% if row.programmes %}
                 <button onclick="toggleCommDetails(this)"
-                        data-programmes='{{ row.programmes_json|escapejs }}'
+                        data-programmes="{{ row.programmes_json|escape }}"
                         data-pt="{{ row.pt_count }}" data-npt="{{ row.non_pt_count }}"
                         class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px]
                                font-semibold bg-slate-100 text-slate-600 hover:bg-amber-100
