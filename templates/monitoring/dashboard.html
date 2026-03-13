@@ -489,6 +489,18 @@
      class="btn-secondary text-xs">
     <i class="fa-solid fa-file-pdf text-red-600"></i> Missed Ads (PDF)
   </a>
+
+  {% if commercial_chart_data or sponsorship_chart_data %}
+  <span class="text-xs font-bold text-slate-400 uppercase tracking-wider ml-3 mr-1">Analytics:</span>
+  <button onclick="openAnalyticsModal()"
+          class="btn-secondary text-xs bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100">
+    <i class="fa-solid fa-chart-bar text-indigo-500"></i> Quick View
+  </button>
+  <a href="{% url 'analytics_full' %}?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
+     class="btn-secondary text-xs bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100">
+    <i class="fa-solid fa-chart-pie text-violet-500"></i> Deep Analysis
+  </a>
+  {% endif %}
 </div>
 
 <!-- ── Tab Report ─────────────────────────────────────────────── -->
