@@ -1073,7 +1073,27 @@ def brand_mapping_list(request):
                             tc_theme=tc_theme, duration=duration, product=product)
                         dur_str = f' ({duration}s)' if duration else ''
                         messages.success(request, f'Mapping added: {brand} → {theme}{dur_str}')
-            return redirect(f'/dashboard/brand-mappings/?account={acc_id}')
+            _qs = f'/dashboard/brand-mappings/?account={acc_id}'
+            if product:
+                from urllib.parse import quote
+                _qs += f'&prefill_product={quote(product)}'
+            return redirect(_qs)
+
+        elif action == 'edit_field':
+            mapping_id = request.POST.get('mapping_id')
+            field_name = request.POST.get('field_name', '').strip()
+            new_value  = request.POST.get('new_value', '').strip()
+            if field_name not in ('product', 'brand', 'theme'):
+                messages.error(request, 'Invalid field.')
+            else:
+                mapping = get_object_or_404(BrandMapping, id=mapping_id)
+                if not _is_admin(user) and mapping.account not in account_qs:
+                    messages.error(request, 'No access to that mapping.')
+                else:
+                    setattr(mapping, field_name, new_value)
+                    mapping.save(update_fields=[field_name])
+                    messages.success(request, f'Updated {field_name} for mapping #{mapping_id}.')
+            return redirect(f'/dashboard/brand-mappings/?account={account_id or mapping.account_id}')
 
         elif action == 'edit_tc_theme':
             mapping_id = request.POST.get('mapping_id')
@@ -1774,6 +1794,39 @@ def monitoring_dashboard(request):
 
         spon_kw_breakdown_json = _to_js(spon_kw_breakdown)
 
+        # ── LMRB Sponsorship Pool ─────────────────────────────────────────────
+        # All LMRB rows in scope that look like sponsorship (keyword match OR
+        # BrandMapping-linked sponsorship brand), grouped by advt_theme.
+        # Each row shows whether it has been assigned via SponsorshipLmrbAssignment.
+        _assigned_lmrb_ids = set(
+            SponsorshipLmrbAssignment.objects
+            .filter(account_id=account_id)
+            .values_list('lmrb_row_id', flat=True)
+        )
+        _spon_lmrb_theme_ids = set()
+        for bm in BrandMapping.objects.filter(account_id=account_id):
+            if bm.brand in sponsorship_brands:
+                _spon_lmrb_theme_ids.add((bm.theme or '').lower().strip())
+
+        lmrb_spon_pool = []
+        for lr in lmrb_qs.order_by('advt_theme', 'date', 'advt_time'):
+            t_lower = (lr.advt_theme or '').lower().strip()
+            is_kw = any(kw and kw.lower() in t_lower for kw in spon_kw)
+            is_mapped_spon = t_lower in _spon_lmrb_theme_ids
+            if not (is_kw or is_mapped_spon):
+                continue
+            lmrb_spon_pool.append({
+                'id':         lr.id,
+                'date':       lr.date,
+                'advt_time':  lr.advt_time,
+                'advt_theme': lr.advt_theme,
+                'duration':   lr.duration,
+                'program':    lr.program or '—',
+                'is_assigned': lr.id in _assigned_lmrb_ids,
+                'is_mapped_spon': is_mapped_spon,
+                'is_kw':      is_kw,
+            })
+
         # ── Advt_Theme Analysis tab data ──────────────────────────────────────
         # For each unique Advt_Theme: daily airings, programme breakdown, PT split
         theme_analysis = []
@@ -1819,6 +1872,7 @@ def monitoring_dashboard(request):
         sponsorship_chart_data = []
         commercial_chart_json = '[]'
         sponsorship_chart_json = '[]'
+        lmrb_spon_pool = []
 
     return render(request, 'monitoring/dashboard.html', {
         'accounts':                  account_qs,
@@ -1859,6 +1913,7 @@ def monitoring_dashboard(request):
         'spon_kw_breakdown_json':    spon_kw_breakdown_json if selected_account and channel and month else '[]',
         'spon_planned_pt':           spon_planned_pt if selected_account and channel and month else 0,
         'spon_planned_non_pt':       spon_planned_non_pt if selected_account and channel and month else 0,
+        'lmrb_spon_pool':            lmrb_spon_pool,
     })
 
 

@@ -90,6 +90,7 @@
             </label>
             <input type="text" name="product" id="productInput" list="productOptions"
                    placeholder="Select product to filter themes…" class="input-field" autocomplete="off"
+                   value="{{ request.GET.prefill_product|default:'' }}"
                    oninput="onProductInput(this.value)">
             <datalist id="productOptions"></datalist>
             <div id="productQuickPick" class="mt-2 hidden">
@@ -252,26 +253,47 @@
                   <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-semibold">{{ m.account.name }}</span>
                 </td>
                 <td class="px-3 py-2.5">
-                  {% if m.product %}
-                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 text-[11px] font-semibold ring-1 ring-indigo-200 max-w-[140px]" title="{{ m.product }}">
-                    <i class="fa-solid fa-boxes-stacked text-[9px] flex-shrink-0"></i>
-                    <span class="truncate">{{ m.product }}</span>
-                  </span>
-                  {% else %}
-                  <span class="text-[11px] text-slate-400 italic">—</span>
-                  {% endif %}
+                  <div class="flex items-center gap-1">
+                    {% if m.product %}
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 text-[11px] font-semibold ring-1 ring-indigo-200 max-w-[130px]" title="{{ m.product }}">
+                      <i class="fa-solid fa-boxes-stacked text-[9px] flex-shrink-0"></i>
+                      <span class="truncate">{{ m.product }}</span>
+                    </span>
+                    {% else %}
+                    <span class="text-[11px] text-slate-400 italic">—</span>
+                    {% endif %}
+                    <button onclick="openEditFieldModal({{ m.id }}, 'product', '{{ m.product|escapejs }}')"
+                            class="inline-flex items-center px-1 py-0.5 rounded text-[10px] text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 transition-colors border border-transparent hover:border-indigo-200"
+                            title="Edit product">
+                      <i class="fa-solid fa-pencil"></i>
+                    </button>
+                  </div>
                 </td>
                 <td class="px-3 py-2.5">
-                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700 text-[11px] font-semibold ring-1 ring-blue-200 max-w-[160px]">
-                    <i class="fa-solid fa-tag text-[9px] flex-shrink-0"></i>
-                    <span class="truncate" title="{{ m.brand }}">{{ m.brand }}</span>
-                  </span>
+                  <div class="flex items-center gap-1">
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700 text-[11px] font-semibold ring-1 ring-blue-200 max-w-[140px]">
+                      <i class="fa-solid fa-tag text-[9px] flex-shrink-0"></i>
+                      <span class="truncate" title="{{ m.brand }}">{{ m.brand }}</span>
+                    </span>
+                    <button onclick="openEditFieldModal({{ m.id }}, 'brand', '{{ m.brand|escapejs }}')"
+                            class="inline-flex items-center px-1 py-0.5 rounded text-[10px] text-slate-300 hover:text-blue-600 hover:bg-blue-50 transition-colors border border-transparent hover:border-blue-200"
+                            title="Edit brand">
+                      <i class="fa-solid fa-pencil"></i>
+                    </button>
+                  </div>
                 </td>
                 <td class="px-3 py-2.5">
-                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 text-[11px] font-semibold ring-1 ring-emerald-200 max-w-[180px]">
-                    <i class="fa-solid fa-arrow-right text-[9px] flex-shrink-0"></i>
-                    <span class="truncate" title="{{ m.theme }}">{{ m.theme }}</span>
-                  </span>
+                  <div class="flex items-center gap-1">
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 text-[11px] font-semibold ring-1 ring-emerald-200 max-w-[160px]">
+                      <i class="fa-solid fa-arrow-right text-[9px] flex-shrink-0"></i>
+                      <span class="truncate" title="{{ m.theme }}">{{ m.theme }}</span>
+                    </span>
+                    <button onclick="openEditFieldModal({{ m.id }}, 'theme', '{{ m.theme|escapejs }}')"
+                            class="inline-flex items-center px-1 py-0.5 rounded text-[10px] text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 transition-colors border border-transparent hover:border-emerald-200"
+                            title="Edit LMRB theme">
+                      <i class="fa-solid fa-pencil"></i>
+                    </button>
+                  </div>
                 </td>
                 <td class="px-3 py-2.5" id="tc-cell-{{ m.id }}">
                   <div class="flex flex-wrap items-center gap-1">
@@ -333,6 +355,39 @@
   </div>
 </div>
 
+
+<!-- ── Edit Field modal (Product / Brand / LMRB Theme) ───────────────────────── -->
+<div id="editFieldModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl border border-slate-100 p-6 w-full max-w-sm mx-4">
+    <div class="flex items-center gap-3 mb-4">
+      <span id="editFieldIcon" class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-slate-100">
+        <i class="fa-solid fa-pencil text-slate-600 text-sm"></i>
+      </span>
+      <div>
+        <h3 class="font-bold text-slate-800 text-sm" id="editFieldTitle">Edit Field</h3>
+        <p class="text-[11px] text-slate-400">Update the value for this mapping</p>
+      </div>
+    </div>
+    <form method="post" id="editFieldForm">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="edit_field">
+      <input type="hidden" name="mapping_id" id="editFieldMappingId">
+      <input type="hidden" name="field_name" id="editFieldName">
+      <div class="mb-4">
+        <label class="field-label" id="editFieldLabel">Value</label>
+        <input type="text" name="new_value" id="editFieldInput"
+               class="input-field w-full" autocomplete="off" required>
+        <p class="field-hint" id="editFieldHint"></p>
+      </div>
+      <div class="flex gap-2">
+        <button type="submit" class="btn-primary flex-1 justify-center">
+          <i class="fa-solid fa-check"></i> Save
+        </button>
+        <button type="button" onclick="closeEditFieldModal()" class="btn-secondary flex-1 justify-center">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <!-- ── Edit TC Theme modal ────────────────────────────────────────────────── -->
 <div id="editTcModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
@@ -732,6 +787,51 @@ function handleTcInputKey(e, ctx) {
 function prepareAddSubmit()  { document.getElementById('addTcHidden').value  = _addTcSelected.join('|'); }
 function prepareEditSubmit() { document.getElementById('editTcHidden').value = _editTcSelected.join('|'); }
 
+// ── Edit Field modal (Product / Brand / LMRB Theme) ───────────────────────────
+const _fieldMeta = {
+  product: {
+    title: 'Edit Product',
+    label: 'Product name (from LMRB)',
+    hint: 'LMRB Product label used for dashboard grouping. Leave blank to clear.',
+    iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600',
+  },
+  brand: {
+    title: 'Edit Brand (Schedule)',
+    label: 'Brand name as it appears in the Schedule file',
+    hint: 'Must match the Brand column in your Schedule Excel exactly.',
+    iconBg: 'bg-blue-100', iconColor: 'text-blue-600',
+  },
+  theme: {
+    title: 'Edit LMRB Theme',
+    label: 'Advt_Theme as it appears in LMRB / MapOnline',
+    hint: 'Case-insensitive. Supports * wildcard suffix for prefix matching.',
+    iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600',
+  },
+};
+
+function openEditFieldModal(mappingId, fieldName, currentValue) {
+  const meta = _fieldMeta[fieldName] || {};
+  document.getElementById('editFieldMappingId').value = mappingId;
+  document.getElementById('editFieldName').value      = fieldName;
+  document.getElementById('editFieldInput').value     = currentValue || '';
+  document.getElementById('editFieldTitle').textContent = meta.title || 'Edit Field';
+  document.getElementById('editFieldLabel').textContent = meta.label || fieldName;
+  document.getElementById('editFieldHint').textContent  = meta.hint  || '';
+  const icon = document.getElementById('editFieldIcon');
+  icon.className = `w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${meta.iconBg || 'bg-slate-100'}`;
+  icon.querySelector('i').className = `fa-solid fa-pencil text-sm ${meta.iconColor || 'text-slate-600'}`;
+  document.getElementById('editFieldModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('editFieldInput').select(), 80);
+}
+
+function closeEditFieldModal() {
+  document.getElementById('editFieldModal').classList.add('hidden');
+}
+
+document.getElementById('editFieldModal').addEventListener('click', function(e) {
+  if (e.target === this) closeEditFieldModal();
+});
+
 // ── Edit TC modal ─────────────────────────────────────────────────────────────
 function openEditTcModal(mappingId, currentValue) {
   document.getElementById('editMappingId').value = mappingId;
@@ -759,11 +859,20 @@ _renderChips('add');
   const sel = document.getElementById('addAccountSelect');
   if (sel && sel.value) {
     _curAccountId = sel.value;
-    // Load channels for pre-selected account
     fetch(`/dashboard/brand-mappings/channels/?account_id=${enc(sel.value)}`)
       .then(r => r.json())
       .then(d => _populateSelect('addChannelSelect', d.channels || [], 'All channels'))
       .catch(() => {});
+
+    // Restore prefill_product from URL if present (set after a successful add)
+    const params = new URLSearchParams(window.location.search);
+    const prefillProduct = params.get('prefill_product');
+    if (prefillProduct) {
+      const inp = document.getElementById('productInput');
+      if (inp) inp.value = prefillProduct;
+      _curProduct = prefillProduct;
+    }
+
     _loadOptions();
   }
 })();
