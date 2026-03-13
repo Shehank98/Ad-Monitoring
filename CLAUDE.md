@@ -73,47 +73,78 @@ Managed by `@role_required(['role1', 'role2'])` decorator in `accounts/decorator
 | `operations` | Upload monitoring data |
 
 Unauthenticated → redirect to `/auth/login/`.
-Wrong role → redirect to `/dashboard/` with error message.
+Wrong role → HTTP 403 (renders `403.html`), not a redirect.
 
 ---
 
 ## 5. URL Routes (all under `/dashboard/` prefix)
 
 ```
-/                                  → dashboard
-/users/                            → user_list
-/users/create/                     → create_user
-/users/<id>/edit/                  → edit_user
-/accounts/                         → account_list
-/channels/                         → channel_list
+/                                         → dashboard
+/users/                                   → user_list
+/users/create/                            → create_user
+/users/<id>/edit/                         → edit_user
+/accounts/                                → account_list
+/channels/                                → channel_list
 
-/schedules/                        → schedule_list
-/schedules/upload/                 → schedule_upload
-/schedules/detect/                 → schedule_detect        (AJAX POST)
-/schedules/<pk>/download/          → schedule_download
-/schedules/<pk>/delete/            → schedule_delete
+/schedules/                               → schedule_list
+/schedules/upload/                        → schedule_upload
+/schedules/detect/                        → schedule_detect           (AJAX POST)
+/schedules/<pk>/download/                 → schedule_download
+/schedules/<pk>/delete/                   → schedule_delete
 
-/brand-mappings/                   → brand_mapping_list
+/brand-mappings/                          → brand_mapping_list
+/brand-mappings/options/                  → brand_mapping_options     (AJAX: account options)
+/brand-mappings/channels/                 → brand_mapping_channels    (AJAX: channels for account)
+/brand-mappings/months/                   → brand_mapping_months      (AJAX: months for channel)
+/brand-mappings/schedules/                → brand_mapping_schedules   (AJAX: schedules for month)
 
-/monitoring/                       → monitoring_list
-/monitoring/upload/                → monitoring_upload
-/monitoring/detect/                → monitoring_detect      (AJAX POST)
-/monitoring/<pk>/download/         → monitoring_download
-/monitoring/<pk>/delete/           → monitoring_delete
-/monitoring/lmrb-delete/           → lmrb_delete_range      (POST)
+/monitoring/                              → monitoring_list
+/monitoring/upload/                       → monitoring_upload
+/monitoring/detect/                       → monitoring_detect         (AJAX POST)
+/monitoring/<pk>/download/                → monitoring_download
+/monitoring/<pk>/delete/                  → monitoring_delete
+/monitoring/group/<group_id>/delete/      → monitoring_delete_group   (POST)
+/monitoring/matched-lmrb-excel/           → matched_lmrb_excel        (Excel download)
 
-/monitor/                          → monitoring_dashboard   (7-tab analytics)
-/monitor/pdf/                      → monitoring_pdf         (missed ad PDF)
+/monitor/                                 → monitoring_dashboard      (analytics tabs)
+/monitor/pdf/                             → monitoring_pdf            (missed ad PDF)
+/monitor/analytics/                       → analytics_full            (full analytics view)
 
-/tc/                               → tc_list
-/tc/upload/                        → tc_upload
-/tc/detect/                        → tc_detect              (AJAX POST)
-/tc/<pk>/delete/                   → tc_delete              (POST)
-/tc/reconcile/                     → tc_reconcile           (GET or POST)
+/tc/                                      → tc_list
+/tc/upload/                               → tc_upload
+/tc/detect/                               → tc_detect                 (AJAX POST)
+/tc/preview/                              → tc_preview                (preview parsed TC rows)
+/tc/upload-parsed/                        → tc_upload_parsed          (submit previewed rows)
+/tc/<pk>/delete/                          → tc_delete                 (POST)
+/tc/reconcile/                            → tc_reconcile              (GET or POST)
+/tc/detail/                               → tc_three_way              (three-way detail view)
+/tc/pdf-convert/                          → tc_pdf_convert            (PDF TC file → Excel preview)
 
-/summary/                          → summary_report         (GET=view, POST=save meta)
-/summary/excel/                    → summary_excel
-/summary/pdf/                      → summary_pdf
+/summary/                                 → summary_report            (GET=view, POST=save meta)
+/summary/excel/                           → summary_excel
+/summary/pdf/                             → summary_pdf
+
+/sponsorship/reconcile/                   → sponsorship_reconcile     (auto-match sponsorship)
+/sponsorship/candidates/                  → sponsorship_candidates    (AJAX: candidate LMRB rows)
+/sponsorship/assign/                      → sponsorship_assign        (POST: manual assign)
+/sponsorship/reset/                       → sponsorship_reset         (POST: reset assignments)
+/sponsorship/unmatched-rows/              → sponsorship_unmatched_rows
+
+/manual/                                  → manual_reconciliation     (manual match UI)
+/manual/match/                            → manual_match_create       (POST: create ManualMatch)
+/manual/dematch/<pk>/                     → manual_dematch            (POST: remove ManualMatch)
+
+/commercial/candidates/                   → commercial_candidates     (AJAX: LMRB pool for commercial)
+/commercial/unmatched-rows/               → commercial_unmatched_rows
+/commercial/assign/                       → commercial_assign         (POST: manual commercial assign)
+
+/settings/                                → system_settings           (super_admin only)
+/settings/branding/                       → branding_upload           (POST: logo/branding upload)
+
+/db-tools/                                → db_tools                  (admin diagnostics)
+
+/admin-export/                            → admin_export              (super_admin data export)
 ```
 
 Also: `/auth/`, `/verify/` (legacy Streamlit-style verification tool).
@@ -144,9 +175,10 @@ date (DateField)
 start_time, end_time (str, "HH:MM:SS")
 duration (int, seconds)
 ad_type (str)             ← stored as 'COMMERCIAL BENEFITS' or 'SPONSORSHIP'
-is_matched (bool)         ← row-level lock; True = claimed by engine
+is_matched (bool)         ← row-level lock; True = claimed by commercial engine
 matched_lmrb (FK → LMRBRow)
 matched_at
+is_manual_matched (bool)  ← permanently locked; set when a ManualMatch references this row
 ```
 
 > **CRITICAL:** `ad_type` is stored as `'COMMERCIAL BENEFITS'` or `'SPONSORSHIP'`.
@@ -179,10 +211,13 @@ program (aired programme name), prog_time
 ad_pos, tot_ads, brk_no, pos_in_brk, ads_in_brk
 lng, cost (Decimal), day
 
-dedup_key (str, unique)   ← sha256(account_id|channel|date|advt_time|advt_theme|dur)[:32]
-is_matched (bool)         ← row-level lock
+batch_id (UUID, nullable) ← groups rows from the same upload batch
+dedup_key (str, unique)   ← sha256 of full identity (see Section 12)
+is_matched (bool)         ← row-level lock for commercial matching
 matched_schedule (FK → ScheduleRow)
 matched_at, uploaded_at
+is_sponsorship_matched (bool) ← row-level lock for sponsorship matching
+is_manual_matched (bool)  ← permanently locked; set when a ManualMatch references this row
 ```
 
 ### `BrandMapping`
@@ -191,13 +226,16 @@ The bridge between all three data sources. One row per brand→theme pairing.
 account (FK)
 brand    (str)   ← as it appears in Schedule file
 theme    (str)   ← as it appears in LMRB / MapOnline (Advt_Theme column)
-tc_theme (str)   ← as it appears in TC file (blank = TC reconciliation skips this brand)
+tc_theme (str)   ← as it appears in TC file; pipe-separated for multiple themes
+                    e.g. "Theme A|Theme B|Theme C"
+                    blank = TC reconciliation skips this brand entirely
 duration (int, optional) ← if set, mapping only applies when duration matches exactly
 ```
 
 > **Rules:**
 > - `theme` is used by the Schedule↔LMRB engine (`verification/engine.py`)
 > - `tc_theme` is used by the TC reconciliation engine (`verification/tc_engine.py`)
+> - Multiple TC themes: separate with `|` — `tc_themes_list` property splits on pipe
 > - If `tc_theme` is blank, that brand is skipped during TC reconciliation
 > - If `duration` is None, the mapping matches any duration
 > - Matching is always **case-insensitive + strip whitespace** (`_normalize`)
@@ -207,6 +245,8 @@ duration (int, optional) ← if set, mapping only applies when duration matches 
 >   a common prefix, e.g. `Ai National Expo 2025*` matches
 >   `Ai National Expo 2025_1 (30)(Sin)`, `Ai National Expo 2025_3 (30)(Sin)`, etc.
 >   This avoids creating a separate mapping row for every theme variant.
+> - **Wildcard is Schedule↔LMRB only** — `tc_theme` pipe-separated values are used
+>   verbatim; wildcard `*` suffix is NOT supported for TC reconciliation.
 
 ### `TransmissionReport`
 One record per TC file upload.
@@ -239,15 +279,91 @@ prepared_by, checked_by, authorised_by
 created_at, updated_at
 ```
 
+### `ManualMatch`
+A manually confirmed linkage created by operations staff via `/dashboard/manual/`.
+```
+account, channel, month
+match_mode: 'schedule_lmrb' | '3way' | 'tc_lmrb'
+schedule_row (OneToOne → ScheduleRow, nullable)
+tc_row       (OneToOne → TCRow, nullable)
+lmrb_row     (OneToOne → LMRBRow, required)
+note         (text, optional)
+matched_at, matched_by (FK → User)
+```
+
+**Workflow:**
+1. Operations user opens `/dashboard/manual/`.
+2. Selects rows from the relevant panels, optionally adds a note, clicks "Match".
+3. All referenced rows are locked (`is_manual_matched=True`) — the automatic engine skips them.
+4. De-matching (`/manual/dematch/<pk>/`) removes the record and unlocks all rows.
+
+**Match modes:**
+- `schedule_lmrb` — links a ScheduleRow to an LMRBRow (no TC required)
+- `3way` — links ScheduleRow + TCRow + LMRBRow
+- `tc_lmrb` — links a TCRow to an LMRBRow only (no corresponding schedule row)
+
+> **CRITICAL:** Once `is_manual_matched=True`, neither the automatic matching engine
+> nor TC reconciliation will touch those rows. They survive `mode='reset'`.
+
+### `SponsorshipLmrbAssignment`
+Tracks the LMRB row assigned to a SPONSORSHIP ScheduleRow.
+```
+account (FK)
+schedule_row (OneToOne → ScheduleRow, ad_type='SPONSORSHIP')
+lmrb_row     (OneToOne → LMRBRow)
+match_type: 'auto' | 'manual'
+matched_at, matched_by (FK → User, nullable)
+```
+
+Created by:
+- `verification/sponsorship_engine.py` `reconcile_sponsorship()` → `match_type='auto'`
+- Operations user via sponsorship picker in the Summary Sheet → `match_type='manual'`
+
+Once created, `LMRBRow.is_sponsorship_matched=True` acts as a permanent lock.
+
+### `SummaryReportMeta`
+User-editable fields for the printed summary. Unique per (account, channel, month).
+```
+supplier_invoice_no, po_no, invoice_no, notes
+prepared_by, checked_by, authorised_by
+created_at, updated_at
+```
+
 ### `MatchResult`
 Persisted outcome of Schedule↔LMRB matching. One row per ScheduleRow processed.
 ```
-status: 'matched' | 'programme_mismatch' | 'late_telecast' | 'not_aired' | 'no_mapping'
+status: 'matched' | 'programme_mismatch' | 'late_telecast' | 'not_aired' | 'no_mapping' | 'manual_match'
 brand, programme, scheduled_date, planned_start, planned_end, duration
 theme, aired_date, air_time, source
 schedule_row (FK), lmrb_row (FK)
 run_at
 ```
+
+### `SystemSetting`
+Key-value store for site-wide configuration, editable at `/dashboard/settings/` (super_admin only).
+Auto-created with defaults on first page visit. Read via module helpers:
+```python
+get_setting(key, default='')        # returns str
+get_setting_int(key, default=0)     # returns int
+get_setting_list(key)               # returns list[str] (comma-split)
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `tc_lmrb_time_tolerance` | `5` | Max seconds between TC aired time and LMRB advt time for cross-check |
+| `tc_extra_theme_aliases` | `` | Extra column names for TC_Theme (comma-separated) |
+| `tc_extra_time_aliases` | `` | Extra column names for Aired_Time (comma-separated) |
+| `tc_extra_date_aliases` | `` | Extra column names for TC Date (comma-separated) |
+| `tc_extra_duration_aliases` | `` | Extra column names for TC Duration (comma-separated) |
+| `tc_extra_programme_aliases` | `` | Extra column names for TC Programme (comma-separated) |
+| `lmrb_extra_theme_aliases` | `` | Extra column names for LMRB Advt_Theme (comma-separated) |
+| `lmrb_extra_time_aliases` | `` | Extra column names for LMRB Advt_time (comma-separated) |
+| `lmrb_extra_duration_aliases` | `` | Extra column names for LMRB Duration (comma-separated) |
+| `lmrb_extra_date_aliases` | `` | Extra column names for LMRB Date (comma-separated) |
+| `lmrb_sponsorship_keywords` | `-BB,Com Break,DJ,-Extro,-Intro,-LLogo,Tag,Time Check,-Tr` | Keywords that classify an LMRB row as Sponsorship |
+
+> **Note:** Column alias settings extend the built-in lists — they do not replace them.
+> Add new aliases here via the settings page instead of editing code.
 
 ---
 
@@ -259,24 +375,39 @@ run_scope(account_id, channel, month, mode='smart')
 auto_run_all_for_account(account_id)
 ```
 
-### Algorithm (two passes)
-**Pass 1 — Same date:**
+### Algorithm (four passes — all schedule rows complete each pass before the next)
+
+**Pass 1 — Exact Match (same date, in-window):**
 - For each ScheduleRow, find LMRBRow candidates: same channel + date + duration + theme (via BrandMapping)
-- If any candidate's `advt_time` is within `[start_time, end_time]` window → **Matched**
-- If candidate exists but time is outside window → **Programme Mismatch**
+- Candidate's `advt_time` falls within planned `[start_time, end_time]` window → **Matched**
+- Lock both rows (`is_matched=True`)
 
-**Pass 2 — Different date:**
-- For still-unmatched ScheduleRows, search any date
-- Found → **Late Telecast**
-- Not found → **Not Aired**
-- No BrandMapping entry → **No Brand Mapping**
+**Pass 2 — Programme Mismatch (same date, just after window):**
+- Still-unmatched ScheduleRows; same date + theme + duration
+- Candidate's `advt_time` is AFTER `end_time` AND within 10 minutes (600s) of it → **Programme Mismatch**
+- Lock both rows
 
-**Extra Aired:** LMRBRows not consumed in either pass.
+**Pass 3 — Late Telecast (different date):**
+- Still-unmatched ScheduleRows; any date where `aired_date > scheduled_date`
+- Same theme + duration + `advt_time` falls within planned time window → **Late Telecast**
+- Lock both rows
+
+**Pass 4 — Not Aired:**
+- Any ScheduleRow still unmatched after Passes 1–3 → **Not Aired**
+- No BrandMapping for brand → **No Brand Mapping** (stored as `not_aired` / `no_mapping`)
+
+**Extra Aired:** LMRBRows not consumed in any pass for the scope.
+
+### Multi-schedule rules
+- **Rule 10:** Multiple Schedule records per (account, channel, month) are processed in ascending `schedule_number` order. A single shared LMRB pool means a row consumed by schedule #101 cannot be claimed by #102.
+- **Rule 12:** If multiple uploads share the same `schedule_number`, only the latest version (highest `version` field) is used.
+- **Rule 8 (LMRB date cap):** Schedule rows with dates beyond the latest available LMRB date are left unprocessed (`is_matched=False`). They are auto-picked up when new LMRB data is uploaded.
 
 ### Row-level locking
 - `ScheduleRow.is_matched = True` and `LMRBRow.is_matched = True` after a match
-- `mode='smart'`: queries `is_matched=False` only — never double-counts
-- `mode='reset'`: clears all flags + MatchResult for scope, then full re-run
+- `ScheduleRow.is_manual_matched = True` / `LMRBRow.is_manual_matched = True` for ManualMatch rows — these are **never** cleared by `mode='reset'`
+- `mode='smart'`: queries `is_matched=False` and `is_manual_matched=False` — never double-counts
+- `mode='reset'`: clears `is_matched` flags + MatchResult records (except `status='manual_match'`), then full re-run
 
 ---
 
@@ -302,18 +433,51 @@ Only brands with a non-empty `tc_theme` are included.
   - Set `TCRow.is_schedule_matched = True`, link `matched_schedule`
 - Remaining TCRows in pool → `is_extra = True`
 
-**Step 3 — TC ↔ LMRB cross-check (±5 seconds):**
+**Step 3 — TC ↔ LMRB cross-check (configurable tolerance):**
 - For each matched + extra TCRow, find an LMRBRow with:
   - Same channel, date, duration
-  - `|aired_time_secs − advt_time_secs| ≤ 5`
+  - `|aired_time_secs − advt_time_secs| ≤ tolerance` (default 5s, configurable via `SystemSetting.tc_lmrb_time_tolerance`)
   - Not already used (one-to-one)
 - Set `TCRow.is_lmrb_confirmed = True`, link `matched_lmrb`
+
+> **To adjust the tolerance:** Go to `/dashboard/settings/` and change **TC–LMRB Time Tolerance (seconds)**.
+> This avoids a code change when TC and LMRB timestamps differ by more than 5 seconds.
 
 ### Normalization helpers
 ```python
 def _normalize(s): return str(s).lower().strip() if s else ''
 def _time_to_secs(t): # "HH:MM:SS" → int seconds since midnight
 ```
+
+---
+
+## 8b. Sponsorship Reconciliation Engine (`verification/sponsorship_engine.py`)
+
+Handles SPONSORSHIP ScheduleRows separately from commercial matching.
+
+### Entry points
+```python
+reconcile_sponsorship(account_id, channel, month)
+# Returns: {'auto_matched': int, 'already_matched': int, 'unmatched': int}
+```
+
+### Algorithm
+
+**Step 1 — Auto matching:**
+- Find all unmatched SPONSORSHIP ScheduleRows for scope
+- Find all leftover (unmatched) LMRBRows for scope
+- Greedy one-to-one match by theme (via BrandMapping) + duration
+- Creates `SponsorshipLmrbAssignment(match_type='auto')`; sets `LMRBRow.is_sponsorship_matched=True`
+
+**Step 2 — Manual assignment (via UI):**
+- Operations user visits the Summary Sheet sponsorship panel
+- Selects an LMRBRow from the unmatched pool and assigns it to a SPONSORSHIP ScheduleRow
+- Creates `SponsorshipLmrbAssignment(match_type='manual')` via `/sponsorship/assign/`
+
+**Reset:** `/sponsorship/reset/` deletes all assignments for the scope and unlocks rows.
+
+> Sponsorship matching uses `BrandMapping.theme` (same as commercial), NOT `tc_theme`.
+> The sponsorship engine is independent of TC reconciliation.
 
 ---
 
@@ -383,9 +547,11 @@ Use this whenever looking up a column in a user-uploaded DataFrame.
 
 ## 12. Deduplication Keys
 
-**LMRBRow:**
+**LMRBRow** — includes break position fields so two spots in the same break at the
+same time (different position) are stored as distinct rows:
 ```python
-raw = f'{account_id}|{channel}|{date}|{advt_time}|{advt_theme}|{dur}'
+raw = (f'{account_id}|{channel}|{date}|{advt_time}|{advt_theme}|{dur}'
+       f'|{brk_no or ""}|{pos_in_brk or ""}|{advertiser or ""}|{product or ""}')
 key = sha256(raw.encode()).hexdigest()[:32]
 ```
 
@@ -394,6 +560,11 @@ key = sha256(raw.encode()).hexdigest()[:32]
 raw = f'tc|{account_id}|{channel}|{date}|{aired_time}|{tc_theme}|{dur}'
 key = sha256(raw.encode()).hexdigest()[:32]
 ```
+
+> **Why different?** LMRB files include break-position metadata; TC files do not.
+> The extra fields in LMRBRow's key prevent collapsing two ads in the same break.
+> TC's simpler key means re-uploading a TC file with the same spot always replaces
+> the existing row rather than inserting a duplicate.
 
 Re-uploading the same file replaces existing rows (old row deleted, new row inserted).
 For LMRBRow, re-upload also unlocks the previously matched ScheduleRow.
@@ -457,12 +628,17 @@ Function: `summary_pdf()` in `core/views.py`
 
 | Symptom | Root cause | Fix |
 |---------|-----------|-----|
-| "0 matched, 0 extra, 0 LMRB-confirmed" | TC column names have different capitalisation — `_parse_tc_rows` couldn't find `TC_Theme` or `Aired_Time` → all rows skipped | Add new aliases to `_ci_rename` calls inside `_parse_tc_rows` |
+| "0 matched, 0 extra, 0 LMRB-confirmed" | TC column names have different capitalisation — `_parse_tc_rows` couldn't find `TC_Theme` or `Aired_Time` → all rows skipped | Add extra aliases via `/dashboard/settings/` (TC Theme / Aired Time aliases) without touching code |
 | "No brand mapping" in TC reconciliation | `BrandMapping.tc_theme` field is blank | Fill in `tc_theme` in the Brand Mappings admin |
 | Summary shows all zeros | Channel or month mismatch between TC and Schedule | Use linked schedule in TC upload to auto-fill exact values |
 | Duplicate rows after re-upload | Old dedup keys not deleted | This is handled automatically — re-upload replaces rows |
-| Schedule rows missing from report | `ad_type` column in Excel is not `'COMMERCIAL BENEFITS'` or `'SPONSORSHIP BENEFITS'` | Parser normalises `'SPONSORSHIP BENEFITS'` → `'SPONSORSHIP'`; any other value is skipped |
+| Schedule rows missing from report | `ad_type` column in Excel is not `'COMMERCIAL BENEFITS'` or `'SPONSORSHIP BENEFITS'` | Parser normalises `'SPONSORSHIP BENEFITS'` → `'SPONSORSHIP'`; any other value is silently skipped |
 | LMRB count wrong in 3rd Party column | BrandMapping.theme doesn't match LMRBRow.advt_theme | Check exact spelling in brand mappings; matching is case-insensitive but must otherwise match |
+| TC reconciliation matches wrong theme variant | `tc_theme` contains one value but TC file has multiple variant names | Use pipe-separated values in `tc_theme` field, e.g. `Theme A\|Theme B` |
+| Manual match prevents automatic re-matching | `is_manual_matched=True` rows are permanently skipped | To undo, use `/dashboard/manual/` → de-match. `mode='reset'` does NOT clear manual matches |
+| Sponsorship "Aired" shows zero | Sponsorship LMRB assignments not run yet | Visit the Summary Sheet sponsorship panel and click "Auto-reconcile" or assign manually |
+| TC–LMRB confirmed count too low | Time tolerance too tight — TC and LMRB timestamps differ by more than 5s | Increase **TC–LMRB Time Tolerance** in `/dashboard/settings/` |
+| Wildcard theme not working in TC | `theme` wildcard (`*` suffix) is only supported for Schedule↔LMRB, not TC reconciliation | Use pipe-separated exact themes in `tc_theme` field instead |
 
 ---
 
@@ -470,11 +646,13 @@ Function: `summary_pdf()` in `core/views.py`
 
 1. **New model field?** → Add migration, update `__str__`, update any admin registration in `core/admin.py`
 2. **New URL?** → Add to `core/urls.py`; follow existing pattern `path('section/action/', views.fn, name='name')`
-3. **New column in TC/LMRB parsing?** → Add alias to `_ci_rename()` in `_parse_tc_rows()` or the LMRB parser; use `_find_col()`, never raw string lookup
+3. **New column in TC/LMRB parsing?** → Prefer adding the alias via `/dashboard/settings/` (no code change needed). If a built-in alias is required, add it to `_ci_rename()` in `_parse_tc_rows()` or the LMRB parser; always use `_find_col()`, never raw string lookup
 4. **New summary metric?** → Update `build_summary_data()` in `verification/tc_engine.py`; update both `summary_report.html` template and `summary_excel()` export; update `summary_pdf()` PDF
 5. **New role restriction?** → Apply `@role_required([...])` decorator
 6. **New file upload?** → Always: detect metadata, create header record, parse rows with dedup key, handle re-upload (delete old + insert new)
 7. **Anything that touches channel or month strings?** → Treat as an exact-match primary key; never transform case or strip after storage
+8. **New system-wide configuration?** → Add entry to `SETTING_DEFAULTS` in `core/models.py`; read via `get_setting()` / `get_setting_int()` / `get_setting_list()` helpers — never query `SystemSetting` directly
+9. **New locking behaviour?** → Follow the `is_matched` / `is_manual_matched` pattern; document which engine sets and clears the flag, and whether `mode='reset'` should clear it
 
 ---
 
@@ -482,16 +660,21 @@ Function: `summary_pdf()` in `core/views.py`
 
 | File | Purpose |
 |------|---------|
-| `core/models.py` | All 9 database models |
-| `core/views.py` | All upload, detect, list, dashboard, PDF, Excel views |
-| `core/urls.py` | All URL routes |
+| `core/models.py` | All database models (12 classes: Account, Channel, Schedule, ScheduleRow, MonitoringData, LMRBRow, BrandMapping, TransmissionReport, TCRow, ManualMatch, SponsorshipLmrbAssignment, SummaryReportMeta, MatchResult, SystemSetting) |
+| `core/views.py` | All upload, detect, list, dashboard, PDF, Excel, manual, sponsorship, settings views |
+| `core/urls.py` | All URL routes (88 routes) |
 | `core/forms.py` | AccountForm, ChannelForm, upload forms |
-| `verification/engine.py` | Schedule ↔ LMRB two-pass matching engine |
+| `verification/engine.py` | Schedule ↔ LMRB four-pass matching engine |
 | `verification/tc_engine.py` | TC ↔ Schedule + TC ↔ LMRB reconciliation + summary data builder |
-| `verification/processing.py` | Low-level helpers: normalize, lmrb_fingerprint, match_ads |
+| `verification/sponsorship_engine.py` | SPONSORSHIP ScheduleRow ↔ LMRBRow assignment engine |
+| `verification/processing.py` | Low-level helpers: normalize, lmrb_fingerprint, four-pass match_ads algorithm |
+| `verification/schedule_converter.py` | Pivot schedule format detection/conversion |
 | `verification/views.py` | Legacy verification tool UI + Excel export |
+| `verification/tc_converters/dispatch.py` | Router for channel-specific PDF TC parsers |
+| `verification/tc_converters/generic.py` | Heuristic PDF TC parser (fallback) |
+| `verification/tc_converters/sirasa_tv.py` | Sirasa TV specific PDF TC parser |
 | `accounts/decorators.py` | `role_required` access control decorator |
-| `accounts/models.py` | Custom User model with `role` field |
+| `accounts/models.py` | Custom User model with `role` field and `CAN_CREATE` hierarchy |
 | `templates/summary/report.html` | Summary sheet HTML report template |
 | `templates/tc/upload.html` | TC file upload form (schedule auto-fill JS here) |
 | `templates/schedules/upload.html` | Schedule upload form |
