@@ -1389,6 +1389,18 @@ def monitoring_dashboard(request):
         stats['commercial'] = n_commercial
 
         # ── LMRB queryset (scoped to schedule date range) ────────────────────
+        def _time_bucket(t):
+            try:
+                h = int(str(t).split(':')[0])
+                if 19 <= h <= 23:
+                    return 'prime'
+                elif 6 <= h <= 18:
+                    return 'non_prime'
+                else:
+                    return 'other'
+            except Exception:
+                return 'other'
+
         sch_dates = ScheduleRow.objects.filter(
             account_id=account_id, channel=channel, month=month
         ).aggregate(d_min=Min('date'), d_max=Max('date'))
@@ -1544,18 +1556,6 @@ def monitoring_dashboard(request):
         )
 
         # ── LMRB theme detail (per theme, for detail drawer) ─────────────────
-        def _time_bucket(t):
-            try:
-                h = int(str(t).split(':')[0])
-                if 19 <= h <= 23:
-                    return 'prime'
-                elif 6 <= h <= 18:
-                    return 'non_prime'
-                else:
-                    return 'other'
-            except Exception:
-                return 'other'
-
         lmrb_theme_detail = []
         for td in lmrb_chart:
             t_theme = td['advt_theme']
