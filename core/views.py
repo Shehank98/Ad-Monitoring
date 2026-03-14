@@ -219,6 +219,73 @@ def dashboard(request):
             ).order_by('name')
         )
 
+        # ── A1: System health ─────────────────────────────────────────────────
+        from django.db.models import Q as _Q, Max as _Max
+        from datetime import timedelta as _td
+
+        _total_results   = MatchResult.objects.count()
+        _matched_results = MatchResult.objects.filter(status='matched').count()
+        ctx['health_match_rate']    = (
+            round(_matched_results / _total_results * 100) if _total_results else None
+        )
+        ctx['health_total_results'] = _total_results
+
+        ctx['missing_lmrb'] = [a for a in ctx['accounts_overview']
+                               if a.sch_count > 0 and a.mon_count == 0]
+        ctx['missing_sch']  = [a for a in ctx['accounts_overview']
+                               if a.mon_count > 0 and a.sch_count == 0]
+
+        _stale_cutoff = _tz.now() - _td(days=7)
+        _last_sch = dict(
+            Schedule.objects.values('account_id')
+            .annotate(last=_Max('uploaded_at'))
+            .values_list('account_id', 'last')
+        )
+        _last_mon = dict(
+            MonitoringData.objects.values('account_id')
+            .annotate(last=_Max('uploaded_at'))
+            .values_list('account_id', 'last')
+        )
+        _stale = []
+        for _a in ctx['accounts_overview']:
+            _dates = [d for d in [_last_sch.get(_a.id), _last_mon.get(_a.id)] if d]
+            if _dates and max(_dates) < _stale_cutoff:
+                _stale.append({'name': _a.name, 'days': (_tz.now() - max(_dates)).days})
+        ctx['stale_accounts'] = _stale
+
+        # ── A2: Per-account compliance % ─────────────────────────────────────
+        _total_by_acct = dict(
+            MatchResult.objects.values('schedule_row__account_id')
+            .annotate(n=_Count('id'))
+            .values_list('schedule_row__account_id', 'n')
+        )
+        _matched_by_acct = dict(
+            MatchResult.objects.filter(status='matched')
+            .values('schedule_row__account_id')
+            .annotate(n=_Count('id'))
+            .values_list('schedule_row__account_id', 'n')
+        )
+        for _a in ctx['accounts_overview']:
+            _tot = _total_by_acct.get(_a.id, 0)
+            _a.match_rate = (
+                round(_matched_by_acct.get(_a.id, 0) / _tot * 100) if _tot else None
+            )
+
+        # ── A3: Recent engine runs ────────────────────────────────────────────
+        ctx['recent_runs'] = list(
+            MatchResult.objects.values(
+                'schedule_row__account__name',
+                'schedule_row__channel',
+                'schedule_row__month',
+            )
+            .annotate(
+                last_run=_Max('run_at'),
+                total=_Count('id'),
+                matched=_Count('id', filter=_Q(status='matched')),
+            )
+            .order_by('-last_run')[:5]
+        )
+
     elif role == 'team_head':
         my_accounts = user.accounts.all()
         sch = Schedule.objects.filter(account__in=my_accounts).select_related('account')

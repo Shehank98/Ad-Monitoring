@@ -186,6 +186,61 @@
 
 </div>
 
+<!-- A1: System Health Snapshot -->
+{% if health_match_rate is not None or missing_lmrb or missing_sch or stale_accounts %}
+<div class="card mb-4 fade-up-3" style="border-left:4px solid {% if health_match_rate is not None %}{% if health_match_rate >= 90 %}#22c55e{% elif health_match_rate >= 70 %}#f59e0b{% else %}#ef4444{% endif %}{% else %}#94a3b8{% endif %};">
+  <div class="flex flex-wrap items-center gap-3">
+
+    {% if health_match_rate is not None %}
+    <div class="flex items-center gap-2.5 pr-4 border-r border-slate-100">
+      <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+           style="background:{% if health_match_rate >= 90 %}rgba(34,197,94,.12){% elif health_match_rate >= 70 %}rgba(245,158,11,.12){% else %}rgba(239,68,68,.12){% endif %};">
+        <i class="fa-solid fa-shield-halved text-sm {% if health_match_rate >= 90 %}text-emerald-500{% elif health_match_rate >= 70 %}text-amber-500{% else %}text-red-500{% endif %}"></i>
+      </div>
+      <div>
+        <p class="text-lg font-extrabold text-slate-800 leading-none">{{ health_match_rate }}%</p>
+        <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">Overall Match Rate</p>
+        <p class="text-[10px] text-slate-300">{{ health_total_results }} result{{ health_total_results|pluralize }}</p>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="flex flex-wrap gap-2 flex-1">
+      {% for a in missing_lmrb %}
+      <div class="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 text-xs">
+        <i class="fa-solid fa-triangle-exclamation text-amber-500 text-[10px]"></i>
+        <span class="font-semibold text-amber-700">{{ a.name }}</span>
+        <span class="text-amber-500">— no LMRB</span>
+      </div>
+      {% endfor %}
+
+      {% for a in missing_sch %}
+      <div class="flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5 text-xs">
+        <i class="fa-solid fa-circle-info text-blue-400 text-[10px]"></i>
+        <span class="font-semibold text-blue-700">{{ a.name }}</span>
+        <span class="text-blue-500">— no schedule</span>
+      </div>
+      {% endfor %}
+
+      {% for s in stale_accounts %}
+      <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs">
+        <i class="fa-solid fa-clock text-slate-400 text-[10px]"></i>
+        <span class="font-semibold text-slate-600">{{ s.name }}</span>
+        <span class="text-slate-400">— {{ s.days }}d since upload</span>
+      </div>
+      {% endfor %}
+
+      {% if not missing_lmrb and not missing_sch and not stale_accounts %}
+      <div class="flex items-center gap-1.5 text-xs text-emerald-600 font-semibold">
+        <i class="fa-solid fa-circle-check"></i> All accounts healthy
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endif %}
+
 {# ── Main grid: accounts + activity ── #}
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4 fade-up-3">
 
@@ -241,14 +296,15 @@
               </span>
             </td>
             <td class="px-2 py-2.5 text-right">
-              {% if acct.sch_count > 0 and acct.mon_count > 0 and acct.tc_count > 0 %}
-                <span class="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-                  <i class="fa-solid fa-circle-check mr-0.5"></i>Full data
+              {% if acct.match_rate is not None %}
+                <span class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full
+                  {% if acct.match_rate >= 90 %}bg-emerald-50 text-emerald-700
+                  {% elif acct.match_rate >= 70 %}bg-amber-50 text-amber-700
+                  {% else %}bg-red-50 text-red-600{% endif %}">
+                  <i class="fa-solid fa-circle-check text-[8px]"></i>{{ acct.match_rate }}%
                 </span>
               {% elif acct.sch_count == 0 and acct.mon_count == 0 and acct.tc_count == 0 %}
-                <span class="text-[10px] font-semibold text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full">
-                  No data
-                </span>
+                <span class="text-[10px] font-semibold text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full">No data</span>
               {% else %}
                 <span class="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
                   <i class="fa-solid fa-circle-half-stroke mr-0.5"></i>Partial
@@ -324,6 +380,36 @@
         <p class="text-xs text-slate-400 text-center py-8">No recent activity.</p>
       {% endif %}
     </div>
+
+    {% if recent_runs %}
+    <div class="border-t border-slate-100 pt-3 mt-3">
+      <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2">
+        <i class="fa-solid fa-gears mr-1"></i>Last Verifications
+      </p>
+      <div class="flex flex-col gap-0">
+        {% for run in recent_runs %}
+        <div class="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
+          <div class="min-w-0 flex-1">
+            <p class="text-xs font-semibold text-slate-700 truncate">
+              {{ run.schedule_row__account__name }}
+              <span class="font-normal text-slate-400">· {{ run.schedule_row__channel }}</span>
+            </p>
+            <p class="text-[10px] text-slate-400">{{ run.schedule_row__month }}</p>
+          </div>
+          <div class="text-right flex-shrink-0 ml-3">
+            <p class="text-[10px] font-bold
+              {% if run.total > 0 and run.matched == run.total %}text-emerald-600
+              {% elif run.total > 0 %}text-amber-600
+              {% else %}text-slate-400{% endif %}">
+              {{ run.matched }}/{{ run.total }}
+            </p>
+            <p class="text-[10px] text-slate-300">{{ run.last_run|timesince }} ago</p>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
   </div>
 
 </div>
