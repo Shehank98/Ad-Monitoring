@@ -1063,7 +1063,8 @@ def brand_mapping_list(request):
                     messages.error(request, 'No access to that account.')
                 else:
                     exists = BrandMapping.objects.filter(
-                        account=account, brand=brand, theme=theme, duration=duration
+                        account=account, brand=brand, theme=theme,
+                        duration=duration, product=product,
                     ).exists()
                     if exists:
                         messages.warning(request, 'That mapping already exists.')
@@ -1598,11 +1599,13 @@ def monitoring_dashboard(request):
                         sr_q = sr_q.filter(duration=bm.duration)
                     planned = sr_q.count()
 
-                    # Commercial aired = MatchResult
+                    # Commercial aired = MatchResult (filter by brand to avoid
+                    # double-counting when two brands share the same LMRB theme)
                     if ad_type_val == 'COMMERCIAL BENEFITS':
                         mr_q = qs.filter(
                             status__in=['matched', 'programme_mismatch', 'late_telecast'],
                             theme__iexact=bm.theme,
+                            schedule_row__brand=brand,
                         )
                         if bm.duration is not None:
                             mr_q = mr_q.filter(duration=bm.duration)
