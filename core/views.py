@@ -1445,6 +1445,10 @@ def monitoring_dashboard(request):
         if sch_dates['d_max']:
             lmrb_qs = lmrb_qs.filter(date__lte=sch_dates['d_max'])
 
+        # Raw LMRB pool excludes sponsorship-matched rows so a row locked for
+        # a SponsorshipLmrbAssignment never inflates commercial raw counts.
+        lmrb_qs_raw = lmrb_qs.filter(is_sponsorship_matched=False)
+
         # ── Commercial chart data: Product → Brand → Theme (Planned vs Aired) ─
         # Only show chart data when verification results exist (MatchResult records).
         # Aired = MatchResult status in matched / programme_mismatch / late_telecast.
@@ -1486,7 +1490,7 @@ def monitoring_dashboard(request):
 
         # theme_lower -> product name (from LMRBRow.product field)
         _theme_product_map = {}
-        for lr in (lmrb_qs.exclude(product='').exclude(product__isnull=True)
+        for lr in (lmrb_qs_raw.exclude(product='').exclude(product__isnull=True)
                    .values('advt_theme', 'product').distinct()):
             t = (lr['advt_theme'] or '').lower().strip()
             if t not in _theme_product_map:
@@ -1495,8 +1499,10 @@ def monitoring_dashboard(request):
         # (theme_lower, duration, product_lower) -> {count, progs, dates}
         # Keyed by LMRBRow.product so themes shared across products (e.g. "BB"
         # in both Mobitel Broadband and SLT Broadband) are kept separate.
+        # Uses lmrb_qs_raw (excludes is_sponsorship_matched rows) so locked rows
+        # don't inflate commercial raw counts.
         _raw_lmrb_by_tdp = {}
-        for lr in lmrb_qs.values(
+        for lr in lmrb_qs_raw.values(
             'advt_theme', 'duration', 'advt_time', 'date', 'program', 'product'
         ):
             t    = (lr['advt_theme'] or '').lower().strip()
@@ -2354,6 +2360,164 @@ def _build_missed_ad_pdf(account_name, channel, month, rows, schedule_number='')
         ('LINEBELOW',   (0, 0), (-1, 0),  1,   BLUE),
     ]))
 
+    story.append(t)
+    doc.build(story)
+    return buf.getvalue()
+
+
+@login_required
+def full_ad_report_pdf(request):
+    """
+    Full Ad Report PDF — all MatchResult statuses for a scope:
+    Matched, Programme Mismatch, Late Telecast, Not Aired, No Brand Mapping.
+
+    Placed in the Verification section of the dashboard export bar and in
+    the admin-export section.
+    """
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+
+    if not (account_id and channel and month):
+        return HttpResponse('Missing parameters: account_id, channel, month', status=400)
+    if not _account_access(request.user, account_id):
+        return HttpResponse('Access denied', status=403)
+
+    try:
+        account = Account.objects.get(pk=account_id)
+    except Account.DoesNotExist:
+        return HttpResponse('Account not found', status=404)
+
+    all_qs = MatchResult.objects.filter(
+        account_id=account_id, channel=channel, month=month,
+    ).order_by('scheduled_date', 'brand')
+
+    sch_numbers = list(
+        Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+        .order_by('version')
+        .values_list('schedule_number', flat=True)
+    )
+    schedule_number = ' / '.join(str(s) for s in sch_numbers if s)
+
+    try:
+        pdf_bytes = _build_full_ad_report_pdf(
+            account.name, channel, month, list(all_qs),
+            schedule_number=schedule_number,
+        )
+    except Exception as e:
+        return HttpResponse(f'PDF generation failed: {e}', status=500)
+
+    fname = f'full_ad_report_{channel}_{month}.pdf'.replace(' ', '_')
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{fname}"'
+    return response
+
+
+def _build_full_ad_report_pdf(account_name, channel, month, rows, schedule_number=''):
+    """Build Full Ad Report PDF — identical layout to missed-ad PDF but includes
+    all statuses (matched, programme_mismatch, late_telecast, not_aired, no_mapping)
+    with green colouring for Matched rows."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
+    )
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=landscape(A4),
+        leftMargin=1.5*cm, rightMargin=1.5*cm,
+        topMargin=1.5*cm, bottomMargin=1.5*cm,
+    )
+
+    styles    = getSampleStyleSheet()
+    NAVY      = colors.HexColor('#0b1726')
+    BLUE      = colors.HexColor('#2563eb')
+    LGRAY     = colors.HexColor('#f8fafc')
+    MGRAY     = colors.HexColor('#e2e8f0')
+    RED       = colors.HexColor('#dc2626')
+    AMBER     = colors.HexColor('#d97706')
+    VIOLET    = colors.HexColor('#7c3aed')
+    GREEN     = colors.HexColor('#16a34a')
+
+    STATUS_COLOR = {
+        'Matched':             GREEN,
+        'Programme Mismatch':  AMBER,
+        'Late Telecast':       VIOLET,
+        'Not Aired':           RED,
+        'No Brand Mapping':    colors.HexColor('#64748b'),
+    }
+
+    h_title = ParagraphStyle('title', fontSize=16, textColor=NAVY,
+                              fontName='Helvetica-Bold', spaceAfter=4)
+    h_sub   = ParagraphStyle('sub',   fontSize=9,  textColor=colors.HexColor('#475569'),
+                              fontName='Helvetica', spaceAfter=2)
+    h_cell  = ParagraphStyle('cell',  fontSize=7.5, fontName='Helvetica')
+    h_hdr   = ParagraphStyle('hdr',   fontSize=7.5, fontName='Helvetica-Bold',
+                              textColor=colors.white)
+
+    story = []
+    story.append(Paragraph(f'Full Ad Report — {channel}', h_title))
+    meta_parts = [f'Account: {account_name}']
+    if schedule_number:
+        meta_parts.append(f'Schedule No: {schedule_number}')
+    meta_parts.append(f'Month: {month}')
+    story.append(Paragraph('  |  '.join(meta_parts), h_sub))
+    story.append(Paragraph(
+        f'Generated: {datetime.now().strftime("%d %B %Y %H:%M")}  |  '
+        f'Total rows: {len(rows)}',
+        h_sub,
+    ))
+    story.append(HRFlowable(width='100%', thickness=1, color=BLUE, spaceAfter=10))
+
+    if not rows:
+        story.append(Paragraph('No records found for this scope.', styles['Normal']))
+        doc.build(story)
+        return buf.getvalue()
+
+    col_headers = [
+        'Brand', 'Duration (s)', 'Programme',
+        'Planned Date', 'Planned Start', 'Planned End',
+        'Aired Date', 'Aired Time', 'Status',
+    ]
+    table_data = [[Paragraph(h, h_hdr) for h in col_headers]]
+
+    for mr in rows:
+        status_label = dict(mr.STATUS_CHOICES).get(mr.status, mr.status)
+        table_data.append([
+            Paragraph(mr.brand or '—', h_cell),
+            Paragraph(str(mr.duration or '—'), h_cell),
+            Paragraph(mr.programme or '—', h_cell),
+            Paragraph(str(mr.scheduled_date or '—'), h_cell),
+            Paragraph(mr.planned_start or '—', h_cell),
+            Paragraph(mr.planned_end or '—', h_cell),
+            Paragraph(str(mr.aired_date or '—'), h_cell),
+            Paragraph(mr.air_time or '—', h_cell),
+            Paragraph(status_label, ParagraphStyle(
+                'st', fontSize=7.5, fontName='Helvetica-Bold',
+                textColor=STATUS_COLOR.get(status_label, colors.black),
+            )),
+        ])
+
+    col_widths = [4*cm, 1.8*cm, 4*cm, 2.2*cm, 2*cm, 2*cm, 2.2*cm, 2*cm, 3*cm]
+    t = Table(table_data, colWidths=col_widths, repeatRows=1)
+    t.setStyle(TableStyle([
+        ('BACKGROUND',    (0, 0), (-1, 0),  NAVY),
+        ('TEXTCOLOR',     (0, 0), (-1, 0),  colors.white),
+        ('FONTNAME',      (0, 0), (-1, 0),  'Helvetica-Bold'),
+        ('FONTSIZE',      (0, 0), (-1, 0),  7.5),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [LGRAY, colors.white]),
+        ('FONTSIZE',      (0, 1), (-1, -1), 7.5),
+        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING',    (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 5),
+        ('GRID',          (0, 0), (-1, -1), 0.4, MGRAY),
+        ('LINEBELOW',     (0, 0), (-1, 0),  1,   BLUE),
+    ]))
     story.append(t)
     doc.build(story)
     return buf.getvalue()
@@ -4469,6 +4633,60 @@ def admin_export(request):
         ws_un = wb.active
         ws_un.title = 'Unmatched LMRB'
         _write_lmrb_sheet(ws_un, unmatched_qs, 'Unmatched LMRB')
+
+    # ── Full Ad Report sheet (MatchResult — all statuses) ─────────────────────
+    mr_qs = MatchResult.objects.filter(account_id=account_id)
+    if channel:
+        mr_qs = mr_qs.filter(channel__iexact=channel)
+    if date_from:
+        try:
+            from datetime import date as _date_cls
+            mr_qs = mr_qs.filter(scheduled_date__gte=_date_cls.fromisoformat(date_from))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            from datetime import date as _date_cls
+            mr_qs = mr_qs.filter(scheduled_date__lte=_date_cls.fromisoformat(date_to))
+        except ValueError:
+            pass
+    mr_qs = mr_qs.order_by('month', 'scheduled_date', 'brand')
+    mr_rows = list(mr_qs)
+
+    ws_report = wb.create_sheet('Full Ad Report')
+    AR_HEADERS = [
+        'Month', 'Brand', 'Theme', 'Duration', 'Programme',
+        'Planned Date', 'Planned Start', 'Planned End',
+        'Aired Date', 'Aired Time', 'Source', 'Status',
+    ]
+    STATUS_LABEL = dict(MatchResult.STATUS_CHOICES)
+    # Row 1 meta
+    ws_report.merge_cells(f'A1:L1')
+    meta_c = ws_report.cell(1, 1,
+        f'Full Ad Report | Account: {account.name}'
+        f'{" | Channel: " + channel if channel else ""}'
+        f' | Total rows: {len(mr_rows)}')
+    meta_c.font = meta_font; meta_c.fill = META_FILL
+    # Row 2 headers
+    for col_i, h in enumerate(AR_HEADERS, start=1):
+        c = ws_report.cell(2, col_i, h)
+        c.font = hdr_font; c.fill = HDR_FILL; c.alignment = centre_al
+    # Data rows
+    for row_i, mr in enumerate(mr_rows, start=3):
+        ws_report.cell(row_i,  1, mr.month or '')
+        ws_report.cell(row_i,  2, mr.brand or '')
+        ws_report.cell(row_i,  3, mr.theme or '')
+        ws_report.cell(row_i,  4, mr.duration)
+        ws_report.cell(row_i,  5, mr.programme or '')
+        ws_report.cell(row_i,  6, str(mr.scheduled_date) if mr.scheduled_date else '')
+        ws_report.cell(row_i,  7, mr.planned_start or '')
+        ws_report.cell(row_i,  8, mr.planned_end or '')
+        ws_report.cell(row_i,  9, str(mr.aired_date) if mr.aired_date else '')
+        ws_report.cell(row_i, 10, mr.air_time or '')
+        ws_report.cell(row_i, 11, mr.source or '')
+        ws_report.cell(row_i, 12, STATUS_LABEL.get(mr.status, mr.status))
+        for col_i in range(1, len(AR_HEADERS) + 1):
+            ws_report.cell(row_i, col_i).font = norm_font
 
     buf = io.BytesIO()
     wb.save(buf); buf.seek(0)

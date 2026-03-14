@@ -274,11 +274,13 @@ def manual_assign(account_id: int, channel: str, month: str,
             skipped += 1
             continue
 
-        # Guard: LMRB row must be unmatched, same account, not already locked
+        # Guard: LMRB row must be unmatched, same account, not already locked,
+        # and not permanently claimed by a ManualMatch.
         try:
             lr = LMRBRow.objects.get(
                 id=lr_id, account_id=account_id,
                 is_matched=False, is_sponsorship_matched=False,
+                is_manual_matched=False,
             )
         except LMRBRow.DoesNotExist:
             skipped += 1

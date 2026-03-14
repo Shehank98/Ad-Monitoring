@@ -40,9 +40,10 @@ urlpatterns = [
     path('monitoring/group/<str:group_id>/delete/',         views.monitoring_delete_group,  name='monitoring_delete_group'),
 
     # Monitoring Dashboard (analytics + 7 tabs + PDF)
-    path('monitor/',                            views.monitoring_dashboard, name='monitoring_dashboard'),
-    path('monitor/pdf/',                        views.monitoring_pdf,       name='monitoring_pdf'),
-    path('monitor/analytics/',                  views.analytics_full,       name='analytics_full'),
+    path('monitor/',                            views.monitoring_dashboard,   name='monitoring_dashboard'),
+    path('monitor/pdf/',                        views.monitoring_pdf,         name='monitoring_pdf'),
+    path('monitor/full-report-pdf/',            views.full_ad_report_pdf,     name='full_ad_report_pdf'),
+    path('monitor/analytics/',                  views.analytics_full,         name='analytics_full'),
 
     # Transmission Certificate (TC)
     path('tc/',                                 views.tc_list,      name='tc_list'),
