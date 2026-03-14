@@ -727,3 +727,36 @@ def get_setting_list(key: str) -> list:
     """Return a SystemSetting value as a list of stripped strings, split by comma."""
     val = get_setting(key, '')
     return [v.strip() for v in val.split(',') if v.strip()]
+
+
+# ── Audit Log ─────────────────────────────────────────────────────────────────
+
+class AuditLog(models.Model):
+    """Records sensitive admin actions for accountability and debugging."""
+
+    ACTION_CHOICES = [
+        ('settings_change', 'Settings Changed'),
+        ('db_reset',        'DB Reset'),
+        ('db_delete',       'DB Delete'),
+        ('db_backup',       'DB Backup'),
+        ('db_dedup',        'Duplicate Removal'),
+        ('user_create',     'User Created'),
+        ('user_toggle',     'User Activated/Deactivated'),
+        ('user_pwd_reset',  'Password Reset'),
+        ('user_accounts',   'User Accounts Updated'),
+    ]
+
+    user      = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL, null=True, related_name='audit_logs'
+    )
+    action    = models.CharField(max_length=50, choices=ACTION_CHOICES)
+    detail    = models.TextField(blank=True, default='')
+    ip        = models.GenericIPAddressField(null=True, blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f'{self.user} — {self.action} — {self.timestamp:%Y-%m-%d %H:%M}'

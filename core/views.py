@@ -20,7 +20,7 @@ from accounts.views import create_user, edit_user, user_list
 
 from .forms import AccountForm, ChannelForm, MonitoringUploadForm, ScheduleUploadForm
 from .models import (
-    Account, BrandMapping, Channel,
+    Account, AuditLog, BrandMapping, Channel,
     LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow,
     SponsorshipLmrbAssignment, SummaryReportMeta, SystemSetting,
     TCRow, TransmissionReport,
@@ -44,6 +44,13 @@ class _JsonEnc(json.JSONEncoder):
 def _to_js(data):
     """Serialize Python data to a JS-safe JSON string (replaces </script> escapes)."""
     return json.dumps(data, cls=_JsonEnc).replace('</', '<\\/')
+
+
+def _audit(request, action: str, detail: str = ''):
+    """Record a sensitive admin action to AuditLog."""
+    ip = (request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+          or request.META.get('REMOTE_ADDR'))
+    AuditLog.objects.create(user=request.user, action=action, detail=detail, ip=ip or None)
 
 
 def _theme_adtype(theme: str, brand_map: dict, spon_kw: list) -> str:
@@ -4845,6 +4852,7 @@ def system_settings(request):
                 updated += 1
         if updated:
             messages.success(request, f'Settings saved — {updated} value(s) updated.')
+            _audit(request, 'settings_change', f'{updated} setting(s) updated.')
         else:
             messages.success(request, 'Settings saved (no changes).')
         return redirect('system_settings')
@@ -5606,6 +5614,33 @@ def commercial_assign(request):
     return JsonResponse({'created': created, 'skipped': skipped})
 
 
+# ── Audit Log (C1) ─────────────────────────────────────────────────────────────
+
+@login_required
+@role_required(['super_admin', 'admin'])
+def audit_log(request):
+    """Show the last 500 AuditLog entries — super_admin / admin only."""
+    from django.db.models import Q as _Q
+    action_filter = request.GET.get('action', '')
+    user_filter   = request.GET.get('user', '')
+
+    qs = AuditLog.objects.select_related('user').order_by('-timestamp')
+    if action_filter:
+        qs = qs.filter(action=action_filter)
+    if user_filter:
+        qs = qs.filter(user__id=user_filter)
+
+    from accounts.models import User as _User
+    return render(request, 'admin_panel/audit_log.html', {
+        'logs':           qs[:500],
+        'action_choices': AuditLog.ACTION_CHOICES,
+        'action_filter':  action_filter,
+        'user_filter':    user_filter,
+        'staff_users':    _User.objects.filter(role__in=['super_admin', 'admin'])
+                                       .order_by('name'),
+    })
+
+
 # ── Admin Analytics (B1 + B2) ──────────────────────────────────────────────────
 
 @login_required
@@ -5772,6 +5807,7 @@ def db_tools(request):
                 is_matched=False, matched_schedule=None, matched_at=None
             )
             msg = f'Reset complete: {n} MatchResult records deleted and row locks cleared. Re-run verification to rebuild results.'
+            _audit(request, 'db_reset', f'{n} MatchResult records deleted.')
 
         elif action == 'delete_duplicate_schedules':
             # Keep only the highest-version Schedule per (account, channel, month, schedule_number)
@@ -5794,22 +5830,26 @@ def db_tools(request):
                 dupes.delete()
                 msg = (f'Removed {n_schedules} duplicate Schedule record(s) and {n_rows} ScheduleRow(s). '
                        f'Only the latest version of each schedule number is kept.')
+                _audit(request, 'db_dedup', msg)
 
         elif action == 'delete_schedules' and confirm == 'DELETE':
             MatchResult.objects.all().delete()
             ScheduleRow.objects.all().delete()
             Schedule.objects.all().delete()
             msg = 'All schedule data deleted.'
+            _audit(request, 'db_delete', 'Deleted all Schedule, ScheduleRow, and MatchResult records.')
 
         elif action == 'delete_lmrb' and confirm == 'DELETE':
             LMRBRow.objects.all().delete()
             MonitoringData.objects.all().delete()
             msg = 'All LMRB / monitoring data deleted.'
+            _audit(request, 'db_delete', 'Deleted all LMRBRow and MonitoringData records.')
 
         elif action == 'delete_tc' and confirm == 'DELETE':
             TCRow.objects.all().delete()
             TransmissionReport.objects.all().delete()
             msg = 'All TC data deleted.'
+            _audit(request, 'db_delete', 'Deleted all TCRow and TransmissionReport records.')
 
         elif action == 'delete_all' and confirm == 'DELETE_ALL':
             MatchResult.objects.all().delete()
@@ -5823,6 +5863,7 @@ def db_tools(request):
             ScheduleRow.objects.update(is_matched=False, matched_lmrb=None, matched_at=None)
             LMRBRow.objects.update(is_matched=False, matched_schedule=None, matched_at=None)
             msg = 'ALL data deleted. The system is now empty.'
+            _audit(request, 'db_delete', 'NUCLEAR DELETE — all data wiped.')
 
         elif action in ('delete_schedules', 'delete_lmrb', 'delete_tc', 'delete_all'):
             msg = 'Delete cancelled — confirmation text did not match.'

@@ -8,7 +8,7 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 
-from core.models import Account
+from core.models import Account, AuditLog
 from .decorators import role_required
 from .forms import ChangePasswordForm, CreateUserForm, LoginForm
 from .models import User
@@ -114,9 +114,31 @@ def user_list(request):
             accounts__in=my_account_ids,
         ).distinct()
 
+    # C2: Activity stats — upload counts and inactivity flags
+    from django.db.models import Count as _Count, Max as _Max
+    from django.utils import timezone as _tz
+    from datetime import timedelta as _td
+    from core.models import Schedule as _Sch, MonitoringData as _Mon
+
+    _inactive_cutoff = _tz.now() - _td(days=30)
+
+    _sch_counts = dict(
+        _Sch.objects.values('uploaded_by_id').annotate(n=_Count('id')).values_list('uploaded_by_id', 'n')
+    )
+    _mon_counts = dict(
+        _Mon.objects.values('uploaded_by_id').annotate(n=_Count('id')).values_list('uploaded_by_id', 'n')
+    )
+
+    users_list = list(qs)
+    for u in users_list:
+        u.sch_upload_count = _sch_counts.get(u.id, 0)
+        u.mon_upload_count = _mon_counts.get(u.id, 0)
+        u.is_inactive = (u.last_login is not None and u.last_login < _inactive_cutoff)
+        u.never_logged_in = u.last_login is None
+
     can_create = bool(me.creatable_roles())
     return render(request, 'admin_panel/users.html', {
-        'users':      qs,
+        'users':      users_list,
         'can_create': can_create,
     })
 
@@ -154,6 +176,13 @@ def create_user(request):
                 if form.cleaned_data.get('accounts'):
                     new_user.accounts.set(form.cleaned_data['accounts'])
                 messages.success(request, f'User {new_user.name} created successfully.')
+                ip = (request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+                      or request.META.get('REMOTE_ADDR'))
+                AuditLog.objects.create(
+                    user=me, action='user_create',
+                    detail=f'Created {new_user.name} ({new_user.email}) as {new_user.role}.',
+                    ip=ip or None,
+                )
                 return redirect('/dashboard/users/')
     else:
         form = CreateUserForm(allowed_roles=allowed_roles, account_qs=account_qs)
@@ -189,11 +218,19 @@ def edit_user(request, user_id):
     if request.method == 'POST':
         action = request.POST.get('action')
 
+        _ip = (request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+               or request.META.get('REMOTE_ADDR'))
+
         if action == 'toggle_active':
             target_user.is_active = not target_user.is_active
             target_user.save()
             state = 'activated' if target_user.is_active else 'deactivated'
             messages.success(request, f'{target_user.name} has been {state}.')
+            AuditLog.objects.create(
+                user=me, action='user_toggle',
+                detail=f'{target_user.name} ({target_user.email}) {state}.',
+                ip=_ip or None,
+            )
 
         elif action == 'reset_password':
             chars   = string.ascii_letters + string.digits + '!@#$'
@@ -204,6 +241,11 @@ def edit_user(request, user_id):
             messages.success(request,
                 f'Password reset for {target_user.name}. '
                 f'Temporary password: <code class="font-mono font-bold">{new_pw}</code>')
+            AuditLog.objects.create(
+                user=me, action='user_pwd_reset',
+                detail=f'Password reset for {target_user.name} ({target_user.email}).',
+                ip=_ip or None,
+            )
 
         elif action == 'update_accounts':
             ids = request.POST.getlist('accounts')
@@ -213,6 +255,11 @@ def edit_user(request, user_id):
                 ids = [i for i in ids if int(i) in my_ids]
             target_user.accounts.set(ids)
             messages.success(request, f'Accounts updated for {target_user.name}.')
+            AuditLog.objects.create(
+                user=me, action='user_accounts',
+                detail=f'Accounts updated for {target_user.name} ({target_user.email}).',
+                ip=_ip or None,
+            )
 
         return redirect('/dashboard/users/')
 

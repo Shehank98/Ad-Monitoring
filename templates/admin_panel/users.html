@@ -43,7 +43,8 @@
           <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Role</th>
           <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Accounts</th>
           <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
-          <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Joined</th>
+          <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Last Active</th>
+          <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Uploads</th>
           <th class="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
         </tr>
       </thead>
@@ -111,9 +112,40 @@
             {% endif %}
           </td>
 
-          <!-- Joined cell -->
-          <td class="px-6 py-4 text-xs text-slate-400 whitespace-nowrap">
-            <i class="fa-regular fa-calendar mr-1"></i>{{ u.date_joined|date:"d M Y" }}
+          <!-- Last Active cell (C2) -->
+          <td class="px-6 py-4 whitespace-nowrap">
+            {% if u.never_logged_in %}
+              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-slate-100 text-slate-400 text-[10px] font-semibold">
+                <i class="fa-solid fa-circle-question text-[8px]"></i>Never logged in
+              </span>
+            {% elif u.is_inactive %}
+              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-600 text-[10px] font-semibold ring-1 ring-amber-200">
+                <i class="fa-solid fa-triangle-exclamation text-[8px]"></i>Inactive
+              </span>
+              <p class="text-[10px] text-slate-300 mt-0.5">{{ u.last_login|date:"d M Y" }}</p>
+            {% else %}
+              <p class="text-xs text-slateald-600 font-medium">{{ u.last_login|timesince }} ago</p>
+              <p class="text-[10px] text-slate-300">{{ u.last_login|date:"d M Y" }}</p>
+            {% endif %}
+          </td>
+
+          <!-- Uploads cell (C2) -->
+          <td class="px-6 py-4">
+            <div class="flex flex-col gap-0.5">
+              {% if u.sch_upload_count %}
+              <span class="text-[10px] font-semibold text-purple-700">
+                <i class="fa-solid fa-calendar-days text-[8px] mr-0.5"></i>{{ u.sch_upload_count }} schedule{{ u.sch_upload_count|pluralize }}
+              </span>
+              {% endif %}
+              {% if u.mon_upload_count %}
+              <span class="text-[10px] font-semibold text-orange-600">
+                <i class="fa-solid fa-satellite-dish text-[8px] mr-0.5"></i>{{ u.mon_upload_count }} LMRB set{{ u.mon_upload_count|pluralize }}
+              </span>
+              {% endif %}
+              {% if not u.sch_upload_count and not u.mon_upload_count %}
+              <span class="text-[10px] text-slate-300 italic">No uploads</span>
+              {% endif %}
+            </div>
           </td>
 
           <!-- Actions cell -->
@@ -134,7 +166,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="6" class="px-6 py-16 text-center">
+          <td colspan="8" class="px-6 py-16 text-center">
             <div class="flex flex-col items-center gap-3">
               <div class="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
                 <i class="fa-solid fa-users text-slate-400 text-2xl"></i>
