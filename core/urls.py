@@ -67,6 +67,9 @@ urlpatterns = [
     path('settings/',                           views.system_settings, name='system_settings'),
     path('settings/branding/',                  views.branding_upload, name='branding_upload'),
 
+    # Admin Analytics (B1 + B2)
+    path('admin/analytics/',                    views.admin_analytics, name='admin_analytics'),
+
     # Database Tools (admin+)
     path('db-tools/',                           views.db_tools,        name='db_tools'),
 

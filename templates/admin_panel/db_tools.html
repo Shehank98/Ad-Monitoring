@@ -46,6 +46,163 @@
   </div>
 </div>
 
+<!-- ── B3: Data Quality Scorecard ── -->
+{% if lmrb_quality or tc_quality or match_quality %}
+<div class="tool-card mb-6">
+  <h3 class="font-bold text-slate-700 text-sm mb-4 uppercase tracking-wide">
+    <i class="fa-solid fa-chart-pie mr-1.5 text-slate-400"></i> Data Quality Scorecard
+  </h3>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+    <!-- LMRB completeness -->
+    {% if lmrb_quality %}
+    <div class="rounded-xl bg-slate-50 p-4">
+      <p class="text-xs font-bold text-slate-600 uppercase tracking-wide mb-3">
+        <i class="fa-solid fa-satellite-dish text-orange-500 mr-1"></i> LMRB / MapOnline
+        <span class="font-normal text-slate-400 normal-case">· {{ lmrb_quality.total|floatformat:0 }} rows</span>
+      </p>
+      <div class="space-y-2">
+        {% for label, key in lmrb_fields %}
+        {% with val=lmrb_quality|default:0 %}
+        {% endwith %}
+        {% endfor %}
+        <!-- Duration -->
+        <div>
+          <div class="flex justify-between text-[11px] mb-0.5">
+            <span class="text-slate-500">Duration</span>
+            <span class="font-bold {% if lmrb_quality.duration >= 90 %}text-emerald-600{% elif lmrb_quality.duration >= 60 %}text-amber-600{% else %}text-red-600{% endif %}">{{ lmrb_quality.duration }}%</span>
+          </div>
+          <div class="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+            <div class="h-full rounded-full {% if lmrb_quality.duration >= 90 %}bg-emerald-400{% elif lmrb_quality.duration >= 60 %}bg-amber-400{% else %}bg-red-400{% endif %}" style="width:{{ lmrb_quality.duration }}%"></div>
+          </div>
+        </div>
+        <!-- Programme -->
+        <div>
+          <div class="flex justify-between text-[11px] mb-0.5">
+            <span class="text-slate-500">Programme</span>
+            <span class="font-bold {% if lmrb_quality.programme >= 90 %}text-emerald-600{% elif lmrb_quality.programme >= 60 %}text-amber-600{% else %}text-red-600{% endif %}">{{ lmrb_quality.programme }}%</span>
+          </div>
+          <div class="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+            <div class="h-full rounded-full {% if lmrb_quality.programme >= 90 %}bg-emerald-400{% elif lmrb_quality.programme >= 60 %}bg-amber-400{% else %}bg-red-400{% endif %}" style="width:{{ lmrb_quality.programme }}%"></div>
+          </div>
+        </div>
+        <!-- Cost -->
+        <div>
+          <div class="flex justify-between text-[11px] mb-0.5">
+            <span class="text-slate-500">Cost</span>
+            <span class="font-bold {% if lmrb_quality.cost >= 90 %}text-emerald-600{% elif lmrb_quality.cost >= 60 %}text-amber-600{% else %}text-red-600{% endif %}">{{ lmrb_quality.cost }}%</span>
+          </div>
+          <div class="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+            <div class="h-full rounded-full {% if lmrb_quality.cost >= 90 %}bg-emerald-400{% elif lmrb_quality.cost >= 60 %}bg-amber-400{% else %}bg-red-400{% endif %}" style="width:{{ lmrb_quality.cost }}%"></div>
+          </div>
+        </div>
+        <!-- Break info -->
+        <div>
+          <div class="flex justify-between text-[11px] mb-0.5">
+            <span class="text-slate-500">Break position</span>
+            <span class="font-bold {% if lmrb_quality.break_info >= 90 %}text-emerald-600{% elif lmrb_quality.break_info >= 60 %}text-amber-600{% else %}text-red-600{% endif %}">{{ lmrb_quality.break_info }}%</span>
+          </div>
+          <div class="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+            <div class="h-full rounded-full {% if lmrb_quality.break_info >= 90 %}bg-emerald-400{% elif lmrb_quality.break_info >= 60 %}bg-amber-400{% else %}bg-red-400{% endif %}" style="width:{{ lmrb_quality.break_info }}%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- TC completeness -->
+    {% if tc_quality %}
+    <div class="rounded-xl bg-slate-50 p-4">
+      <p class="text-xs font-bold text-slate-600 uppercase tracking-wide mb-3">
+        <i class="fa-solid fa-file-certificate text-teal-500 mr-1"></i> TC Rows
+        <span class="font-normal text-slate-400 normal-case">· {{ tc_quality.total|floatformat:0 }} rows</span>
+      </p>
+      <div class="space-y-2">
+        <div>
+          <div class="flex justify-between text-[11px] mb-0.5">
+            <span class="text-slate-500">Programme</span>
+            <span class="font-bold {% if tc_quality.programme >= 90 %}text-emerald-600{% elif tc_quality.programme >= 60 %}text-amber-600{% else %}text-red-600{% endif %}">{{ tc_quality.programme }}%</span>
+          </div>
+          <div class="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+            <div class="h-full rounded-full {% if tc_quality.programme >= 90 %}bg-emerald-400{% elif tc_quality.programme >= 60 %}bg-amber-400{% else %}bg-red-400{% endif %}" style="width:{{ tc_quality.programme }}%"></div>
+          </div>
+        </div>
+        <div>
+          <div class="flex justify-between text-[11px] mb-0.5">
+            <span class="text-slate-500">Duration</span>
+            <span class="font-bold {% if tc_quality.duration >= 90 %}text-emerald-600{% elif tc_quality.duration >= 60 %}text-amber-600{% else %}text-red-600{% endif %}">{{ tc_quality.duration }}%</span>
+          </div>
+          <div class="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+            <div class="h-full rounded-full {% if tc_quality.duration >= 90 %}bg-emerald-400{% elif tc_quality.duration >= 60 %}bg-amber-400{% else %}bg-red-400{% endif %}" style="width:{{ tc_quality.duration }}%"></div>
+          </div>
+        </div>
+      </div>
+
+      {% if freshness.tc %}
+      <p class="text-[11px] text-slate-400 mt-3">
+        <i class="fa-solid fa-clock mr-1"></i> Last upload: {{ freshness.tc|date:"d M Y, g:i A" }}
+      </p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Match result breakdown -->
+    {% if match_quality %}
+    <div class="rounded-xl bg-slate-50 p-4">
+      <p class="text-xs font-bold text-slate-600 uppercase tracking-wide mb-3">
+        <i class="fa-solid fa-check-double text-indigo-500 mr-1"></i> Match Results
+        <span class="font-normal text-slate-400 normal-case">· {{ match_quality.total|floatformat:0 }} total</span>
+      </p>
+      <div class="space-y-1.5 text-[11px]">
+        <div class="flex justify-between">
+          <span class="text-emerald-600 font-semibold">✓ Matched</span>
+          <span class="font-bold text-slate-700">{{ match_quality.matched }}</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-amber-600 font-semibold">~ Prog. Mismatch</span>
+          <span class="font-bold text-slate-700">{{ match_quality.prog_mis }}</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-amber-500 font-semibold">⏱ Late Telecast</span>
+          <span class="font-bold text-slate-700">{{ match_quality.late }}</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-red-600 font-semibold">✗ Not Aired</span>
+          <span class="font-bold text-slate-700">{{ match_quality.not_aired }}</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-500 font-semibold">⚠ No Mapping</span>
+          <span class="font-bold text-slate-700">{{ match_quality.no_mapping }}</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-indigo-600 font-semibold">✎ Manual</span>
+          <span class="font-bold text-slate-700">{{ match_quality.manual }}</span>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+
+  <!-- Freshness row -->
+  <div class="mt-4 pt-4 border-t border-slate-100 grid grid-cols-3 gap-4 text-[11px] text-slate-500">
+    <div>
+      <span class="font-semibold text-purple-700"><i class="fa-solid fa-calendar-days mr-1"></i>Last Schedule</span><br>
+      {{ freshness.schedule|date:"d M Y, g:i A"|default:"—" }}
+    </div>
+    <div>
+      <span class="font-semibold text-orange-600"><i class="fa-solid fa-satellite-dish mr-1"></i>Last LMRB</span><br>
+      {{ freshness.lmrb|date:"d M Y, g:i A"|default:"—" }}
+    </div>
+    <div>
+      <span class="font-semibold text-teal-600"><i class="fa-solid fa-file-certificate mr-1"></i>Last TC</span><br>
+      {{ freshness.tc|date:"d M Y, g:i A"|default:"—" }}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- ── Safe operations ── -->
 <div class="space-y-4 mb-6">
   <h3 class="font-bold text-slate-500 text-xs uppercase tracking-widest">Safe Operations</h3>

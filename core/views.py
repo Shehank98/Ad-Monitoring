@@ -5606,6 +5606,132 @@ def commercial_assign(request):
     return JsonResponse({'created': created, 'skipped': skipped})
 
 
+# ── Admin Analytics (B1 + B2) ──────────────────────────────────────────────────
+
+@login_required
+@role_required(['super_admin', 'admin'])
+def admin_analytics(request):
+    """
+    Cross-account analytics page for super_admin / admin.
+    B1: Compliance bar chart, pass breakdown donut, monthly trend.
+    B2: Brand mapping coverage per account (unmapped LMRB themes).
+    """
+    from django.db.models import Q as _Q, Count as _Count
+
+    # ── B1 Chart 1: Per-account compliance % ──────────────────────────────────
+    _acct_totals = {
+        r['account_id']: r['n']
+        for r in MatchResult.objects.values('account_id').annotate(n=_Count('id'))
+    }
+    _acct_matched = {
+        r['account_id']: r['n']
+        for r in MatchResult.objects.filter(status='matched')
+                 .values('account_id').annotate(n=_Count('id'))
+    }
+    _acct_names = {a.id: a.name for a in Account.objects.all()}
+
+    acct_compliance = []
+    for aid, total in sorted(_acct_totals.items(), key=lambda x: _acct_names.get(x[0], '')):
+        matched = _acct_matched.get(aid, 0)
+        acct_compliance.append({
+            'name': _acct_names.get(aid, str(aid)),
+            'pct':  round(matched / total * 100) if total else 0,
+            'matched': matched,
+            'total':   total,
+        })
+
+    # ── B1 Chart 2: Global status breakdown ───────────────────────────────────
+    _global = MatchResult.objects.aggregate(
+        matched   = _Count('id', filter=_Q(status='matched')),
+        prog_mis  = _Count('id', filter=_Q(status='programme_mismatch')),
+        late      = _Count('id', filter=_Q(status='late_telecast')),
+        not_aired = _Count('id', filter=_Q(status='not_aired')),
+        no_map    = _Count('id', filter=_Q(status='no_mapping')),
+        manual    = _Count('id', filter=_Q(status='manual_match')),
+    )
+    _global['total'] = sum(_global.values())
+
+    # ── B1 Chart 3: Monthly trend ──────────────────────────────────────────────
+    monthly_raw = list(
+        MatchResult.objects.values('month')
+        .annotate(
+            total   = _Count('id'),
+            matched = _Count('id', filter=_Q(status='matched')),
+        )
+        .order_by('month')
+    )
+    # Sort by parsed date so "January 2025" < "February 2025" etc.
+    import calendar as _cal
+    def _month_key(m):
+        parts = m['month'].split()
+        if len(parts) == 2:
+            try:
+                mon_num = list(_cal.month_name).index(parts[0])
+                return (int(parts[1]), mon_num)
+            except (ValueError, IndexError):
+                pass
+        return (9999, 0)
+    monthly_raw.sort(key=_month_key)
+
+    # ── B2: Brand mapping coverage per account ────────────────────────────────
+    mapping_coverage = []
+    for account in Account.objects.order_by('name'):
+        lmrb_themes = list(
+            LMRBRow.objects.filter(account=account)
+            .exclude(advt_theme='')
+            .values_list('advt_theme', flat=True)
+            .distinct()
+        )
+        mapped_raw = list(
+            BrandMapping.objects.filter(account=account)
+            .values_list('theme', flat=True)
+        )
+        # Build normalized prefix/exact lookup
+        mapped_norm = set()
+        prefixes = []
+        for t in mapped_raw:
+            t_strip = t.strip()
+            if t_strip.endswith('*'):
+                prefixes.append(t_strip[:-1].lower())
+            else:
+                mapped_norm.add(t_strip.lower())
+
+        def _is_covered(theme):
+            t_low = theme.strip().lower()
+            if t_low in mapped_norm:
+                return True
+            return any(t_low.startswith(p) for p in prefixes)
+
+        unmapped = sorted([t for t in lmrb_themes if not _is_covered(t)])
+        total = len(lmrb_themes)
+        covered = total - len(unmapped)
+        if total > 0:
+            mapping_coverage.append({
+                'account':  account.name,
+                'total':    total,
+                'covered':  covered,
+                'pct':      round(covered / total * 100),
+                'unmapped': unmapped[:30],
+            })
+
+    ctx = {
+        'acct_compliance':    acct_compliance,
+        'acct_labels_js':     _to_js([a['name'] for a in acct_compliance]),
+        'acct_rates_js':      _to_js([a['pct']  for a in acct_compliance]),
+        'global_status':      _global,
+        'status_labels_js':   _to_js(['Matched', 'Prog. Mismatch', 'Late Telecast',
+                                       'Not Aired', 'No Mapping', 'Manual']),
+        'status_values_js':   _to_js([_global['matched'], _global['prog_mis'],
+                                       _global['late'], _global['not_aired'],
+                                       _global['no_map'], _global['manual']]),
+        'monthly_labels_js':  _to_js([m['month']   for m in monthly_raw]),
+        'monthly_total_js':   _to_js([m['total']   for m in monthly_raw]),
+        'monthly_matched_js': _to_js([m['matched'] for m in monthly_raw]),
+        'mapping_coverage':   mapping_coverage,
+    }
+    return render(request, 'admin_panel/admin_analytics.html', ctx)
+
+
 # ── Database Admin Tools ───────────────────────────────────────────────────────
 
 @login_required
@@ -5718,8 +5844,71 @@ def db_tools(request):
                        'or run `pg_dump` from the CLI to export your database.')
                 msg_type = 'info'
 
+    # ── B3: Data Quality Scorecard ────────────────────────────────────────────
+    from django.db.models import Q as _Q, Max as _Max
+
+    _lmrb_total = LMRBRow.objects.count()
+    if _lmrb_total:
+        _lmrb_agg = LMRBRow.objects.aggregate(
+            has_duration  = _Count('id', filter=_Q(duration__isnull=False)),
+            has_programme = _Count('id', filter=_Q(program__gt='')),
+            has_cost      = _Count('id', filter=_Q(cost__isnull=False)),
+            has_brk_no    = _Count('id', filter=_Q(brk_no__isnull=False)),
+            has_pos_brk   = _Count('id', filter=_Q(pos_in_brk__isnull=False)),
+        )
+        def _pct(n): return round(n / _lmrb_total * 100)
+        lmrb_quality = {
+            'total':      _lmrb_total,
+            'duration':   _pct(_lmrb_agg['has_duration']),
+            'programme':  _pct(_lmrb_agg['has_programme']),
+            'cost':       _pct(_lmrb_agg['has_cost']),
+            'break_info': _pct(_lmrb_agg['has_brk_no']),
+            'pos_in_brk': _pct(_lmrb_agg['has_pos_brk']),
+        }
+    else:
+        lmrb_quality = None
+
+    _tc_total = TCRow.objects.count()
+    if _tc_total:
+        _tc_agg = TCRow.objects.aggregate(
+            has_programme = _Count('id', filter=_Q(programme__gt='')),
+            has_duration  = _Count('id', filter=_Q(duration__isnull=False)),
+        )
+        def _tpct(n): return round(n / _tc_total * 100)
+        tc_quality = {
+            'total':     _tc_total,
+            'programme': _tpct(_tc_agg['has_programme']),
+            'duration':  _tpct(_tc_agg['has_duration']),
+        }
+    else:
+        tc_quality = None
+
+    _mr_total = MatchResult.objects.count()
+    if _mr_total:
+        _mr_agg = MatchResult.objects.aggregate(
+            matched     = _Count('id', filter=_Q(status='matched')),
+            prog_mis    = _Count('id', filter=_Q(status='programme_mismatch')),
+            late        = _Count('id', filter=_Q(status='late_telecast')),
+            not_aired   = _Count('id', filter=_Q(status='not_aired')),
+            no_mapping  = _Count('id', filter=_Q(status='no_mapping')),
+            manual      = _Count('id', filter=_Q(status='manual_match')),
+        )
+        match_quality = {**_mr_agg, 'total': _mr_total}
+    else:
+        match_quality = None
+
+    freshness = {
+        'schedule':   Schedule.objects.aggregate(last=_Max('uploaded_at'))['last'],
+        'lmrb':       MonitoringData.objects.aggregate(last=_Max('uploaded_at'))['last'],
+        'tc':         TransmissionReport.objects.aggregate(last=_Max('uploaded_at'))['last'],
+    }
+
     return render(request, 'admin_panel/db_tools.html', {
-        'counts': _counts(),
-        'msg': msg,
-        'msg_type': msg_type,
+        'counts':        _counts(),
+        'msg':           msg,
+        'msg_type':      msg_type,
+        'lmrb_quality':  lmrb_quality,
+        'tc_quality':    tc_quality,
+        'match_quality': match_quality,
+        'freshness':     freshness,
     })
