@@ -3881,16 +3881,16 @@ def summary_excel(request):
 
 @login_required
 def summary_pdf(request):
-    """Download professional Reconciliation PDF: Cover + Summary (portrait) + Matched LMRB (landscape)."""
+    """Premium Reconciliation PDF: full-bleed cover + summary tables + matched LMRB."""
     from reportlab.lib import colors
     from reportlab.lib.colors import HexColor
     from reportlab.lib.pagesizes import A4, landscape as rl_landscape
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import cm
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import cm, mm
+    from reportlab.lib.utils import ImageReader as _IR
     from reportlab.platypus import (
         BaseDocTemplate, Frame, PageTemplate, NextPageTemplate,
-        Table, TableStyle, Paragraph, Spacer,
-        HRFlowable, PageBreak,
+        Table, TableStyle, Paragraph, Spacer, HRFlowable, PageBreak,
     )
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     from verification.tc_engine import build_summary_data
@@ -3903,7 +3903,6 @@ def summary_pdf(request):
     if not (account_id and channel and month):
         messages.error(request, 'Incomplete parameters.')
         return redirect('/dashboard/summary/')
-
     if not _account_access(request.user, account_id):
         messages.error(request, 'Access denied.')
         return redirect('/dashboard/summary/')
@@ -3913,24 +3912,37 @@ def summary_pdf(request):
     meta    = SummaryReportMeta.objects.filter(
         account_id=account_id, channel=channel, month=month
     ).first()
-    sched   = Schedule.objects.filter(
+    sched = Schedule.objects.filter(
         account_id=account_id, channel=channel, month=month
     ).order_by('-uploaded_at').first()
     estimate_no = sched.schedule_number if sched else ''
 
-    # ── Colors ────────────────────────────────────────────────────────────────
-    NAVY  = HexColor('#0f2340')
-    BLUE  = HexColor('#2563eb')
-    LGRAY = HexColor('#f8fafc')
-    MGRAY = HexColor('#e2e8f0')
-    DGRAY = HexColor('#e2e8f0')
+    # ── Palette ───────────────────────────────────────────────────────────────
+    NAVY      = HexColor('#0D1F3C')   # primary deep navy
+    NAVY_MID  = HexColor('#1A3353')   # slightly lighter navy (accents)
+    GOLD      = HexColor('#C8A951')   # warm gold accent
+    GOLD_LITE = HexColor('#F0DFA0')   # pale gold tint
+    WHITE     = colors.white
+    OFF_WHITE = HexColor('#F7F9FC')
+    SLATE_100 = HexColor('#F1F5F9')
+    SLATE_200 = HexColor('#E2E8F0')
+    SLATE_400 = HexColor('#94A3B8')
+    SLATE_600 = HexColor('#475569')
+    SLATE_900 = HexColor('#0F172A')
+    GREEN     = HexColor('#15803D')
+    GREEN_BG  = HexColor('#DCFCE7')
+    RED       = HexColor('#B91C1C')
+    RED_BG    = HexColor('#FEE2E2')
+    AMBER     = HexColor('#B45309')
+    AMBER_BG  = HexColor('#FEF3C7')
 
-    # ── Page sizes & margins ─────────────────────────────────────────────────
-    PORT_W, PORT_H = A4
+    # ── Page geometry ────────────────────────────────────────────────────────
+    PORT_W, PORT_H = A4                     # 595.28 × 841.89 pt
     LAND_W, LAND_H = rl_landscape(A4)
     MARGIN  = 1.5 * cm
-    FOOT_H  = 1.0 * cm   # reserved at bottom for footer
-    TOP_PAD = 2.0 * cm   # reserved at top for logo
+    FOOT_H  = 0.85 * cm
+    # Cover: navy band occupies top 40% of page
+    BAND_H  = PORT_H * 0.40
 
     # ── Logo path ────────────────────────────────────────────────────────────
     logo_path = None
@@ -3946,75 +3958,218 @@ def summary_pdf(request):
         except Exception:
             pass
 
-    # ── Report metadata ───────────────────────────────────────────────────────
-    report_ts   = datetime.now().strftime('%d %B %Y %H:%M')
+    # ── Report meta ───────────────────────────────────────────────────────────
+    report_ts   = datetime.now().strftime('%d %B %Y  %H:%M')
+    report_date = datetime.now().strftime('%d %B %Y')
     invoice_ref = ''
     if meta:
         invoice_ref = meta.invoice_no or meta.supplier_invoice_no or meta.po_no or ''
 
-    # ── onPage callbacks — draw logo + footer on every page ──────────────────
-    def _draw_page_chrome(canvas, doc, pw, ph):
-        canvas.saveState()
-        # Logo top-right
+    sch_dates = Schedule.objects.filter(
+        account_id=account_id, channel=channel, month=month
+    ).aggregate(d_min=Min('start_date'), d_max=Max('end_date'))
+    date_min = sch_dates.get('d_min')
+    date_max = sch_dates.get('d_max')
+    if date_min and date_max:
+        campaign_period = f"{date_min.strftime('%d %b %Y')} \u2013 {date_max.strftime('%d %b %Y')}"
+    elif date_min:
+        campaign_period = date_min.strftime('%d %b %Y')
+    else:
+        campaign_period = '\u2014'
+
+    comm_total    = data.get('commercial_total', {})
+    spon_total    = data.get('sponsorship_total', {})
+    total_planned = (comm_total.get('planned', 0) or 0) + (spon_total.get('planned', 0) or 0)
+    total_aired   = (comm_total.get('aired',   0) or 0) + (spon_total.get('aired',   0) or 0)
+    total_missed  = (comm_total.get('missed',  0) or 0) + (spon_total.get('missed',  0) or 0)
+    total_extra   = (comm_total.get('extra',   0) or 0) + (spon_total.get('extra',   0) or 0)
+
+    # ── Canvas page callbacks ─────────────────────────────────────────────────
+
+    def _footer(canvas, pw, page_num):
+        """Draw hairline + footer text."""
+        canvas.setStrokeColor(SLATE_200)
+        canvas.setLineWidth(0.4)
+        canvas.line(MARGIN, FOOT_H, pw - MARGIN, FOOT_H)
+        canvas.setFont('Helvetica', 6)
+        canvas.setFillColor(SLATE_400)
+        left = f'CONFIDENTIAL  \u2022  {account.name}  \u2022  {channel}  \u2022  {month}'
+        if invoice_ref:
+            left += f'  \u2022  Ref: {invoice_ref}'
+        canvas.drawString(MARGIN, FOOT_H * 0.35, left)
+        canvas.drawRightString(pw - MARGIN, FOOT_H * 0.35, f'Page {page_num}')
+
+    def _inner_page_header(canvas, pw, ph):
+        """Thin navy bar + gold accent line at top of every non-cover page."""
+        bar_h = 0.6 * cm
+        # Navy bar
+        canvas.setFillColor(NAVY)
+        canvas.rect(0, ph - bar_h, pw, bar_h, stroke=0, fill=1)
+        # Gold accent under bar
+        canvas.setFillColor(GOLD)
+        canvas.rect(0, ph - bar_h - 1.5, pw, 1.5, stroke=0, fill=1)
+        # Context text in bar
+        canvas.setFont('Helvetica-Bold', 7)
+        canvas.setFillColor(SLATE_400)
+        canvas.drawString(MARGIN, ph - bar_h + 0.15 * cm,
+                          'ADVERTISEMENT MONITORING  \u2014  RECONCILIATION REPORT')
+        canvas.setFillColor(WHITE)
+        canvas.setFont('Helvetica', 6.5)
+        canvas.drawRightString(pw - MARGIN, ph - bar_h + 0.15 * cm,
+                               f'{account.name}  \u00b7  {channel}  \u00b7  {month}')
+        # Logo on right inside bar
         if logo_path:
-            lw, lh = 3.5 * cm, 1.4 * cm
             try:
-                from reportlab.lib.utils import ImageReader as _IR
                 _img = _IR(logo_path)
-                canvas.drawImage(
-                    _img,
-                    pw - MARGIN - lw, ph - MARGIN - lh,
-                    width=lw, height=lh,
-                    preserveAspectRatio=True,
-                )
+                canvas.drawImage(_img,
+                                 pw - MARGIN - 3.0 * cm, ph - bar_h + 0.05 * cm,
+                                 width=2.8 * cm, height=0.5 * cm,
+                                 preserveAspectRatio=True, mask='auto')
             except Exception:
                 pass
-        # Footer separator line
-        canvas.setStrokeColor(MGRAY)
-        canvas.setLineWidth(0.5)
-        canvas.line(MARGIN, FOOT_H, pw - MARGIN, FOOT_H)
-        # Footer text
-        canvas.setFont('Helvetica', 6.5)
-        canvas.setFillColor(HexColor('#64748b'))
-        left_txt = f'CONFIDENTIAL  \u2022  Generated: {report_ts}'
-        if invoice_ref:
-            left_txt += f'  \u2022  Ref: {invoice_ref}'
-        canvas.drawString(MARGIN, FOOT_H * 0.38, left_txt)
-        canvas.drawRightString(pw - MARGIN, FOOT_H * 0.38, f'Page {doc.page}')
+
+    def _cover_page(canvas, doc):
+        canvas.saveState()
+        W, H = PORT_W, PORT_H
+
+        # ── 1. Left gold accent stripe (full height) ─────────────────────────
+        canvas.setFillColor(GOLD)
+        canvas.rect(0, 0, 3.5, H, stroke=0, fill=1)
+
+        # ── 2. Full-bleed navy band (top 40%) ────────────────────────────────
+        canvas.setFillColor(NAVY)
+        canvas.rect(0, H - BAND_H, W, BAND_H, stroke=0, fill=1)
+
+        # ── 3. Subtle diagonal accent inside navy band (bottom-right) ────────
+        canvas.setFillColor(NAVY_MID)
+        canvas.setStrokeColor(NAVY_MID)
+        path = canvas.beginPath()
+        path.moveTo(W * 0.55, H - BAND_H)
+        path.lineTo(W, H - BAND_H + BAND_H * 0.45)
+        path.lineTo(W, H - BAND_H)
+        path.close()
+        canvas.drawPath(path, stroke=0, fill=1)
+
+        # ── 4. Gold separator line beneath the navy band ─────────────────────
+        canvas.setFillColor(GOLD)
+        canvas.rect(0, H - BAND_H - 3, W, 3, stroke=0, fill=1)
+
+        # ── 5. Agency tag + report type label ────────────────────────────────
+        canvas.setFont('Helvetica', 8)
+        canvas.setFillColor(SLATE_400)
+        canvas.drawString(1.2 * cm, H - 1.1 * cm,
+                          'PHOENIX O & M (PVT) LTD  \u2022  ADVERTISEMENT MONITORING')
+
+        # ── 6. Main title (two lines) ─────────────────────────────────────────
+        canvas.setFillColor(WHITE)
+        canvas.setFont('Helvetica-Bold', 34)
+        canvas.drawString(1.2 * cm, H - BAND_H + 5.5 * cm, 'RECONCILIATION')
+        canvas.setFont('Helvetica-Bold', 34)
+        canvas.drawString(1.2 * cm, H - BAND_H + 3.8 * cm, 'SUMMARY REPORT')
+        # Thin gold underline beneath title
+        canvas.setStrokeColor(GOLD)
+        canvas.setLineWidth(1.5)
+        canvas.line(1.2 * cm, H - BAND_H + 3.5 * cm, 10 * cm, H - BAND_H + 3.5 * cm)
+
+        # ── 7. Channel / Month pill in navy band ──────────────────────────────
+        pill_x = 1.2 * cm
+        pill_y = H - BAND_H + 2.3 * cm
+        canvas.setFillColor(NAVY_MID)
+        canvas.roundRect(pill_x, pill_y, 8 * cm, 0.65 * cm, 3, stroke=0, fill=1)
+        canvas.setFont('Helvetica-Bold', 8)
+        canvas.setFillColor(GOLD_LITE)
+        canvas.drawString(pill_x + 0.3 * cm, pill_y + 0.18 * cm,
+                          f'{channel.upper()}   \u2022   {month.upper()}')
+
+        # ── 8. Logo in navy band (top-right) ─────────────────────────────────
+        if logo_path:
+            try:
+                _img = _IR(logo_path)
+                canvas.drawImage(_img,
+                                 W - MARGIN - 4 * cm, H - MARGIN - 1.8 * cm,
+                                 width=3.6 * cm, height=1.4 * cm,
+                                 preserveAspectRatio=True, mask='auto')
+            except Exception:
+                pass
+
+        # ── 9. KPI metrics strip (bottom of white area) ──────────────────────
+        kpi_y   = FOOT_H + 0.8 * cm
+        kpi_h   = 2.4 * cm
+        kpi_w   = (W - 2 * MARGIN - 3 * 0.35 * cm) / 4
+        kpi_gap = 0.35 * cm
+
+        kpi_data = [
+            ('TOTAL PLANNED', str(total_planned), NAVY,  WHITE,    NAVY_MID),
+            ('TOTAL AIRED',   str(total_aired),   GREEN, GREEN_BG, GREEN),
+            ('TOTAL MISSED',  str(total_missed),  RED,   RED_BG,   RED),
+            ('EXTRA AIRED',   str(total_extra),   AMBER, AMBER_BG, AMBER),
+        ]
+        for i, (label, val, accent, bg, txt_color) in enumerate(kpi_data):
+            x = MARGIN + i * (kpi_w + kpi_gap)
+            # Box background
+            canvas.setFillColor(bg)
+            canvas.setStrokeColor(SLATE_200)
+            canvas.setLineWidth(0.4)
+            canvas.roundRect(x, kpi_y, kpi_w, kpi_h, 4, stroke=1, fill=1)
+            # Top accent bar
+            canvas.setFillColor(accent)
+            canvas.roundRect(x, kpi_y + kpi_h - 0.22 * cm, kpi_w, 0.22 * cm, 2, stroke=0, fill=1)
+            # Large value
+            canvas.setFont('Helvetica-Bold', 26)
+            canvas.setFillColor(txt_color)
+            canvas.drawCentredString(x + kpi_w / 2, kpi_y + 0.9 * cm, val)
+            # Label
+            canvas.setFont('Helvetica-Bold', 6.5)
+            canvas.setFillColor(SLATE_600)
+            canvas.drawCentredString(x + kpi_w / 2, kpi_y + 0.3 * cm, label)
+
+        _footer(canvas, W, doc.page)
         canvas.restoreState()
 
     def _portrait_page(canvas, doc):
-        _draw_page_chrome(canvas, doc, PORT_W, PORT_H)
+        canvas.saveState()
+        _inner_page_header(canvas, PORT_W, PORT_H)
+        _footer(canvas, PORT_W, doc.page)
+        canvas.restoreState()
 
     def _landscape_page(canvas, doc):
-        _draw_page_chrome(canvas, doc, LAND_W, LAND_H)
+        canvas.saveState()
+        _inner_page_header(canvas, LAND_W, LAND_H)
+        _footer(canvas, LAND_W, doc.page)
+        canvas.restoreState()
 
     # ── Frames ───────────────────────────────────────────────────────────────
+    # Cover frame: the white area below the band, above KPIs
+    _cover_content_top    = PORT_H - BAND_H - 4 * mm      # just below gold line
+    _cover_content_bottom = FOOT_H + 3.4 * cm             # above KPI strip
+    _cover_frame = Frame(
+        MARGIN, _cover_content_bottom,
+        PORT_W - 2 * MARGIN,
+        _cover_content_top - _cover_content_bottom,
+        leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0,
+        id='cover',
+    )
+    _HDR_H = 0.6 * cm + 1.5 + 3 * mm          # bar + gold line + padding
     def _mk_frame(w, h, fid):
         return Frame(
-            MARGIN,
-            FOOT_H + 0.1 * cm,
+            MARGIN, FOOT_H + 2 * mm,
             w - 2 * MARGIN,
-            h - MARGIN - FOOT_H - 0.1 * cm - TOP_PAD,
-            leftPadding=0, rightPadding=0,
-            topPadding=0, bottomPadding=0,
+            h - _HDR_H - FOOT_H - 4 * mm,
+            leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0,
             id=fid,
         )
 
-    portrait_frame  = _mk_frame(PORT_W, PORT_H, 'portrait')
-    landscape_frame = _mk_frame(LAND_W, LAND_H, 'landscape')
-
     # ── Document ─────────────────────────────────────────────────────────────
     buf = io.BytesIO()
-    doc = BaseDocTemplate(
-        buf, pagesize=A4,
-        leftMargin=MARGIN, rightMargin=MARGIN,
-        topMargin=MARGIN + TOP_PAD, bottomMargin=FOOT_H + 0.2 * cm,
-    )
+    doc = BaseDocTemplate(buf, pagesize=A4,
+                          leftMargin=0, rightMargin=0,
+                          topMargin=0, bottomMargin=0)
     doc.addPageTemplates([
-        PageTemplate(id='portrait',  frames=[portrait_frame],
+        PageTemplate(id='cover',     frames=[_cover_frame],
+                     onPage=_cover_page, pagesize=A4),
+        PageTemplate(id='portrait',  frames=[_mk_frame(PORT_W, PORT_H, 'portrait')],
                      onPage=_portrait_page, pagesize=A4),
-        PageTemplate(id='landscape', frames=[landscape_frame],
+        PageTemplate(id='landscape', frames=[_mk_frame(LAND_W, LAND_H, 'landscape')],
                      onPage=_landscape_page, pagesize=rl_landscape(A4)),
     ])
 
@@ -4024,357 +4179,278 @@ def summary_pdf(request):
         return ParagraphStyle(name, **kw)
 
     S = dict(
-        title     = _ps('pdf_title',   fontSize=22, textColor=NAVY, fontName='Helvetica-Bold',
-                        spaceAfter=4, alignment=TA_LEFT),
-        sub_hdr   = _ps('pdf_subhdr',  fontSize=10, textColor=NAVY, fontName='Helvetica-Bold',
-                        spaceAfter=2),
-        sub       = _ps('pdf_sub',     fontSize=8.5, textColor=HexColor('#475569'), spaceAfter=2),
-        sect      = _ps('pdf_sect',    fontSize=9,  textColor=NAVY, fontName='Helvetica-Bold',
-                        spaceAfter=2),
-        cell      = _ps('pdf_cell',    fontSize=7.5),
-        cell_sm   = _ps('pdf_cellsm',  fontSize=5.5),
-        hdr_wht   = _ps('pdf_hdrwht',  fontSize=7,  textColor=colors.white,
-                        fontName='Helvetica-Bold'),
-        cover_t   = _ps('pdf_covt',    fontSize=26, textColor=NAVY, fontName='Helvetica-Bold',
-                        alignment=TA_CENTER, spaceAfter=6),
-        cover_s   = _ps('pdf_covs',    fontSize=12, textColor=HexColor('#475569'),
-                        alignment=TA_CENTER, spaceAfter=4),
-        cover_lbl = _ps('pdf_covlbl',  fontSize=9,  textColor=HexColor('#64748b'),
-                        fontName='Helvetica-Bold', alignment=TA_CENTER),
-        cover_val = _ps('pdf_covval',  fontSize=12, textColor=NAVY,
-                        fontName='Helvetica-Bold', alignment=TA_CENTER),
-        conf      = _ps('pdf_conf',    fontSize=8,  textColor=HexColor('#94a3b8'),
-                        fontName='Helvetica-Bold', alignment=TA_CENTER),
-        prog_lbl  = _ps('pdf_proglbl', fontSize=8,  textColor=BLUE,
-                        fontName='Helvetica-Bold'),
-        gt        = _ps('pdf_gt',      fontSize=7.5, fontName='Helvetica-Bold'),
+        section   = _ps('s_sect',   fontSize=9.5, textColor=NAVY, fontName='Helvetica-Bold',
+                        spaceBefore=6, spaceAfter=4),
+        sub       = _ps('s_sub',    fontSize=8,   textColor=SLATE_600, spaceAfter=2),
+        cell      = _ps('s_cell',   fontSize=7.5, textColor=SLATE_900),
+        cell_r    = _ps('s_cellr',  fontSize=7.5, textColor=SLATE_900, alignment=TA_RIGHT),
+        cell_sm   = _ps('s_csm',    fontSize=5.5, textColor=SLATE_900),
+        hdr_wht   = _ps('s_hwht',   fontSize=7.5, textColor=WHITE, fontName='Helvetica-Bold',
+                        alignment=TA_CENTER),
+        gt        = _ps('s_gt',     fontSize=7.5, textColor=SLATE_900, fontName='Helvetica-Bold'),
+        gt_r      = _ps('s_gtr',    fontSize=7.5, textColor=SLATE_900, fontName='Helvetica-Bold',
+                        alignment=TA_RIGHT),
+        prog_lbl  = _ps('s_prog',   fontSize=8,   textColor=NAVY_MID, fontName='Helvetica-Bold',
+                        spaceBefore=6, spaceAfter=2),
+        # Cover-specific
+        cov_lbl   = _ps('c_lbl',    fontSize=8.5, textColor=SLATE_600, fontName='Helvetica-Bold'),
+        cov_val   = _ps('c_val',    fontSize=9.5, textColor=SLATE_900, fontName='Helvetica-Bold'),
+        cov_conf  = _ps('c_conf',   fontSize=7.5, textColor=SLATE_400, fontName='Helvetica-Bold',
+                        alignment=TA_CENTER),
+        cov_sig_l = _ps('c_sigl',   fontSize=8,   textColor=SLATE_600, fontName='Helvetica-Bold'),
+        cov_sig_v = _ps('c_sigv',   fontSize=9,   textColor=SLATE_900, fontName='Helvetica-Bold'),
     )
 
     story = []
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # COVER PAGE (Portrait) — navy header band design
+    # PAGE 1 — COVER  (drawn by canvas; Platypus renders info card in white area)
     # ═══════════════════════════════════════════════════════════════════════════
-
-    from reportlab.platypus import Image as _RLImage
-    from reportlab.lib.colors import HexColor as _HC
-
-    # Cover-page colour palette
-    C_NAVY   = _HC('#1F3864')
-    C_ACCENT = _HC('#2E75B6')
-    C_LGRAY  = _HC('#F2F2F2')
-    C_WHITE  = colors.white
 
     content_w = PORT_W - 2 * MARGIN
 
-    # Campaign period
-    sch_dates = Schedule.objects.filter(
-        account_id=account_id, channel=channel, month=month
-    ).aggregate(d_min=Min('start_date'), d_max=Max('end_date'))
-    date_min = sch_dates.get('d_min')
-    date_max = sch_dates.get('d_max')
-    campaign_period = ''
-    if date_min and date_max:
-        campaign_period = (
-            f"{date_min.strftime('%d %b %Y')} \u2013 {date_max.strftime('%d %b %Y')}"
-        )
-    elif date_min:
-        campaign_period = date_min.strftime('%d %b %Y')
-
-    # Totals for KPI strip
-    comm_total    = data.get('commercial_total', {})
-    spon_total    = data.get('sponsorship_total', {})
-    total_planned = (comm_total.get('planned', 0) or 0) + (spon_total.get('planned', 0) or 0)
-    total_aired   = (comm_total.get('aired',   0) or 0) + (spon_total.get('aired',   0) or 0)
-    total_missed  = (comm_total.get('missed',  0) or 0) + (spon_total.get('missed',  0) or 0)
-
-    # ── Paragraph styles for cover page ──────────────────────────────────────
-    def _cps(name, **kw):
-        kw.setdefault('fontName', 'Helvetica')
-        return ParagraphStyle(name, **kw)
-
-    CS = dict(
-        hdr_channel = _cps('cov_hdrch',  fontSize=9,  textColor=C_WHITE,
-                            fontName='Helvetica', spaceAfter=4),
-        hdr_title   = _cps('cov_hdrtit', fontSize=20, textColor=C_WHITE,
-                            fontName='Helvetica-Bold', leading=24, spaceAfter=0),
-        lbl         = _cps('cov_lbl',    fontSize=9,  textColor=HexColor('#475569'),
-                            fontName='Helvetica-Bold', alignment=TA_LEFT),
-        val         = _cps('cov_val',    fontSize=10, textColor=C_NAVY,
-                            fontName='Helvetica-Bold', alignment=TA_LEFT),
-        kpi_lbl     = _cps('cov_kpi_l',  fontSize=8,  textColor=HexColor('#64748b'),
-                            fontName='Helvetica-Bold', alignment=TA_CENTER),
-        kpi_val     = _cps('cov_kpi_v',  fontSize=22, textColor=C_NAVY,
-                            fontName='Helvetica-Bold', alignment=TA_CENTER, spaceAfter=2),
-        conf        = _cps('cov_conf',   fontSize=8,  textColor=HexColor('#94a3b8'),
-                            fontName='Helvetica-Bold', alignment=TA_CENTER),
-    )
-
-    # ── Navy header band ─────────────────────────────────────────────────────
-    # Left cell: subtitle + main title (white text)
-    hdr_left_inner = Table(
-        [
-            [Paragraph('ADVERTISEMENT MONITORING', CS['hdr_channel'])],
-            [Paragraph('RECONCILIATION<br/>SUMMARY REPORT', CS['hdr_title'])],
-        ],
-        colWidths=[content_w * 0.72],
-    )
-    hdr_left_inner.setStyle(TableStyle([
-        ('TOPPADDING',    (0, 0), (-1, -1), 0),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
-        ('LEFTPADDING',   (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING',  (0, 0), (-1, -1), 0),
-        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-    ]))
-
-    # Right cell: logo or blank
-    if logo_path:
-        try:
-            _logo_cov = _RLImage(logo_path, width=3.2 * cm, height=1.3 * cm, kind='bound')
-        except Exception:
-            _logo_cov = Spacer(3.2 * cm, 1.3 * cm)
-    else:
-        _logo_cov = Spacer(3.2 * cm, 1.3 * cm)
-
-    hdr_tbl = Table(
-        [[hdr_left_inner, _logo_cov]],
-        colWidths=[content_w * 0.72, content_w * 0.28],
-    )
-    hdr_tbl.setStyle(TableStyle([
-        ('BACKGROUND',    (0, 0), (-1, -1), C_NAVY),
-        ('TOPPADDING',    (0, 0), (-1, -1), 20),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 20),
-        ('LEFTPADDING',   (0, 0), (0, 0),  20),
-        ('LEFTPADDING',   (1, 0), (1, 0),   8),
-        ('RIGHTPADDING',  (0, 0), (-1, -1), 15),
-        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-        ('ALIGN',         (1, 0), (1, 0),  'RIGHT'),
-    ]))
-    story.append(hdr_tbl)
-    story.append(Spacer(1, 0.6 * cm))
-
-    # ── Info block (two-column table) ─────────────────────────────────────────
+    # Info card ─ clean borderless rows with subtle dividers
     cover_meta = [
-        ['Client / Account', account.name],
-        ['Agency',           'Phoenix O & M (Pvt) Ltd'],
-        ['Channel',          channel],
-        ['Campaign Period',  campaign_period or '\u2014'],
-        ['Estimate / RO No.', estimate_no or '\u2014'],
-        ['Report Date',      report_ts[:11]],
+        ('Client / Account',   account.name),
+        ('Agency',             'Phoenix O & M (Pvt) Ltd'),
+        ('Channel',            channel),
+        ('Campaign Period',    campaign_period),
+        ('Estimate / RO No.',  estimate_no or '\u2014'),
+        ('Report Date',        report_date),
     ]
     if meta:
         if meta.invoice_no:
-            cover_meta.append(['Invoice No.',  meta.invoice_no])
+            cover_meta.append(('Invoice No.',         meta.invoice_no))
         if meta.po_no:
-            cover_meta.append(['Release Order Ref.', meta.po_no])
+            cover_meta.append(('Release Order Ref.',  meta.po_no))
+        if meta.supplier_invoice_no:
+            cover_meta.append(('Supplier Invoice No.', meta.supplier_invoice_no))
 
-    cov_tbl = Table(
-        [[Paragraph(k, CS['lbl']), Paragraph(str(v), CS['val'])]
-         for k, v in cover_meta],
-        colWidths=[5 * cm, 10 * cm],
-        hAlign='LEFT',
-    )
-    cov_tbl.setStyle(TableStyle([
-        ('BACKGROUND',    (0, 0), (0, -1), C_LGRAY),
-        ('BACKGROUND',    (1, 0), (1, -1), C_WHITE),
-        ('GRID',          (0, 0), (-1, -1), 0.5, HexColor('#cbd5e1')),
-        ('TOPPADDING',    (0, 0), (-1, -1), 7),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
-        ('LEFTPADDING',   (0, 0), (-1, -1), 10),
-        ('RIGHTPADDING',  (0, 0), (-1, -1), 10),
-        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-    ]))
-    story.append(cov_tbl)
-    story.append(Spacer(1, 0.5 * cm))
-
-    # ── Bold horizontal rule ──────────────────────────────────────────────────
-    story.append(HRFlowable(width='100%', thickness=2.5, color=C_NAVY, spaceAfter=12))
-
-    # ── KPI boxes: Total Planned | Total Aired | Total Missed ─────────────────
-    kpi_items = [
-        ('TOTAL PLANNED', str(total_planned)),
-        ('TOTAL AIRED',   str(total_aired)),
-        ('TOTAL MISSED',  str(total_missed)),
+    info_tbl_data = [
+        [Paragraph(k, S['cov_lbl']), Paragraph(str(v), S['cov_val'])]
+        for k, v in cover_meta
     ]
-    kpi_cells = []
-    for label, val in kpi_items:
-        inner = Table(
-            [
-                [Paragraph(label, CS['kpi_lbl'])],
-                [Paragraph(val,   CS['kpi_val'])],
-            ],
-            colWidths=[4.8 * cm],
-        )
-        inner.setStyle(TableStyle([
-            ('BACKGROUND',    (0, 0), (-1, -1), C_LGRAY),
-            ('TOPPADDING',    (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
-            ('LEFTPADDING',   (0, 0), (-1, -1), 6),
-            ('RIGHTPADDING',  (0, 0), (-1, -1), 6),
-            ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
-            ('LINEBELOW',     (0, 0), (-1, 0),  3, C_ACCENT),
-        ]))
-        kpi_cells.append(inner)
-    kpi_row = Table([kpi_cells], colWidths=[5.2 * cm, 5.2 * cm, 5.2 * cm], hAlign='LEFT')
-    kpi_row.setStyle(TableStyle([
-        ('LEFTPADDING',  (0, 0), (-1, -1), 4),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-    ]))
-    story.append(kpi_row)
-    story.append(Spacer(1, 0.8 * cm))
+    info_tbl = Table(info_tbl_data, colWidths=[5.2 * cm, content_w - 5.2 * cm], hAlign='LEFT')
+    _info_row_count = len(info_tbl_data)
+    _info_style = [
+        ('TOPPADDING',    (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('LEFTPADDING',   (0, 0), (0, -1),  0),
+        ('LEFTPADDING',   (1, 0), (1, -1),  10),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 6),
+        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+        ('BACKGROUND',    (0, 0), (0, -1),  OFF_WHITE),
+    ]
+    # Subtle dividers between rows (skip last)
+    for _r in range(_info_row_count - 1):
+        _info_style.append(('LINEBELOW', (0, _r), (-1, _r), 0.3, SLATE_200))
+    # Gold left border on label column
+    _info_style.append(('LINEBEFORE', (0, 0), (0, -1), 2, GOLD))
+    info_tbl.setStyle(TableStyle(_info_style))
 
-    # ── Signature fields (optional) ───────────────────────────────────────────
+    story.append(Spacer(1, 0.4 * cm))
+    story.append(info_tbl)
+
+    # Signature block
     if meta and any([meta.prepared_by, meta.checked_by, meta.authorised_by]):
-        sig_tbl = Table(
-            [[
-                Paragraph(f'Prepared by<br/>{meta.prepared_by or ""}', CS['lbl']),
-                Paragraph(f'Checked by<br/>{meta.checked_by or ""}',   CS['lbl']),
-                Paragraph(f'Authorised by<br/>{meta.authorised_by or ""}', CS['lbl']),
-            ]],
-            colWidths=[5 * cm, 5 * cm, 5 * cm],
-            hAlign='LEFT',
-        )
+        story.append(Spacer(1, 0.5 * cm))
+        sig_data = [[
+            Table([
+                [Paragraph(role, S['cov_sig_l'])],
+                [Paragraph(name or '\u2014', S['cov_sig_v'])],
+            ], colWidths=[4.8 * cm],
+               style=TableStyle([
+                   ('TOPPADDING',    (0, 0), (-1, -1), 3),
+                   ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                   ('LEFTPADDING',   (0, 0), (-1, -1), 0),
+                   ('RIGHTPADDING',  (0, 0), (-1, -1), 0),
+               ]))
+            for role, name in [
+                ('Prepared by',    meta.prepared_by or ''),
+                ('Checked by',     meta.checked_by or ''),
+                ('Authorised by',  meta.authorised_by or ''),
+            ]
+        ]]
+        sig_tbl = Table(sig_data, colWidths=[5.2 * cm, 5.2 * cm, 5.2 * cm], hAlign='LEFT')
         sig_tbl.setStyle(TableStyle([
-            ('TOPPADDING',    (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 14),
-            ('LEFTPADDING',   (0, 0), (-1, -1), 6),
-            ('RIGHTPADDING',  (0, 0), (-1, -1), 6),
-            ('LINEABOVE',     (0, 0), (-1, 0),  0.5, HexColor('#94a3b8')),
+            ('LINEABOVE',    (0, 0), (-1, 0), 0.4, SLATE_200),
+            ('TOPPADDING',   (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING',(0, 0), (-1, -1), 6),
+            ('LEFTPADDING',  (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
         ]))
         story.append(sig_tbl)
-        story.append(Spacer(1, 0.3 * cm))
 
-    story.append(Paragraph('CONFIDENTIAL \u2014 For authorised recipients only', S['conf']))
+    story.append(Spacer(1, 0.4 * cm))
+    story.append(Paragraph(
+        'STRICTLY CONFIDENTIAL \u2014 This document is intended solely for authorised recipients.',
+        S['cov_conf'],
+    ))
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SUMMARY TABLES (Portrait)
+    # PAGE 2 — RECONCILIATION SUMMARY TABLES (Portrait)
     # ═══════════════════════════════════════════════════════════════════════════
+    story.append(NextPageTemplate('portrait'))
     story.append(PageBreak())
 
-    story.append(Paragraph('RECONCILIATION SUMMARY', S['sub_hdr']))
-    story.append(Paragraph(
+    # Section heading helper — left gold bar via table padding trick
+    def _section_heading(title, subtitle=''):
+        rows = [[Paragraph(title, S['section'])]]
+        if subtitle:
+            rows.append([Paragraph(subtitle, S['sub'])])
+        t = Table(rows, colWidths=[content_w])
+        t.setStyle(TableStyle([
+            ('LINEBEFORE',   (0, 0), (0, -1), 3, GOLD),
+            ('LEFTPADDING',  (0, 0), (-1, -1), 8),
+            ('TOPPADDING',   (0, 0), (-1, -1), 2),
+            ('BOTTOMPADDING',(0, 0), (-1, -1), 2),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('BACKGROUND',   (0, 0), (-1, -1), OFF_WHITE),
+        ]))
+        return t
+
+    story.append(_section_heading(
+        'RECONCILIATION SUMMARY',
         f'{account.name}  \u00b7  {channel}  \u00b7  {month}'
-        + (f'  \u00b7  Estimate: {estimate_no}' if estimate_no else ''),
-        S['sub'],
+        + (f'  \u00b7  Estimate No: {estimate_no}' if estimate_no else ''),
     ))
-    story.append(HRFlowable(width='100%', thickness=1, color=BLUE, spaceAfter=8))
+    story.append(Spacer(1, 0.35 * cm))
 
-    # Summary table: 7 columns, portrait width ≈ 18cm
+    # Summary table builder
     SUM_HEADERS = ['Product / Brand', 'Dur', 'Planned', 'Aired', 'Missed', 'Extra', '3rd Party']
-    SUM_WIDTHS  = [5.5 * cm, 1.5 * cm, 2.1 * cm, 2.1 * cm, 2.1 * cm, 2.1 * cm, 2.1 * cm]
+    SUM_WIDTHS  = [5.5 * cm, 1.5 * cm, 2.0 * cm, 2.0 * cm, 2.0 * cm, 2.0 * cm, 2.0 * cm]
 
-    def _sum_style():
-        return TableStyle([
+    def _num_cell(val, zero_style=None):
+        """Return a Paragraph for a numeric table cell, styled by value."""
+        s = zero_style or S['cell_r']
+        return Paragraph(str(val), s)
+
+    def _missed_style(val):
+        if val and int(val) > 0:
+            return _ps(f'mc_{val}', fontSize=7.5, textColor=RED,
+                       fontName='Helvetica-Bold', alignment=TA_RIGHT)
+        return S['cell_r']
+
+    def _extra_style(val):
+        if val and int(val) > 0:
+            return _ps(f'ec_{val}', fontSize=7.5, textColor=GREEN,
+                       fontName='Helvetica-Bold', alignment=TA_RIGHT)
+        return S['cell_r']
+
+    def _build_sum_table(rows, total_row, has_total=True):
+        hdr = [Paragraph(h, S['hdr_wht']) for h in SUM_HEADERS]
+        tdata = [hdr]
+        for r in rows:
+            missed = r.get('missed', 0) or 0
+            extra  = r.get('extra',  0) or 0
+            tdata.append([
+                Paragraph(str(r.get('product', '')), S['cell']),
+                Paragraph(str(r.get('dur') or '\u2014'), S['cell_r']),
+                _num_cell(r.get('planned',     0)),
+                _num_cell(r.get('aired',       0)),
+                Paragraph(str(missed), _missed_style(missed)),
+                Paragraph(str(extra),  _extra_style(extra)),
+                _num_cell(r.get('third_party', 0)),
+            ])
+        if has_total:
+            t = total_row
+            gt_missed = t.get('missed', 0) or 0
+            gt_extra  = t.get('extra',  0) or 0
+            tdata.append([
+                Paragraph('Grand Total', S['gt']),
+                Paragraph('', S['cell']),
+                Paragraph(str(t.get('planned',     0)), S['gt_r']),
+                Paragraph(str(t.get('aired',       0)), S['gt_r']),
+                Paragraph(str(gt_missed), _ps('gm', fontSize=7.5, fontName='Helvetica-Bold',
+                                             textColor=RED if gt_missed > 0 else SLATE_900,
+                                             alignment=TA_RIGHT)),
+                Paragraph(str(gt_extra),  _ps('ge', fontSize=7.5, fontName='Helvetica-Bold',
+                                             textColor=GREEN if gt_extra > 0 else SLATE_900,
+                                             alignment=TA_RIGHT)),
+                Paragraph(str(t.get('third_party', 0)), S['gt_r']),
+            ])
+        n   = len(tdata)
+        tbl = Table(tdata, colWidths=SUM_WIDTHS, repeatRows=1)
+        style = [
+            # Header row
             ('BACKGROUND',    (0, 0), (-1, 0),  NAVY),
-            ('TEXTCOLOR',     (0, 0), (-1, 0),  colors.white),
+            ('TEXTCOLOR',     (0, 0), (-1, 0),  WHITE),
             ('FONTNAME',      (0, 0), (-1, 0),  'Helvetica-Bold'),
+            ('ALIGN',         (1, 0), (-1, 0),  'CENTER'),
+            ('LINEBELOW',     (0, 0), (-1, 0),  2, GOLD),
+            # Data rows
             ('FONTSIZE',      (0, 0), (-1, -1), 7.5),
-            ('ROWBACKGROUNDS',(0, 1), (-1, -2), [LGRAY, colors.white]),
-            ('BACKGROUND',    (0, -1),(-1, -1), DGRAY),
-            ('FONTNAME',      (0, -1),(-1, -1), 'Helvetica-Bold'),
+            ('ROWBACKGROUNDS',(0, 1), (-1, n - 2 if has_total else -1),
+                              [SLATE_100, WHITE]),
             ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
             ('TOPPADDING',    (0, 0), (-1, -1), 4),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
             ('LEFTPADDING',   (0, 0), (-1, -1), 5),
             ('RIGHTPADDING',  (0, 0), (-1, -1), 5),
-            ('GRID',          (0, 0), (-1, -1), 0.3, MGRAY),
-            ('LINEBELOW',     (0, 0), (-1, 0),  1.2, BLUE),
-        ])
-
-    def _summary_table(rows, total_row):
-        tdata = [[Paragraph(h, S['hdr_wht']) for h in SUM_HEADERS]]
-        for r in rows:
-            tdata.append([
-                Paragraph(str(r.get('product', '')), S['cell']),
-                Paragraph(str(r.get('dur') or '\u2014'), S['cell']),
-                Paragraph(str(r.get('planned',     0)), S['cell']),
-                Paragraph(str(r.get('aired',       0)), S['cell']),
-                Paragraph(str(r.get('missed',      0)), S['cell']),
-                Paragraph(str(r.get('extra',       0)), S['cell']),
-                Paragraph(str(r.get('third_party', 0)), S['cell']),
-            ])
-        t = total_row
-        tdata.append([
-            Paragraph('Grand Total', S['gt']),
-            Paragraph('', S['cell']),
-            Paragraph(str(t.get('planned',     0)), S['cell']),
-            Paragraph(str(t.get('aired',       0)), S['cell']),
-            Paragraph(str(t.get('missed',      0)), S['cell']),
-            Paragraph(str(t.get('extra',       0)), S['cell']),
-            Paragraph(str(t.get('third_party', 0)), S['cell']),
-        ])
-        tbl = Table(tdata, colWidths=SUM_WIDTHS, repeatRows=1)
-        tbl.setStyle(_sum_style())
+            ('LINEBELOW',     (0, 0), (-1, -1), 0.25, SLATE_200),
+            # Totals row
+        ]
+        if has_total:
+            style += [
+                ('BACKGROUND',    (0, -1), (-1, -1), HexColor('#EEF2FF')),
+                ('LINEABOVE',     (0, -1), (-1, -1), 1.2, NAVY),
+                ('LINEBELOW',     (0, -1), (-1, -1), 1.2, NAVY),
+            ]
+        tbl.setStyle(TableStyle(style))
         return tbl
 
-    # Commercial Benefits
     if data.get('commercial'):
-        story.append(Paragraph('Commercial Benefits', S['sect']))
-        story.append(Spacer(1, 0.2 * cm))
-        story.append(_summary_table(data['commercial'], data['commercial_total']))
-        story.append(Spacer(1, 0.4 * cm))
+        story.append(Paragraph('Commercial Benefits', S['prog_lbl']))
+        story.append(Spacer(1, 0.15 * cm))
+        story.append(_build_sum_table(data['commercial'], data['commercial_total']))
+        story.append(Spacer(1, 0.5 * cm))
 
-    # Sponsorship Benefits — one table per programme, grand total at end
     if data.get('sponsorship'):
-        story.append(Paragraph('Sponsorship Benefits', S['sect']))
-        story.append(Spacer(1, 0.2 * cm))
-        for section in data['sponsorship']:
-            story.append(Paragraph(section['programme'].upper(), S['prog_lbl']))
-            story.append(Spacer(1, 0.1 * cm))
-            tdata_s = [[Paragraph(h, S['hdr_wht']) for h in SUM_HEADERS]]
-            for r in section['rows']:
-                tdata_s.append([
-                    Paragraph(str(r.get('product', '')), S['cell']),
-                    Paragraph(str(r.get('dur') or '\u2014'), S['cell']),
-                    Paragraph(str(r.get('planned',     0)), S['cell']),
-                    Paragraph(str(r.get('aired',       0)), S['cell']),
-                    Paragraph(str(r.get('missed',      0)), S['cell']),
-                    Paragraph(str(r.get('extra',       0)), S['cell']),
-                    Paragraph(str(r.get('third_party', 0)), S['cell']),
-                ])
-            s_tbl = Table(tdata_s, colWidths=SUM_WIDTHS, repeatRows=1)
-            s_tbl.setStyle(TableStyle([
-                ('BACKGROUND',    (0, 0), (-1, 0),  NAVY),
-                ('TEXTCOLOR',     (0, 0), (-1, 0),  colors.white),
-                ('FONTSIZE',      (0, 0), (-1, -1), 7.5),
-                ('ROWBACKGROUNDS',(0, 1), (-1, -1), [LGRAY, colors.white]),
-                ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-                ('TOPPADDING',    (0, 0), (-1, -1), 4),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-                ('LEFTPADDING',   (0, 0), (-1, -1), 5),
-                ('RIGHTPADDING',  (0, 0), (-1, -1), 5),
-                ('GRID',          (0, 0), (-1, -1), 0.3, MGRAY),
-                ('LINEBELOW',     (0, 0), (-1, 0),  1.2, BLUE),
-            ]))
-            story.append(s_tbl)
-            story.append(Spacer(1, 0.3 * cm))
-        # Sponsorship Grand Total
-        story.append(Paragraph('SPONSORSHIP GRAND TOTAL', S['sect']))
+        story.append(Paragraph('Sponsorship Benefits', S['prog_lbl']))
         story.append(Spacer(1, 0.1 * cm))
-        story.append(_summary_table([], data['sponsorship_total']))
+        for section in data['sponsorship']:
+            prog_label = Table(
+                [[Paragraph(section['programme'].upper(), S['sub'])]],
+                colWidths=[content_w],
+            )
+            prog_label.setStyle(TableStyle([
+                ('BACKGROUND',    (0, 0), (-1, -1), HexColor('#F0F4FF')),
+                ('LEFTPADDING',   (0, 0), (-1, -1), 8),
+                ('TOPPADDING',    (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('LINEBEFORE',    (0, 0), (0, -1),  2, NAVY_MID),
+            ]))
+            story.append(prog_label)
+            story.append(Spacer(1, 0.1 * cm))
+            story.append(_build_sum_table(section['rows'], {}, has_total=False))
+            story.append(Spacer(1, 0.25 * cm))
+        story.append(Paragraph('SPONSORSHIP GRAND TOTAL', S['prog_lbl']))
+        story.append(Spacer(1, 0.1 * cm))
+        story.append(_build_sum_table([], data['sponsorship_total']))
 
-    # Notes
     if meta and meta.notes:
-        story.append(Spacer(1, 0.4 * cm))
-        story.append(Paragraph('Notes:', S['sect']))
+        story.append(Spacer(1, 0.5 * cm))
+        story.append(_section_heading('Notes'))
+        story.append(Spacer(1, 0.2 * cm))
         for line in meta.notes.splitlines():
-            story.append(Paragraph(line, S['sub']))
+            if line.strip():
+                story.append(Paragraph(line, S['sub']))
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # MATCHED LMRB REPORT (Landscape)
+    # PAGE 3+ — MATCHED LMRB REPORT (Landscape)
     # ═══════════════════════════════════════════════════════════════════════════
     story.append(NextPageTemplate('landscape'))
     story.append(PageBreak())
 
-    story.append(Paragraph('MATCHED LMRB REPORT', S['sub_hdr']))
-    story.append(Paragraph(
+    land_content_w = LAND_W - 2 * MARGIN
+    story.append(_section_heading(
+        'MATCHED LMRB REPORT',
         f'{account.name}  \u00b7  {channel}  \u00b7  {month}'
         '  \u00b7  Commercial (TC-confirmed) + Sponsorship (assigned)',
-        S['sub'],
     ))
-    story.append(HRFlowable(width='100%', thickness=1, color=BLUE, spaceAfter=8))
+    story.append(Spacer(1, 0.35 * cm))
 
-    # Fetch LMRB rows
+    # Fetch rows
     commercial_lmrb_qs = LMRBRow.objects.filter(account_id=account_id, channel__iexact=channel)
     if date_min and date_max:
         commercial_lmrb_qs = commercial_lmrb_qs.filter(date__range=(date_min, date_max))
@@ -4384,8 +4460,6 @@ def summary_pdf(request):
         .distinct()
         .order_by('date', 'program', 'advt_time')
     )
-
-    from core.models import SponsorshipLmrbAssignment
     spon_lmrb_ids = set(
         SponsorshipLmrbAssignment.objects.filter(
             account_id=account_id,
@@ -4402,55 +4476,36 @@ def summary_pdf(request):
     all_lmrb_rows = list(commercial_lmrb_qs) + list(sponsorship_only_qs)
 
     LMRB_HEADERS = [
-        'Product\nGroup', 'Advertiser', 'Product', 'Advt\nTheme', 'Ads',
-        'Channel', 'Program',
-        'Dd', 'Mn', 'Yr', 'Day', 'Prog\nTime', 'Advt\nTime',
-        'AdPos', 'TotAds', 'BrkNo', 'PosIn\nBrk', 'AdsIn\nBrk',
+        'Prod Group', 'Advertiser', 'Product', 'Advt Theme', 'Ads',
+        'Channel', 'Program', 'Date', 'Day', 'Prog Time', 'Advt Time',
+        'Ad Pos', 'Tot Ads', 'Brk No', 'Pos/Brk', 'Ads/Brk',
         'Lng', 'Dur', 'Cost',
     ]
+    _lw = land_content_w
     LMRB_WIDTHS = [
-        2.2 * cm, 2.5 * cm, 2.2 * cm, 3.0 * cm, 0.8 * cm,
-        2.0 * cm, 2.5 * cm,
-        0.65 * cm, 0.65 * cm, 0.9 * cm, 0.8 * cm, 1.2 * cm, 1.2 * cm,
-        0.9 * cm, 0.9 * cm, 0.9 * cm, 0.9 * cm, 0.9 * cm,
-        0.7 * cm, 0.7 * cm, 1.3 * cm,
+        _lw * 0.08, _lw * 0.10, _lw * 0.08, _lw * 0.12, _lw * 0.03,
+        _lw * 0.08, _lw * 0.10, _lw * 0.07, _lw * 0.04, _lw * 0.05, _lw * 0.05,
+        _lw * 0.04, _lw * 0.04, _lw * 0.04, _lw * 0.04, _lw * 0.04,
+        _lw * 0.03, _lw * 0.03, _lw * 0.05,
     ]
-    lmrb_tbl_style = TableStyle([
-        ('BACKGROUND',    (0, 0), (-1, 0),  NAVY),
-        ('TEXTCOLOR',     (0, 0), (-1, 0),  colors.white),
-        ('FONTNAME',      (0, 0), (-1, 0),  'Helvetica-Bold'),
-        ('FONTSIZE',      (0, 0), (-1, -1), 6),
-        ('ROWBACKGROUNDS',(0, 1), (-1, -1), [LGRAY, colors.white]),
-        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING',    (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-        ('LEFTPADDING',   (0, 0), (-1, -1), 2),
-        ('RIGHTPADDING',  (0, 0), (-1, -1), 2),
-        ('GRID',          (0, 0), (-1, -1), 0.3, MGRAY),
-        ('LINEBELOW',     (0, 0), (-1, 0),  1.2, BLUE),
-    ])
 
     if all_lmrb_rows:
         lmrb_data = [[Paragraph(h, S['hdr_wht']) for h in LMRB_HEADERS]]
         for lr in all_lmrb_rows:
             cost_str = f'{lr.cost:,.2f}' if lr.cost is not None else ''
-            dd = str(lr.date.day)   if lr.date else ''
-            mn = str(lr.date.month) if lr.date else ''
-            yr = str(lr.date.year)  if lr.date else ''
+            date_str = lr.date.strftime('%d/%m/%y') if lr.date else ''
             lmrb_data.append([
                 Paragraph(str(lr.product_group or ''), S['cell_sm']),
-                Paragraph(str(lr.advertiser or ''), S['cell_sm']),
-                Paragraph(str(lr.product or ''), S['cell_sm']),
-                Paragraph(str(lr.advt_theme or ''), S['cell_sm']),
-                Paragraph(str(lr.ads or ''), S['cell_sm']),
-                Paragraph(str(lr.channel or ''), S['cell_sm']),
-                Paragraph(str(lr.program or ''), S['cell_sm']),
-                Paragraph(dd, S['cell_sm']),
-                Paragraph(mn, S['cell_sm']),
-                Paragraph(yr, S['cell_sm']),
-                Paragraph(str(lr.day or ''), S['cell_sm']),
-                Paragraph(str(lr.prog_time or ''), S['cell_sm']),
-                Paragraph(str(lr.advt_time or ''), S['cell_sm']),
+                Paragraph(str(lr.advertiser or ''),    S['cell_sm']),
+                Paragraph(str(lr.product or ''),       S['cell_sm']),
+                Paragraph(str(lr.advt_theme or ''),    S['cell_sm']),
+                Paragraph(str(lr.ads or ''),           S['cell_sm']),
+                Paragraph(str(lr.channel or ''),       S['cell_sm']),
+                Paragraph(str(lr.program or ''),       S['cell_sm']),
+                Paragraph(date_str,                    S['cell_sm']),
+                Paragraph(str(lr.day or ''),           S['cell_sm']),
+                Paragraph(str(lr.prog_time or ''),     S['cell_sm']),
+                Paragraph(str(lr.advt_time or ''),     S['cell_sm']),
                 Paragraph(str(lr.ad_pos     if lr.ad_pos     is not None else ''), S['cell_sm']),
                 Paragraph(str(lr.tot_ads    if lr.tot_ads    is not None else ''), S['cell_sm']),
                 Paragraph(str(lr.brk_no     if lr.brk_no     is not None else ''), S['cell_sm']),
@@ -4458,15 +4513,28 @@ def summary_pdf(request):
                 Paragraph(str(lr.ads_in_brk if lr.ads_in_brk is not None else ''), S['cell_sm']),
                 Paragraph(str(lr.lng or ''), S['cell_sm']),
                 Paragraph(str(lr.duration or ''), S['cell_sm']),
-                Paragraph(cost_str, S['cell_sm']),
+                Paragraph(cost_str,          S['cell_sm']),
             ])
         lmrb_tbl = Table(lmrb_data, colWidths=LMRB_WIDTHS, repeatRows=1)
-        lmrb_tbl.setStyle(lmrb_tbl_style)
+        lmrb_tbl.setStyle(TableStyle([
+            ('BACKGROUND',    (0, 0), (-1, 0),  NAVY),
+            ('TEXTCOLOR',     (0, 0), (-1, 0),  WHITE),
+            ('FONTNAME',      (0, 0), (-1, 0),  'Helvetica-Bold'),
+            ('LINEBELOW',     (0, 0), (-1, 0),  2, GOLD),
+            ('FONTSIZE',      (0, 0), (-1, -1), 5.5),
+            ('ROWBACKGROUNDS',(0, 1), (-1, -1), [SLATE_100, WHITE]),
+            ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING',    (0, 0), (-1, -1), 2),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ('LEFTPADDING',   (0, 0), (-1, -1), 2),
+            ('RIGHTPADDING',  (0, 0), (-1, -1), 2),
+            ('LINEBELOW',     (0, 1), (-1, -1), 0.2, SLATE_200),
+        ]))
         story.append(lmrb_tbl)
     else:
         story.append(Paragraph('No matched LMRB rows found for this scope.', S['sub']))
 
-    # ── Build response ────────────────────────────────────────────────────────
+    # ── Build & respond ───────────────────────────────────────────────────────
     doc.build(story)
     buf.seek(0)
     fname = f'Reconciliation_{account.name}_{channel}_{month}.pdf'.replace(' ', '_')
