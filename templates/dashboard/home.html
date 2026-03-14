@@ -48,9 +48,7 @@
   }
 </style>
 
-{# ══════════════════════════════════════════════════════════
-   HERO BANNER
-══════════════════════════════════════════════════════════ #}
+<!-- HERO BANNER -->
 <div class="relative overflow-hidden rounded-2xl mb-6 fade-up"
      style="background:linear-gradient(135deg,#0c0e13 0%,#1e2030 55%,#2d1a1b 100%);">
   {# Decorative glows #}
@@ -111,9 +109,7 @@
   </div>
 </div>
 
-{# ══════════════════════════════════════════════════════════
-   ADMIN / SUPER ADMIN
-══════════════════════════════════════════════════════════ #}
+<!-- ADMIN / SUPER ADMIN -->
 {% if request.user.role in "super_admin,admin" %}
 
 {# ── Stat strip ── #}
@@ -395,9 +391,7 @@
   </div>
 </div>
 
-{# ══════════════════════════════════════════════════════════
-   PLANNER
-══════════════════════════════════════════════════════════ #}
+<!-- PLANNER -->
 {% elif request.user.role == 'planner' %}
 
 <div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-5 fade-up-2">
@@ -484,9 +478,7 @@
   </div>
 </div>
 
-{# ══════════════════════════════════════════════════════════
-   OPERATIONS
-══════════════════════════════════════════════════════════ #}
+<!-- OPERATIONS -->
 {% elif request.user.role == 'operations' %}
 
 <div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-5 fade-up-2">
@@ -578,9 +570,7 @@
   </div>
 </div>
 
-{# ══════════════════════════════════════════════════════════
-   TEAM HEAD
-══════════════════════════════════════════════════════════ #}
+<!-- TEAM HEAD -->
 {% elif request.user.role == 'team_head' %}
 
 <div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-5 fade-up-2">
