@@ -371,11 +371,12 @@
                 {% endif %}
               </td>
               <td class="text-right">
-                {% if row.programmes %}
+                {% if row.programmes or row.raw_lmrb_count %}
                 <button onclick="toggleCommDetails(this)"
                         data-programmes="{{ row.programmes_json|escape }}"
                         data-dates="{{ row.dates_json|escape }}"
                         data-pt="{{ row.pt_count }}" data-npt="{{ row.non_pt_count }}"
+                        data-is-raw="{% if not row.aired and not row.lmrb_count and row.raw_lmrb_count %}1{% else %}0{% endif %}"
                         class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px]
                                font-semibold bg-slate-100 text-slate-600 hover:bg-blue-100
                                hover:text-blue-700 transition">
@@ -465,11 +466,12 @@
                 {% endif %}
               </td>
               <td class="text-right">
-                {% if row.programmes %}
+                {% if row.programmes or row.raw_lmrb_count %}
                 <button onclick="toggleCommDetails(this)"
                         data-programmes="{{ row.programmes_json|escape }}"
                         data-dates="{{ row.dates_json|escape }}"
                         data-pt="{{ row.pt_count }}" data-npt="{{ row.non_pt_count }}"
+                        data-is-raw="{% if not row.aired and not row.lmrb_count and row.raw_lmrb_count %}1{% else %}0{% endif %}"
                         class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px]
                                font-semibold bg-slate-100 text-slate-600 hover:bg-amber-100
                                hover:text-amber-700 transition">
@@ -1570,7 +1572,16 @@ function toggleCommDetails(btn) {
   const pt    = parseInt(btn.dataset.pt || '0');
   const npt   = parseInt(btn.dataset.npt || '0');
   const total = pt + npt;
-  let html = '<div class="flex flex-wrap gap-6 text-xs">';
+  const isRaw = btn.dataset.isRaw === '1';
+  let html = '';
+  if (isRaw) {
+    html += `<div class="mb-3 flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-lg
+                         bg-amber-50 border border-amber-200 text-amber-700">
+      <i class="fa-solid fa-triangle-exclamation"></i>
+      <span>Verification not yet run — showing raw LMRB observations found in this period.</span>
+    </div>`;
+  }
+  html += '<div class="flex flex-wrap gap-6 text-xs">';
   // PT / Non-PT bar
   if (total > 0) {
     const ptPct = Math.round(pt / total * 100);
