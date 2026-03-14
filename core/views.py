@@ -4784,7 +4784,7 @@ def admin_export(request):
             _write_lmrb_sheet(ws_un, unmatched_qs, 'Unmatched LMRB')
 
     # ── 2. Schedule Rows sheet ───────────────────────────────────────────────
-    sr_qs = ScheduleRow.objects.select_related('schedule').filter(account_id=account_id)
+    sr_qs = ScheduleRow.objects.select_related('schedule', 'matched_lmrb').filter(account_id=account_id)
     if channel:         sr_qs = sr_qs.filter(channel__iexact=channel)
     if month:           sr_qs = sr_qs.filter(month=month)
     if schedule_number: sr_qs = sr_qs.filter(schedule__schedule_number=schedule_number)
@@ -4938,7 +4938,7 @@ def admin_export(request):
         ws_mm.cell(row_i, 11, str(mm.lmrb_row.date) if mm.lmrb_row_id and mm.lmrb_row.date else '')
         ws_mm.cell(row_i, 12, mm.lmrb_row.advt_time if mm.lmrb_row_id else '')
         ws_mm.cell(row_i, 13, mm.note or '')
-        ws_mm.cell(row_i, 14, mm.matched_by.get_full_name() or mm.matched_by.email if mm.matched_by_id else '')
+        ws_mm.cell(row_i, 14, mm.matched_by.name if mm.matched_by_id else '')
         ws_mm.cell(row_i, 15, str(mm.matched_at) if mm.matched_at else '')
     _norm_rows(ws_mm, len(mm_rows), len(MM_HEADERS))
 
@@ -4974,7 +4974,7 @@ def admin_export(request):
         ws_sp.cell(row_i,  9, lr.advt_time if lr else '')
         ws_sp.cell(row_i, 10, lr.duration if lr else '')
         ws_sp.cell(row_i, 11, sp.match_type or '')
-        ws_sp.cell(row_i, 12, sp.matched_by.get_full_name() or sp.matched_by.email if sp.matched_by_id else 'Auto')
+        ws_sp.cell(row_i, 12, sp.matched_by.name if sp.matched_by_id else 'Auto')
         ws_sp.cell(row_i, 13, str(sp.matched_at) if sp.matched_at else '')
     _norm_rows(ws_sp, len(sp_rows), len(SP_HEADERS))
 
