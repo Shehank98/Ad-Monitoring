@@ -546,7 +546,30 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
 
             lmrb_themes = _lmrb_themes_for_brand(brand, dur, lmrb_theme_map)
 
-            # Aired = count of SponsorshipLmrbAssignment for this brand/dur/programme
+            # ── Aired (Sponsorship) ───────────────────────────────────────────
+            # Combine two sources so neither is missed:
+            #   a) TC-confirmed: TCRows linked to a SPONSORSHIP ScheduleRow that
+            #      are also LMRB-confirmed (TCRow.is_lmrb_confirmed=True).
+            #      This is the ground truth when TC reconciliation has run.
+            #   b) SponsorshipLmrbAssignment: manual/auto LMRB assignments made
+            #      via the sponsorship picker (used when TC data is absent).
+            # Deduplication by lmrb_row_id prevents counting the same observation
+            # twice if a row appears in both sources.
+            tc_spon_q = TCRow.objects.filter(
+                account_id=account_id, channel=channel,
+                tc_report__month=month,
+                is_schedule_matched=True,
+                is_lmrb_confirmed=True,
+                matched_schedule__ad_type='SPONSORSHIP',
+                matched_schedule__programme=prog,
+                matched_schedule__brand=brand,
+                matched_lmrb__isnull=False,
+            )
+            if dur_int is not None:
+                tc_spon_q = tc_spon_q.filter(matched_schedule__duration=dur_int)
+            if schedule_id:
+                tc_spon_q = tc_spon_q.filter(matched_schedule__schedule_id=schedule_id)
+
             spon_asgn_q = SponsorshipLmrbAssignment.objects.filter(
                 account_id=account_id,
                 schedule_row__channel=channel,
@@ -558,7 +581,12 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
             )
             if schedule_id:
                 spon_asgn_q = spon_asgn_q.filter(schedule_row__schedule_id=schedule_id)
-            aired = spon_asgn_q.count()
+
+            # Union LMRB row IDs from both sources; len() gives unique aired count.
+            tc_lmrb_ids   = set(tc_spon_q.values_list('matched_lmrb_id', flat=True))
+            spon_lmrb_ids  = set(spon_asgn_q.values_list('lmrb_row_id', flat=True))
+            all_aired_ids  = tc_lmrb_ids | spon_lmrb_ids
+            aired          = len(all_aired_ids)
 
             # Status
             if aired >= planned:
@@ -570,11 +598,8 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
                     available_lmrb = 0
                 status = 'incomplete' if (aired > 0 or available_lmrb > 0) else 'no_data'
 
-            # 3rd Party for sponsorship = count of assigned LMRB spots.
-            # This is the same as `aired` (SponsorshipLmrbAssignment count) and
-            # is what users see as "manually matched LMRB spots" in the UI.
-            # The previous behaviour of showing the total independent LMRB count
-            # (which can be hundreds) was confusing for sponsorship rows.
+            # 3rd Party for sponsorship = total unique LMRB observations confirmed
+            # (same set as aired — TC-confirmed + SponsorshipLmrbAssignment, deduplicated).
             third_party = aired
 
             missed = max(0, planned - aired)

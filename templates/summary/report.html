@@ -699,6 +699,10 @@
                oninput="filterSponRows()"
                class="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-400">
       </div>
+      <select id="spon-product-filter" onchange="filterSponRows()"
+              class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-amber-400 min-w-[130px]">
+        <option value="">All Products</option>
+      </select>
       <button type="button" onclick="selectAllFiltered()"
               class="text-xs px-3 py-1.5 rounded-lg bg-amber-100 text-amber-700 font-semibold hover:bg-amber-200 transition border border-amber-200">
         <i class="fa-solid fa-check-double mr-1"></i>Select All Filtered
@@ -716,6 +720,7 @@
         <thead>
           <tr>
             <th class="text-center w-8"><input type="checkbox" id="spon-select-all" title="Select all visible"></th>
+            <th class="text-left">Product</th>
             <th class="text-left">Theme</th>
             <th class="text-center">Dur</th>
             <th class="text-center">Date</th>
@@ -785,12 +790,25 @@
         }
         const tbody = document.getElementById('spon-cand-tbody');
         tbody.innerHTML = '';
+
+        // Populate product filter dropdown with unique products from this batch
+        const prodSelect = document.getElementById('spon-product-filter');
+        prodSelect.innerHTML = '<option value="">All Products</option>';
+        const uniqueProds = [...new Set(rows.map(r => r.product||'').filter(Boolean))].sort();
+        uniqueProds.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p; opt.textContent = p;
+          prodSelect.appendChild(opt);
+        });
+
         rows.forEach(r => {
           const tr = document.createElement('tr');
+          tr.dataset.product = (r.product||'').toLowerCase();
           tr.innerHTML = `
             <td class="text-center">
               <input type="checkbox" class="spon-lmrb-chk" data-id="${r.id}">
             </td>
+            <td class="text-xs font-semibold text-amber-700">${r.product||'—'}</td>
             <td class="font-medium text-slate-800">${r.advt_theme||''}</td>
             <td class="text-center">${r.duration||''}</td>
             <td class="text-center">${r.date||''}</td>
@@ -831,17 +849,23 @@
   };
 
   window.filterSponRows = function () {
-    const q = (document.getElementById('spon-theme-filter').value || '').toLowerCase();
+    const q    = (document.getElementById('spon-theme-filter').value || '').toLowerCase();
+    const prod = (document.getElementById('spon-product-filter').value || '').toLowerCase();
     let visible = 0;
     document.querySelectorAll('#spon-cand-tbody tr').forEach(tr => {
-      const theme = (tr.querySelector('td:nth-child(2)')?.textContent || '').toLowerCase();
-      const show = !q || theme.includes(q);
+      // theme is now td:nth-child(3), product is td:nth-child(2) / tr.dataset.product
+      const theme   = (tr.querySelector('td:nth-child(3)')?.textContent || '').toLowerCase();
+      const trProd  = (tr.dataset.product || '').toLowerCase();
+      const themeOk = !q    || theme.includes(q);
+      const prodOk  = !prod || trProd === prod;
+      const show = themeOk && prodOk;
       tr.style.display = show ? '' : 'none';
       if (show) visible++;
     });
     const total = document.querySelectorAll('#spon-cand-tbody tr').length;
+    const filterActive = q || prod;
     document.getElementById('spon-visible-count').textContent =
-        q ? visible + ' of ' + total + ' shown' : total + ' rows';
+        filterActive ? visible + ' of ' + total + ' shown' : total + ' rows';
     updateSelectedCount();
   };
 

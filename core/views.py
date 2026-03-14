@@ -1532,32 +1532,40 @@ def monitoring_dashboard(request):
             """Aggregate raw LMRB count + programme details + date counts.
 
             bm_product — BrandMapping.product value.  When set, only LMRBRows
-            whose product field matches are included, so "Mobitel Broadband BB"
-            is never mixed with "SLT Broadband BB".  When empty all products
-            for that theme/duration are included.
+            whose product field matches are included (so "Mobitel Broadband BB"
+            is never mixed with "SLT Broadband BB").  When the product field on
+            the LMRB rows is empty or doesn't match (common for sponsorship/BB
+            themes where LMRB data lacks a product column), the function falls
+            back to matching by theme + duration only, so the chart never shows 0
+            simply because of missing product metadata.
             duration=None aggregates across all durations.
             """
-            prod_filter = bm_product.lower().strip() if bm_product else None
-            total = 0
-            merged_progs = {}
-            merged_dates = {}
-            for (t, d, p), entry in _raw_lmrb_by_tdp.items():
-                if t != t_lower:
-                    continue
-                if duration is not None and d != duration:
-                    continue
-                if prod_filter is not None and p != prod_filter:
-                    continue
-                total += entry['count']
-                for prog, v in entry['progs'].items():
-                    e = merged_progs.setdefault(
-                        prog, {'count': 0, 'prime': 0, 'non_prime': 0}
-                    )
-                    e['count'] += v['count']
-                    e['prime'] += v['prime']
-                    e['non_prime'] += v['non_prime']
-                for dd, c in entry['dates'].items():
-                    merged_dates[dd] = merged_dates.get(dd, 0) + c
+            def _scan(use_prod_filter):
+                tot, progs, dates = 0, {}, {}
+                pf = bm_product.lower().strip() if (use_prod_filter and bm_product) else None
+                for (t, d, p), entry in _raw_lmrb_by_tdp.items():
+                    if t != t_lower:
+                        continue
+                    if duration is not None and d != duration:
+                        continue
+                    if pf is not None and p != pf:
+                        continue
+                    tot += entry['count']
+                    for prog, v in entry['progs'].items():
+                        e = progs.setdefault(prog, {'count': 0, 'prime': 0, 'non_prime': 0})
+                        e['count'] += v['count']
+                        e['prime'] += v['prime']
+                        e['non_prime'] += v['non_prime']
+                    for dd, c in entry['dates'].items():
+                        dates[dd] = dates.get(dd, 0) + c
+                return tot, progs, dates
+
+            total, merged_progs, merged_dates = _scan(use_prod_filter=True)
+            # Fallback: if product filter wiped out all rows (LMRB rows have no
+            # matching product metadata, e.g. BB / break-bumper themes), retry
+            # without the product restriction so the count is still useful.
+            if total == 0 and bm_product:
+                total, merged_progs, merged_dates = _scan(use_prod_filter=False)
             return total, merged_progs, merged_dates
 
         def _build_chart_rows(ad_type_val):
@@ -4395,10 +4403,24 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month):
             schedule_row__month=month,
         ).values_list('lmrb_row_id', flat=True)
     )
-    spon_qs = LMRBRow.objects.filter(id__in=spon_ids) if spon_ids else LMRBRow.objects.none()
+
+    # TC-confirmed sponsorship LMRB rows: TCRow.matched_lmrb where the TCRow is
+    # linked to a SPONSORSHIP ScheduleRow.  These are confirmed by TC reconciliation
+    # but may not have a SponsorshipLmrbAssignment record yet; they must still appear
+    # in the final LMRB export so the complete aired picture is captured.
+    tc_spon_lmrb_ids = set(
+        TCRow.objects.filter(
+            account_id=account_id, channel=channel,
+            tc_report__month=month,
+            is_schedule_matched=True,
+            is_lmrb_confirmed=True,
+            matched_schedule__ad_type='SPONSORSHIP',
+            matched_lmrb__isnull=False,
+        ).values_list('matched_lmrb_id', flat=True)
+    )
 
     # Combine, deduplicate by id, sort by date+time
-    all_ids  = set(comm_qs.values_list('id', flat=True)) | spon_ids
+    all_ids = set(comm_qs.values_list('id', flat=True)) | spon_ids | tc_spon_lmrb_ids
     combined = list(
         LMRBRow.objects.filter(id__in=all_ids).order_by('date', 'advt_time')
     )
@@ -4846,12 +4868,20 @@ def sponsorship_candidates(request):
 
     rows = lmrb_candidates(int(account_id), channel, month)
 
-    # Optional server-side filter by brand mapping theme
+    # Optional server-side filter by brand mapping theme.
+    # NOTE: `brand` here is actually the *product* name from the summary row
+    # (openSponPicker passes row.product).  We resolve themes by looking up all
+    # BrandMappings whose .product matches that value; if none match by product
+    # we fall back to matching by .brand so direct brand names also work.
     if brand or duration:
         from core.models import BrandMapping as BM
+        bm_all = list(BM.objects.filter(account_id=account_id))
+        brand_lower = brand.lower().strip() if brand else ''
         themes = set()
-        for bm in BM.objects.filter(account_id=account_id):
-            if brand and bm.brand.lower().strip() != brand.lower().strip():
+
+        # Pass 1 — match BrandMapping by product (row.product from template)
+        for bm in bm_all:
+            if brand_lower and (bm.product or '').lower().strip() != brand_lower:
                 continue
             if duration:
                 try:
@@ -4861,6 +4891,20 @@ def sponsorship_candidates(request):
                     pass
             if bm.theme:
                 themes.add(bm.theme.lower().strip())
+
+        # Pass 2 — fallback: match by brand name directly
+        if not themes and brand_lower:
+            for bm in bm_all:
+                if bm.brand.lower().strip() != brand_lower:
+                    continue
+                if duration:
+                    try:
+                        if bm.duration is not None and int(bm.duration) != int(duration):
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+                if bm.theme:
+                    themes.add(bm.theme.lower().strip())
 
         if themes:
             rows = [

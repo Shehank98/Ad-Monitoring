@@ -244,7 +244,7 @@ def lmrb_candidates(account_id: int, channel: str, month: str) -> list:
 
     return list(qs.values(
         'id', 'date', 'advt_time', 'advt_theme', 'duration',
-        'program', 'source',
+        'program', 'source', 'product',
     ))
 
 
