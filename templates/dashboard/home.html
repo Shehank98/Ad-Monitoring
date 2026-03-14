@@ -1,254 +1,724 @@
 {% extends 'base.html' %}
 {% block title %}Dashboard{% endblock %}
 {% block page_title %}Dashboard{% endblock %}
-{% block page_subtitle %}Welcome back, {{ request.user.name }}{% endblock %}
+{% block page_subtitle %}Overview · Phoenix O&M{% endblock %}
 
 {% block content %}
 
+{# ── Shared hero styles ──────────────────────────────────────────────── #}
+<style>
+  @keyframes fadeUp {
+    from { opacity:0; transform:translateY(14px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+  .fade-up { animation: fadeUp .45s ease both; }
+  .fade-up-2 { animation: fadeUp .45s .08s ease both; }
+  .fade-up-3 { animation: fadeUp .45s .16s ease both; }
+  .fade-up-4 { animation: fadeUp .45s .24s ease both; }
+
+  .stat-card {
+    background:#fff; border-radius:1rem;
+    border:1px solid #f1f5f9;
+    box-shadow:0 1px 4px rgba(0,0,0,.06);
+    padding:1.25rem 1.25rem;
+    display:flex; align-items:center; gap:1rem;
+    transition:box-shadow .2s, transform .2s;
+  }
+  .stat-card:hover { box-shadow:0 4px 16px rgba(0,0,0,.1); transform:translateY(-2px); }
+
+  .acct-row:hover { background:#fafbfd; }
+  .activity-dot::before {
+    content:''; position:absolute; left:50%; top:100%;
+    transform:translateX(-50%);
+    width:1px; height:100%; background:#e2e8f0;
+  }
+  .activity-item:last-child .activity-dot::before { display:none; }
+
+  .quick-action {
+    display:flex; align-items:center; gap:.875rem;
+    padding:.875rem 1rem; border-radius:.875rem;
+    border:1.5px solid #f1f5f9;
+    background:#fff; text-decoration:none;
+    transition:border-color .18s, box-shadow .18s, transform .18s;
+  }
+  .quick-action:hover {
+    border-color:#cbd5e1;
+    box-shadow:0 4px 12px rgba(0,0,0,.08);
+    transform:translateY(-1px);
+  }
+</style>
+
+{# ══════════════════════════════════════════════════════════
+   HERO BANNER
+══════════════════════════════════════════════════════════ #}
+<div class="relative overflow-hidden rounded-2xl mb-6 fade-up"
+     style="background:linear-gradient(135deg,#0c0e13 0%,#1e2030 55%,#2d1a1b 100%);">
+  {# Decorative glows #}
+  <div class="absolute top-0 right-0 w-80 h-80 rounded-full blur-3xl"
+       style="background:radial-gradient(circle,rgba(235,63,67,.25) 0%,transparent 70%);transform:translate(30%,-40%);"></div>
+  <div class="absolute bottom-0 left-1/3 w-56 h-56 rounded-full blur-3xl"
+       style="background:radial-gradient(circle,rgba(99,102,241,.12) 0%,transparent 70%);transform:translateY(40%);"></div>
+
+  <div class="relative px-7 py-7 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
+    {# Left — avatar + greeting #}
+    <div class="flex items-center gap-4">
+      <div class="w-14 h-14 rounded-2xl flex items-center justify-center text-white font-extrabold text-xl flex-shrink-0"
+           style="background:linear-gradient(135deg,#EB3F43,#c4292d);box-shadow:0 8px 24px rgba(235,63,67,.35);">
+        {{ request.user.name|first|upper }}
+      </div>
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5"
+           style="color:rgba(255,255,255,.45);" id="greeting-label">Welcome back,</p>
+        <h2 class="text-xl font-extrabold text-white leading-tight">{{ request.user.name }}</h2>
+        <div class="flex flex-wrap items-center gap-2 mt-1.5">
+          <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full"
+                style="background:rgba(255,255,255,.1);color:rgba(255,255,255,.8);">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+            {% if request.user.role == 'super_admin' %}Super Admin
+            {% elif request.user.role == 'admin' %}Admin
+            {% elif request.user.role == 'team_head' %}Team Head
+            {% elif request.user.role == 'planner' %}Planner
+            {% elif request.user.role == 'operations' %}Operations
+            {% else %}{{ request.user.role }}{% endif %}
+          </span>
+          <span class="text-xs font-medium" style="color:rgba(255,255,255,.35);">
+            <i class="fa-solid fa-building mr-1" style="color:rgba(235,63,67,.6);"></i>
+            Phoenix O&amp;M · Ogilvy Media
+          </span>
+        </div>
+      </div>
+    </div>
+
+    {# Right — date / time / quick links #}
+    <div class="flex flex-col items-end gap-3">
+      <div class="text-right">
+        <p class="font-bold text-white" id="hero-date" style="font-size:.95rem;"></p>
+        <p class="text-xs font-mono" style="color:rgba(255,255,255,.4);" id="hero-time"></p>
+      </div>
+      <div class="flex items-center gap-2">
+        <a href="/dashboard/summary/"
+           class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg text-white transition-all"
+           style="background:rgba(235,63,67,.9);">
+          <i class="fa-solid fa-file-lines"></i> Summary Sheet
+        </a>
+        <a href="/dashboard/monitor/"
+           class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all"
+           style="background:rgba(255,255,255,.08);color:rgba(255,255,255,.75);">
+          <i class="fa-solid fa-chart-line"></i> Analytics
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ══════════════════════════════════════════════════════════
+   ADMIN / SUPER ADMIN
+══════════════════════════════════════════════════════════ #}
 {% if request.user.role in "super_admin,admin" %}
-<!-- ── Admin / Super Admin ──────────────────────────────────── -->
 
-<!-- Stats row -->
-<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-  <div class="card flex items-center gap-4">
-    <div class="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center flex-shrink-0">
-      <i class="fa-solid fa-users text-blue-600 text-xl"></i>
+{# ── Stat strip ── #}
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6 fade-up-2">
+
+  <div class="stat-card">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(59,130,246,.1);">
+      <i class="fa-solid fa-users" style="color:#3b82f6;font-size:.9rem;"></i>
     </div>
     <div>
-      <p class="text-2xl font-extrabold text-slate-800">{{ total_users }}</p>
-      <p class="text-xs text-slate-500 font-medium">Total Users</p>
+      <p class="text-xl font-extrabold text-slate-800 leading-none">{{ total_users }}</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">Users</p>
+      <p class="text-[10px] mt-0.5" style="color:#22c55e;">
+        <i class="fa-solid fa-circle-dot text-[7px]"></i> {{ active_users }} active
+      </p>
     </div>
   </div>
-  <div class="card flex items-center gap-4">
-    <div class="w-12 h-12 bg-emerald-100 rounded-2xl flex items-center justify-center flex-shrink-0">
-      <i class="fa-solid fa-user-check text-emerald-600 text-xl"></i>
+
+  <div class="stat-card">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(245,158,11,.1);">
+      <i class="fa-solid fa-building" style="color:#f59e0b;font-size:.9rem;"></i>
     </div>
     <div>
-      <p class="text-2xl font-extrabold text-slate-800">{{ active_users }}</p>
-      <p class="text-xs text-slate-500 font-medium">Active Users</p>
+      <p class="text-xl font-extrabold text-slate-800 leading-none">{{ total_accounts }}</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">Accounts</p>
     </div>
   </div>
-  <div class="card flex items-center gap-4">
-    <div class="w-12 h-12 bg-purple-100 rounded-2xl flex items-center justify-center flex-shrink-0">
-      <i class="fa-solid fa-calendar-days text-purple-600 text-xl"></i>
+
+  <div class="stat-card">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(139,92,246,.1);">
+      <i class="fa-solid fa-calendar-days" style="color:#8b5cf6;font-size:.9rem;"></i>
     </div>
     <div>
-      <p class="text-2xl font-extrabold text-slate-800">{{ total_schedules }}</p>
-      <p class="text-xs text-slate-500 font-medium">Schedules</p>
+      <p class="text-xl font-extrabold text-slate-800 leading-none">{{ total_schedules }}</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">Schedules</p>
     </div>
   </div>
-  <div class="card flex items-center gap-4">
-    <div class="w-12 h-12 bg-orange-100 rounded-2xl flex items-center justify-center flex-shrink-0">
-      <i class="fa-solid fa-database text-orange-600 text-xl"></i>
+
+  <div class="stat-card">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(249,115,22,.1);">
+      <i class="fa-solid fa-satellite-dish" style="color:#f97316;font-size:.9rem;"></i>
     </div>
     <div>
-      <p class="text-2xl font-extrabold text-slate-800">{{ total_mon }}</p>
-      <p class="text-xs text-slate-500 font-medium">Monitoring Sets</p>
+      <p class="text-xl font-extrabold text-slate-800 leading-none">{{ total_mon }}</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">LMRB Sets</p>
     </div>
   </div>
+
+  <div class="stat-card">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(20,184,166,.1);">
+      <i class="fa-solid fa-file-certificate" style="color:#14b8a6;font-size:.9rem;"></i>
+    </div>
+    <div>
+      <p class="text-xl font-extrabold text-slate-800 leading-none">{{ total_tc }}</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">TC Reports</p>
+    </div>
+  </div>
+
+  <div class="stat-card">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(236,72,153,.1);">
+      <i class="fa-solid fa-shield-check" style="color:#ec4899;font-size:.9rem;"></i>
+    </div>
+    <div>
+      <p class="text-xl font-extrabold text-slate-800 leading-none">{{ active_users }}</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">Online Now</p>
+    </div>
+  </div>
+
 </div>
 
-<!-- Quick actions -->
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-  <a href="/dashboard/users/create/" class="card group hover:border-blue-300 hover:shadow-md transition-all border border-slate-100 flex items-center gap-4 no-underline">
-    <div class="w-10 h-10 bg-blue-600 group-hover:bg-blue-700 rounded-xl flex items-center justify-center transition-colors">
-      <i class="fa-solid fa-user-plus text-white"></i>
-    </div>
-    <div><p class="font-semibold text-slate-800">Add User</p><p class="text-xs text-slate-500">Create a new account</p></div>
-  </a>
-  <a href="/dashboard/schedules/" class="card group hover:border-purple-300 hover:shadow-md transition-all border border-slate-100 flex items-center gap-4 no-underline">
-    <div class="w-10 h-10 bg-purple-600 group-hover:bg-purple-700 rounded-xl flex items-center justify-center transition-colors">
-      <i class="fa-solid fa-calendar-days text-white"></i>
-    </div>
-    <div><p class="font-semibold text-slate-800">Schedules</p><p class="text-xs text-slate-500">Browse all schedules</p></div>
-  </a>
-  <a href="/verify/" class="card group hover:border-emerald-300 hover:shadow-md transition-all border border-slate-100 flex items-center gap-4 no-underline">
-    <div class="w-10 h-10 bg-emerald-600 group-hover:bg-emerald-700 rounded-xl flex items-center justify-center transition-colors">
-      <i class="fa-solid fa-magnifying-glass-chart text-white"></i>
-    </div>
-    <div><p class="font-semibold text-slate-800">Verify Ads</p><p class="text-xs text-slate-500">Run ad verification</p></div>
-  </a>
-</div>
+{# ── Main grid: accounts + activity ── #}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4 fade-up-3">
 
-<!-- Recent activity grid -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-  <div class="card">
+  {# Accounts overview (2/3 wide) #}
+  <div class="lg:col-span-2 card">
     <div class="flex items-center justify-between mb-4">
-      <h3 class="font-bold text-slate-800">Recent Schedules</h3>
-      <a href="/dashboard/schedules/" class="text-xs text-blue-600 hover:underline font-medium">View all →</a>
+      <div>
+        <h3 class="font-bold text-slate-800 text-sm">Account Overview</h3>
+        <p class="text-xs text-slate-400 mt-0.5">Schedules · LMRB sets · TC reports per client</p>
+      </div>
+      <a href="/dashboard/accounts/"
+         class="text-xs font-semibold text-og-red hover:underline">Manage →</a>
+    </div>
+    <div class="overflow-x-auto -mx-1.5">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+            <th class="px-2 py-2 text-left">Account</th>
+            <th class="px-2 py-2 text-center">Schedules</th>
+            <th class="px-2 py-2 text-center">LMRB</th>
+            <th class="px-2 py-2 text-center">TC</th>
+            <th class="px-2 py-2 text-right">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for acct in accounts_overview %}
+          <tr class="acct-row border-t border-slate-50 transition-colors">
+            <td class="px-2 py-2.5">
+              <div class="flex items-center gap-2.5">
+                <div class="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[10px] font-extrabold flex-shrink-0"
+                     style="background:linear-gradient(135deg,#EB3F43,#c4292d);">
+                  {{ acct.name|first|upper }}
+                </div>
+                <span class="font-semibold text-slate-700 text-xs leading-tight">{{ acct.name }}</span>
+              </div>
+            </td>
+            <td class="px-2 py-2.5 text-center">
+              <span class="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md text-xs font-bold
+                {% if acct.sch_count > 0 %}bg-purple-50 text-purple-700{% else %}bg-slate-50 text-slate-400{% endif %}">
+                {{ acct.sch_count }}
+              </span>
+            </td>
+            <td class="px-2 py-2.5 text-center">
+              <span class="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md text-xs font-bold
+                {% if acct.mon_count > 0 %}bg-orange-50 text-orange-700{% else %}bg-slate-50 text-slate-400{% endif %}">
+                {{ acct.mon_count }}
+              </span>
+            </td>
+            <td class="px-2 py-2.5 text-center">
+              <span class="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md text-xs font-bold
+                {% if acct.tc_count > 0 %}bg-teal-50 text-teal-700{% else %}bg-slate-50 text-slate-400{% endif %}">
+                {{ acct.tc_count }}
+              </span>
+            </td>
+            <td class="px-2 py-2.5 text-right">
+              {% if acct.sch_count > 0 and acct.mon_count > 0 and acct.tc_count > 0 %}
+                <span class="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                  <i class="fa-solid fa-circle-check mr-0.5"></i>Full data
+                </span>
+              {% elif acct.sch_count == 0 and acct.mon_count == 0 and acct.tc_count == 0 %}
+                <span class="text-[10px] font-semibold text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full">
+                  No data
+                </span>
+              {% else %}
+                <span class="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
+                  <i class="fa-solid fa-circle-half-stroke mr-0.5"></i>Partial
+                </span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="text-center text-slate-400 text-xs py-8">No accounts yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# Recent activity feed (1/3) #}
+  <div class="card flex flex-col">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-bold text-slate-800 text-sm">Recent Activity</h3>
+      <span class="text-[10px] text-slate-400 font-medium">Latest uploads</span>
+    </div>
+    <div class="flex flex-col gap-0 flex-1 overflow-y-auto" style="max-height:340px;">
+
+      {% for s in recent_schedules %}
+      <div class="activity-item flex gap-3 pb-4 relative">
+        <div class="activity-dot relative flex flex-col items-center flex-shrink-0">
+          <div class="w-7 h-7 rounded-lg flex items-center justify-center mt-0.5"
+               style="background:rgba(139,92,246,.12);">
+            <i class="fa-solid fa-calendar-days text-purple-600" style="font-size:.65rem;"></i>
+          </div>
+        </div>
+        <div class="flex-1 min-w-0 pt-0.5">
+          <p class="text-xs font-semibold text-slate-700 truncate">{{ s.account.name }}</p>
+          <p class="text-[10px] text-slate-400 truncate">Schedule · {{ s.channel }} · {{ s.month }}</p>
+          <p class="text-[10px] text-slate-300 mt-0.5">{{ s.uploaded_at|date:"d M, g:i A" }}</p>
+        </div>
+      </div>
+      {% endfor %}
+
+      {% for m in recent_mon %}
+      <div class="activity-item flex gap-3 pb-4 relative">
+        <div class="activity-dot relative flex flex-col items-center flex-shrink-0">
+          <div class="w-7 h-7 rounded-lg flex items-center justify-center mt-0.5"
+               style="background:rgba(249,115,22,.12);">
+            <i class="fa-solid fa-satellite-dish text-orange-500" style="font-size:.65rem;"></i>
+          </div>
+        </div>
+        <div class="flex-1 min-w-0 pt-0.5">
+          <p class="text-xs font-semibold text-slate-700 truncate">{{ m.account.name }}</p>
+          <p class="text-[10px] text-slate-400 truncate">LMRB · {{ m.channel }} · {{ m.get_data_type_display }}</p>
+          <p class="text-[10px] text-slate-300 mt-0.5">{{ m.uploaded_at|date:"d M, g:i A" }}</p>
+        </div>
+      </div>
+      {% endfor %}
+
+      {% for t in recent_tc %}
+      <div class="activity-item flex gap-3 pb-4 relative">
+        <div class="activity-dot relative flex flex-col items-center flex-shrink-0">
+          <div class="w-7 h-7 rounded-lg flex items-center justify-center mt-0.5"
+               style="background:rgba(20,184,166,.12);">
+            <i class="fa-solid fa-file-certificate text-teal-600" style="font-size:.65rem;"></i>
+          </div>
+        </div>
+        <div class="flex-1 min-w-0 pt-0.5">
+          <p class="text-xs font-semibold text-slate-700 truncate">{{ t.account.name }}</p>
+          <p class="text-[10px] text-slate-400 truncate">TC · {{ t.channel }} · {{ t.month }}</p>
+          <p class="text-[10px] text-slate-300 mt-0.5">{{ t.uploaded_at|date:"d M, g:i A" }}</p>
+        </div>
+      </div>
+      {% endfor %}
+
+      {% if not recent_schedules and not recent_mon and not recent_tc %}
+        <p class="text-xs text-slate-400 text-center py-8">No recent activity.</p>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+{# ── Quick actions ── #}
+<div class="fade-up-4">
+  <p class="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-2 px-0.5">Quick Actions</p>
+  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+
+    <a href="/dashboard/users/create/" class="quick-action">
+      <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+           style="background:rgba(59,130,246,.1);">
+        <i class="fa-solid fa-user-plus text-blue-600" style="font-size:.8rem;"></i>
+      </div>
+      <div>
+        <p class="text-xs font-bold text-slate-700">Add User</p>
+        <p class="text-[10px] text-slate-400">Create account</p>
+      </div>
+    </a>
+
+    <a href="/dashboard/schedules/upload/" class="quick-action">
+      <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+           style="background:rgba(139,92,246,.1);">
+        <i class="fa-solid fa-file-arrow-up text-purple-600" style="font-size:.8rem;"></i>
+      </div>
+      <div>
+        <p class="text-xs font-bold text-slate-700">Upload Schedule</p>
+        <p class="text-[10px] text-slate-400">Add new plan</p>
+      </div>
+    </a>
+
+    <a href="/dashboard/monitoring/upload/" class="quick-action">
+      <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+           style="background:rgba(249,115,22,.1);">
+        <i class="fa-solid fa-cloud-arrow-up text-orange-600" style="font-size:.8rem;"></i>
+      </div>
+      <div>
+        <p class="text-xs font-bold text-slate-700">Upload LMRB</p>
+        <p class="text-[10px] text-slate-400">MapOnline / MW</p>
+      </div>
+    </a>
+
+    <a href="/dashboard/tc/upload/" class="quick-action">
+      <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+           style="background:rgba(20,184,166,.1);">
+        <i class="fa-solid fa-file-certificate text-teal-600" style="font-size:.8rem;"></i>
+      </div>
+      <div>
+        <p class="text-xs font-bold text-slate-700">Upload TC</p>
+        <p class="text-[10px] text-slate-400">Transmission cert</p>
+      </div>
+    </a>
+
+    <a href="/dashboard/monitor/" class="quick-action">
+      <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+           style="background:rgba(236,72,153,.1);">
+        <i class="fa-solid fa-chart-bar text-pink-600" style="font-size:.8rem;"></i>
+      </div>
+      <div>
+        <p class="text-xs font-bold text-slate-700">Analytics</p>
+        <p class="text-[10px] text-slate-400">Monitoring dash</p>
+      </div>
+    </a>
+
+  </div>
+</div>
+
+{# ══════════════════════════════════════════════════════════
+   PLANNER
+══════════════════════════════════════════════════════════ #}
+{% elif request.user.role == 'planner' %}
+
+<div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-5 fade-up-2">
+  <div class="stat-card">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(59,130,246,.1);">
+      <i class="fa-solid fa-building" style="color:#3b82f6;font-size:.9rem;"></i>
+    </div>
+    <div>
+      <p class="text-xl font-extrabold text-slate-800 leading-none">{{ my_accounts.count }}</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">My Accounts</p>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(139,92,246,.1);">
+      <i class="fa-solid fa-calendar-days" style="color:#8b5cf6;font-size:.9rem;"></i>
+    </div>
+    <div>
+      <p class="text-xl font-extrabold text-slate-800 leading-none">{{ schedule_count }}</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">My Schedules</p>
+    </div>
+  </div>
+  <a href="/dashboard/schedules/upload/" class="quick-action border-dashed border-2 border-purple-200 bg-purple-50/40">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(139,92,246,.15);">
+      <i class="fa-solid fa-file-arrow-up text-purple-600 text-sm"></i>
+    </div>
+    <div>
+      <p class="text-sm font-bold text-purple-700">Upload Schedule</p>
+      <p class="text-[10px] text-purple-400">Add a new plan</p>
+    </div>
+  </a>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 fade-up-3">
+  {# My schedules table #}
+  <div class="lg:col-span-2 card">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-bold text-slate-800 text-sm">My Recent Schedules</h3>
+      <a href="/dashboard/schedules/" class="text-xs font-semibold text-og-red hover:underline">View all →</a>
+    </div>
+    <table class="data-table">
+      <thead><tr><th>Account</th><th>Channel</th><th>Month</th><th>Sched #</th><th>Rows</th></tr></thead>
+      <tbody>
+        {% for s in my_schedules %}
+        <tr>
+          <td class="font-medium text-xs">{{ s.account.name }}</td>
+          <td class="text-xs">{{ s.channel }}</td>
+          <td class="text-xs">{{ s.month }}</td>
+          <td class="font-mono text-xs text-slate-500">{{ s.schedule_number }}</td>
+          <td class="text-slate-500 text-xs">{{ s.row_count }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="text-center text-slate-400 py-8 text-xs">
+          No schedules yet. <a href="/dashboard/schedules/upload/" class="text-og-red hover:underline">Upload your first</a>.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# My accounts card list #}
+  <div class="card">
+    <h3 class="font-bold text-slate-800 text-sm mb-4">My Accounts</h3>
+    <div class="flex flex-col gap-2">
+      {% for acc in my_accounts %}
+      <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-extrabold flex-shrink-0"
+               style="background:linear-gradient(135deg,#EB3F43,#c4292d);">
+            {{ acc.name|first|upper }}
+          </div>
+          <span class="text-xs font-semibold text-slate-700">{{ acc.name }}</span>
+        </div>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+          {{ acc.sch_count }} sch
+        </span>
+      </div>
+      {% empty %}
+      <p class="text-xs text-slate-400 text-center py-4">No accounts assigned.</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{# ══════════════════════════════════════════════════════════
+   OPERATIONS
+══════════════════════════════════════════════════════════ #}
+{% elif request.user.role == 'operations' %}
+
+<div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-5 fade-up-2">
+  <div class="stat-card">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(249,115,22,.1);">
+      <i class="fa-solid fa-database" style="color:#f97316;font-size:.9rem;"></i>
+    </div>
+    <div>
+      <p class="text-xl font-extrabold text-slate-800 leading-none">{{ total_mon }}</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">Total Datasets</p>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(59,130,246,.1);">
+      <i class="fa-solid fa-cloud-arrow-up" style="color:#3b82f6;font-size:.9rem;"></i>
+    </div>
+    <div>
+      <p class="text-xl font-extrabold text-slate-800 leading-none">{{ upload_count }}</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">My Uploads</p>
+    </div>
+  </div>
+  <a href="/dashboard/monitoring/upload/" class="quick-action border-dashed border-2 border-orange-200 bg-orange-50/40">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(249,115,22,.15);">
+      <i class="fa-solid fa-cloud-arrow-up text-orange-600 text-sm"></i>
+    </div>
+    <div>
+      <p class="text-sm font-bold text-orange-700">Upload LMRB</p>
+      <p class="text-[10px] text-orange-400">MapOnline / MediaWatch</p>
+    </div>
+  </a>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 fade-up-3">
+  {# Recent uploads #}
+  <div class="lg:col-span-2 card">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-bold text-slate-800 text-sm">Recent Monitoring Uploads</h3>
+      <a href="/dashboard/monitoring/" class="text-xs font-semibold text-og-red hover:underline">View all →</a>
+    </div>
+    <table class="data-table">
+      <thead><tr><th>Account</th><th>Type</th><th>Channel</th><th>Date Range</th><th>Rows</th></tr></thead>
+      <tbody>
+        {% for m in my_uploads %}
+        <tr>
+          <td class="font-medium text-xs">{{ m.account.name }}</td>
+          <td>
+            <span class="badge text-[10px]
+              {% if m.data_type == 'maponline' %}bg-blue-100 text-blue-700{% else %}bg-purple-100 text-purple-700{% endif %}">
+              {{ m.get_data_type_display }}
+            </span>
+          </td>
+          <td class="text-xs">{{ m.channel }}</td>
+          <td class="text-slate-500 text-[10px]">{{ m.start_date }} → {{ m.end_date }}</td>
+          <td class="text-slate-500 text-xs">{{ m.row_count }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="text-center text-slate-400 py-8 text-xs">
+          No uploads yet. <a href="/dashboard/monitoring/upload/" class="text-og-red hover:underline">Upload data</a>.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# My accounts #}
+  <div class="card">
+    <h3 class="font-bold text-slate-800 text-sm mb-4">My Accounts</h3>
+    <div class="flex flex-col gap-2">
+      {% for acc in my_accounts %}
+      <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-extrabold flex-shrink-0"
+               style="background:linear-gradient(135deg,#EB3F43,#c4292d);">
+            {{ acc.name|first|upper }}
+          </div>
+          <span class="text-xs font-semibold text-slate-700">{{ acc.name }}</span>
+        </div>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
+          {{ acc.mon_count }} sets
+        </span>
+      </div>
+      {% empty %}
+      <p class="text-xs text-slate-400 text-center py-4">No accounts assigned.</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{# ══════════════════════════════════════════════════════════
+   TEAM HEAD
+══════════════════════════════════════════════════════════ #}
+{% elif request.user.role == 'team_head' %}
+
+<div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-5 fade-up-2">
+  <div class="stat-card">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(16,185,129,.1);">
+      <i class="fa-solid fa-building" style="color:#10b981;font-size:.9rem;"></i>
+    </div>
+    <div>
+      <p class="text-xl font-extrabold text-slate-800 leading-none">{{ my_accounts.count }}</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">My Accounts</p>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(139,92,246,.1);">
+      <i class="fa-solid fa-calendar-days" style="color:#8b5cf6;font-size:.9rem;"></i>
+    </div>
+    <div>
+      <p class="text-xl font-extrabold text-slate-800 leading-none">{{ schedule_count }}</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">Schedules</p>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+         style="background:rgba(59,130,246,.1);">
+      <i class="fa-solid fa-chart-bar" style="color:#3b82f6;font-size:.9rem;"></i>
+    </div>
+    <div>
+      <p class="text-xl font-extrabold text-slate-800 leading-none">{{ mon_count }}</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">LMRB Sets</p>
+    </div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 fade-up-3">
+  {# Recent schedules #}
+  <div class="lg:col-span-2 card">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-bold text-slate-800 text-sm">Recent Schedules</h3>
+      <a href="/dashboard/schedules/" class="text-xs font-semibold text-og-red hover:underline">View all →</a>
     </div>
     <table class="data-table">
       <thead><tr><th>Account</th><th>Channel</th><th>Month</th><th>Rows</th></tr></thead>
       <tbody>
-        {% for s in recent_schedules %}
-          <tr>
-            <td class="font-medium">{{ s.account.name }}</td>
-            <td>{{ s.channel }}</td>
-            <td>{{ s.month }}</td>
-            <td class="text-slate-500">{{ s.row_count }}</td>
-          </tr>
-        {% empty %}
-          <tr><td colspan="4" class="text-center text-slate-400 py-6">No schedules yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="card">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="font-bold text-slate-800">Recent Monitoring Data</h3>
-      <a href="/dashboard/monitoring/" class="text-xs text-blue-600 hover:underline font-medium">View all →</a>
-    </div>
-    <table class="data-table">
-      <thead><tr><th>Type</th><th>Channel</th><th>Date Range</th><th>Rows</th></tr></thead>
-      <tbody>
-        {% for m in recent_mon %}
-          <tr>
-            <td><span class="badge {% if m.data_type == 'maponline' %}bg-blue-100 text-blue-700{% else %}bg-purple-100 text-purple-700{% endif %}">{{ m.get_data_type_display }}</span></td>
-            <td>{{ m.channel }}</td>
-            <td class="text-slate-500 text-xs">{{ m.start_date }} → {{ m.end_date }}</td>
-            <td class="text-slate-500">{{ m.row_count }}</td>
-          </tr>
-        {% empty %}
-          <tr><td colspan="4" class="text-center text-slate-400 py-6">No monitoring data yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-
-{% elif request.user.role == 'planner' %}
-<!-- ── Planner ──────────────────────────────────────────── -->
-<div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-  <div class="card flex items-center gap-4">
-    <div class="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center">
-      <i class="fa-solid fa-building text-blue-600 text-xl"></i>
-    </div>
-    <div>
-      <p class="text-2xl font-extrabold text-slate-800">{{ my_accounts.count }}</p>
-      <p class="text-xs text-slate-500 font-medium">My Accounts</p>
-    </div>
-  </div>
-  <div class="card flex items-center gap-4">
-    <div class="w-12 h-12 bg-purple-100 rounded-2xl flex items-center justify-center">
-      <i class="fa-solid fa-file-excel text-purple-600 text-xl"></i>
-    </div>
-    <div>
-      <p class="text-2xl font-extrabold text-slate-800">{{ schedule_count }}</p>
-      <p class="text-xs text-slate-500 font-medium">My Schedules</p>
-    </div>
-  </div>
-  <a href="/dashboard/schedules/upload/" class="card group hover:border-blue-300 hover:shadow-md transition-all border border-slate-100 flex items-center gap-4 no-underline">
-    <div class="w-12 h-12 bg-emerald-100 group-hover:bg-emerald-200 rounded-2xl flex items-center justify-center transition-colors">
-      <i class="fa-solid fa-file-arrow-up text-emerald-600 text-xl"></i>
-    </div>
-    <div>
-      <p class="font-bold text-slate-800">Upload Schedule</p>
-      <p class="text-xs text-slate-500">Add a new schedule</p>
-    </div>
-  </a>
-</div>
-
-<div class="card">
-  <div class="flex items-center justify-between mb-4">
-    <h3 class="font-bold text-slate-800">My Recent Schedules</h3>
-    <a href="/dashboard/schedules/" class="text-xs text-blue-600 hover:underline font-medium">View all →</a>
-  </div>
-  <table class="data-table">
-    <thead><tr><th>Account</th><th>Channel</th><th>Month</th><th>Schedule #</th><th>Rows</th></tr></thead>
-    <tbody>
-      {% for s in my_schedules %}
+        {% for s in schedules %}
         <tr>
-          <td class="font-medium">{{ s.account.name }}</td>
-          <td>{{ s.channel }}</td>
-          <td>{{ s.month }}</td>
-          <td class="font-mono text-xs">{{ s.schedule_number }}</td>
-          <td class="text-slate-500">{{ s.row_count }}</td>
+          <td class="font-medium text-xs">{{ s.account.name }}</td>
+          <td class="text-xs">{{ s.channel }}</td>
+          <td class="text-xs">{{ s.month }}</td>
+          <td class="text-slate-500 text-xs">{{ s.row_count }}</td>
         </tr>
+        {% empty %}
+        <tr><td colspan="4" class="text-center text-slate-400 py-8 text-xs">No schedules yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# My accounts #}
+  <div class="card">
+    <h3 class="font-bold text-slate-800 text-sm mb-4">My Accounts</h3>
+    <div class="flex flex-col gap-2">
+      {% for acc in my_accounts %}
+      <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-extrabold flex-shrink-0"
+               style="background:linear-gradient(135deg,#EB3F43,#c4292d);">
+            {{ acc.name|first|upper }}
+          </div>
+          <span class="text-xs font-semibold text-slate-700">{{ acc.name }}</span>
+        </div>
+        <div class="flex flex-col items-end gap-0.5">
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+            {{ acc.sch_count }} sch
+          </span>
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
+            {{ acc.mon_count }} mon
+          </span>
+        </div>
+      </div>
       {% empty %}
-        <tr><td colspan="5" class="text-center text-slate-400 py-8">
-          No schedules yet. <a href="/dashboard/schedules/upload/" class="text-blue-600 hover:underline">Upload your first schedule</a>.
-        </td></tr>
+      <p class="text-xs text-slate-400 text-center py-4">No accounts assigned.</p>
       {% endfor %}
-    </tbody>
-  </table>
-</div>
+    </div>
 
-{% elif request.user.role == 'operations' %}
-<!-- ── Operations ──────────────────────────────────────── -->
-<div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-  <div class="card flex items-center gap-4">
-    <div class="w-12 h-12 bg-orange-100 rounded-2xl flex items-center justify-center">
-      <i class="fa-solid fa-database text-orange-600 text-xl"></i>
-    </div>
-    <div>
-      <p class="text-2xl font-extrabold text-slate-800">{{ total_mon }}</p>
-      <p class="text-xs text-slate-500 font-medium">Total Datasets</p>
-    </div>
-  </div>
-  <div class="card flex items-center gap-4">
-    <div class="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center">
-      <i class="fa-solid fa-cloud-arrow-up text-blue-600 text-xl"></i>
-    </div>
-    <div>
-      <p class="text-2xl font-extrabold text-slate-800">{{ upload_count }}</p>
-      <p class="text-xs text-slate-500 font-medium">My Uploads</p>
-    </div>
-  </div>
-  <a href="/dashboard/monitoring/upload/" class="card group hover:border-orange-300 hover:shadow-md transition-all border border-slate-100 flex items-center gap-4 no-underline">
-    <div class="w-12 h-12 bg-orange-100 group-hover:bg-orange-200 rounded-2xl flex items-center justify-center transition-colors">
-      <i class="fa-solid fa-cloud-arrow-up text-orange-600 text-xl"></i>
-    </div>
-    <div>
-      <p class="font-bold text-slate-800">Upload Data</p>
-      <p class="text-xs text-slate-500">MapOnline or MediaWatch</p>
-    </div>
-  </a>
-</div>
-
-{% elif request.user.role == 'team_head' %}
-<!-- ── Team Head ────────────────────────────────────────── -->
-<div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-  <div class="card flex items-center gap-4">
-    <div class="w-12 h-12 bg-emerald-100 rounded-2xl flex items-center justify-center">
-      <i class="fa-solid fa-building text-emerald-600 text-xl"></i>
-    </div>
-    <div>
-      <p class="text-2xl font-extrabold text-slate-800">{{ my_accounts.count }}</p>
-      <p class="text-xs text-slate-500 font-medium">My Accounts</p>
-    </div>
-  </div>
-  <div class="card flex items-center gap-4">
-    <div class="w-12 h-12 bg-purple-100 rounded-2xl flex items-center justify-center">
-      <i class="fa-solid fa-calendar-days text-purple-600 text-xl"></i>
-    </div>
-    <div>
-      <p class="text-2xl font-extrabold text-slate-800">{{ schedule_count }}</p>
-      <p class="text-xs text-slate-500 font-medium">Schedules</p>
-    </div>
-  </div>
-  <div class="card flex items-center gap-4">
-    <div class="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center">
-      <i class="fa-solid fa-chart-bar text-blue-600 text-xl"></i>
-    </div>
-    <div>
-      <p class="text-2xl font-extrabold text-slate-800">{{ mon_count }}</p>
-      <p class="text-xs text-slate-500 font-medium">Monitoring Sets</p>
+    <div class="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 gap-2">
+      <a href="/dashboard/monitor/" class="quick-action justify-center text-center flex-col gap-1 py-3">
+        <i class="fa-solid fa-chart-line text-pink-500 text-sm"></i>
+        <span class="text-[10px] font-bold text-slate-700">Analytics</span>
+      </a>
+      <a href="/dashboard/summary/" class="quick-action justify-center text-center flex-col gap-1 py-3">
+        <i class="fa-solid fa-file-lines text-og-red text-sm"></i>
+        <span class="text-[10px] font-bold text-slate-700">Summary</span>
+      </a>
     </div>
   </div>
 </div>
 
-<div class="card">
-  <h3 class="font-bold text-slate-800 mb-3">My Accounts</h3>
-  <div class="flex flex-wrap gap-2">
-    {% for acc in my_accounts %}
-      <span class="badge bg-slate-100 text-slate-700 text-sm px-3 py-1">
-        <i class="fa-solid fa-building mr-1.5 text-slate-400"></i>{{ acc.name }}
-      </span>
-    {% empty %}
-      <p class="text-sm text-slate-400">No accounts assigned. Contact your admin.</p>
-    {% endfor %}
-  </div>
-</div>
 {% endif %}
+
+{# ── Hero date/time + greeting JS ── #}
+<script>
+(function () {
+  var days   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  var months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  function fmt(d) {
+    return days[d.getDay()] + ', ' + d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
+  }
+  function fmtTime(d) {
+    var h = d.getHours(), m = d.getMinutes(), s = d.getSeconds();
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return (h < 10 ? '0' : '') + h + ':' +
+           (m < 10 ? '0' : '') + m + ':' +
+           (s < 10 ? '0' : '') + s + ' ' + ampm;
+  }
+  function greeting() {
+    var h = new Date().getHours();
+    if (h < 12) return 'Good morning,';
+    if (h < 17) return 'Good afternoon,';
+    return 'Good evening,';
+  }
+
+  var dateEl     = document.getElementById('hero-date');
+  var timeEl     = document.getElementById('hero-time');
+  var greetLabel = document.getElementById('greeting-label');
+
+  if (greetLabel) greetLabel.textContent = greeting();
+  if (dateEl) dateEl.textContent = fmt(new Date());
+
+  if (timeEl) {
+    function tick() { timeEl.textContent = fmtTime(new Date()); }
+    tick();
+    setInterval(tick, 1000);
+  }
+})();
+</script>
 
 {% endblock %}

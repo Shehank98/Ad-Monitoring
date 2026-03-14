@@ -186,37 +186,70 @@ def _safe_decimal(val):
 
 @login_required
 def dashboard(request):
+    from django.db.models import Count as _Count
+    from django.utils import timezone as _tz
     user = request.user
     role = user.role
-    ctx  = {'user': user}
+    ctx  = {'user': user, 'today': _tz.localdate()}
 
     if role in ('super_admin', 'admin'):
         ctx['total_users']      = User.objects.count()
         ctx['active_users']     = User.objects.filter(is_active=True).count()
         ctx['total_schedules']  = Schedule.objects.count()
         ctx['total_mon']        = MonitoringData.objects.count()
-        ctx['recent_schedules'] = Schedule.objects.select_related('account', 'uploaded_by')[:5]
-        ctx['recent_mon']       = MonitoringData.objects.select_related('uploaded_by', 'account')[:5]
+        ctx['total_accounts']   = Account.objects.count()
+        ctx['total_tc']         = TransmissionReport.objects.count()
+        ctx['recent_schedules'] = (
+            Schedule.objects.select_related('account', 'uploaded_by')
+            .order_by('-uploaded_at')[:5]
+        )
+        ctx['recent_mon'] = (
+            MonitoringData.objects.select_related('uploaded_by', 'account')
+            .order_by('-uploaded_at')[:4]
+        )
+        ctx['recent_tc'] = (
+            TransmissionReport.objects.select_related('account', 'uploaded_by')
+            .order_by('-uploaded_at')[:4]
+        )
+        ctx['accounts_overview'] = list(
+            Account.objects.annotate(
+                sch_count=_Count('schedule', distinct=True),
+                mon_count=_Count('monitoringdata', distinct=True),
+                tc_count=_Count('transmissionreport', distinct=True),
+            ).order_by('name')
+        )
 
     elif role == 'team_head':
         my_accounts = user.accounts.all()
         sch = Schedule.objects.filter(account__in=my_accounts).select_related('account')
-        ctx['my_accounts']    = my_accounts
-        ctx['schedules']      = sch[:5]
+        ctx['my_accounts']    = my_accounts.annotate(
+            sch_count=_Count('schedule', distinct=True),
+            mon_count=_Count('monitoringdata', distinct=True),
+        )
+        ctx['schedules']      = sch.order_by('-uploaded_at')[:5]
         ctx['schedule_count'] = sch.count()
         ctx['mon_count']      = MonitoringData.objects.filter(account__in=my_accounts).count()
+        ctx['recent_mon']     = (
+            MonitoringData.objects.filter(account__in=my_accounts)
+            .select_related('account').order_by('-uploaded_at')[:4]
+        )
 
     elif role == 'planner':
         my_accounts = user.accounts.all()
         sch = Schedule.objects.filter(account__in=my_accounts).select_related('account')
-        ctx['my_accounts']    = my_accounts
-        ctx['my_schedules']   = sch[:5]
+        ctx['my_accounts']    = my_accounts.annotate(
+            sch_count=_Count('schedule', distinct=True),
+        )
+        ctx['my_schedules']   = sch.order_by('-uploaded_at')[:5]
         ctx['schedule_count'] = sch.count()
 
-    elif role in ('operations', 'team_head'):
+    elif role == 'operations':
         my_accounts = user.accounts.all()
         mon = MonitoringData.objects.filter(account__in=my_accounts)
-        ctx['my_uploads']   = mon[:5]
+        ctx['my_accounts']    = my_accounts.annotate(
+            mon_count=_Count('monitoringdata', distinct=True),
+        )
+        ctx['my_uploads']   = mon.select_related('account').order_by('-uploaded_at')[:5]
         ctx['upload_count'] = mon.filter(uploaded_by=user).count()
         ctx['total_mon']    = mon.count()
 
