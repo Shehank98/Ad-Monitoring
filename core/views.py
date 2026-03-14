@@ -1491,27 +1491,26 @@ def monitoring_dashboard(request):
             if t not in _theme_product_map:
                 _theme_product_map[t] = lr['product']
 
-        # theme_lower -> {duration: count}  (raw LMRB observations in date range,
-        # used as fallback count when no MatchResult / assignment exists yet)
-        _lmrb_theme_dur_count = {}
-        for lr in lmrb_qs.values('advt_theme', 'duration').annotate(cnt=Count('id')):
-            t = (lr['advt_theme'] or '').lower().strip()
-            _lmrb_theme_dur_count.setdefault(t, {})[lr['duration']] = lr['cnt']
-
-        # (theme_lower, duration) -> {prog: {count, prime, non_prime}}
-        # (theme_lower, duration) -> {date_str: count}
-        # Used to populate Details panel when no matched data exists yet.
-        _raw_lmrb_prog_by_td  = {}
-        _raw_lmrb_date_by_td  = {}
-        for lr in lmrb_qs.values('advt_theme', 'duration', 'advt_time', 'date', 'program'):
-            t   = (lr['advt_theme'] or '').lower().strip()
-            dur = lr['duration']
-            key = (t, dur)
+        # (theme_lower, duration, product_lower) -> {count, progs, dates}
+        # Keyed by LMRBRow.product so themes shared across products (e.g. "BB"
+        # in both Mobitel Broadband and SLT Broadband) are kept separate.
+        _raw_lmrb_by_tdp = {}
+        for lr in lmrb_qs.values(
+            'advt_theme', 'duration', 'advt_time', 'date', 'program', 'product'
+        ):
+            t    = (lr['advt_theme'] or '').lower().strip()
+            dur  = lr['duration']
+            prod = (lr['product']   or '').lower().strip()
+            key  = (t, dur, prod)
             prog     = lr['program'] or 'Unknown'
             time_val = lr['advt_time'] or ''
             date_str = str(lr['date']) if lr['date'] else ''
             bucket   = _time_bucket(time_val) if time_val else 'other'
-            pe = _raw_lmrb_prog_by_td.setdefault(key, {}).setdefault(
+            entry = _raw_lmrb_by_tdp.setdefault(
+                key, {'count': 0, 'progs': {}, 'dates': {}}
+            )
+            entry['count'] += 1
+            pe = entry['progs'].setdefault(
                 prog, {'count': 0, 'prime': 0, 'non_prime': 0}
             )
             pe['count'] += 1
@@ -1520,8 +1519,39 @@ def monitoring_dashboard(request):
             else:
                 pe['non_prime'] += 1
             if date_str:
-                dd = _raw_lmrb_date_by_td.setdefault(key, {})
-                dd[date_str] = dd.get(date_str, 0) + 1
+                entry['dates'][date_str] = entry['dates'].get(date_str, 0) + 1
+
+        def _agg_raw_lmrb(t_lower, duration, bm_product):
+            """Aggregate raw LMRB count + programme details + date counts.
+
+            bm_product — BrandMapping.product value.  When set, only LMRBRows
+            whose product field matches are included, so "Mobitel Broadband BB"
+            is never mixed with "SLT Broadband BB".  When empty all products
+            for that theme/duration are included.
+            duration=None aggregates across all durations.
+            """
+            prod_filter = bm_product.lower().strip() if bm_product else None
+            total = 0
+            merged_progs = {}
+            merged_dates = {}
+            for (t, d, p), entry in _raw_lmrb_by_tdp.items():
+                if t != t_lower:
+                    continue
+                if duration is not None and d != duration:
+                    continue
+                if prod_filter is not None and p != prod_filter:
+                    continue
+                total += entry['count']
+                for prog, v in entry['progs'].items():
+                    e = merged_progs.setdefault(
+                        prog, {'count': 0, 'prime': 0, 'non_prime': 0}
+                    )
+                    e['count'] += v['count']
+                    e['prime'] += v['prime']
+                    e['non_prime'] += v['non_prime']
+                for dd, c in entry['dates'].items():
+                    merged_dates[dd] = merged_dates.get(dd, 0) + c
+            return total, merged_progs, merged_dates
 
         def _build_chart_rows(ad_type_val):
             """Return flat list of dicts for one ad_type ('COMMERCIAL BENEFITS' or 'SPONSORSHIP').
@@ -1630,41 +1660,23 @@ def monitoring_dashboard(request):
                     pt_count    = sum(p['prime'] for p in progs)
                     non_pt_count = sum(p['non_prime'] for p in progs)
 
-                    # Raw LMRB fallback count (unmatched observations in date range)
-                    _dur_map = _lmrb_theme_dur_count.get(t_lower, {})
-                    if bm.duration is not None:
-                        raw_lmrb_count = _dur_map.get(bm.duration, 0)
-                    else:
-                        raw_lmrb_count = sum(_dur_map.values())
+                    # Raw LMRB fallback — product-aware so that shared themes
+                    # (e.g. "BB") are only counted for this product, not all products.
+                    raw_lmrb_count, _raw_progs_map, _raw_dates_map = _agg_raw_lmrb(
+                        t_lower, bm.duration, bm.product
+                    )
 
                     # If no matched details exist yet, populate progs/dates from raw LMRB
                     # so the Details panel is never blank.
                     if not progs and raw_lmrb_count > 0:
-                        keys = (
-                            [(t_lower, bm.duration)]
-                            if bm.duration is not None
-                            else [(t_lower, d) for d in _dur_map]
-                        )
-                        merged_progs = {}
-                        merged_dates = {}
-                        for _k in keys:
-                            for _prog, _v in _raw_lmrb_prog_by_td.get(_k, {}).items():
-                                _e = merged_progs.setdefault(
-                                    _prog, {'count': 0, 'prime': 0, 'non_prime': 0}
-                                )
-                                _e['count']     += _v['count']
-                                _e['prime']     += _v['prime']
-                                _e['non_prime'] += _v['non_prime']
-                            for _d, _c in _raw_lmrb_date_by_td.get(_k, {}).items():
-                                merged_dates[_d] = merged_dates.get(_d, 0) + _c
                         progs = sorted(
                             [{'name': k, 'count': v['count'],
                               'prime': v['prime'], 'non_prime': v['non_prime']}
-                             for k, v in merged_progs.items()],
+                             for k, v in _raw_progs_map.items()],
                             key=lambda x: -x['count'],
                         )
                         dates_data = [{'date': d, 'count': c}
-                                      for d, c in sorted(merged_dates.items())]
+                                      for d, c in sorted(_raw_dates_map.items())]
                         pt_count     = sum(p['prime']     for p in progs)
                         non_pt_count = sum(p['non_prime'] for p in progs)
 
