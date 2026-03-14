@@ -155,8 +155,9 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
             is_extra=False,
         )
 
-    # ── Build brand→tc_theme map ──────────────────────────────────────────────
-    tc_theme_map = _build_tc_theme_map(account_id)
+    # ── Build brand→tc_theme map and brand→lmrb_theme map ────────────────────
+    tc_theme_map   = _build_tc_theme_map(account_id)
+    lmrb_theme_map = _build_lmrb_theme_map(account_id)
 
     # ── Load ScheduleRows for scope ───────────────────────────────────────────
     sch_qs = ScheduleRow.objects.filter(
@@ -228,6 +229,15 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
             ['is_schedule_matched', 'matched_schedule_id', 'is_extra'],
         )
 
+    # Map tcrow_id → (brand, duration) for schedule-matched rows.
+    # Built before the reload so the in-memory matched_schedule objects are available.
+    # Used in the TC-LMRB cross-check to validate LMRB theme against BrandMapping.
+    tc_brand_dur_map: dict = {}
+    for tr in tc_matched:
+        sr_obj = getattr(tr, 'matched_schedule', None)
+        if sr_obj is not None:
+            tc_brand_dur_map[tr.id] = (sr_obj.brand, sr_obj.duration)
+
     # ── TC-LMRB cross-check ───────────────────────────────────────────────────
     # For every matched + extra TCRow, look for an LMRBRow within ±5 sec
     all_tc = list(tc_qs.filter(is_schedule_matched=True)) + list(tc_qs.filter(is_extra=True))
@@ -275,6 +285,19 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
         # Normalise channel so it matches the normalised index key
         key = (_normalize(tcrow.channel), tcrow.date, dur)
         candidates = lmrb_index.get(key, [])
+
+        # Theme validation for schedule-matched TCRows:
+        # Only accept LMRB candidates whose advt_theme is in the BrandMapping.theme
+        # set for the matched schedule row's brand.  This prevents mismatches such
+        # as "Com Break" being linked to a Mobitel sponsorship slot purely by time.
+        # Extra TCRows (no schedule match) skip this validation.
+        brand_dur = tc_brand_dur_map.get(tcrow.id)
+        expected_lmrb_themes: list = []
+        if brand_dur:
+            expected_lmrb_themes = _lmrb_themes_for_brand(
+                brand_dur[0], brand_dur[1], lmrb_theme_map
+            )
+
         best = None
         best_diff = time_tolerance + 1  # anything > tolerance means no match
         for lmrb_id, lmrb_secs, lr_obj in candidates:
@@ -282,6 +305,14 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
                 continue
             if lmrb_secs is None:
                 continue
+            # Skip LMRB rows whose theme does not match the expected set
+            if expected_lmrb_themes:
+                lr_theme = _normalize(lr_obj.advt_theme)
+                if not any(
+                    lr_theme.startswith(t[:-1]) if t.endswith('*') else lr_theme == t
+                    for t in expected_lmrb_themes
+                ):
+                    continue
             diff = abs(tc_secs - lmrb_secs)
             if diff <= time_tolerance and diff < best_diff:
                 best_diff = diff
@@ -451,9 +482,9 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
 
         aired = tc_aired + manual_aired
 
-        # 3rd Party = TC rows confirmed by LMRB (is_lmrb_confirmed=True),
-        # includes both schedule-matched and extra TC rows.
-        # This represents spots appearing in BOTH TC and LMRB (TC↔LMRB matched pairs).
+        # 3rd Party = unique LMRB rows confirmed via TC cross-check OR ManualMatch.
+        # Union deduplicates so a ManualMatch whose LMRB row also appears in a
+        # TC-confirmed pair is never double-counted.
         third_party_q = TCRow.objects.filter(
             account_id=account_id, channel=channel,
             tc_report__month=month,
@@ -466,7 +497,12 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
             third_party_q = third_party_q.filter(theme_q)
         if dur_int is not None:
             third_party_q = third_party_q.filter(duration=dur_int)
-        third_party = third_party_q.count()
+        tc_lmrb_ids     = set(third_party_q.values_list('matched_lmrb_id', flat=True))
+        manual_lmrb_ids = set(
+            manual_q.filter(lmrb_row__isnull=False)
+            .values_list('lmrb_row_id', flat=True)
+        )
+        third_party = len(tc_lmrb_ids | manual_lmrb_ids)
 
         # Missed = Planned − Aired (in Schedule but not confirmed by TC+LMRB)
         missed = max(0, planned - aired)
