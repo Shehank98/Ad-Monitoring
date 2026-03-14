@@ -361,7 +361,14 @@
               <td class="text-right text-slate-500">{{ row.duration|default:"—" }}</td>
               <td class="text-right font-semibold text-blue-700">{{ row.planned }}</td>
               <td class="text-right font-semibold {% if row.aired >= row.planned %}text-emerald-700{% elif row.aired > 0 %}text-amber-700{% else %}text-red-500{% endif %}">
-                {{ row.aired }}
+                {% if row.aired == 0 and row.raw_lmrb_count > 0 %}
+                  <span title="No verification run yet — {{ row.raw_lmrb_count }} raw LMRB observation{{ row.raw_lmrb_count|pluralize }} found in this period">
+                    {{ row.raw_lmrb_count }}
+                    <span class="ml-0.5 text-[8px] font-normal px-1 py-0.5 rounded bg-slate-200 text-slate-500 align-middle">LMRB</span>
+                  </span>
+                {% else %}
+                  {{ row.aired }}
+                {% endif %}
               </td>
               <td class="text-right">
                 {% if row.programmes %}
@@ -448,7 +455,14 @@
               <td class="text-right text-slate-500">{{ row.duration|default:"—" }}</td>
               <td class="text-right font-semibold text-amber-700">{{ row.planned }}</td>
               <td class="text-right font-semibold {% if row.lmrb_count >= row.planned %}text-emerald-700{% elif row.lmrb_count > 0 %}text-amber-600{% else %}text-red-500{% endif %}">
-                {{ row.lmrb_count }}
+                {% if row.lmrb_count == 0 and row.raw_lmrb_count > 0 %}
+                  <span title="No assignment yet — {{ row.raw_lmrb_count }} raw LMRB observation{{ row.raw_lmrb_count|pluralize }} found in this period">
+                    {{ row.raw_lmrb_count }}
+                    <span class="ml-0.5 text-[8px] font-normal px-1 py-0.5 rounded bg-slate-200 text-slate-500 align-middle">LMRB</span>
+                  </span>
+                {% else %}
+                  {{ row.lmrb_count }}
+                {% endif %}
               </td>
               <td class="text-right">
                 {% if row.programmes %}

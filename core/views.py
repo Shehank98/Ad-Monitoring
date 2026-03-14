@@ -1491,6 +1491,13 @@ def monitoring_dashboard(request):
             if t not in _theme_product_map:
                 _theme_product_map[t] = lr['product']
 
+        # theme_lower -> {duration: count}  (raw LMRB observations in date range,
+        # used as fallback count when no MatchResult / assignment exists yet)
+        _lmrb_theme_dur_count = {}
+        for lr in lmrb_qs.values('advt_theme', 'duration').annotate(cnt=Count('id')):
+            t = (lr['advt_theme'] or '').lower().strip()
+            _lmrb_theme_dur_count.setdefault(t, {})[lr['duration']] = lr['cnt']
+
         def _build_chart_rows(ad_type_val):
             """Return flat list of dicts for one ad_type ('COMMERCIAL BENEFITS' or 'SPONSORSHIP').
 
@@ -1520,6 +1527,7 @@ def monitoring_dashboard(request):
                         'planned': planned,
                         'aired': 0,
                         'lmrb_count': 0,
+                        'raw_lmrb_count': 0,
                         'is_mapped': False,
                         'programmes': [],
                         'programmes_json': '[]',
@@ -1597,6 +1605,13 @@ def monitoring_dashboard(request):
                     pt_count    = sum(p['prime'] for p in progs)
                     non_pt_count = sum(p['non_prime'] for p in progs)
 
+                    # Raw LMRB fallback count (unmatched observations in date range)
+                    _dur_map = _lmrb_theme_dur_count.get(t_lower, {})
+                    if bm.duration is not None:
+                        raw_lmrb_count = _dur_map.get(bm.duration, 0)
+                    else:
+                        raw_lmrb_count = sum(_dur_map.values())
+
                     # Product resolution: BrandMapping.product → ScheduleRow.product →
                     # LMRBRow product → brand
                     if bm.product.strip():
@@ -1620,6 +1635,7 @@ def monitoring_dashboard(request):
                         'planned': planned,
                         'aired': aired,
                         'lmrb_count': lmrb_count,
+                        'raw_lmrb_count': raw_lmrb_count,
                         'is_mapped': True,
                         'programmes': progs,
                         'programmes_json': _to_js(progs),
@@ -1639,8 +1655,14 @@ def monitoring_dashboard(request):
                     'product': p,
                     'themes': themes,
                     'total_planned': sum(t['planned'] for t in themes),
-                    'total_aired': sum(t['aired'] for t in themes),
-                    'total_lmrb': sum(t['lmrb_count'] for t in themes),
+                    'total_aired': sum(
+                        t['aired'] if t['aired'] > 0 else t['raw_lmrb_count']
+                        for t in themes
+                    ),
+                    'total_lmrb': sum(
+                        t['lmrb_count'] if t['lmrb_count'] > 0 else t['raw_lmrb_count']
+                        for t in themes
+                    ),
                 }
                 for p, themes in sorted(groups.items())
             ]
