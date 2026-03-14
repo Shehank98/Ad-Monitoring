@@ -4619,48 +4619,61 @@ def matched_lmrb_excel(request):
 @role_required(['super_admin', 'admin'])
 def admin_export(request):
     """
-    FIX 6 — Admin-only full database export.
+    Admin-only full database export.
 
     GET:  Show the filter form.
     POST: Generate and download the Excel file.
 
     Exports to Excel with separate sheets:
-      - Matched LMRB (is_matched=True)
-      - Unmatched LMRB (is_matched=False)
-      - Summary (build_summary_data output)
+      - Matched LMRB
+      - Unmatched LMRB
+      - Schedule Rows
+      - TC Rows
+      - Full Ad Report (MatchResult)
+      - Brand Mappings
+      - Manual Matches
+      - Sponsorship Assignments
 
-    Filters: account, channel, brand, date_from, date_to.
+    Filters: account, channel, month, schedule_number, brand, date_from, date_to.
     Each sheet has a metadata row at the top with row count.
     """
     import openpyxl
-    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-    from django.db.models import Min, Max
+    from openpyxl.styles import Font, Alignment, PatternFill
 
     user       = request.user
     account_qs = _account_qs(user)
 
     if request.method == 'GET':
-        # Collect available channels for the dropdown (filtered by account if selected)
         account_id = request.GET.get('account_id', '')
-        channels = []
+        sel_channel = request.GET.get('channel', '')
+        channels, months, schedule_numbers = [], [], []
         if account_id and _account_access(user, account_id):
             channels = sorted(set(
-                LMRBRow.objects.filter(account_id=account_id)
-                .values_list('channel', flat=True)
+                list(LMRBRow.objects.filter(account_id=account_id).values_list('channel', flat=True))
+                + list(Schedule.objects.filter(account_id=account_id).values_list('channel', flat=True))
             ))
+            if sel_channel:
+                months = sorted(set(
+                    Schedule.objects.filter(account_id=account_id, channel=sel_channel)
+                    .values_list('month', flat=True)
+                ))
         return render(request, 'admin_export.html', {
             'accounts': account_qs,
             'account_id': account_id,
             'channels': channels,
+            'sel_channel': sel_channel,
+            'months': months,
         })
 
-    # POST — build export
-    account_id = request.POST.get('account_id', '').strip()
-    channel    = request.POST.get('channel', '').strip()
-    brand      = request.POST.get('brand', '').strip()
-    date_from  = request.POST.get('date_from', '').strip()
-    date_to    = request.POST.get('date_to', '').strip()
-    scope      = request.POST.get('scope', 'both')  # 'matched' | 'unmatched' | 'both'
+    # ── POST — build export ──────────────────────────────────────────────────
+    account_id      = request.POST.get('account_id', '').strip()
+    channel         = request.POST.get('channel', '').strip()
+    month           = request.POST.get('month', '').strip()
+    schedule_number = request.POST.get('schedule_number', '').strip()
+    brand           = request.POST.get('brand', '').strip()
+    date_from       = request.POST.get('date_from', '').strip()
+    date_to         = request.POST.get('date_to', '').strip()
+    scope           = request.POST.get('scope', 'both')
 
     if not account_id or not _account_access(user, account_id):
         messages.error(request, 'Select a valid account.')
@@ -4668,33 +4681,23 @@ def admin_export(request):
 
     account = get_object_or_404(Account, id=account_id)
 
-    # Base queryset
-    base_qs = LMRBRow.objects.filter(account_id=account_id)
-    if channel:
-        base_qs = base_qs.filter(channel__iexact=channel)
-    if brand:
-        # Filter by advt_theme containing brand (case-insensitive)
-        base_qs = base_qs.filter(advt_theme__icontains=brand)
-    if date_from:
-        try:
-            from datetime import date as _date
-            from_d = _date.fromisoformat(date_from)
-            base_qs = base_qs.filter(date__gte=from_d)
-        except ValueError:
-            pass
-    if date_to:
-        try:
-            from datetime import date as _date
-            to_d = _date.fromisoformat(date_to)
-            base_qs = base_qs.filter(date__lte=to_d)
-        except ValueError:
-            pass
+    # ── Shared date helpers ──────────────────────────────────────────────────
+    from datetime import date as _date
+    _from_d = None
+    _to_d   = None
+    try:
+        if date_from:
+            _from_d = _date.fromisoformat(date_from)
+    except ValueError:
+        pass
+    try:
+        if date_to:
+            _to_d = _date.fromisoformat(date_to)
+    except ValueError:
+        pass
 
-    matched_qs   = base_qs.filter(is_matched=True).order_by('date', 'advt_time')
-    unmatched_qs = base_qs.filter(is_matched=False).order_by('date', 'advt_time')
-
-    wb = openpyxl.Workbook()
-
+    # ── Styling helpers ──────────────────────────────────────────────────────
+    wb        = openpyxl.Workbook()
     HDR_FILL  = PatternFill('solid', fgColor='0F2340')
     META_FILL = PatternFill('solid', fgColor='FEF9C3')
     hdr_font  = Font(bold=True, color='FFFFFF', size=10)
@@ -4702,26 +4705,48 @@ def admin_export(request):
     norm_font = Font(size=10)
     centre_al = Alignment(horizontal='center', vertical='center')
 
+    filter_label = f'Account: {account.name}'
+    if channel:         filter_label += f' | Channel: {channel}'
+    if month:           filter_label += f' | Month: {month}'
+    if schedule_number: filter_label += f' | Schedule No: {schedule_number}'
+
+    def _meta_row(ws, ncols, label, n_rows):
+        ws.merge_cells(f'A1:{chr(64 + min(ncols, 26))}1')
+        c = ws.cell(1, 1, f'{label} | {filter_label} | Total rows: {n_rows}')
+        c.font = meta_font; c.fill = META_FILL
+
+    def _hdr_row(ws, headers):
+        for col_i, h in enumerate(headers, start=1):
+            c = ws.cell(2, col_i, h)
+            c.font = hdr_font; c.fill = HDR_FILL; c.alignment = centre_al
+
+    def _norm_rows(ws, n_rows, n_cols):
+        for row_i in range(3, n_rows + 3):
+            for col_i in range(1, n_cols + 1):
+                ws.cell(row_i, col_i).font = norm_font
+
+    # ── 1. LMRB sheets ──────────────────────────────────────────────────────
+    lmrb_qs = LMRBRow.objects.filter(account_id=account_id)
+    if channel:   lmrb_qs = lmrb_qs.filter(channel__iexact=channel)
+    if month:     lmrb_qs = lmrb_qs.filter(date__range=_month_date_range(month))
+    if brand:     lmrb_qs = lmrb_qs.filter(advt_theme__icontains=brand)
+    if _from_d:   lmrb_qs = lmrb_qs.filter(date__gte=_from_d)
+    if _to_d:     lmrb_qs = lmrb_qs.filter(date__lte=_to_d)
+
+    matched_qs   = lmrb_qs.filter(is_matched=True).order_by('date', 'advt_time')
+    unmatched_qs = lmrb_qs.filter(is_matched=False).order_by('date', 'advt_time')
+
     LMRB_HEADERS = [
         'Date', 'Channel', 'Advt_Theme', 'Advt_Time', 'Duration', 'Source',
         'Product_Group', 'Advertiser', 'Product', 'Ads', 'Program', 'Prog_Time',
         'Ad_Pos', 'Tot_Ads', 'Brk_No', 'Pos_In_Brk', 'Ads_In_Brk',
-        'Lng', 'Cost', 'Day', 'Is_Matched', 'Is_Sponsorship_Matched',
+        'Lng', 'Cost', 'Day', 'Is_Matched', 'Is_Sponsorship_Matched', 'Is_Manual_Matched',
     ]
 
     def _write_lmrb_sheet(ws_sheet, qs, label):
         rows = list(qs)
-        # Row 1: metadata
-        ws_sheet.merge_cells(f'A1:V1')
-        c = ws_sheet.cell(1, 1, f'{label} | Account: {account.name}'
-                                f'{" | Channel: " + channel if channel else ""}'
-                                f' | Total rows: {len(rows)}')
-        c.font = meta_font; c.fill = META_FILL
-        # Row 2: headers
-        for col_i, h in enumerate(LMRB_HEADERS, start=1):
-            c = ws_sheet.cell(2, col_i, h)
-            c.font = hdr_font; c.fill = HDR_FILL; c.alignment = centre_al
-        # Data rows
+        _meta_row(ws_sheet, len(LMRB_HEADERS), label, len(rows))
+        _hdr_row(ws_sheet, LMRB_HEADERS)
         for row_i, lr in enumerate(rows, start=3):
             ws_sheet.cell(row_i,  1, str(lr.date) if lr.date else '')
             ws_sheet.cell(row_i,  2, lr.channel or '')
@@ -4745,87 +4770,240 @@ def admin_export(request):
             ws_sheet.cell(row_i, 20, lr.day or '')
             ws_sheet.cell(row_i, 21, 'Yes' if lr.is_matched else 'No')
             ws_sheet.cell(row_i, 22, 'Yes' if lr.is_sponsorship_matched else 'No')
-        for row_i in range(3, len(rows) + 3):
-            for col_i in range(1, len(LMRB_HEADERS) + 1):
-                ws_sheet.cell(row_i, col_i).font = norm_font
+            ws_sheet.cell(row_i, 23, 'Yes' if lr.is_manual_matched else 'No')
+        _norm_rows(ws_sheet, len(rows), len(LMRB_HEADERS))
 
-    if scope in ('matched', 'both'):
-        ws_matched = wb.active
-        ws_matched.title = 'Matched LMRB'
-        _write_lmrb_sheet(ws_matched, matched_qs, 'Matched LMRB')
-
-    if scope in ('unmatched', 'both'):
-        ws_unmatched = wb.create_sheet('Unmatched LMRB')
-        _write_lmrb_sheet(ws_unmatched, unmatched_qs, 'Unmatched LMRB')
-    elif scope == 'unmatched':
-        # Only unmatched requested — rename the default sheet
-        ws_un = wb.active
-        ws_un.title = 'Unmatched LMRB'
+    if scope == 'unmatched':
+        ws_un = wb.active; ws_un.title = 'Unmatched LMRB'
         _write_lmrb_sheet(ws_un, unmatched_qs, 'Unmatched LMRB')
+    else:
+        ws_matched = wb.active; ws_matched.title = 'Matched LMRB'
+        _write_lmrb_sheet(ws_matched, matched_qs, 'Matched LMRB')
+        if scope == 'both':
+            ws_un = wb.create_sheet('Unmatched LMRB')
+            _write_lmrb_sheet(ws_un, unmatched_qs, 'Unmatched LMRB')
 
-    # ── Full Ad Report sheet (MatchResult — all statuses) ─────────────────────
+    # ── 2. Schedule Rows sheet ───────────────────────────────────────────────
+    sr_qs = ScheduleRow.objects.select_related('schedule').filter(account_id=account_id)
+    if channel:         sr_qs = sr_qs.filter(channel__iexact=channel)
+    if month:           sr_qs = sr_qs.filter(month=month)
+    if schedule_number: sr_qs = sr_qs.filter(schedule__schedule_number=schedule_number)
+    if brand:           sr_qs = sr_qs.filter(brand__icontains=brand)
+    if _from_d:         sr_qs = sr_qs.filter(date__gte=_from_d)
+    if _to_d:           sr_qs = sr_qs.filter(date__lte=_to_d)
+    sr_qs = sr_qs.order_by('month', 'date', 'start_time')
+    sr_rows = list(sr_qs)
+
+    ws_sr = wb.create_sheet('Schedule Rows')
+    SR_HEADERS = [
+        'Schedule No', 'Version', 'Channel', 'Month', 'Brand', 'Programme',
+        'Date', 'Start Time', 'End Time', 'Duration (s)', 'Ad Type',
+        'Is Matched', 'Is Manual Matched', 'Matched LMRB Theme', 'Matched At',
+    ]
+    _meta_row(ws_sr, len(SR_HEADERS), 'Schedule Rows', len(sr_rows))
+    _hdr_row(ws_sr, SR_HEADERS)
+    for row_i, sr in enumerate(sr_rows, start=3):
+        ws_sr.cell(row_i,  1, sr.schedule.schedule_number if sr.schedule else '')
+        ws_sr.cell(row_i,  2, sr.schedule.version if sr.schedule else '')
+        ws_sr.cell(row_i,  3, sr.channel or '')
+        ws_sr.cell(row_i,  4, sr.month or '')
+        ws_sr.cell(row_i,  5, sr.brand or '')
+        ws_sr.cell(row_i,  6, sr.programme or '')
+        ws_sr.cell(row_i,  7, str(sr.date) if sr.date else '')
+        ws_sr.cell(row_i,  8, sr.start_time or '')
+        ws_sr.cell(row_i,  9, sr.end_time or '')
+        ws_sr.cell(row_i, 10, sr.duration)
+        ws_sr.cell(row_i, 11, sr.ad_type or '')
+        ws_sr.cell(row_i, 12, 'Yes' if sr.is_matched else 'No')
+        ws_sr.cell(row_i, 13, 'Yes' if sr.is_manual_matched else 'No')
+        ws_sr.cell(row_i, 14, sr.matched_lmrb.advt_theme if sr.matched_lmrb_id else '')
+        ws_sr.cell(row_i, 15, str(sr.matched_at) if sr.matched_at else '')
+    _norm_rows(ws_sr, len(sr_rows), len(SR_HEADERS))
+
+    # ── 3. TC Rows sheet ─────────────────────────────────────────────────────
+    tc_qs = TCRow.objects.select_related('tc_report', 'matched_schedule').filter(account_id=account_id)
+    if channel: tc_qs = tc_qs.filter(channel__iexact=channel)
+    if month:   tc_qs = tc_qs.filter(tc_report__month=month)
+    if _from_d: tc_qs = tc_qs.filter(date__gte=_from_d)
+    if _to_d:   tc_qs = tc_qs.filter(date__lte=_to_d)
+    tc_qs = tc_qs.order_by('date', 'aired_time')
+    tc_rows = list(tc_qs)
+
+    ws_tc = wb.create_sheet('TC Rows')
+    TC_HEADERS = [
+        'Channel', 'Month', 'Date', 'Programme', 'TC Theme', 'Duration (s)',
+        'Aired Time', 'Is Schedule Matched', 'Matched Schedule Brand',
+        'Matched Schedule Date', 'Is LMRB Confirmed', 'Is Extra',
+    ]
+    _meta_row(ws_tc, len(TC_HEADERS), 'TC Rows', len(tc_rows))
+    _hdr_row(ws_tc, TC_HEADERS)
+    for row_i, tc in enumerate(tc_rows, start=3):
+        ws_tc.cell(row_i,  1, tc.channel or '')
+        ws_tc.cell(row_i,  2, tc.tc_report.month if tc.tc_report else '')
+        ws_tc.cell(row_i,  3, str(tc.date) if tc.date else '')
+        ws_tc.cell(row_i,  4, tc.programme or '')
+        ws_tc.cell(row_i,  5, tc.tc_theme or '')
+        ws_tc.cell(row_i,  6, tc.duration)
+        ws_tc.cell(row_i,  7, tc.aired_time or '')
+        ws_tc.cell(row_i,  8, 'Yes' if tc.is_schedule_matched else 'No')
+        ws_tc.cell(row_i,  9, tc.matched_schedule.brand if tc.matched_schedule_id else '')
+        ws_tc.cell(row_i, 10, str(tc.matched_schedule.date) if tc.matched_schedule_id and tc.matched_schedule.date else '')
+        ws_tc.cell(row_i, 11, 'Yes' if tc.is_lmrb_confirmed else 'No')
+        ws_tc.cell(row_i, 12, 'Yes' if tc.is_extra else 'No')
+    _norm_rows(ws_tc, len(tc_rows), len(TC_HEADERS))
+
+    # ── 4. Full Ad Report sheet (MatchResult) ────────────────────────────────
     mr_qs = MatchResult.objects.filter(account_id=account_id)
-    if channel:
-        mr_qs = mr_qs.filter(channel__iexact=channel)
-    if date_from:
-        try:
-            from datetime import date as _date_cls
-            mr_qs = mr_qs.filter(scheduled_date__gte=_date_cls.fromisoformat(date_from))
-        except ValueError:
-            pass
-    if date_to:
-        try:
-            from datetime import date as _date_cls
-            mr_qs = mr_qs.filter(scheduled_date__lte=_date_cls.fromisoformat(date_to))
-        except ValueError:
-            pass
+    if channel: mr_qs = mr_qs.filter(channel__iexact=channel)
+    if month:   mr_qs = mr_qs.filter(month=month)
+    if _from_d: mr_qs = mr_qs.filter(scheduled_date__gte=_from_d)
+    if _to_d:   mr_qs = mr_qs.filter(scheduled_date__lte=_to_d)
+    if brand:   mr_qs = mr_qs.filter(brand__icontains=brand)
     mr_qs = mr_qs.order_by('month', 'scheduled_date', 'brand')
     mr_rows = list(mr_qs)
 
     ws_report = wb.create_sheet('Full Ad Report')
     AR_HEADERS = [
-        'Month', 'Brand', 'Theme', 'Duration', 'Programme',
+        'Month', 'Channel', 'Brand', 'Theme', 'Duration', 'Programme',
         'Planned Date', 'Planned Start', 'Planned End',
         'Aired Date', 'Aired Time', 'Source', 'Status',
     ]
     STATUS_LABEL = dict(MatchResult.STATUS_CHOICES)
-    # Row 1 meta
-    ws_report.merge_cells(f'A1:L1')
-    meta_c = ws_report.cell(1, 1,
-        f'Full Ad Report | Account: {account.name}'
-        f'{" | Channel: " + channel if channel else ""}'
-        f' | Total rows: {len(mr_rows)}')
-    meta_c.font = meta_font; meta_c.fill = META_FILL
-    # Row 2 headers
-    for col_i, h in enumerate(AR_HEADERS, start=1):
-        c = ws_report.cell(2, col_i, h)
-        c.font = hdr_font; c.fill = HDR_FILL; c.alignment = centre_al
-    # Data rows
+    _meta_row(ws_report, len(AR_HEADERS), 'Full Ad Report', len(mr_rows))
+    _hdr_row(ws_report, AR_HEADERS)
     for row_i, mr in enumerate(mr_rows, start=3):
         ws_report.cell(row_i,  1, mr.month or '')
-        ws_report.cell(row_i,  2, mr.brand or '')
-        ws_report.cell(row_i,  3, mr.theme or '')
-        ws_report.cell(row_i,  4, mr.duration)
-        ws_report.cell(row_i,  5, mr.programme or '')
-        ws_report.cell(row_i,  6, str(mr.scheduled_date) if mr.scheduled_date else '')
-        ws_report.cell(row_i,  7, mr.planned_start or '')
-        ws_report.cell(row_i,  8, mr.planned_end or '')
-        ws_report.cell(row_i,  9, str(mr.aired_date) if mr.aired_date else '')
-        ws_report.cell(row_i, 10, mr.air_time or '')
-        ws_report.cell(row_i, 11, mr.source or '')
-        ws_report.cell(row_i, 12, STATUS_LABEL.get(mr.status, mr.status))
+        ws_report.cell(row_i,  2, getattr(mr, 'channel', '') or '')
+        ws_report.cell(row_i,  3, mr.brand or '')
+        ws_report.cell(row_i,  4, mr.theme or '')
+        ws_report.cell(row_i,  5, mr.duration)
+        ws_report.cell(row_i,  6, mr.programme or '')
+        ws_report.cell(row_i,  7, str(mr.scheduled_date) if mr.scheduled_date else '')
+        ws_report.cell(row_i,  8, mr.planned_start or '')
+        ws_report.cell(row_i,  9, mr.planned_end or '')
+        ws_report.cell(row_i, 10, str(mr.aired_date) if mr.aired_date else '')
+        ws_report.cell(row_i, 11, mr.air_time or '')
+        ws_report.cell(row_i, 12, mr.source or '')
+        ws_report.cell(row_i, 13, STATUS_LABEL.get(mr.status, mr.status))
         for col_i in range(1, len(AR_HEADERS) + 1):
             ws_report.cell(row_i, col_i).font = norm_font
 
+    # ── 5. Brand Mappings sheet ───────────────────────────────────────────────
+    bm_qs = BrandMapping.objects.filter(account_id=account_id)
+    if brand: bm_qs = bm_qs.filter(brand__icontains=brand)
+    bm_qs = bm_qs.order_by('brand', 'theme')
+    bm_rows = list(bm_qs)
+
+    ws_bm = wb.create_sheet('Brand Mappings')
+    BM_HEADERS = ['Brand', 'LMRB Theme', 'TC Theme', 'Duration Filter']
+    _meta_row(ws_bm, len(BM_HEADERS), 'Brand Mappings', len(bm_rows))
+    _hdr_row(ws_bm, BM_HEADERS)
+    for row_i, bm in enumerate(bm_rows, start=3):
+        ws_bm.cell(row_i, 1, bm.brand or '')
+        ws_bm.cell(row_i, 2, bm.theme or '')
+        ws_bm.cell(row_i, 3, bm.tc_theme or '')
+        ws_bm.cell(row_i, 4, bm.duration if bm.duration is not None else '')
+    _norm_rows(ws_bm, len(bm_rows), len(BM_HEADERS))
+
+    # ── 6. Manual Matches sheet ───────────────────────────────────────────────
+    mm_qs = ManualMatch.objects.select_related(
+        'schedule_row', 'tc_row', 'lmrb_row', 'matched_by'
+    ).filter(account_id=account_id)
+    if channel: mm_qs = mm_qs.filter(channel__iexact=channel)
+    if month:   mm_qs = mm_qs.filter(month=month)
+    mm_qs = mm_qs.order_by('month', 'channel', 'matched_at')
+    mm_rows = list(mm_qs)
+
+    ws_mm = wb.create_sheet('Manual Matches')
+    MM_HEADERS = [
+        'Channel', 'Month', 'Match Mode',
+        'Schedule Brand', 'Schedule Date', 'Schedule Start',
+        'TC Theme', 'TC Date', 'TC Aired Time',
+        'LMRB Theme', 'LMRB Date', 'LMRB Time',
+        'Note', 'Matched By', 'Matched At',
+    ]
+    _meta_row(ws_mm, len(MM_HEADERS), 'Manual Matches', len(mm_rows))
+    _hdr_row(ws_mm, MM_HEADERS)
+    for row_i, mm in enumerate(mm_rows, start=3):
+        ws_mm.cell(row_i,  1, mm.channel or '')
+        ws_mm.cell(row_i,  2, mm.month or '')
+        ws_mm.cell(row_i,  3, mm.match_mode or '')
+        ws_mm.cell(row_i,  4, mm.schedule_row.brand if mm.schedule_row_id else '')
+        ws_mm.cell(row_i,  5, str(mm.schedule_row.date) if mm.schedule_row_id and mm.schedule_row.date else '')
+        ws_mm.cell(row_i,  6, mm.schedule_row.start_time if mm.schedule_row_id else '')
+        ws_mm.cell(row_i,  7, mm.tc_row.tc_theme if mm.tc_row_id else '')
+        ws_mm.cell(row_i,  8, str(mm.tc_row.date) if mm.tc_row_id and mm.tc_row.date else '')
+        ws_mm.cell(row_i,  9, mm.tc_row.aired_time if mm.tc_row_id else '')
+        ws_mm.cell(row_i, 10, mm.lmrb_row.advt_theme if mm.lmrb_row_id else '')
+        ws_mm.cell(row_i, 11, str(mm.lmrb_row.date) if mm.lmrb_row_id and mm.lmrb_row.date else '')
+        ws_mm.cell(row_i, 12, mm.lmrb_row.advt_time if mm.lmrb_row_id else '')
+        ws_mm.cell(row_i, 13, mm.note or '')
+        ws_mm.cell(row_i, 14, mm.matched_by.get_full_name() or mm.matched_by.email if mm.matched_by_id else '')
+        ws_mm.cell(row_i, 15, str(mm.matched_at) if mm.matched_at else '')
+    _norm_rows(ws_mm, len(mm_rows), len(MM_HEADERS))
+
+    # ── 7. Sponsorship Assignments sheet ─────────────────────────────────────
+    sp_qs = SponsorshipLmrbAssignment.objects.select_related(
+        'schedule_row', 'lmrb_row', 'matched_by'
+    ).filter(account_id=account_id)
+    if channel: sp_qs = sp_qs.filter(schedule_row__channel__iexact=channel)
+    if month:   sp_qs = sp_qs.filter(schedule_row__month=month)
+    sp_qs = sp_qs.order_by('schedule_row__month', 'schedule_row__date')
+    sp_rows = list(sp_qs)
+
+    ws_sp = wb.create_sheet('Sponsorship Assignments')
+    SP_HEADERS = [
+        'Channel', 'Month', 'Schedule Brand', 'Schedule Date',
+        'Schedule Start', 'Schedule Duration (s)',
+        'LMRB Theme', 'LMRB Date', 'LMRB Time', 'LMRB Duration (s)',
+        'Match Type', 'Matched By', 'Matched At',
+    ]
+    _meta_row(ws_sp, len(SP_HEADERS), 'Sponsorship Assignments', len(sp_rows))
+    _hdr_row(ws_sp, SP_HEADERS)
+    for row_i, sp in enumerate(sp_rows, start=3):
+        sr = sp.schedule_row
+        lr = sp.lmrb_row
+        ws_sp.cell(row_i,  1, sr.channel if sr else '')
+        ws_sp.cell(row_i,  2, sr.month if sr else '')
+        ws_sp.cell(row_i,  3, sr.brand if sr else '')
+        ws_sp.cell(row_i,  4, str(sr.date) if sr and sr.date else '')
+        ws_sp.cell(row_i,  5, sr.start_time if sr else '')
+        ws_sp.cell(row_i,  6, sr.duration if sr else '')
+        ws_sp.cell(row_i,  7, lr.advt_theme if lr else '')
+        ws_sp.cell(row_i,  8, str(lr.date) if lr and lr.date else '')
+        ws_sp.cell(row_i,  9, lr.advt_time if lr else '')
+        ws_sp.cell(row_i, 10, lr.duration if lr else '')
+        ws_sp.cell(row_i, 11, sp.match_type or '')
+        ws_sp.cell(row_i, 12, sp.matched_by.get_full_name() or sp.matched_by.email if sp.matched_by_id else 'Auto')
+        ws_sp.cell(row_i, 13, str(sp.matched_at) if sp.matched_at else '')
+    _norm_rows(ws_sp, len(sp_rows), len(SP_HEADERS))
+
+    # ── Build filename & response ─────────────────────────────────────────────
     buf = io.BytesIO()
     wb.save(buf); buf.seek(0)
-    fname = f'AdminExport_{account.name}{"_" + channel if channel else ""}.xlsx'.replace(' ', '_')
+    parts = [account.name]
+    if channel:         parts.append(channel)
+    if month:           parts.append(month)
+    if schedule_number: parts.append(f'Sch{schedule_number}')
+    fname = f'AdminExport_{"_".join(parts)}.xlsx'.replace(' ', '_')
     resp = HttpResponse(
         buf.read(),
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
     resp['Content-Disposition'] = f'attachment; filename="{fname}"'
     return resp
+
+
+def _month_date_range(month_str):
+    """Return (first_date, last_date) for a 'Month YYYY' string, or (None, None)."""
+    import calendar
+    from datetime import date as _date, datetime
+    try:
+        dt = datetime.strptime(month_str, '%B %Y').date()
+        last_day = calendar.monthrange(dt.year, dt.month)[1]
+        return (_date(dt.year, dt.month, 1), _date(dt.year, dt.month, last_day))
+    except Exception:
+        return (None, None)
 
 
 # ── System Settings (super_admin only) ────────────────────────────────────────

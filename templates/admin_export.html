@@ -1,20 +1,20 @@
 {% extends 'base.html' %}
 {% block title %}Admin Database Export{% endblock %}
 {% block page_title %}Admin Database Export{% endblock %}
-{% block page_subtitle %}Full LMRB database export with filters — admin only{% endblock %}
+{% block page_subtitle %}Full database export with filters — admin only{% endblock %}
 
 {% block content %}
-<div class="max-w-2xl mx-auto">
+<div class="max-w-3xl mx-auto">
   <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
 
     <div class="flex items-center gap-2 mb-5">
       <span class="inline-flex items-center gap-1.5 text-xs font-bold bg-red-50 text-red-600 border border-red-200 rounded-lg px-3 py-1">
         <i class="fa-solid fa-shield-halved"></i> Admin Only
       </span>
-      <p class="text-sm text-slate-500">Export all LMRB records with optional filters.</p>
+      <p class="text-sm text-slate-500">Export all records with optional filters. Each section is a separate sheet in the Excel file.</p>
     </div>
 
-    <form method="post" action="/dashboard/admin-export/">
+    <form method="post" id="exportForm" action="/dashboard/admin-export/">
       {% csrf_token %}
 
       <div class="space-y-4">
@@ -22,7 +22,7 @@
         <!-- Account -->
         <div>
           <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Account <span class="text-red-500">*</span></label>
-          <select name="account_id" class="select-field" required onchange="this.form.submit()">
+          <select name="account_id" id="accountSelect" class="select-field" required onchange="onAccountChange()">
             <option value="">Select account…</option>
             {% for acc in accounts %}
               <option value="{{ acc.id }}" {% if acc.id|stringformat:"s" == account_id %}selected{% endif %}>{{ acc.name }}</option>
@@ -33,17 +33,36 @@
         <!-- Channel -->
         <div>
           <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel <span class="text-slate-400 font-normal">(optional)</span></label>
-          <select name="channel" class="select-field" {% if not channels %}disabled{% endif %}>
+          <select name="channel" id="channelSelect" class="select-field" onchange="onChannelChange()" {% if not channels %}disabled{% endif %}>
             <option value="">All channels</option>
             {% for ch in channels %}
-              <option value="{{ ch }}">{{ ch }}</option>
+              <option value="{{ ch }}" {% if ch == sel_channel %}selected{% endif %}>{{ ch }}</option>
             {% endfor %}
+          </select>
+        </div>
+
+        <!-- Month -->
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Month <span class="text-slate-400 font-normal">(optional)</span></label>
+          <select name="month" id="monthSelect" class="select-field" onchange="onMonthChange()" disabled>
+            <option value="">All months</option>
+            {% for m in months %}
+              <option value="{{ m }}">{{ m }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Schedule Number -->
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Schedule Number <span class="text-slate-400 font-normal">(optional — filters Schedule Rows sheet)</span></label>
+          <select name="schedule_number" id="scheduleSelect" class="select-field" disabled>
+            <option value="">All schedules</option>
           </select>
         </div>
 
         <!-- Brand / Theme keyword -->
         <div>
-          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Brand / Theme keyword <span class="text-slate-400 font-normal">(optional — searches Advt_Theme)</span></label>
+          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Brand / Theme keyword <span class="text-slate-400 font-normal">(optional — searches brand / advt_theme)</span></label>
           <input type="text" name="brand" class="input-field" placeholder="e.g. MOBITEL, DIALOG…">
         </div>
 
@@ -59,10 +78,10 @@
           </div>
         </div>
 
-        <!-- Export scope -->
+        <!-- Export scope (LMRB sheets only) -->
         <div>
-          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Export Scope</label>
-          <div class="flex gap-4">
+          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">LMRB Export Scope</label>
+          <div class="flex flex-wrap gap-4">
             <label class="flex items-center gap-2 text-sm cursor-pointer">
               <input type="radio" name="scope" value="both" checked class="accent-blue-600"> Both (Matched + Unmatched)
             </label>
@@ -77,11 +96,20 @@
 
       </div><!-- /space-y-4 -->
 
-      <!-- Info box -->
-      <div class="mt-5 p-3 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-700 space-y-1">
-        <p><i class="fa-solid fa-circle-info mr-1"></i> The Excel file will contain separate sheets per scope type.</p>
-        <p>Each sheet has a metadata row at the top showing the row count and filter parameters.</p>
-        <p>All original LMRB columns are included. No data is truncated regardless of dataset size.</p>
+      <!-- Sheets info box -->
+      <div class="mt-5 p-4 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-700 space-y-1.5">
+        <p class="font-bold text-blue-800 mb-1"><i class="fa-solid fa-table mr-1"></i> Sheets included in the export:</p>
+        <div class="grid grid-cols-2 gap-x-6 gap-y-1">
+          <p><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> <strong>Matched LMRB</strong> — LMRB rows matched to schedule</p>
+          <p><i class="fa-solid fa-circle-xmark text-rose-400 mr-1"></i> <strong>Unmatched LMRB</strong> — LMRB rows with no match</p>
+          <p><i class="fa-solid fa-calendar-days text-blue-500 mr-1"></i> <strong>Schedule Rows</strong> — all planned ad spots</p>
+          <p><i class="fa-solid fa-file-certificate text-violet-500 mr-1"></i> <strong>TC Rows</strong> — transmission certificate data</p>
+          <p><i class="fa-solid fa-chart-bar text-orange-500 mr-1"></i> <strong>Full Ad Report</strong> — all match results with status</p>
+          <p><i class="fa-solid fa-tags text-teal-500 mr-1"></i> <strong>Brand Mappings</strong> — LMRB & TC theme mappings</p>
+          <p><i class="fa-solid fa-link text-pink-500 mr-1"></i> <strong>Manual Matches</strong> — manually confirmed matches</p>
+          <p><i class="fa-solid fa-star text-amber-500 mr-1"></i> <strong>Sponsorship Assignments</strong> — sponsorship LMRB assignments</p>
+        </div>
+        <p class="mt-2 text-blue-600">Each sheet has a metadata row at the top showing the row count and active filters.</p>
       </div>
 
       <div class="mt-5 flex gap-3">
@@ -94,4 +122,88 @@
     </form>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const accountSelect  = document.getElementById('accountSelect');
+const channelSelect  = document.getElementById('channelSelect');
+const monthSelect    = document.getElementById('monthSelect');
+const scheduleSelect = document.getElementById('scheduleSelect');
+
+function onAccountChange() {
+  const accountId = accountSelect.value;
+  // Reset downstream selects
+  _resetSelect(channelSelect, 'All channels', true);
+  _resetSelect(monthSelect, 'All months', true);
+  _resetSelect(scheduleSelect, 'All schedules', true);
+
+  if (!accountId) return;
+
+  // Reload page to get channels list (matches existing GET pattern)
+  const url = new URL(window.location.href);
+  url.searchParams.set('account_id', accountId);
+  url.searchParams.delete('channel');
+  window.location.href = url.toString();
+}
+
+function onChannelChange() {
+  const accountId = accountSelect.value;
+  const channel   = channelSelect.value;
+  _resetSelect(monthSelect, 'All months', true);
+  _resetSelect(scheduleSelect, 'All schedules', true);
+
+  if (!accountId || !channel) {
+    channelSelect.disabled = false;
+    return;
+  }
+
+  fetch(`/dashboard/brand-mappings/months/?account_id=${encodeURIComponent(accountId)}&channel=${encodeURIComponent(channel)}`)
+    .then(r => r.json())
+    .then(data => {
+      monthSelect.disabled = false;
+      (data.months || []).forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m; opt.textContent = m;
+        monthSelect.appendChild(opt);
+      });
+    });
+}
+
+function onMonthChange() {
+  const accountId = accountSelect.value;
+  const channel   = channelSelect.value;
+  const month     = monthSelect.value;
+  _resetSelect(scheduleSelect, 'All schedules', true);
+
+  if (!accountId || !channel || !month) return;
+
+  fetch(`/dashboard/brand-mappings/schedules/?account_id=${encodeURIComponent(accountId)}&channel=${encodeURIComponent(channel)}&month=${encodeURIComponent(month)}`)
+    .then(r => r.json())
+    .then(data => {
+      scheduleSelect.disabled = false;
+      (data.schedules || []).forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.schedule_number;
+        opt.textContent = `#${s.schedule_number} (v${s.version}, ${s.row_count} rows)`;
+        scheduleSelect.appendChild(opt);
+      });
+    });
+}
+
+function _resetSelect(sel, placeholder, disable) {
+  sel.innerHTML = `<option value="">${placeholder}</option>`;
+  sel.disabled = disable;
+}
+
+// On page load: if a channel is already selected (GET reload), enable month dropdown
+document.addEventListener('DOMContentLoaded', () => {
+  {% if sel_channel and months %}
+  monthSelect.disabled = false;
+  {% endif %}
+  {% if channels %}
+  channelSelect.disabled = false;
+  {% endif %}
+});
+</script>
 {% endblock %}
