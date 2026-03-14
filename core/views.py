@@ -213,9 +213,9 @@ def dashboard(request):
         )
         ctx['accounts_overview'] = list(
             Account.objects.annotate(
-                sch_count=_Count('schedule', distinct=True),
+                sch_count=_Count('schedules', distinct=True),
                 mon_count=_Count('monitoringdata', distinct=True),
-                tc_count=_Count('transmissionreport', distinct=True),
+                tc_count=_Count('tc_reports', distinct=True),
             ).order_by('name')
         )
 
@@ -223,7 +223,7 @@ def dashboard(request):
         my_accounts = user.accounts.all()
         sch = Schedule.objects.filter(account__in=my_accounts).select_related('account')
         ctx['my_accounts']    = my_accounts.annotate(
-            sch_count=_Count('schedule', distinct=True),
+            sch_count=_Count('schedules', distinct=True),
             mon_count=_Count('monitoringdata', distinct=True),
         )
         ctx['schedules']      = sch.order_by('-uploaded_at')[:5]
@@ -238,7 +238,7 @@ def dashboard(request):
         my_accounts = user.accounts.all()
         sch = Schedule.objects.filter(account__in=my_accounts).select_related('account')
         ctx['my_accounts']    = my_accounts.annotate(
-            sch_count=_Count('schedule', distinct=True),
+            sch_count=_Count('schedules', distinct=True),
         )
         ctx['my_schedules']   = sch.order_by('-uploaded_at')[:5]
         ctx['schedule_count'] = sch.count()
