@@ -531,7 +531,7 @@
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
 
   <!-- Tab bar -->
-  <div class="flex gap-1 px-4 pt-3 pb-0 border-b border-slate-100 overflow-x-auto">
+  <div class="flex gap-1 px-4 pt-3 pb-0 border-b border-slate-100 overflow-x-auto sticky top-0 z-40 bg-white">
     <button class="tab-btn active" onclick="showTab('full',this)">
       <i class="fa-solid fa-table-list mr-1"></i> Full Report
       <span class="ml-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-bold">{{ tab_data.full|length }}</span>
@@ -580,17 +580,17 @@
 
     <!-- ── Full Report Tab ────────────────────────────────── -->
     <div id="tab-full" class="tab-pane active">
-      {% include "monitoring/_match_table.html" with rows=tab_data.full show_status=True %}
+      {% include "monitoring/_match_table.html" with rows=tab_data.full show_status=True tbody_id="tab-full-body" %}
     </div>
 
     <!-- ── Matched Tab ────────────────────────────────────── -->
     <div id="tab-matched" class="tab-pane">
-      {% include "monitoring/_match_table.html" with rows=tab_data.matched show_status=False %}
+      {% include "monitoring/_match_table.html" with rows=tab_data.matched show_status=False tbody_id="tab-matched-body" %}
     </div>
 
     <!-- ── Not Aired Tab ─────────────────────────────────── -->
     <div id="tab-not_aired" class="tab-pane">
-      {% include "monitoring/_match_table.html" with rows=tab_data.not_aired show_status=True %}
+      {% include "monitoring/_match_table.html" with rows=tab_data.not_aired show_status=True tbody_id="tab-not-aired-body" %}
     </div>
 
     <!-- ── Programme Mismatch Tab ────────────────────────── -->
@@ -642,7 +642,7 @@
           <i class="fa-solid fa-table mr-1"></i> Show full table view
         </summary>
         <div class="mt-2">
-          {% include "monitoring/_match_table.html" with rows=tab_data.prog_mis show_status=True show_aired_programme=True %}
+          {% include "monitoring/_match_table.html" with rows=tab_data.prog_mis show_status=True show_aired_programme=True tbody_id="tab-progmis-body" %}
         </div>
       </details>
       {% else %}
@@ -699,7 +699,7 @@
           <i class="fa-solid fa-table mr-1"></i> Show full table view
         </summary>
         <div class="mt-2">
-          {% include "monitoring/_match_table.html" with rows=tab_data.late show_status=True show_aired_programme=True %}
+          {% include "monitoring/_match_table.html" with rows=tab_data.late show_status=True show_aired_programme=True tbody_id="tab-late-body" %}
         </div>
       </details>
       {% else %}
@@ -2011,6 +2011,14 @@ function filterThemeRows(q) {
   document.querySelectorAll('#themeAnalysisTable tbody .theme-row').forEach(function(row) {
     const theme = row.querySelector('td:first-child').textContent.toLowerCase();
     row.style.display = (!q || theme.includes(q)) ? '' : 'none';
+  });
+}
+
+// ── Generic tab table filter ───────────────────────────────────────────────
+function filterTab(input, tbodyId) {
+  var q = input.value.toLowerCase();
+  document.querySelectorAll('#' + tbodyId + ' tr').forEach(function(tr) {
+    tr.style.display = q === '' || tr.textContent.toLowerCase().includes(q) ? '' : 'none';
   });
 }
 </script>

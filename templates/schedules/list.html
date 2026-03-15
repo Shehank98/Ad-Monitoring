@@ -29,6 +29,10 @@
     <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Month</label>
     <input type="text" name="month" value="{{ filters.month }}" placeholder="e.g. January 2025" class="input-field"/>
   </div>
+  <div class="flex-1 min-w-[130px]">
+    <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Search</label>
+    <input type="text" name="q" id="sch-search" value="{{ filters.q }}" placeholder="Search filename…" class="input-field"/>
+  </div>
   <div class="flex gap-2">
     <button type="submit" class="btn-primary"><i class="fa-solid fa-filter"></i> Filter</button>
     <a href="/dashboard/schedules/" class="btn-secondary">Clear</a>
@@ -46,6 +50,17 @@
 
 <!-- ── Table ──────────────────────────────────────────────────── -->
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+  <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+    <p class="text-xs font-semibold text-slate-500">
+      <i class="fa-solid fa-calendar-days mr-1.5 text-slate-300"></i>
+      {{ schedules|length }} schedule{{ schedules|length|pluralize }}
+    </p>
+    {% if request.user.role in "planner,super_admin,admin" %}
+    <a href="/dashboard/schedules/upload/" class="text-xs font-semibold text-og-red hover:underline">
+      <i class="fa-solid fa-plus mr-1"></i>Upload New
+    </a>
+    {% endif %}
+  </div>
   <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <thead>
@@ -61,7 +76,7 @@
           <th class="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-slate-100">
+      <tbody id="schedTable" class="divide-y divide-slate-100">
         {% for s in schedules %}
         <tr class="hover:bg-slate-50/70 transition-colors">
 
@@ -76,10 +91,15 @@
           <td class="px-5 py-3 text-slate-600">{{ s.month }}</td>
 
           <td class="px-5 py-3">
-            <span class="font-mono text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded-md">{{ s.schedule_number }}</span>
-            {% if s.is_superseded %}
-              <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">superseded</span>
-            {% endif %}
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="font-mono text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded-md">{{ s.schedule_number }}</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-50 text-slate-400 border border-slate-200">v{{ s.version }}</span>
+              {% if s.is_superseded %}
+                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">
+                  <i class="fa-solid fa-arrow-up-right-dots text-[8px]"></i> superseded by v{{ s.version }}
+                </span>
+              {% endif %}
+            </div>
           </td>
 
           <td class="px-5 py-3 max-w-[160px]">
@@ -147,4 +167,19 @@
   </div>
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+  var input = document.getElementById('sch-search');
+  if(!input) return;
+  input.addEventListener('input', function(){
+    var q = this.value.toLowerCase();
+    document.querySelectorAll('#schedTable tr').forEach(function(tr){
+      tr.style.display = q === '' || tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+})();
+</script>
 {% endblock %}

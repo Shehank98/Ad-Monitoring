@@ -135,6 +135,7 @@
               <div id="lmrbQuickPickItems" class="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto"></div>
             </div>
             <p class="field-hint">Advt_Theme / MapOnline Theme column</p>
+            <p class="field-hint text-amber-600"><i class="fa-solid fa-asterisk text-[9px] mr-1"></i>Tip: End with <code class="bg-amber-50 px-1 rounded">*</code> for prefix wildcard matching (e.g. <code class="bg-amber-50 px-1 rounded">Brand Name 2025*</code>)</p>
           </div>
 
           <!-- TC Themes — multi-select chip picker -->
@@ -297,13 +298,17 @@
                 </td>
                 <td class="px-3 py-2.5" id="tc-cell-{{ m.id }}">
                   <div class="flex flex-wrap items-center gap-1">
+                    {% if m.tc_theme %}
                     {% for t in m.tc_themes_list %}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[11px] font-semibold ring-1 ring-amber-200 max-w-[150px]" title="{{ t }}">
                       <span class="truncate">{{ t }}</span>
                     </span>
-                    {% empty %}
-                    <span class="text-[11px] text-slate-400 italic">not set</span>
                     {% endfor %}
+                    {% else %}
+                    <span class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200">
+                      <i class="fa-solid fa-triangle-exclamation text-[8px]"></i> Not set
+                    </span>
+                    {% endif %}
                     <button onclick="openEditTcModal({{ m.id }}, '{{ m.tc_theme|escapejs }}')"
                             class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors border border-transparent hover:border-amber-200"
                             title="Edit TC themes">
@@ -474,6 +479,17 @@ let _curScheduleId = '';
 let _curProduct    = '';
 let _allProducts   = [];
 
+// ── Loading helper ────────────────────────────────────────────────────────────
+function setSelectLoading(sel, loading) {
+  if(loading) {
+    sel.style.opacity = '0.6';
+    sel.disabled = true;
+  } else {
+    sel.style.opacity = '';
+    sel.disabled = false;
+  }
+}
+
 // ── Cascade: Account → Channel → Month → Schedule ────────────────────────────
 function onAccountChange(accountId) {
   _curAccountId  = accountId;
@@ -501,10 +517,12 @@ function onChannelChange(channel) {
   _resetSelect('addScheduleSelect', 'All schedules');
   if (!_curAccountId) return;
   if (channel) {
+    const monthSel = document.getElementById('addMonthSelect');
+    setSelectLoading(monthSel, true);
     fetch(`/dashboard/brand-mappings/months/?account_id=${enc(_curAccountId)}&channel=${enc(channel)}`)
       .then(r => r.json())
-      .then(d => _populateSelect('addMonthSelect', d.months || [], 'All months'))
-      .catch(() => {});
+      .then(d => { setSelectLoading(monthSel, false); _populateSelect('addMonthSelect', d.months || [], 'All months'); })
+      .catch(() => { setSelectLoading(monthSel, false); });
   }
   _loadOptions();
 }
@@ -515,19 +533,21 @@ function onMonthChange(month) {
   _resetSelect('addScheduleSelect', 'All schedules');
   if (!_curAccountId) return;
   if (_curChannel && month) {
+    const scheduleSel = document.getElementById('addScheduleSelect');
+    setSelectLoading(scheduleSel, true);
     fetch(`/dashboard/brand-mappings/schedules/?account_id=${enc(_curAccountId)}&channel=${enc(_curChannel)}&month=${enc(month)}`)
       .then(r => r.json())
       .then(d => {
-        const sel = document.getElementById('addScheduleSelect');
-        sel.innerHTML = '<option value="">All schedules</option>';
+        setSelectLoading(scheduleSel, false);
+        scheduleSel.innerHTML = '<option value="">All schedules</option>';
         (d.schedules || []).forEach(s => {
           const opt = document.createElement('option');
           opt.value = s.id;
           opt.textContent = `#${s.schedule_number || s.id}  (v${s.version}, ${s.row_count} rows)`;
-          sel.appendChild(opt);
+          scheduleSel.appendChild(opt);
         });
       })
-      .catch(() => {});
+      .catch(() => { setSelectLoading(scheduleSel, false); });
   }
   _loadOptions();
 }
@@ -670,20 +690,22 @@ function loadFilterChannels(accountId) {
   chSel.innerHTML = '<option value="">All channels</option>';
   moSel.innerHTML = '<option value="">All months</option>';
   if (!accountId) return;
+  setSelectLoading(chSel, true);
   fetch(`/dashboard/brand-mappings/channels/?account_id=${enc(accountId)}`)
     .then(r => r.json())
-    .then(d => _populateSelect('filterChannelSelect', d.channels || [], 'All channels'))
-    .catch(() => {});
+    .then(d => { setSelectLoading(chSel, false); _populateSelect('filterChannelSelect', d.channels || [], 'All channels'); })
+    .catch(() => { setSelectLoading(chSel, false); });
 }
 
 function loadFilterMonths(accountId, channel) {
   const moSel = document.getElementById('filterMonthSelect');
   moSel.innerHTML = '<option value="">All months</option>';
   if (!accountId || !channel) return;
+  setSelectLoading(moSel, true);
   fetch(`/dashboard/brand-mappings/months/?account_id=${enc(accountId)}&channel=${enc(channel)}`)
     .then(r => r.json())
-    .then(d => _populateSelect('filterMonthSelect', d.months || [], 'All months'))
-    .catch(() => {});
+    .then(d => { setSelectLoading(moSel, false); _populateSelect('filterMonthSelect', d.months || [], 'All months'); })
+    .catch(() => { setSelectLoading(moSel, false); });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

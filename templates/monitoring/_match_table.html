@@ -4,7 +4,17 @@
     rows                - list of MatchResult objects
     show_status         - bool, show Status column
     show_aired_programme - bool, show Aired Programme column (for mismatch/late tabs)
+    tbody_id            - optional str, id attribute for the <tbody> (enables filterTab())
+    filter_placeholder  - optional str, placeholder text for the filter input
 {% endcomment %}
+{% if tbody_id %}
+<div class="mb-3">
+  <input type="text"
+         placeholder="{{ filter_placeholder|default:'Filter by brand, programme…' }}"
+         class="border border-slate-200 rounded-lg px-3 py-1.5 text-xs w-full max-w-sm focus:ring-2 focus:ring-blue-300 focus:outline-none"
+         oninput="filterTab(this, '{{ tbody_id }}')">
+</div>
+{% endif %}
 <div class="tab-table-wrap">
   <table class="data-table w-full">
     <thead>
@@ -21,7 +31,7 @@
         {% if show_status %}<th>Status</th>{% endif %}
       </tr>
     </thead>
-    <tbody>
+    <tbody{% if tbody_id %} id="{{ tbody_id }}"{% endif %}>
       {% for mr in rows %}
       <tr>
         <td class="font-medium text-slate-800">{{ mr.brand|default:"-" }}</td>

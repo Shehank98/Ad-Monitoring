@@ -41,6 +41,19 @@
 
   /* Divider between column groups */
   .group-sep { border-left: 2px solid #e2e8f0 !important; }
+
+  /* Sticky first column */
+  .cmp-table .col-sticky {
+    position: sticky; left: 0; z-index: 5;
+    background: inherit;
+    box-shadow: 2px 0 4px rgba(0,0,0,.04);
+  }
+  .cmp-table thead .col-sticky { background: #0f2340; z-index: 6; }
+
+  /* Stat card clickable */
+  .stat-card.clickable { cursor: pointer; transition: transform .15s, box-shadow .15s; }
+  .stat-card.clickable:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+  .stat-card.clickable.active { ring: 2px solid #3b82f6; outline: 2px solid #3b82f6; }
 </style>
 {% endblock %}
 

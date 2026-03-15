@@ -71,6 +71,25 @@
   </form>
 </div>
 
+<!-- ── Data freshness strip ───────────────────────────────── -->
+{% if tc_report or schedules_in_scope %}
+<div class="flex flex-wrap gap-2 mb-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
+  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider self-center">Data freshness:</span>
+  {% if schedules_in_scope %}
+  <span class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-600">
+    <i class="fa-solid fa-calendar-days text-purple-500 text-[10px]"></i>
+    Schedule: {{ schedules_in_scope.0.uploaded_at|date:"d M Y, H:i" }}
+  </span>
+  {% endif %}
+  {% if tc_report %}
+  <span class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-600">
+    <i class="fa-solid fa-file-certificate text-teal-500 text-[10px]"></i>
+    TC: {{ tc_report.uploaded_at|date:"d M Y, H:i" }}
+  </span>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if summary_data %}
 
 <!-- ── Action buttons ─────────────────────────────────────────── -->
@@ -184,65 +203,70 @@
       </div>
     </div>
 
-    <!-- Editable metadata form -->
+    <!-- Editable metadata form (collapsible) -->
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-      <h3 class="font-bold text-slate-800 text-sm mb-4 flex items-center gap-2">
-        <i class="fa-solid fa-pen-to-square text-amber-500"></i> Invoice & Notes
-      </h3>
-      <form method="post" class="space-y-3">
-        {% csrf_token %}
-        <input type="hidden" name="account_id"  value="{{ account_id }}">
-        <input type="hidden" name="channel"     value="{{ channel }}">
-        <input type="hidden" name="month"       value="{{ month }}">
-        <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
+      <details class="group" {% if meta.supplier_invoice_no or meta.po_no or meta.invoice_no or meta.notes %}open{% endif %}>
+        <summary class="flex items-center justify-between cursor-pointer list-none select-none">
+          <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+            <i class="fa-solid fa-pen-to-square text-amber-500"></i> Invoice &amp; Notes
+          </h3>
+          <i class="fa-solid fa-chevron-down text-slate-400 text-xs transition-transform duration-200 group-open:rotate-180"></i>
+        </summary>
+        <form method="post" class="space-y-3 mt-4">
+          {% csrf_token %}
+          <input type="hidden" name="account_id"  value="{{ account_id }}">
+          <input type="hidden" name="channel"     value="{{ channel }}">
+          <input type="hidden" name="month"       value="{{ month }}">
+          <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
 
-        {% for field_name, label, placeholder in meta_fields %}
-        {% endfor %}
+          {% for field_name, label, placeholder in meta_fields %}
+          {% endfor %}
 
-        <div>
-          <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Supplier Invoice No</label>
-          <input type="text" name="supplier_invoice_no" class="input-field text-sm"
-                 placeholder="e.g. 5200061259, 5200062303"
-                 value="{{ meta.supplier_invoice_no|default:'' }}">
-        </div>
-        <div>
-          <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">PO No</label>
-          <input type="text" name="po_no" class="input-field text-sm"
-                 placeholder="e.g. 79190/2025"
-                 value="{{ meta.po_no|default:'' }}">
-        </div>
-        <div>
-          <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Invoice No</label>
-          <input type="text" name="invoice_no" class="input-field text-sm"
-                 placeholder="Invoice number"
-                 value="{{ meta.invoice_no|default:'' }}">
-        </div>
-        <div>
-          <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Notes</label>
-          <textarea name="notes" rows="3" class="input-field text-sm resize-none"
-                    placeholder="e.g. Channel transmission attached&#10;Sponsorship Benefits confirmation email attached">{{ meta.notes|default:'' }}</textarea>
-        </div>
-        <div class="grid grid-cols-3 gap-2">
           <div>
-            <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Prepared By</label>
-            <input type="text" name="prepared_by" class="input-field text-xs"
-                   value="{{ meta.prepared_by|default:'' }}">
+            <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Supplier Invoice No</label>
+            <input type="text" name="supplier_invoice_no" class="input-field text-sm"
+                   placeholder="e.g. 5200061259, 5200062303"
+                   value="{{ meta.supplier_invoice_no|default:'' }}">
           </div>
           <div>
-            <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Checked By</label>
-            <input type="text" name="checked_by" class="input-field text-xs"
-                   value="{{ meta.checked_by|default:'' }}">
+            <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">PO No</label>
+            <input type="text" name="po_no" class="input-field text-sm"
+                   placeholder="e.g. 79190/2025"
+                   value="{{ meta.po_no|default:'' }}">
           </div>
           <div>
-            <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Authorised By</label>
-            <input type="text" name="authorised_by" class="input-field text-xs"
-                   value="{{ meta.authorised_by|default:'' }}">
+            <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Invoice No</label>
+            <input type="text" name="invoice_no" class="input-field text-sm"
+                   placeholder="Invoice number"
+                   value="{{ meta.invoice_no|default:'' }}">
           </div>
-        </div>
-        <button type="submit" class="btn-primary w-full justify-center text-sm">
-          <i class="fa-solid fa-floppy-disk"></i> Save Details
-        </button>
-      </form>
+          <div>
+            <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Notes</label>
+            <textarea name="notes" rows="3" class="input-field text-sm resize-none"
+                      placeholder="e.g. Channel transmission attached&#10;Sponsorship Benefits confirmation email attached">{{ meta.notes|default:'' }}</textarea>
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Prepared By</label>
+              <input type="text" name="prepared_by" class="input-field text-xs"
+                     value="{{ meta.prepared_by|default:'' }}">
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Checked By</label>
+              <input type="text" name="checked_by" class="input-field text-xs"
+                     value="{{ meta.checked_by|default:'' }}">
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Authorised By</label>
+              <input type="text" name="authorised_by" class="input-field text-xs"
+                     value="{{ meta.authorised_by|default:'' }}">
+            </div>
+          </div>
+          <button type="submit" class="btn-primary w-full justify-center text-sm">
+            <i class="fa-solid fa-floppy-disk"></i> Save Details
+          </button>
+        </form>
+      </details>
     </div>
   </div>
 
@@ -293,7 +317,15 @@
                   </td>
                   <td class="text-center text-slate-600">{{ row.dur|default:"-" }}</td>
                   <td class="text-center font-semibold">{{ row.planned }}</td>
-                  <td class="text-center text-emerald-700 font-semibold">{{ row.aired }}</td>
+                  <td class="text-center text-emerald-700 font-semibold">
+                    {{ row.aired }}
+                    <div class="mt-1 w-full bg-slate-100 rounded-full h-1">
+                      {% if row.planned > 0 %}
+                      <div class="h-1 rounded-full {% if row.aired >= row.planned %}bg-emerald-500{% elif row.aired > 0 %}bg-amber-400{% else %}bg-red-400{% endif %}"
+                           style="width: {% widthratio row.aired row.planned 100 %}%"></div>
+                      {% endif %}
+                    </div>
+                  </td>
                   <td class="text-center {% if row.missed > 0 %}text-red-600 font-bold{% else %}text-slate-400{% endif %}">
                     {{ row.missed }}
                   </td>
@@ -368,7 +400,15 @@
                   </td>
                   <td class="text-center text-slate-600">{{ row.dur|default:"-" }}</td>
                   <td class="text-center font-semibold">{{ row.planned }}</td>
-                  <td class="text-center text-emerald-700 font-semibold">{{ row.aired }}</td>
+                  <td class="text-center text-emerald-700 font-semibold">
+                    {{ row.aired }}
+                    <div class="mt-1 w-full bg-slate-100 rounded-full h-1">
+                      {% if row.planned > 0 %}
+                      <div class="h-1 rounded-full {% if row.aired >= row.planned %}bg-emerald-500{% elif row.aired > 0 %}bg-amber-400{% else %}bg-red-400{% endif %}"
+                           style="width: {% widthratio row.aired row.planned 100 %}%"></div>
+                      {% endif %}
+                    </div>
+                  </td>
                   <td class="text-center {% if row.missed > 0 %}text-red-600 font-bold{% else %}text-slate-400{% endif %}">{{ row.missed }}</td>
                   <td class="text-center {% if row.extra > 0 %}text-violet-600 font-semibold{% else %}text-slate-400{% endif %}">{{ row.extra }}</td>
                   <td class="text-center text-blue-600 font-semibold">{{ row.third_party }}</td>
