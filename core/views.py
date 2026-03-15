@@ -3417,6 +3417,12 @@ def tc_three_way(request):
             schedule_id = str(schedules_in_scope[0].id)
 
         from core.models import ManualMatch
+        from verification.tc_engine import _time_to_secs as _tts3w
+
+        def _pt(t):
+            """Parse HH:MM:SS → seconds, or None."""
+            return _tts3w(str(t)) if t else None
+
         sch_filter = dict(account_id=account_id, channel=channel, month=month)
         if schedule_id:
             sch_filter['schedule_id'] = schedule_id
@@ -3436,6 +3442,15 @@ def tc_three_way(request):
                 schedule_row__isnull=False,
             ).select_related('tc_row', 'lmrb_row')
         }
+
+        # Pre-load unconfirmed LMRB rows for nearest-match search on tc_only rows
+        scope_lmrb_pool = list(
+            LMRBRow.objects.filter(
+                account_id=account_id,
+                channel=channel,
+                is_lmrb_confirmed=False,
+            ).values('advt_time', 'duration', 'date')
+        )
 
         for sr in sch_qs:
             lmrb = sr.matched_lmrb
@@ -3476,6 +3491,91 @@ def tc_three_way(request):
             if tc and tc.is_lmrb_confirmed and tc.matched_lmrb_id:
                 display_lmrb = tc.matched_lmrb
 
+            # ── Timing deltas ───────────────────────────────────────────
+            plan_start_s  = _pt(sr.start_time)
+            plan_end_s    = _pt(sr.end_time)
+            lmrb_time_s   = _pt(display_lmrb.advt_time if display_lmrb else None)
+            tc_time_s     = _pt(tc.aired_time if tc else None)
+
+            # LMRB time delta relative to plan window (0 = within, positive = seconds outside)
+            lmrb_delta = None
+            if lmrb_time_s is not None and plan_start_s is not None and plan_end_s is not None:
+                if plan_start_s <= lmrb_time_s <= plan_end_s:
+                    lmrb_delta = 0
+                elif lmrb_time_s > plan_end_s:
+                    lmrb_delta = lmrb_time_s - plan_end_s
+                else:
+                    lmrb_delta = plan_start_s - lmrb_time_s
+
+            # TC↔LMRB time gap (seconds)
+            tc_lmrb_delta = None
+            if tc_time_s is not None and lmrb_time_s is not None:
+                tc_lmrb_delta = abs(tc_time_s - lmrb_time_s)
+
+            # ── Nearest unconfirmed LMRB for tc_only rows ───────────────
+            near_lmrb_time  = ''
+            near_lmrb_delta = None
+            tc_date_val     = tc.date if tc else None
+            if status == 'tc_only' and tc_time_s is not None:
+                best_d, best_t = None, ''
+                for lr in scope_lmrb_pool:
+                    if lr['duration'] != sr.duration:
+                        continue
+                    if lr['date'] != tc_date_val:
+                        continue
+                    lt_s = _pt(str(lr['advt_time']))
+                    if lt_s is None:
+                        continue
+                    d = abs(tc_time_s - lt_s)
+                    if best_d is None or d < best_d:
+                        best_d, best_t = d, str(lr['advt_time'])
+                near_lmrb_time  = best_t
+                near_lmrb_delta = best_d
+
+            # ── Confidence score (0-100) ─────────────────────────────────
+            lmrb_date_val = display_lmrb.date if display_lmrb else None
+            if status == 'aired':
+                score = 100
+                if lmrb_date_val != sr.date:
+                    score -= 10
+                if lmrb_delta is not None and lmrb_delta > 0:
+                    score -= min(20, lmrb_delta // 30)
+                if tc_lmrb_delta is not None and tc_lmrb_delta > 0:
+                    score -= min(10, tc_lmrb_delta)
+                score = max(60, score)
+            elif status == 'tc_only':
+                score = 55
+                if tc_date_val == sr.date:
+                    score += 10
+                if near_lmrb_delta is not None:
+                    if near_lmrb_delta <= 30:
+                        score += 15
+                    elif near_lmrb_delta <= 120:
+                        score += 7
+                score = min(79, score)
+            elif status == 'lmrb_only':
+                score = 50
+                if lmrb_date_val == sr.date:
+                    score += 15
+                if lmrb_delta == 0:
+                    score += 15
+                score = min(74, score)
+            elif status == 'manual':
+                score = 70
+            else:
+                score = 0
+
+            if score >= 85:
+                conf_label = 'excellent'
+            elif score >= 65:
+                conf_label = 'good'
+            elif score >= 40:
+                conf_label = 'partial'
+            elif score > 0:
+                conf_label = 'low'
+            else:
+                conf_label = 'none'
+
             rows.append({
                 'brand':          sr.brand,
                 'ad_type':        sr.ad_type,
@@ -3491,7 +3591,7 @@ def tc_three_way(request):
                 'lmrb_time':      display_lmrb.advt_time  if display_lmrb else '',
                 'lmrb_theme':     display_lmrb.advt_theme if display_lmrb else '',
                 # TC (channel certificate)
-                'tc_date':        tc.date          if tc else None,
+                'tc_date':        tc_date_val,
                 'tc_programme':   tc.programme     if tc else '',
                 'tc_time':        tc.aired_time    if tc else '',
                 'tc_theme':       tc.tc_theme      if tc else '',
@@ -3501,6 +3601,13 @@ def tc_three_way(request):
                 'tc_lmrb_confirmed':   tc.is_lmrb_confirmed if tc else False,
                 'is_manual':           is_manual,
                 'status':              status,
+                # Match quality / confidence
+                'confidence_pct':   score,
+                'confidence_label': conf_label,
+                'lmrb_delta_secs':  lmrb_delta,
+                'tc_lmrb_delta_secs': tc_lmrb_delta,
+                'near_lmrb_time':   near_lmrb_time,
+                'near_lmrb_delta':  near_lmrb_delta,
             })
 
     return render(request, 'tc/detail.html', {

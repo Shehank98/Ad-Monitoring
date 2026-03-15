@@ -5,7 +5,7 @@
 
 {% block extra_head %}
 <style>
-  /* Table layout */
+  /* ── Table layout ──────────────────────────────────────────── */
   .cmp-table { width: 100%; border-collapse: collapse; font-size: .76rem; }
   .cmp-table th {
     background: #0f2340; color: #fff; font-weight: 700; font-size: .68rem;
@@ -13,21 +13,21 @@
     padding: .4rem .55rem; white-space: nowrap;
   }
   .cmp-table td { padding: .35rem .55rem; white-space: nowrap; border-bottom: 1px solid #f1f5f9; }
-  .cmp-table tbody tr:hover { background: #f8fafc; }
+  .cmp-table tbody tr.data-row:hover { background: #f0f7ff !important; cursor: pointer; }
+  .cmp-table tbody tr.data-row.row-selected { outline: 2px solid #3b82f6; outline-offset: -1px; }
 
-  /* Column group headers */
+  /* ── Column group headers ──────────────────────────────────── */
   .th-plan  { background: #1d4ed8 !important; }
   .th-lmrb  { background: #065f46 !important; }
   .th-tc    { background: #7c3aed !important; }
 
-  /* Status row colours */
+  /* ── Status row colours ────────────────────────────────────── */
   .row-aired     { background: #f0fdf4; }
-  .row-aired td  { }
   .row-tc-only   { background: #fefce8; }
   .row-lmrb-only { background: #eff6ff; }
   .row-not-aired { background: #fff1f2; }
 
-  /* Badges */
+  /* ── Badges ────────────────────────────────────────────────── */
   .badge { display:inline-flex; align-items:center; gap:.25rem;
            padding:.15rem .45rem; border-radius:9999px; font-size:.65rem; font-weight:700; }
   .badge-green  { background:#dcfce7; color:#166534; }
@@ -35,14 +35,44 @@
   .badge-blue   { background:#dbeafe; color:#1e40af; }
   .badge-red    { background:#fee2e2; color:#991b1b; }
   .badge-grey   { background:#f1f5f9; color:#64748b; }
+  .badge-purple { background:#f3e8ff; color:#6b21a8; }
 
-  /* Stat cards */
+  /* ── Time delta pills ──────────────────────────────────────── */
+  .delta-pill {
+    display: inline-block; font-size: .6rem; font-weight: 700;
+    padding: .08rem .3rem; border-radius: 4px; margin-left: .2rem;
+    vertical-align: middle;
+  }
+  .delta-ok     { background: #dcfce7; color: #166534; }
+  .delta-near   { background: #fef9c3; color: #92400e; }
+  .delta-far    { background: #fee2e2; color: #991b1b; }
+
+  /* ── Confidence bar ────────────────────────────────────────── */
+  .conf-track {
+    height: 4px; border-radius: 9999px; background: #e2e8f0;
+    margin-top: .3rem; width: 80px;
+  }
+  .conf-fill {
+    height: 100%; border-radius: 9999px;
+    transition: width .3s ease;
+  }
+  .conf-excellent .conf-fill { background: #16a34a; }
+  .conf-good      .conf-fill { background: #65a30d; }
+  .conf-partial   .conf-fill { background: #d97706; }
+  .conf-low       .conf-fill { background: #dc2626; }
+  .conf-none      .conf-fill { background: #94a3b8; }
+  .conf-label-txt { font-size: .6rem; color: #64748b; text-transform: uppercase; letter-spacing: .04em; }
+
+  /* ── Stat cards ────────────────────────────────────────────── */
   .stat-card { border-radius:1rem; padding:.75rem 1.25rem; min-width:130px; }
+  .stat-card.clickable { cursor: pointer; transition: transform .15s, box-shadow .15s; }
+  .stat-card.clickable:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+  .stat-card.clickable.active { outline: 2px solid #3b82f6; }
 
-  /* Divider between column groups */
+  /* ── Divider between column groups ────────────────────────── */
   .group-sep { border-left: 2px solid #e2e8f0 !important; }
 
-  /* Sticky first column */
+  /* ── Sticky first column ───────────────────────────────────── */
   .cmp-table .col-sticky {
     position: sticky; left: 0; z-index: 5;
     background: inherit;
@@ -50,10 +80,78 @@
   }
   .cmp-table thead .col-sticky { background: #0f2340; z-index: 6; }
 
-  /* Stat card clickable */
-  .stat-card.clickable { cursor: pointer; transition: transform .15s, box-shadow .15s; }
-  .stat-card.clickable:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.1); }
-  .stat-card.clickable.active { ring: 2px solid #3b82f6; outline: 2px solid #3b82f6; }
+  /* ── Expand toggle button ──────────────────────────────────── */
+  .expand-btn {
+    width: 18px; height: 18px; border-radius: 4px;
+    border: 1px solid #cbd5e1; background: #f8fafc;
+    color: #64748b; font-size: .65rem; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background .15s;
+  }
+  .expand-btn:hover { background: #e2e8f0; }
+  .expand-btn.open { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+
+  /* ── Detail expansion panel ────────────────────────────────── */
+  .detail-row { display: none; }
+  .detail-row.visible { display: table-row; }
+  .detail-panel {
+    padding: .75rem 1rem;
+    background: #f8fafc;
+    border-bottom: 2px solid #e2e8f0;
+    border-top: 1px solid #e2e8f0;
+  }
+  .detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: .75rem;
+  }
+  .detail-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: .75rem;
+    padding: .6rem .9rem;
+  }
+  .detail-card-title {
+    font-size: .65rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .05em; color: #64748b; margin-bottom: .4rem;
+  }
+  .detail-row-val { font-size: .75rem; color: #1e293b; line-height: 1.5; }
+  .detail-row-val .lbl { color: #94a3b8; font-size: .65rem; }
+
+  /* ── Near-LMRB highlight card ──────────────────────────────── */
+  .near-lmrb-card {
+    border-color: #fbbf24 !important;
+    background: #fffbeb !important;
+  }
+  .near-lmrb-card .detail-card-title { color: #92400e; }
+
+  /* ── Confidence breakdown section ──────────────────────────── */
+  .conf-breakdown {
+    display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  }
+  .conf-big-bar {
+    flex: 0 0 120px; height: 8px; border-radius: 9999px; background: #e2e8f0; overflow: hidden;
+  }
+  .conf-big-fill { height: 100%; border-radius: 9999px; transition: width .4s ease; }
+  .conf-pct-txt { font-size: .9rem; font-weight: 800; }
+  .conf-excellent .conf-pct-txt { color: #16a34a; }
+  .conf-good      .conf-pct-txt { color: #65a30d; }
+  .conf-partial   .conf-pct-txt { color: #d97706; }
+  .conf-low       .conf-pct-txt { color: #dc2626; }
+  .conf-none      .conf-pct-txt { color: #94a3b8; }
+  .conf-excellent .conf-big-fill { background: #16a34a; }
+  .conf-good      .conf-big-fill { background: #65a30d; }
+  .conf-partial   .conf-big-fill { background: #d97706; }
+  .conf-low       .conf-big-fill { background: #dc2626; }
+  .conf-none      .conf-big-fill { background: #94a3b8; }
+
+  /* ── Close-match highlight (LMRB found but not close enough) ─ */
+  .close-match-hint {
+    display: inline-flex; align-items: center; gap: .3rem;
+    font-size: .68rem; padding: .18rem .5rem;
+    border-radius: 6px; border: 1px dashed #f59e0b;
+    background: #fffbeb; color: #92400e; font-weight: 600;
+  }
 </style>
 {% endblock %}
 
@@ -153,12 +251,13 @@
   </div>
 </div>
 
-<!-- ── Colour legend ──────────────────────────────────────────── -->
-<div class="flex flex-wrap gap-2 mb-4 text-xs">
-  <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Aired - confirmed by both TC &amp; LMRB</span>
-  <span class="badge badge-amber"><i class="fa-solid fa-file-certificate"></i> TC only - TC says aired, LMRB not confirmed</span>
-  <span class="badge badge-blue"><i class="fa-solid fa-eye"></i> LMRB only - LMRB found a match, no TC record linked</span>
-  <span class="badge badge-red"><i class="fa-solid fa-circle-xmark"></i> Not aired - neither source confirms</span>
+<!-- ── Colour legend + hint ───────────────────────────────────── -->
+<div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
+  <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Aired — confirmed by both TC &amp; LMRB</span>
+  <span class="badge badge-amber"><i class="fa-solid fa-file-certificate"></i> TC only — TC says aired, LMRB not confirmed</span>
+  <span class="badge badge-blue"><i class="fa-solid fa-eye"></i> LMRB only — LMRB found a match, no TC record</span>
+  <span class="badge badge-red"><i class="fa-solid fa-circle-xmark"></i> Not aired — neither source confirms</span>
+  <span class="text-slate-400 ml-2"><i class="fa-solid fa-hand-pointer mr-1"></i>Click any row to see match confidence details</span>
 </div>
 
 <!-- ── Main table ─────────────────────────────────────────────── -->
@@ -167,7 +266,7 @@
     <thead>
       <!-- Group headers -->
       <tr>
-        <th colspan="4" class="text-center">Ad Details</th>
+        <th colspan="5" class="text-center">Ad Details</th>
         <th colspan="4" class="text-center th-plan">
           <i class="fa-solid fa-calendar-days mr-1"></i>PLAN (Schedule)
         </th>
@@ -177,11 +276,12 @@
         <th colspan="4" class="text-center th-tc group-sep">
           <i class="fa-solid fa-file-certificate mr-1"></i>TC (Channel Certificate)
         </th>
-        <th class="text-center">Status</th>
+        <th class="text-center">Status &amp; Confidence</th>
       </tr>
       <!-- Column headers -->
       <tr>
         <!-- Ad details -->
+        <th></th><!-- expand toggle -->
         <th>#</th>
         <th>Brand</th>
         <th>Type</th>
@@ -207,7 +307,18 @@
     </thead>
     <tbody>
       {% for r in rows %}
-      <tr class="{% if r.status == 'aired' %}row-aired{% elif r.status == 'tc_only' %}row-tc-only{% elif r.status == 'lmrb_only' %}row-lmrb-only{% else %}row-not-aired{% endif %}">
+      <!-- ── Data row ──────────────────────────────────────────── -->
+      <tr class="data-row {% if r.status == 'aired' %}row-aired{% elif r.status == 'tc_only' %}row-tc-only{% elif r.status == 'lmrb_only' %}row-lmrb-only{% else %}row-not-aired{% endif %}"
+          id="row-{{ forloop.counter }}"
+          onclick="toggleDetail({{ forloop.counter }})">
+
+        <!-- Expand toggle -->
+        <td class="col-sticky" style="width:28px; padding:.3rem .4rem;">
+          <button class="expand-btn" id="btn-{{ forloop.counter }}" onclick="event.stopPropagation(); toggleDetail({{ forloop.counter }})">
+            <i class="fa-solid fa-chevron-right" id="chevron-{{ forloop.counter }}"></i>
+          </button>
+        </td>
+
         <!-- Ad details -->
         <td class="text-slate-400 font-mono">{{ forloop.counter }}</td>
         <td class="font-semibold text-slate-800">{{ r.brand }}</td>
@@ -232,37 +343,201 @@
         {% if r.has_lmrb %}
           <td class="font-mono group-sep {% if r.lmrb_date == r.plan_date %}text-green-700{% else %}text-amber-600{% endif %}">
             {{ r.lmrb_date|date:"d M Y" }}
+            {% if r.lmrb_date != r.plan_date %}<span class="delta-pill delta-near" title="Date differs from plan">≠date</span>{% endif %}
           </td>
           <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.lmrb_programme }}">{{ r.lmrb_programme|default:"-" }}</td>
-          <td class="font-mono text-green-700">{{ r.lmrb_time }}</td>
+          <td class="font-mono">
+            <span class="{% if r.lmrb_delta_secs == 0 %}text-green-700{% elif r.lmrb_delta_secs is not None %}text-amber-700{% else %}text-slate-600{% endif %}">
+              {{ r.lmrb_time }}
+            </span>
+            {% if r.lmrb_delta_secs == 0 %}
+              <span class="delta-pill delta-ok" title="Within planned window">✓</span>
+            {% elif r.lmrb_delta_secs is not None %}
+              {% if r.lmrb_delta_secs <= 300 %}
+                <span class="delta-pill delta-near" title="Outside planned window">+{{ r.lmrb_delta_secs }}s</span>
+              {% else %}
+                <span class="delta-pill delta-far" title="Well outside planned window">+{{ r.lmrb_delta_secs }}s</span>
+              {% endif %}
+            {% endif %}
+          </td>
           <td class="text-slate-600 max-w-[120px] truncate" title="{{ r.lmrb_theme }}">{{ r.lmrb_theme }}</td>
         {% else %}
-          <td class="group-sep text-red-400 italic text-center" colspan="4">- not found -</td>
+          <td class="group-sep text-red-400 italic text-center" colspan="4">— not found —</td>
         {% endif %}
 
         <!-- TC -->
         {% if r.has_tc %}
           <td class="font-mono group-sep {% if r.tc_date == r.plan_date %}text-green-700{% else %}text-amber-600{% endif %}">
             {{ r.tc_date|date:"d M Y" }}
+            {% if r.tc_date != r.plan_date %}<span class="delta-pill delta-near" title="Date differs from plan">≠date</span>{% endif %}
           </td>
           <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.tc_programme }}">{{ r.tc_programme|default:"-" }}</td>
-          <td class="font-mono {% if r.tc_lmrb_confirmed %}text-green-700{% else %}text-amber-600{% endif %}">{{ r.tc_time }}</td>
+          <td class="font-mono">
+            {% if r.tc_lmrb_confirmed %}
+              <span class="text-green-700">{{ r.tc_time }}</span>
+              {% if r.tc_lmrb_delta_secs is not None %}
+                <span class="delta-pill delta-ok" title="TC confirmed by LMRB within {{ r.tc_lmrb_delta_secs }}s">±{{ r.tc_lmrb_delta_secs }}s</span>
+              {% endif %}
+            {% else %}
+              <span class="text-amber-700">{{ r.tc_time }}</span>
+              {% if r.near_lmrb_time %}
+                <span class="delta-pill delta-far" title="Nearest LMRB was {{ r.near_lmrb_delta }}s away from this TC time">~{{ r.near_lmrb_delta }}s</span>
+              {% endif %}
+            {% endif %}
+          </td>
           <td class="text-slate-600 max-w-[120px] truncate" title="{{ r.tc_theme }}">{{ r.tc_theme }}</td>
         {% else %}
-          <td class="group-sep text-red-400 italic text-center" colspan="4">- not found -</td>
+          <td class="group-sep text-red-400 italic text-center" colspan="4">— not found —</td>
         {% endif %}
 
-        <!-- Status badge -->
-        <td>
+        <!-- Status + mini confidence bar -->
+        <td style="min-width:110px;">
           {% if r.status == 'aired' %}
             <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Aired</span>
           {% elif r.status == 'tc_only' %}
             <span class="badge badge-amber"><i class="fa-solid fa-triangle-exclamation"></i> TC Only</span>
           {% elif r.status == 'lmrb_only' %}
             <span class="badge badge-blue"><i class="fa-solid fa-eye"></i> LMRB Only</span>
+          {% elif r.status == 'manual' %}
+            <span class="badge badge-purple"><i class="fa-solid fa-hand"></i> Manual</span>
           {% else %}
             <span class="badge badge-red"><i class="fa-solid fa-circle-xmark"></i> Not Aired</span>
           {% endif %}
+          <!-- Mini confidence bar -->
+          {% if r.status != 'not_aired' %}
+          <div class="conf-track conf-{{ r.confidence_label }}" title="{{ r.confidence_pct }}% confidence — {{ r.confidence_label }}">
+            <div class="conf-fill" style="width: {{ r.confidence_pct }}%;"></div>
+          </div>
+          <div class="conf-label-txt">{{ r.confidence_pct }}%</div>
+          {% endif %}
+        </td>
+      </tr>
+
+      <!-- ── Detail expansion row ──────────────────────────────── -->
+      <tr class="detail-row" id="detail-{{ forloop.counter }}">
+        <td colspan="18" class="p-0">
+          <div class="detail-panel">
+            <div class="detail-grid">
+
+              <!-- Confidence breakdown card -->
+              <div class="detail-card conf-{{ r.confidence_label }}">
+                <div class="detail-card-title"><i class="fa-solid fa-gauge-high mr-1"></i>Match Confidence</div>
+                <div class="conf-breakdown">
+                  <div class="conf-big-bar">
+                    <div class="conf-big-fill" style="width: {{ r.confidence_pct }}%;"></div>
+                  </div>
+                  <span class="conf-pct-txt">{{ r.confidence_pct }}%</span>
+                  <span class="badge {% if r.confidence_label == 'excellent' %}badge-green{% elif r.confidence_label == 'good' %}badge-green{% elif r.confidence_label == 'partial' %}badge-amber{% elif r.confidence_label == 'low' %}badge-red{% else %}badge-grey{% endif %}" style="font-size:.65rem;">
+                    {{ r.confidence_label|capfirst }}
+                  </span>
+                </div>
+                <div class="detail-row-val mt-2 text-xs text-slate-500">
+                  {% if r.status == 'aired' %}
+                    TC confirmed by LMRB
+                    {% if r.tc_lmrb_delta_secs is not None %} — gap: {{ r.tc_lmrb_delta_secs }}s{% endif %}
+                  {% elif r.status == 'tc_only' %}
+                    TC matched schedule but LMRB did not confirm
+                  {% elif r.status == 'lmrb_only' %}
+                    LMRB matched schedule but no TC record found
+                  {% elif r.status == 'manual' %}
+                    Manually linked by operations
+                  {% else %}
+                    No evidence from either source
+                  {% endif %}
+                </div>
+              </div>
+
+              <!-- Plan details card -->
+              <div class="detail-card">
+                <div class="detail-card-title" style="color:#1d4ed8;"><i class="fa-solid fa-calendar-days mr-1"></i>Plan (Schedule)</div>
+                <div class="detail-row-val">
+                  <div><span class="lbl">Date</span> {{ r.plan_date|date:"d M Y" }}</div>
+                  <div><span class="lbl">Window</span> {{ r.plan_start }} – {{ r.plan_end }}</div>
+                  <div><span class="lbl">Programme</span> {{ r.plan_programme|default:"—" }}</div>
+                  <div><span class="lbl">Duration</span> {{ r.duration }}s</div>
+                </div>
+              </div>
+
+              <!-- LMRB details card -->
+              {% if r.has_lmrb %}
+              <div class="detail-card">
+                <div class="detail-card-title" style="color:#065f46;"><i class="fa-solid fa-eye mr-1"></i>LMRB (3rd-Party)</div>
+                <div class="detail-row-val">
+                  <div><span class="lbl">Date</span>
+                    {{ r.lmrb_date|date:"d M Y" }}
+                    {% if r.lmrb_date == r.plan_date %}<span class="delta-pill delta-ok ml-1">✓ same</span>{% else %}<span class="delta-pill delta-near ml-1">≠ plan</span>{% endif %}
+                  </div>
+                  <div><span class="lbl">Time</span> {{ r.lmrb_time }}
+                    {% if r.lmrb_delta_secs == 0 %}<span class="delta-pill delta-ok ml-1">✓ in window</span>
+                    {% elif r.lmrb_delta_secs is not None %}<span class="delta-pill {% if r.lmrb_delta_secs <= 300 %}delta-near{% else %}delta-far{% endif %} ml-1">+{{ r.lmrb_delta_secs }}s outside</span>{% endif %}
+                  </div>
+                  <div><span class="lbl">Theme</span> {{ r.lmrb_theme|default:"—" }}</div>
+                  <div><span class="lbl">Programme</span> {{ r.lmrb_programme|default:"—" }}</div>
+                </div>
+              </div>
+              {% endif %}
+
+              <!-- TC details card -->
+              {% if r.has_tc %}
+              <div class="detail-card">
+                <div class="detail-card-title" style="color:#7c3aed;"><i class="fa-solid fa-file-certificate mr-1"></i>TC (Channel Cert)</div>
+                <div class="detail-row-val">
+                  <div><span class="lbl">Date</span>
+                    {{ r.tc_date|date:"d M Y" }}
+                    {% if r.tc_date == r.plan_date %}<span class="delta-pill delta-ok ml-1">✓ same</span>{% else %}<span class="delta-pill delta-near ml-1">≠ plan</span>{% endif %}
+                  </div>
+                  <div><span class="lbl">Time</span> {{ r.tc_time }}
+                    {% if r.tc_lmrb_confirmed %}<span class="delta-pill delta-ok ml-1">✓ LMRB confirmed</span>
+                    {% else %}<span class="delta-pill delta-far ml-1">✗ LMRB not confirmed</span>{% endif %}
+                  </div>
+                  {% if r.tc_lmrb_delta_secs is not None %}
+                  <div><span class="lbl">TC↔LMRB gap</span> {{ r.tc_lmrb_delta_secs }}s</div>
+                  {% endif %}
+                  <div><span class="lbl">Theme</span> {{ r.tc_theme|default:"—" }}</div>
+                  <div><span class="lbl">Programme</span> {{ r.tc_programme|default:"—" }}</div>
+                </div>
+              </div>
+              {% endif %}
+
+              <!-- Nearest LMRB card (tc_only rows with a close but unconfirmed LMRB) -->
+              {% if r.status == 'tc_only' and r.near_lmrb_time %}
+              <div class="detail-card near-lmrb-card">
+                <div class="detail-card-title"><i class="fa-solid fa-crosshairs mr-1"></i>Closest Unconfirmed LMRB</div>
+                <div class="detail-row-val">
+                  <div><span class="lbl">LMRB time</span> <strong>{{ r.near_lmrb_time }}</strong></div>
+                  <div><span class="lbl">Distance from TC</span>
+                    {% if r.near_lmrb_delta <= 5 %}
+                      <span class="delta-pill delta-ok">{{ r.near_lmrb_delta }}s — within tolerance</span>
+                    {% elif r.near_lmrb_delta <= 30 %}
+                      <span class="delta-pill delta-near">{{ r.near_lmrb_delta }}s — very close</span>
+                    {% elif r.near_lmrb_delta <= 120 %}
+                      <span class="delta-pill delta-near">{{ r.near_lmrb_delta }}s — close</span>
+                    {% else %}
+                      <span class="delta-pill delta-far">{{ r.near_lmrb_delta }}s — far</span>
+                    {% endif %}
+                  </div>
+                  <div class="text-slate-500 text-xs mt-1">
+                    {% if r.near_lmrb_delta <= 5 %}
+                      This LMRB row is within the ±5s tolerance — re-running reconciliation may confirm it.
+                    {% elif r.near_lmrb_delta <= 60 %}
+                      An LMRB row is nearby. Consider increasing the TC–LMRB time tolerance in Settings if this is a systematic offset.
+                    {% else %}
+                      LMRB and TC times differ significantly. Check if TC timestamp is recorded differently.
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+              {% elif r.status == 'tc_only' and not r.near_lmrb_time %}
+              <div class="detail-card" style="border-color:#fca5a5; background:#fff1f2;">
+                <div class="detail-card-title" style="color:#991b1b;"><i class="fa-solid fa-triangle-exclamation mr-1"></i>No Nearby LMRB Found</div>
+                <div class="detail-row-val text-slate-500 text-xs">
+                  No unconfirmed LMRB row with matching duration was found on the same date. The TC record may be an extra spot not captured by 3rd-party monitoring.
+                </div>
+              </div>
+              {% endif %}
+
+            </div><!-- /detail-grid -->
+          </div><!-- /detail-panel -->
         </td>
       </tr>
       {% endfor %}
@@ -287,4 +562,28 @@
   <div class="text-slate-400 text-sm text-center py-12">Select an account to get started.</div>
 {% endif %}
 
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function toggleDetail(n) {
+  const detailRow  = document.getElementById('detail-' + n);
+  const btn        = document.getElementById('btn-' + n);
+  const chevron    = document.getElementById('chevron-' + n);
+  const dataRow    = document.getElementById('row-' + n);
+  const isOpen     = detailRow.classList.contains('visible');
+
+  if (isOpen) {
+    detailRow.classList.remove('visible');
+    btn.classList.remove('open');
+    chevron.className = 'fa-solid fa-chevron-right';
+    dataRow.classList.remove('row-selected');
+  } else {
+    detailRow.classList.add('visible');
+    btn.classList.add('open');
+    chevron.className = 'fa-solid fa-chevron-down';
+    dataRow.classList.add('row-selected');
+  }
+}
+</script>
 {% endblock %}
