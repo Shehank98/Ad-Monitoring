@@ -482,31 +482,15 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
 
         aired = tc_aired + manual_aired
 
-        # 3rd Party = unique LMRB rows confirmed via TC cross-check OR ManualMatch.
-        # Union deduplicates so a ManualMatch whose LMRB row also appears in a
-        # TC-confirmed pair is never double-counted.
-        third_party_q = TCRow.objects.filter(
-            account_id=account_id, channel=channel,
-            tc_report__month=month,
-            is_lmrb_confirmed=True,
-        )
-        if tc_themes:
-            theme_q = Q()
-            for t in tc_themes:
-                theme_q |= Q(tc_theme__iexact=t)
-            third_party_q = third_party_q.filter(theme_q)
-        if dur_int is not None:
-            third_party_q = third_party_q.filter(duration=dur_int)
-        tc_lmrb_ids     = set(third_party_q.values_list('matched_lmrb_id', flat=True))
-        manual_lmrb_ids = set(
-            manual_q.filter(lmrb_row__isnull=False)
-            .values_list('lmrb_row_id', flat=True)
-        )
-        third_party = len(tc_lmrb_ids | manual_lmrb_ids)
+        # 3rd Party = total LMRB row count for this brand/theme/duration in scope.
+        # This is the raw independent-monitoring count, regardless of TC confirmation.
+        # If LMRB observed 60 spots and only 50 were planned, 3rd Party = 60.
+        lmrb_themes = _lmrb_themes_for_brand(brand, dur, lmrb_theme_map)
+        third_party = _lmrb_row_count(lmrb_themes, dur_int, exclude_spon=True)
 
-        # Missed = Planned − Aired (in Schedule but not confirmed by TC+LMRB)
-        missed = max(0, planned - aired)
-        # Extra = TC+LMRB confirmed − Planned (more confirmed than planned)
+        # Missed = Planned − 3rd Party (LMRB found fewer than planned)
+        missed = max(0, planned - third_party)
+        # Extra = 3rd Party − Planned (LMRB found more than planned)
         extra  = max(0, third_party - planned)
 
         commercial_rows.append({

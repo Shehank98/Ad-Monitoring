@@ -3443,12 +3443,12 @@ def tc_three_way(request):
             ).select_related('tc_row', 'lmrb_row')
         }
 
-        # Pre-load unconfirmed LMRB rows for nearest-match search on tc_only rows
+        # Pre-load LMRB rows for nearest-match search on tc_only rows.
+        # (is_lmrb_confirmed lives on TCRow, not LMRBRow — no such filter here.)
         scope_lmrb_pool = list(
             LMRBRow.objects.filter(
                 account_id=account_id,
                 channel=channel,
-                is_lmrb_confirmed=False,
             ).values('advt_time', 'duration', 'date')
         )
 
