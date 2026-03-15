@@ -5555,8 +5555,10 @@ def manual_reconciliation(request):
         ).aggregate(mn=_Min('date'), mx=_Max('date'))
         sch_date_range = (dr['mn'], dr['mx'])
 
-        # Unmatched TC rows — exclude auto-matched and extra rows, and rows
-        # that already have a ManualMatch linking them.
+        # Unmatched TC rows — all TC rows not yet linked to a schedule or a
+        # ManualMatch.  This deliberately includes is_extra=True rows (spots the
+        # reconcile engine couldn't match to any schedule row) so they can be
+        # manually paired with an LMRB row via the tc_lmrb match mode.
         unmatched_tc = list(
             TCRow.objects.filter(
                 account_id=account_id,
@@ -5564,7 +5566,6 @@ def manual_reconciliation(request):
                 tc_report__month=month,
                 manual_match__isnull=True,
                 is_schedule_matched=False,
-                is_extra=False,
             ).select_related('tc_report')
             .order_by('tc_theme', 'duration', 'date', 'aired_time')[:500]
         )
