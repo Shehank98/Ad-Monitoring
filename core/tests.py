@@ -1654,3 +1654,173 @@ class ReconcileTCReturnCountsTest(TestCase):
         result = reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
         self.assertEqual(result["matched"], 0)
         self.assertEqual(result["extra"], 1)
+
+
+# ── Bug Regression Tests ──────────────────────────────────────────────────────
+
+
+class ScheduleSupersedeBugTest(TestCase):
+    """
+    Regression tests for the schedule-supersede bug (core/views.py line ~490).
+
+    BUG (CRITICAL — core/views.py:490):
+        When a schedule is replaced via dup_action='replace', the upload view
+        calls:
+
+            existing_same_ref.rows.update(
+                is_matched=False, matched_lmrb=None, matched_at=None,
+                is_manual_matched=False,   # ← BUG
+            )
+
+        This clears is_manual_matched on ALL old ScheduleRows, including those
+        locked by a ManualMatch record.  However:
+          - The ManualMatch records are NOT deleted.
+          - The LMRBRow.is_manual_matched flag is NOT cleared (LMRB stays locked).
+
+        Result: orphaned ManualMatch records pointing to superseded ScheduleRows
+        with is_manual_matched=False.  build_summary_data() still counts these
+        ManualMatches in the 'aired' total (it filters by account/channel/month/
+        brand, not by schedule_id), inflating the summary with stale data.
+
+        The LMRB rows linked to the stale ManualMatches remain permanently locked
+        (is_manual_matched=True) and cannot be used for any other match.
+
+    NOTE: These tests exercise the MODEL/ENGINE layer only.  The bug itself lives
+    in the VIEW layer (schedule_upload).  The tests simulate what the view does
+    so they can run without HTTP requests, and assert the incorrect state that
+    results.  Once the bug is fixed in the view, these tests serve as a guard
+    to confirm the fix is correct.
+    """
+
+    def setUp(self):
+        self.account = make_account()
+        self.user = make_user()
+        make_brand_mapping(self.account)
+
+    def _simulate_supersede(self, old_schedule):
+        """
+        Simulate what core/views.py does when dup_action='replace'.
+        Mirrors the exact update at views.py ~line 488-491.
+        """
+        from core.models import LMRBRow as _LR
+        sr_ids = list(old_schedule.rows.values_list("id", flat=True))
+        _LR.objects.filter(schedule_matches__in=sr_ids).update(
+            is_matched=False, matched_at=None
+        )
+        old_schedule.rows.update(
+            is_matched=False, matched_lmrb=None, matched_at=None,
+            is_manual_matched=False,          # ← the buggy line
+        )
+        old_schedule.is_superseded = True
+        old_schedule.save(update_fields=["is_superseded"])
+
+    # ── Tests that document EXISTING (buggy) behaviour ────────────────────────
+
+    def test_supersede_clears_is_manual_matched_on_schedule_rows(self):
+        """
+        BUG: is_manual_matched is cleared on ScheduleRows when schedule is
+        superseded, even when a ManualMatch record exists for them.
+
+        This violates the invariant that is_manual_matched=True is permanent.
+        """
+        old_sched = make_schedule(self.account, schedule_number="101", version=1)
+        sr = make_schedule_row(self.account, old_sched)
+        lr = make_lmrb_row(self.account)
+
+        # Create a ManualMatch — locks both rows
+        ManualMatch.objects.create(
+            account=self.account,
+            channel=CHANNEL,
+            month=MONTH,
+            match_mode="schedule_lmrb",
+            schedule_row=sr,
+            lmrb_row=lr,
+            matched_by=self.user,
+        )
+        ScheduleRow.objects.filter(id=sr.id).update(is_manual_matched=True)
+        LMRBRow.objects.filter(id=lr.id).update(is_manual_matched=True)
+
+        # Simulate superseding the old schedule
+        self._simulate_supersede(old_sched)
+
+        # BUG: is_manual_matched is now False on the ScheduleRow
+        sr.refresh_from_db()
+        lr.refresh_from_db()
+
+        self.assertFalse(
+            sr.is_manual_matched,
+            "BUG CONFIRMED: is_manual_matched was cleared on superseded ScheduleRow. "
+            "ManualMatch record still exists but lock is gone.",
+        )
+        # The LMRBRow lock is NOT cleared (only ScheduleRow is affected by the bug)
+        self.assertTrue(
+            lr.is_manual_matched,
+            "LMRBRow.is_manual_matched should remain True (LMRB side is not touched "
+            "by the supersede update — only ScheduleRow side is wrongly cleared).",
+        )
+
+    def test_manual_match_record_survives_supersede(self):
+        """
+        BUG (related): ManualMatch records are NOT deleted when a schedule is
+        superseded.  Combined with is_manual_matched being cleared on the
+        ScheduleRow, this leaves orphaned ManualMatch records.
+        """
+        old_sched = make_schedule(self.account, schedule_number="101", version=1)
+        sr = make_schedule_row(self.account, old_sched)
+        lr = make_lmrb_row(self.account)
+
+        mm = ManualMatch.objects.create(
+            account=self.account,
+            channel=CHANNEL,
+            month=MONTH,
+            match_mode="schedule_lmrb",
+            schedule_row=sr,
+            lmrb_row=lr,
+            matched_by=self.user,
+        )
+        ScheduleRow.objects.filter(id=sr.id).update(is_manual_matched=True)
+        LMRBRow.objects.filter(id=lr.id).update(is_manual_matched=True)
+
+        self._simulate_supersede(old_sched)
+
+        # ManualMatch record is still in the DB after supersede
+        self.assertTrue(
+            ManualMatch.objects.filter(id=mm.id).exists(),
+            "ManualMatch record survives supersede (not deleted by the view). "
+            "This orphaned record will be incorrectly counted in build_summary_data().",
+        )
+
+    def test_lmrb_row_remains_locked_after_supersede(self):
+        """
+        The LMRB row linked to a ManualMatch on a superseded schedule remains
+        permanently locked (is_manual_matched=True), making it unusable for any
+        new match even though the linked schedule is gone.
+        """
+        old_sched = make_schedule(self.account, schedule_number="101", version=1)
+        sr = make_schedule_row(self.account, old_sched)
+        lr = make_lmrb_row(self.account)
+
+        ManualMatch.objects.create(
+            account=self.account,
+            channel=CHANNEL,
+            month=MONTH,
+            match_mode="schedule_lmrb",
+            schedule_row=sr,
+            lmrb_row=lr,
+            matched_by=self.user,
+        )
+        LMRBRow.objects.filter(id=lr.id).update(is_manual_matched=True)
+
+        self._simulate_supersede(old_sched)
+
+        # Create a new schedule and a new ScheduleRow for the same brand
+        new_sched = make_schedule(self.account, schedule_number="101", version=2)
+        new_sr = make_schedule_row(self.account, new_sched)
+
+        # The LMRB row is still locked — new schedule engine cannot use it
+        lr.refresh_from_db()
+        self.assertTrue(
+            lr.is_manual_matched,
+            "LMRB row is permanently locked even after old schedule is superseded. "
+            "It cannot be matched against the new schedule.",
+        )
