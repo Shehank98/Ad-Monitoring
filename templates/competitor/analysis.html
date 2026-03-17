@@ -49,6 +49,13 @@
   <!-- ── Main content ─────────────────────────────────────────────────── -->
   <div class="px-6 py-6 max-w-screen-2xl mx-auto">
 
+    {% if db_error %}
+    <div class="mb-4 rounded-lg px-4 py-3 text-sm font-medium flex items-center gap-2 bg-red-50 text-red-800 border border-red-200">
+      <i class="fa-solid fa-circle-exclamation"></i>
+      <span><strong>Database error:</strong> {{ db_error }} — the database tables may not be set up yet. Please contact your administrator.</span>
+    </div>
+    {% endif %}
+
     {% if messages %}
     <div class="mb-4 space-y-2">
       {% for msg in messages %}

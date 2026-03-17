@@ -177,27 +177,33 @@ def competitor_analysis(request):
             account_id = ''
 
     # Always load upload batches for the sidebar / management tab
-    batches = (
-        list(CompetitorUploadBatch.objects
-             .filter(account=selected_account)
-             .select_related('uploaded_by')
-             .order_by('-uploaded_at'))
-        if selected_account else []
-    )
-    total_rows   = sum(b.row_count for b in batches)
-    locked_count = sum(1 for b in batches if b.is_locked)
-
-    # Filter option lists (for dashboard dropdowns)
+    batches = []
+    total_rows = locked_count = 0
     all_advertisers = all_channels = all_programmes = all_products = all_durations = []
+    _db_error = None
+
     if selected_account:
-        base_qs = CompetitorAd.objects.filter(account=selected_account)
-        all_advertisers = sorted(set(base_qs.values_list('advertiser', flat=True).distinct()) - {''})
-        all_channels    = sorted(set(base_qs.values_list('channel',    flat=True).distinct()) - {''})
-        all_programmes  = sorted(set(base_qs.exclude(program='').values_list('program', flat=True).distinct()) - {''})
-        all_products    = sorted(set(base_qs.exclude(product='').values_list('product', flat=True).distinct()) - {''})
-        all_durations   = sorted(set(
-            d for d in base_qs.values_list('duration', flat=True).distinct() if d
-        ))
+        try:
+            batches = list(
+                CompetitorUploadBatch.objects
+                .filter(account=selected_account)
+                .select_related('uploaded_by')
+                .order_by('-uploaded_at')
+            )
+            total_rows   = sum(b.row_count for b in batches)
+            locked_count = sum(1 for b in batches if b.is_locked)
+
+            # Filter option lists (for dashboard dropdowns)
+            base_qs = CompetitorAd.objects.filter(account=selected_account)
+            all_advertisers = sorted({v for v in base_qs.values_list('advertiser', flat=True).distinct() if v})
+            all_channels    = sorted({v for v in base_qs.values_list('channel',    flat=True).distinct() if v})
+            all_programmes  = sorted({v for v in base_qs.values_list('program',    flat=True).distinct() if v})
+            all_products    = sorted({v for v in base_qs.values_list('product',    flat=True).distinct() if v})
+            all_durations   = sorted({d for d in base_qs.values_list('duration',   flat=True).distinct() if d})
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception('competitor_analysis DB error')
+            _db_error = str(e)
 
     _TAB_DEFS = [
         ('upload',     'Data Upload',            'fa-cloud-arrow-up'),
@@ -220,13 +226,24 @@ def competitor_analysis(request):
         'all_durations':    all_durations,
         'total_rows':       total_rows,
         'locked_count':     locked_count,
+        'db_error':         _db_error,
     }
 
-    if tab == 'dashboard' and selected_account:
-        ctx.update(_build_dashboard_data(request, selected_account))
+    if tab == 'dashboard' and selected_account and not _db_error:
+        try:
+            ctx.update(_build_dashboard_data(request, selected_account))
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception('_build_dashboard_data error')
+            ctx['db_error'] = str(e)
 
-    if tab == 'deep' and selected_account:
-        ctx.update(_build_deep_data(request, selected_account, all_advertisers))
+    if tab == 'deep' and selected_account and not _db_error:
+        try:
+            ctx.update(_build_deep_data(request, selected_account, all_advertisers))
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception('_build_deep_data error')
+            ctx['db_error'] = str(e)
 
     return render(request, 'competitor/analysis.html', ctx)
 
