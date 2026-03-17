@@ -164,6 +164,20 @@
         </div>
       </div>
 
+      <!-- Sponsorship type picker (shown when sponsorship brands are detected) -->
+      <div id="spon-type-panel" class="hidden">
+        <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl">
+          <p class="text-sm font-bold text-amber-800 mb-1 flex items-center gap-2">
+            <i class="fa-solid fa-award text-amber-500"></i>
+            Sponsorship Brands Detected — Assign Types
+          </p>
+          <p class="text-xs text-amber-700 mb-3">
+            The file contains SPONSORSHIP rows. Please assign a type to each brand so the dashboard can show Planned vs Aired by type.
+          </p>
+          <div id="spon-brand-rows" class="space-y-2"></div>
+        </div>
+      </div>
+
       <!-- File drop zone -->
       <div>
         <label class="block text-sm font-semibold text-slate-700 mb-1.5">Schedule File *</label>
@@ -221,12 +235,17 @@
 
 {% block extra_js %}
 <script>
-  const CSRF   = '{{ csrf_token }}';
-  const fi     = document.getElementById('schedule-file');
-  const fn     = document.getElementById('file-name');
-  const dl     = document.getElementById('drop-label');
-  const prev   = document.getElementById('detect-preview');
-  const pcont  = document.getElementById('detect-content');
+  const CSRF       = '{{ csrf_token }}';
+  const fi         = document.getElementById('schedule-file');
+  const fn         = document.getElementById('file-name');
+  const dl         = document.getElementById('drop-label');
+  const prev       = document.getElementById('detect-preview');
+  const pcont      = document.getElementById('detect-content');
+  const sponPanel  = document.getElementById('spon-type-panel');
+  const sponBrands = document.getElementById('spon-brand-rows');
+
+  // Sponsorship type options from Django settings (lmrb_sponsorship_keywords)
+  const SPON_TYPE_OPTIONS = [{% for opt in spon_type_options %}"{{ opt|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}];
 
   fi.addEventListener('change', function() {
     if (this.files[0]) {
@@ -243,6 +262,8 @@
     fd.append('file', file);
     pcont.innerHTML = '<p class="col-span-3 text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Scanning…</p>';
     prev.classList.remove('hidden');
+    sponPanel.classList.add('hidden');
+    sponBrands.innerHTML = '';
     try {
       const res  = await fetch('/dashboard/schedules/detect/', {method: 'POST', body: fd});
       const data = await res.json();
@@ -266,6 +287,39 @@
           <p class="text-slate-400 text-[10px] uppercase tracking-wider mb-1">Detected Rows &nbsp; ${fmtBadge}</p>
           <p class="font-semibold text-slate-800">${data.row_count.toLocaleString()} spot records</p>
         </div>`;
+
+      // Show sponsorship type picker if any sponsorship brands detected
+      if (data.spon_brands && data.spon_brands.length > 0) {
+        sponPanel.classList.remove('hidden');
+        sponBrands.innerHTML = '';
+        // Build type options list: use SPON_TYPE_OPTIONS (from lmrb_sponsorship_keywords)
+        const typeOptions = SPON_TYPE_OPTIONS.length > 0
+          ? SPON_TYPE_OPTIONS
+          : ['-BB', 'Tag', '-Intro', '-Extro', '-LLogo', 'Com Break', 'DJ', 'Time Check', '-Tr'];
+        data.spon_brands.forEach(brand => {
+          const safeKey = brand.replace(/[^a-zA-Z0-9]/g, '_');
+          const opts = typeOptions.map(t =>
+            `<option value="${t}">${t.trim()}</option>`
+          ).join('');
+          sponBrands.insertAdjacentHTML('beforeend', `
+            <div class="flex items-center gap-3 bg-white rounded-lg border border-amber-200 px-3 py-2">
+              <div class="flex-1">
+                <span class="text-xs font-semibold text-slate-700">${brand}</span>
+                <span class="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">Sponsorship</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Type:</label>
+                <select name="spon_type_${brand}"
+                        class="border border-amber-300 rounded-md px-2 py-1 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-amber-300 focus:outline-none min-w-[120px]">
+                  <option value="">— Select type —</option>
+                  ${opts}
+                  <option value="Opening/Closing">Opening/Closing</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </div>`);
+        });
+      }
     } catch (e) {
       pcont.innerHTML = `<p class="col-span-3 text-red-500">Detection failed: ${e.message}</p>`;
     }

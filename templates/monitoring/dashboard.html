@@ -305,96 +305,136 @@
 <!-- ── Commercial Overview Chart ───────────────────────────────── -->
 {% if commercial_chart_data %}
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-5">
-  <div class="flex items-center justify-between mb-4">
-    <h3 class="text-sm font-bold text-slate-700">
-      <i class="fa-solid fa-rectangle-ad text-blue-500 mr-1.5"></i>
-      Commercial Benefits — Planned vs Aired by Product &amp; Theme
+  <div class="flex items-center justify-between mb-1">
+    <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
+      <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-blue-100">
+        <i class="fa-solid fa-rectangle-ad text-blue-600 text-xs"></i>
+      </span>
+      Commercial Benefits — Planned vs Aired
     </h3>
-    <div class="flex items-center gap-3 text-xs">
-      <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-blue-500"></span>Planned</span>
-      <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-emerald-500"></span>Aired</span>
+    <div class="flex items-center gap-3 text-xs text-slate-500">
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:rgba(37,99,235,0.85)"></span>Planned
+      </span>
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:rgba(5,150,105,0.85)"></span>Aired
+      </span>
     </div>
   </div>
+  <p class="text-[10px] text-slate-400 mb-4">By Product &amp; Theme — values shown on bars</p>
 
-  <!-- Bar chart (all products/themes in one chart) -->
-  <div style="position:relative;{% if commercial_chart_data|length > 3 %}height:{{ commercial_chart_data|length }}00px;min-height:200px;{% else %}height:260px;{% endif %}max-height:600px;overflow-y:auto;">
+  <!-- Modern bar chart -->
+  {% with row_count=commercial_chart_data|length %}
+  <div style="position:relative;height:{% if row_count > 5 %}{{ row_count }}{% else %}5{% endif %}80px;min-height:240px;max-height:700px;">
     <canvas id="commChart"></canvas>
   </div>
+  {% endwith %}
 
   <!-- Detailed table per product -->
-  <div class="mt-5 space-y-4">
+  <div class="mt-6 space-y-5">
     {% for prod in commercial_chart_data %}
-    <div>
-      <!-- Product header -->
-      <div class="flex items-center gap-2 mb-2">
-        <span class="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200">
-          {{ prod.product }}
-        </span>
-        <span class="text-xs text-slate-400">
-          Planned: <strong class="text-blue-700">{{ prod.total_planned }}</strong>
-          &nbsp;·&nbsp; Aired: <strong class="text-emerald-700">{{ prod.total_aired }}</strong>
-        </span>
+    <div class="rounded-2xl border border-slate-100 overflow-hidden">
+      <!-- Product header bar -->
+      <div class="flex items-center justify-between px-4 py-2.5 bg-gradient-to-r from-blue-50 to-slate-50 border-b border-slate-100">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-bold text-blue-700">{{ prod.product }}</span>
+          {% if prod.total_planned %}
+          <span class="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-600 font-semibold">
+            {{ prod.total_planned }} planned
+          </span>
+          {% endif %}
+        </div>
+        <div class="flex items-center gap-3 text-xs">
+          <span class="font-bold text-blue-700">{{ prod.total_planned }} <span class="font-normal text-slate-400">planned</span></span>
+          <span class="text-slate-300">|</span>
+          <span class="font-bold {% if prod.total_aired >= prod.total_planned %}text-emerald-700{% elif prod.total_aired > 0 %}text-amber-600{% else %}text-red-500{% endif %}">
+            {{ prod.total_aired }} <span class="font-normal text-slate-400">aired</span>
+          </span>
+          {% if prod.total_planned > 0 %}
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-bold
+            {% if prod.total_aired >= prod.total_planned %}bg-emerald-100 text-emerald-700
+            {% elif prod.total_aired > 0 %}bg-amber-100 text-amber-700
+            {% else %}bg-red-100 text-red-600{% endif %}">
+            {% widthratio prod.total_aired prod.total_planned 100 %}%
+          </span>
+          {% endif %}
+        </div>
       </div>
       <!-- Theme table -->
-      <div class="overflow-x-auto rounded-xl border border-slate-100">
-        <table class="data-table w-full text-xs">
-          <thead>
-            <tr>
-              <th>Brand</th>
-              <th>Advt Theme</th>
-              <th class="text-right">Duration (s)</th>
-              <th class="text-right">Planned</th>
-              <th class="text-right">Aired</th>
-              <th class="text-right">Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in prod.themes %}
-            <tr>
-              <td class="font-medium text-slate-700">{{ row.brand }}</td>
-              <td class="text-slate-800">
-                {{ row.theme }}
-                {% if not row.is_mapped %}
-                  <span class="ml-1 text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700">unmapped</span>
-                {% endif %}
-              </td>
-              <td class="text-right text-slate-500">{{ row.duration|default:"—" }}</td>
-              <td class="text-right font-semibold text-blue-700">{{ row.planned }}</td>
-              <td class="text-right font-semibold {% if row.aired >= row.planned %}text-emerald-700{% elif row.aired > 0 %}text-amber-700{% else %}text-red-500{% endif %}">
-                {% if row.aired == 0 and row.raw_lmrb_count > 0 %}
-                  <span title="No verification run yet — {{ row.raw_lmrb_count }} raw LMRB observation{{ row.raw_lmrb_count|pluralize }} found in this period">
-                    {{ row.raw_lmrb_count }}
-                    <span class="ml-0.5 text-[8px] font-normal px-1 py-0.5 rounded bg-slate-200 text-slate-500 align-middle">LMRB</span>
-                  </span>
-                {% else %}
-                  {{ row.aired }}
-                {% endif %}
-              </td>
-              <td class="text-right">
-                {% if row.programmes or row.raw_lmrb_count %}
-                <button onclick="toggleCommDetails(this)"
-                        data-programmes="{{ row.programmes_json|escape }}"
-                        data-dates="{{ row.dates_json|escape }}"
-                        data-pt="{{ row.pt_count }}" data-npt="{{ row.non_pt_count }}"
-                        data-is-raw="{% if not row.aired and not row.lmrb_count and row.raw_lmrb_count %}1{% else %}0{% endif %}"
-                        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px]
-                               font-semibold bg-slate-100 text-slate-600 hover:bg-blue-100
-                               hover:text-blue-700 transition">
-                  <i class="fa-solid fa-circle-info"></i> Details
-                </button>
-                {% else %}—{% endif %}
-              </td>
-            </tr>
-            <!-- Expandable detail row -->
-            <tr class="comm-detail-row hidden">
-              <td colspan="6" class="bg-blue-50 px-4 py-3">
-                <div class="comm-detail-content"></div>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+      <table class="data-table w-full text-xs">
+        <thead>
+          <tr>
+            <th class="text-left">Brand</th>
+            <th class="text-left">Advt Theme</th>
+            <th class="text-right">Dur (s)</th>
+            <th class="text-right">Planned</th>
+            <th class="text-right">Aired</th>
+            <th class="text-center">Coverage</th>
+            <th class="text-right">Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in prod.themes %}
+          <tr>
+            <td class="font-medium text-slate-700">{{ row.brand }}</td>
+            <td class="text-slate-800">
+              {{ row.theme }}
+              {% if not row.is_mapped %}
+                <span class="ml-1 text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700">unmapped</span>
+              {% endif %}
+            </td>
+            <td class="text-right text-slate-500">{{ row.duration|default:"—" }}</td>
+            <td class="text-right font-bold text-blue-700">{{ row.planned }}</td>
+            <td class="text-right font-bold {% if row.aired >= row.planned %}text-emerald-700{% elif row.aired > 0 %}text-amber-600{% else %}text-red-500{% endif %}">
+              {% if row.aired == 0 and row.raw_lmrb_count > 0 %}
+                <span title="Verification not run yet — {{ row.raw_lmrb_count }} raw LMRB observation{{ row.raw_lmrb_count|pluralize }}">
+                  {{ row.raw_lmrb_count }}
+                  <span class="ml-0.5 text-[8px] font-normal px-1 py-0.5 rounded bg-slate-200 text-slate-500 align-middle">LMRB</span>
+                </span>
+              {% else %}
+                {{ row.aired }}
+              {% endif %}
+            </td>
+            <td class="text-center">
+              {% if row.planned > 0 %}
+              <div class="flex items-center gap-1 justify-center">
+                <div class="w-16 h-2 rounded-full bg-slate-100 overflow-hidden">
+                  <div class="h-full rounded-full {% if row.aired >= row.planned %}bg-emerald-500{% elif row.aired > 0 %}bg-amber-400{% else %}bg-red-400{% endif %}"
+                       style="width:{% if row.planned > 0 %}{% widthratio row.aired row.planned 100 %}{% else %}0{% endif %}%"></div>
+                </div>
+                <span class="text-[10px] font-semibold text-slate-500">{% if row.planned > 0 %}{% widthratio row.aired row.planned 100 %}{% else %}0{% endif %}%</span>
+              </div>
+              {% else %}—{% endif %}
+            </td>
+            <td class="text-right">
+              {% if row.programmes or row.raw_lmrb_count %}
+              <button onclick="toggleCommDetails(this)"
+                      data-brand="{{ row.brand|escape }}"
+                      data-theme="{{ row.theme|escape }}"
+                      data-planned="{{ row.planned }}"
+                      data-aired="{{ row.aired }}"
+                      data-lmrb="{{ row.lmrb_count }}"
+                      data-programmes="{{ row.programmes_json|escape }}"
+                      data-dates="{{ row.dates_json|escape }}"
+                      data-pt="{{ row.pt_count }}" data-npt="{{ row.non_pt_count }}"
+                      data-is-raw="{% if not row.aired and not row.lmrb_count and row.raw_lmrb_count %}1{% else %}0{% endif %}"
+                      class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px]
+                             font-semibold bg-blue-50 text-blue-600 border border-blue-100
+                             hover:bg-blue-100 hover:text-blue-800 transition">
+                <i class="fa-solid fa-chart-column text-[9px]"></i> Details
+              </button>
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          <!-- Expandable detail row -->
+          <tr class="comm-detail-row hidden">
+            <td colspan="7" class="bg-gradient-to-r from-blue-50 to-slate-50 px-4 py-4 border-t border-blue-100">
+              <div class="comm-detail-content"></div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
     {% endfor %}
   </div>
@@ -402,99 +442,179 @@
 {% endif %}
 
 <!-- ── Sponsorship Overview Chart ────────────────────────────────── -->
-{% if sponsorship_chart_data %}
+{% if sponsorship_chart_data or spon_kw_breakdown %}
 <div class="bg-white rounded-2xl border border-amber-100 shadow-sm p-5 mb-5">
-  <div class="flex items-center justify-between mb-4">
-    <h3 class="text-sm font-bold text-slate-700">
-      <i class="fa-solid fa-award text-amber-500 mr-1.5"></i>
-      Sponsorship Benefits — Planned vs LMRB Count by Product &amp; Theme
+  <div class="flex items-center justify-between mb-1">
+    <h3 class="text-sm font-bold text-slate-700 flex items-center gap-2">
+      <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-amber-100">
+        <i class="fa-solid fa-award text-amber-600 text-xs"></i>
+      </span>
+      Sponsorship Benefits — Planned vs Aired
     </h3>
-    <div class="flex items-center gap-3 text-xs">
-      <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-amber-500"></span>Planned</span>
-      <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-amber-300"></span>Aired (LMRB)</span>
+    <div class="flex items-center gap-3 text-xs text-slate-500">
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:rgba(217,119,6,0.85)"></span>Planned
+      </span>
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:rgba(245,158,11,0.6)"></span>Aired (LMRB)
+      </span>
     </div>
   </div>
+  <p class="text-[10px] text-slate-400 mb-4">By sponsorship type — uses LMRB keyword matching for aired counts</p>
 
-  <div style="position:relative;{% if sponsorship_chart_data|length > 3 %}height:{{ sponsorship_chart_data|length }}00px;min-height:200px;{% else %}height:220px;{% endif %}max-height:500px;overflow-y:auto;">
-    <canvas id="sponChart"></canvas>
-  </div>
-
-  <div class="mt-5 space-y-4">
-    {% for prod in sponsorship_chart_data %}
-    <div>
-      <div class="flex items-center gap-2 mb-2">
-        <span class="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200">
-          {{ prod.product }}
-        </span>
-        <span class="text-xs text-slate-400">
-          Planned: <strong class="text-amber-700">{{ prod.total_planned }}</strong>
-          &nbsp;·&nbsp; LMRB: <strong class="text-amber-600">{{ prod.total_lmrb }}</strong>
-        </span>
+  {% if spon_kw_breakdown %}
+  <!-- Sponsorship by type: planned vs aired -->
+  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-5">
+    {% for kb in spon_kw_breakdown %}
+    <div class="rounded-xl border bg-gradient-to-br from-amber-50 to-white p-3
+                {% if kb.total >= kb.planned and kb.planned > 0 %}border-emerald-200
+                {% elif kb.total > 0 %}border-amber-200
+                {% else %}border-slate-200{% endif %}">
+      <div class="flex items-center justify-between mb-1.5">
+        <span class="text-xs font-bold text-slate-700">{{ kb.kw }}</span>
+        {% if kb.planned > 0 %}
+          {% if kb.total >= kb.planned %}
+            <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">On track</span>
+          {% elif kb.total > 0 %}
+            <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">Partial</span>
+          {% else %}
+            <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold">Not aired</span>
+          {% endif %}
+        {% endif %}
       </div>
-      <div class="overflow-x-auto rounded-xl border border-amber-100">
-        <table class="data-table w-full text-xs">
-          <thead>
-            <tr>
-              <th>Product</th>
-              <th>Brand</th>
-              <th>Advt Theme</th>
-              <th class="text-right">Duration (s)</th>
-              <th class="text-right">Planned</th>
-              <th class="text-right">Aired (LMRB)</th>
-              <th class="text-right">Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in prod.themes %}
-            <tr>
-              <td class="font-semibold text-amber-700">{{ row.product }}</td>
-              <td class="font-medium text-slate-700">{{ row.brand }}</td>
-              <td class="text-slate-800">
-                {{ row.theme }}
-                {% if not row.is_mapped %}
-                  <span class="ml-1 text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700">unmapped</span>
-                {% endif %}
-              </td>
-              <td class="text-right text-slate-500">{{ row.duration|default:"—" }}</td>
-              <td class="text-right font-semibold text-amber-700">{{ row.planned }}</td>
-              <td class="text-right font-semibold {% if row.lmrb_count >= row.planned %}text-emerald-700{% elif row.lmrb_count > 0 %}text-amber-600{% else %}text-red-500{% endif %}">
-                {% if row.lmrb_count == 0 and row.raw_lmrb_count > 0 %}
-                  <span title="No assignment yet — {{ row.raw_lmrb_count }} raw LMRB observation{{ row.raw_lmrb_count|pluralize }} found in this period">
-                    {{ row.raw_lmrb_count }}
-                    <span class="ml-0.5 text-[8px] font-normal px-1 py-0.5 rounded bg-slate-200 text-slate-500 align-middle">LMRB</span>
-                  </span>
-                {% else %}
-                  {{ row.lmrb_count }}
-                {% endif %}
-              </td>
-              <td class="text-right">
-                {% if row.programmes or row.raw_lmrb_count %}
-                <button onclick="toggleCommDetails(this)"
-                        data-programmes="{{ row.programmes_json|escape }}"
-                        data-dates="{{ row.dates_json|escape }}"
-                        data-pt="{{ row.pt_count }}" data-npt="{{ row.non_pt_count }}"
-                        data-is-raw="{% if not row.aired and not row.lmrb_count and row.raw_lmrb_count %}1{% else %}0{% endif %}"
-                        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px]
-                               font-semibold bg-slate-100 text-slate-600 hover:bg-amber-100
-                               hover:text-amber-700 transition">
-                  <i class="fa-solid fa-circle-info"></i> Details
-                </button>
-                {% else %}—{% endif %}
-              </td>
-            </tr>
-            <!-- Expandable detail row (reuses same toggleCommDetails handler) -->
-            <tr class="comm-detail-row hidden">
-              <td colspan="7" class="bg-amber-50 px-4 py-3">
-                <div class="comm-detail-content"></div>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="flex items-end justify-between gap-2 mt-2">
+        <div class="text-center">
+          <div class="text-xl font-black text-slate-700">{{ kb.planned }}</div>
+          <div class="text-[9px] text-blue-600 font-semibold uppercase tracking-wider">Planned</div>
+        </div>
+        <div class="flex-1 flex flex-col items-center justify-end pb-1">
+          <div class="text-[10px] text-slate-400 font-semibold">vs</div>
+        </div>
+        <div class="text-center">
+          <div class="text-xl font-black {% if kb.total >= kb.planned and kb.planned > 0 %}text-emerald-700{% elif kb.total > 0 %}text-amber-600{% else %}text-slate-400{% endif %}">{{ kb.total }}</div>
+          <div class="text-[9px] text-amber-600 font-semibold uppercase tracking-wider">Aired</div>
+        </div>
       </div>
+      {% if kb.planned > 0 %}
+      <div class="mt-2">
+        <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+          <div class="h-full rounded-full
+            {% if kb.total >= kb.planned %}bg-emerald-400{% elif kb.total > 0 %}bg-amber-400{% else %}bg-slate-300{% endif %}"
+               style="width:{% widthratio kb.total kb.planned 100 %}%"></div>
+        </div>
+        <div class="flex justify-between text-[9px] mt-0.5 text-slate-400">
+          <span>{{ kb.pt }} PT</span><span>{{ kb.non_pt }} Non-PT</span>
+        </div>
+      </div>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
+  {% endif %}
+
+  {% if sponsorship_chart_data %}
+  <!-- Bar chart -->
+  {% with row_count=sponsorship_chart_data|length %}
+  <div style="position:relative;height:{% if row_count > 5 %}{{ row_count }}{% else %}5{% endif %}70px;min-height:220px;max-height:600px;">
+    <canvas id="sponChart"></canvas>
+  </div>
+  {% endwith %}
+  {% endif %}
+
+  <!-- Detailed table per product -->
+  {% if sponsorship_chart_data %}
+  <div class="mt-6 space-y-5">
+    {% for prod in sponsorship_chart_data %}
+    <div class="rounded-2xl border border-amber-100 overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-2.5 bg-gradient-to-r from-amber-50 to-slate-50 border-b border-amber-100">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-bold text-amber-700">{{ prod.product }}</span>
+        </div>
+        <div class="flex items-center gap-3 text-xs">
+          <span class="font-bold text-amber-700">{{ prod.total_planned }} <span class="font-normal text-slate-400">planned</span></span>
+          <span class="text-slate-300">|</span>
+          <span class="font-bold {% if prod.total_lmrb >= prod.total_planned %}text-emerald-700{% elif prod.total_lmrb > 0 %}text-amber-600{% else %}text-red-500{% endif %}">
+            {{ prod.total_lmrb }} <span class="font-normal text-slate-400">LMRB</span>
+          </span>
+        </div>
+      </div>
+      <table class="data-table w-full text-xs">
+        <thead>
+          <tr>
+            <th class="text-left">Brand</th>
+            <th class="text-left">Advt Theme</th>
+            <th class="text-right">Dur (s)</th>
+            <th class="text-right">Planned</th>
+            <th class="text-right">Aired (LMRB)</th>
+            <th class="text-center">Coverage</th>
+            <th class="text-right">Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in prod.themes %}
+          <tr>
+            <td class="font-medium text-slate-700">{{ row.brand }}</td>
+            <td class="text-slate-800">
+              {{ row.theme }}
+              {% if not row.is_mapped %}
+                <span class="ml-1 text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700">unmapped</span>
+              {% endif %}
+            </td>
+            <td class="text-right text-slate-500">{{ row.duration|default:"—" }}</td>
+            <td class="text-right font-bold text-amber-700">{{ row.planned }}</td>
+            <td class="text-right font-bold {% if row.lmrb_count >= row.planned %}text-emerald-700{% elif row.lmrb_count > 0 %}text-amber-600{% else %}text-red-500{% endif %}">
+              {% if row.lmrb_count == 0 and row.raw_lmrb_count > 0 %}
+                <span title="No assignment yet — {{ row.raw_lmrb_count }} raw LMRB observation{{ row.raw_lmrb_count|pluralize }}">
+                  {{ row.raw_lmrb_count }}
+                  <span class="ml-0.5 text-[8px] font-normal px-1 py-0.5 rounded bg-slate-200 text-slate-500 align-middle">LMRB</span>
+                </span>
+              {% else %}
+                {{ row.lmrb_count }}
+              {% endif %}
+            </td>
+            <td class="text-center">
+              {% if row.planned > 0 %}
+              <div class="flex items-center gap-1 justify-center">
+                <div class="w-16 h-2 rounded-full bg-slate-100 overflow-hidden">
+                  <div class="h-full rounded-full {% if row.lmrb_count >= row.planned %}bg-emerald-500{% elif row.lmrb_count > 0 %}bg-amber-400{% else %}bg-red-400{% endif %}"
+                       style="width:{% widthratio row.lmrb_count row.planned 100 %}%"></div>
+                </div>
+                <span class="text-[10px] font-semibold text-slate-500">{% widthratio row.lmrb_count row.planned 100 %}%</span>
+              </div>
+              {% else %}—{% endif %}
+            </td>
+            <td class="text-right">
+              {% if row.programmes or row.raw_lmrb_count %}
+              <button onclick="toggleCommDetails(this)"
+                      data-brand="{{ row.brand|escape }}"
+                      data-theme="{{ row.theme|escape }}"
+                      data-planned="{{ row.planned }}"
+                      data-aired="{{ row.lmrb_count }}"
+                      data-programmes="{{ row.programmes_json|escape }}"
+                      data-dates="{{ row.dates_json|escape }}"
+                      data-pt="{{ row.pt_count }}" data-npt="{{ row.non_pt_count }}"
+                      data-is-raw="{% if not row.aired and not row.lmrb_count and row.raw_lmrb_count %}1{% else %}0{% endif %}"
+                      class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px]
+                             font-semibold bg-amber-50 text-amber-700 border border-amber-100
+                             hover:bg-amber-100 hover:text-amber-900 transition">
+                <i class="fa-solid fa-chart-column text-[9px]"></i> Details
+              </button>
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          <!-- Expandable detail row -->
+          <tr class="comm-detail-row hidden">
+            <td colspan="7" class="bg-gradient-to-r from-amber-50 to-slate-50 px-4 py-4 border-t border-amber-100">
+              <div class="comm-detail-content"></div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 </div>
 {% endif %}
 
@@ -834,7 +954,9 @@
           <thead>
             <tr>
               <th>Type (Keyword)</th>
-              <th class="text-right">Total Aired</th>
+              <th class="text-right text-blue-700">Planned</th>
+              <th class="text-right text-amber-700">Total Aired</th>
+              <th class="text-right">Coverage</th>
               <th class="text-right text-violet-700">PT Aired</th>
               <th class="text-right text-sky-700">Non-PT Aired</th>
               <th>Top Programmes Aired</th>
@@ -844,7 +966,18 @@
             {% for kb in spon_kw_breakdown %}
             <tr>
               <td class="font-bold text-slate-800">{{ kb.kw }}</td>
-              <td class="text-right font-bold text-slate-700">{{ kb.total }}</td>
+              <td class="text-right font-bold text-blue-700">{{ kb.planned|default:"—" }}</td>
+              <td class="text-right font-bold {% if kb.total >= kb.planned and kb.planned %}text-emerald-700{% elif kb.total > 0 %}text-amber-700{% else %}text-slate-400{% endif %}">{{ kb.total }}</td>
+              <td class="text-right">
+                {% if kb.planned %}
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold
+                  {% if kb.total >= kb.planned %}bg-emerald-100 text-emerald-700
+                  {% elif kb.total > 0 %}bg-amber-100 text-amber-700
+                  {% else %}bg-red-100 text-red-600{% endif %}">
+                  {% widthratio kb.total kb.planned 100 %}%
+                </span>
+                {% else %}—{% endif %}
+              </td>
               <td class="text-right font-bold text-violet-700">{{ kb.pt }}</td>
               <td class="text-right font-bold text-sky-700">{{ kb.non_pt }}</td>
               <td class="text-slate-600">
@@ -1422,22 +1555,54 @@ function buildDonut(id, labels, data, colors) {
   });
 }
 
+/* ── Datalabels plugin (show values on bars) ────────────────────── */
+Chart.register({
+  id: 'barValueLabels',
+  afterDatasetsDraw(chart) {
+    if (!chart.config.options._showBarValues) return;
+    const ctx = chart.ctx;
+    const isHorizontal = chart.config.options.indexAxis === 'y';
+    chart.data.datasets.forEach((dataset, di) => {
+      const meta = chart.getDatasetMeta(di);
+      meta.data.forEach((bar, i) => {
+        const val = dataset.data[i];
+        if (val === null || val === undefined || val === 0) return;
+        ctx.save();
+        ctx.font = 'bold 9px system-ui, sans-serif';
+        ctx.fillStyle = '#475569';
+        if (isHorizontal) {
+          // Place label just after bar end (to the right)
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(val, bar.x + 3, bar.y);
+        } else {
+          // Place label above bar (vertical chart)
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(val, bar.x, bar.y - 2);
+        }
+        ctx.restore();
+      });
+    });
+  },
+});
+
 /* ── Commercial Planned vs Aired grouped bar chart ─────────────── */
 {% if commercial_chart_data %}
 (function() {
   const products = {{ commercial_chart_json|safe }};
-  const labels = [], plannedVals = [], airedVals = [], bgColors = [];
+  const labels = [], plannedVals = [], airedVals = [], prodSegments = [];
   const PROD_COLORS = [
     '#2563eb','#7c3aed','#0891b2','#059669','#d97706',
     '#dc2626','#db2777','#65a30d','#ea580c','#0284c7',
   ];
   products.forEach((prod, pi) => {
-    const c = PROD_COLORS[pi % PROD_COLORS.length];
     prod.themes.forEach(t => {
-      labels.push(t.theme + (t.duration ? ' (' + t.duration + 's)' : ''));
+      const label = t.brand + (t.duration ? ' · ' + t.duration + 's' : '');
+      labels.push(label);
       plannedVals.push(t.planned);
-      airedVals.push(t.aired);
-      bgColors.push(c);
+      airedVals.push(t.aired > 0 ? t.aired : (t.raw_lmrb_count || 0));
+      prodSegments.push({ product: prod.product, brand: t.brand, theme: t.theme, colorIdx: pi });
     });
   });
   const el = document.getElementById('commChart');
@@ -1450,49 +1615,66 @@ function buildDonut(id, labels, data, colors) {
         {
           label: 'Planned',
           data: plannedVals,
-          backgroundColor: '#2563ebaa',
-          borderColor: '#2563eb',
-          borderWidth: 1,
-          borderRadius: 4,
+          backgroundColor: labels.map((_, i) => PROD_COLORS[prodSegments[i].colorIdx % PROD_COLORS.length] + 'cc'),
+          borderColor:     labels.map((_, i) => PROD_COLORS[prodSegments[i].colorIdx % PROD_COLORS.length]),
+          borderWidth: 1.5,
+          borderRadius: { topRight: 5, bottomRight: 5 },
+          borderSkipped: false,
         },
         {
           label: 'Aired',
           data: airedVals,
-          backgroundColor: '#059669aa',
+          backgroundColor: '#10b981bb',
           borderColor: '#059669',
-          borderWidth: 1,
-          borderRadius: 4,
+          borderWidth: 1.5,
+          borderRadius: { topRight: 5, bottomRight: 5 },
+          borderSkipped: false,
         },
       ],
     },
     options: {
+      _showBarValues: true,
       indexAxis: 'y',
       responsive: true,
       maintainAspectRatio: false,
+      layout: { padding: { right: 36 } },
       plugins: {
-        legend: { display: true, position: 'top', labels: { font: { size: 10 }, boxWidth: 12 } },
+        legend: {
+          display: true, position: 'top',
+          labels: { font: { size: 11 }, boxWidth: 14, padding: 16 },
+        },
         tooltip: {
+          backgroundColor: '#1e293b',
+          titleFont: { size: 11, weight: 'bold' },
+          bodyFont: { size: 10 },
+          padding: 10,
           callbacks: {
-            afterBody: function(ctx) {
+            title: ctx => ctx[0].label,
+            afterBody: ctx => {
               const di = ctx[0].dataIndex;
-              // Find matching product/theme for this bar index
-              let idx = 0;
-              for (const prod of products) {
-                for (const t of prod.themes) {
-                  if (idx === di) {
-                    return ['Product: ' + prod.product, 'Brand: ' + t.brand];
-                  }
-                  idx++;
-                }
-              }
-              return [];
+              const seg = prodSegments[di];
+              const pl = plannedVals[di];
+              const ai = airedVals[di];
+              const pct = pl > 0 ? Math.round(ai / pl * 100) : 0;
+              return [
+                'Product: ' + seg.product,
+                'Theme: ' + seg.theme,
+                'Coverage: ' + pct + '%',
+              ];
             },
           },
         },
       },
       scales: {
-        x: { ticks: { font: { size: 10 } }, grid: { color: '#f1f5f9' }, beginAtZero: true },
-        y: { ticks: { font: { size: 9 } } },
+        x: {
+          ticks: { font: { size: 10 }, color: '#94a3b8' },
+          grid: { color: '#f1f5f9' },
+          beginAtZero: true,
+        },
+        y: {
+          ticks: { font: { size: 10 }, color: '#334155' },
+          grid: { display: false },
+        },
       },
     },
   });
@@ -1506,9 +1688,9 @@ function buildDonut(id, labels, data, colors) {
   const labels = [], plannedVals = [], lmrbVals = [];
   products.forEach(prod => {
     prod.themes.forEach(t => {
-      labels.push(t.theme + (t.duration ? ' (' + t.duration + 's)' : ''));
+      labels.push(t.brand + (t.duration ? ' · ' + t.duration + 's' : ''));
       plannedVals.push(t.planned);
-      lmrbVals.push(t.lmrb_count);
+      lmrbVals.push(t.lmrb_count > 0 ? t.lmrb_count : (t.raw_lmrb_count || 0));
     });
   });
   const el = document.getElementById('sponChart');
@@ -1521,31 +1703,56 @@ function buildDonut(id, labels, data, colors) {
         {
           label: 'Planned',
           data: plannedVals,
-          backgroundColor: '#f59e0baa',
-          borderColor: '#f59e0b',
-          borderWidth: 1,
-          borderRadius: 4,
+          backgroundColor: '#d97706cc',
+          borderColor: '#b45309',
+          borderWidth: 1.5,
+          borderRadius: { topRight: 5, bottomRight: 5 },
+          borderSkipped: false,
         },
         {
-          label: 'LMRB Count',
+          label: 'Aired (LMRB)',
           data: lmrbVals,
-          backgroundColor: '#fbbf24aa',
-          borderColor: '#fbbf24',
-          borderWidth: 1,
-          borderRadius: 4,
+          backgroundColor: '#f59e0b99',
+          borderColor: '#d97706',
+          borderWidth: 1.5,
+          borderRadius: { topRight: 5, bottomRight: 5 },
+          borderSkipped: false,
         },
       ],
     },
     options: {
+      _showBarValues: true,
       indexAxis: 'y',
       responsive: true,
       maintainAspectRatio: false,
+      layout: { padding: { right: 36 } },
       plugins: {
-        legend: { display: true, position: 'top', labels: { font: { size: 10 }, boxWidth: 12 } },
+        legend: {
+          display: true, position: 'top',
+          labels: { font: { size: 11 }, boxWidth: 14, padding: 16 },
+        },
+        tooltip: {
+          backgroundColor: '#1e293b',
+          callbacks: {
+            afterBody: ctx => {
+              const pl = plannedVals[ctx[0].dataIndex];
+              const ai = lmrbVals[ctx[0].dataIndex];
+              const pct = pl > 0 ? Math.round(ai / pl * 100) : 0;
+              return ['Coverage: ' + pct + '%'];
+            },
+          },
+        },
       },
       scales: {
-        x: { ticks: { font: { size: 10 } }, grid: { color: '#fef3c7' }, beginAtZero: true },
-        y: { ticks: { font: { size: 9 } } },
+        x: {
+          ticks: { font: { size: 10 }, color: '#94a3b8' },
+          grid: { color: '#fef3c7' },
+          beginAtZero: true,
+        },
+        y: {
+          ticks: { font: { size: 10 }, color: '#78350f' },
+          grid: { display: false },
+        },
       },
     },
   });
@@ -1559,7 +1766,6 @@ function toggleCommDetails(btn) {
   if (!detailTr || !detailTr.classList.contains('comm-detail-row')) return;
   const isOpen = !detailTr.classList.contains('hidden');
   if (isOpen) {
-    // Destroy any existing Chart.js instance to avoid canvas reuse errors
     const existingCanvas = detailTr.querySelector('canvas[data-chartid]');
     if (existingCanvas) {
       const cid = existingCanvas.dataset.chartid;
@@ -1569,50 +1775,85 @@ function toggleCommDetails(btn) {
       }
     }
     detailTr.classList.add('hidden');
-    btn.innerHTML = '<i class="fa-solid fa-circle-info"></i> Details';
+    btn.innerHTML = '<i class="fa-solid fa-chart-column text-[9px]"></i> Details';
     return;
   }
   // Build detail content
-  const progs = JSON.parse(btn.dataset.programmes || '[]');
-  const dates = JSON.parse(btn.dataset.dates || '[]');
-  const pt    = parseInt(btn.dataset.pt || '0');
-  const npt   = parseInt(btn.dataset.npt || '0');
-  const total = pt + npt;
-  const isRaw = btn.dataset.isRaw === '1';
+  const progs   = JSON.parse(btn.dataset.programmes || '[]');
+  const dates   = JSON.parse(btn.dataset.dates || '[]');
+  const pt      = parseInt(btn.dataset.pt || '0');
+  const npt     = parseInt(btn.dataset.npt || '0');
+  const planned = parseInt(btn.dataset.planned || '0');
+  const aired   = parseInt(btn.dataset.aired || '0');
+  const brand   = btn.dataset.brand || '';
+  const theme   = btn.dataset.theme || '';
+  const total   = pt + npt;
+  const isRaw   = btn.dataset.isRaw === '1';
+
   let html = '';
+
+  // Header row: key metrics
+  if (planned || aired || total) {
+    const coverage = planned > 0 ? Math.round(aired / planned * 100) : 0;
+    const coverageColor = coverage >= 100 ? '#059669' : coverage > 0 ? '#d97706' : '#dc2626';
+    html += `<div class="flex flex-wrap gap-3 mb-3">
+      <div class="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
+        <div class="text-center">
+          <div class="text-lg font-black text-blue-700">${planned}</div>
+          <div class="text-[9px] text-blue-500 font-bold uppercase tracking-wider">Planned</div>
+        </div>
+        <div class="text-slate-300 font-bold text-lg">→</div>
+        <div class="text-center">
+          <div class="text-lg font-black" style="color:${coverageColor}">${aired}</div>
+          <div class="text-[9px] font-bold uppercase tracking-wider" style="color:${coverageColor}">Aired</div>
+        </div>
+        <div class="ml-1 px-2 py-1 rounded-lg text-sm font-black" style="background:${coverageColor}22;color:${coverageColor}">${coverage}%</div>
+      </div>
+      ${brand ? `<div class="flex items-center gap-1.5 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-xs text-slate-600">
+        <i class="fa-solid fa-tag text-slate-400"></i>
+        <span class="font-semibold">${brand}</span>
+      </div>` : ''}
+    </div>`;
+  }
+
   if (isRaw) {
-    html += `<div class="mb-3 flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-lg
-                         bg-amber-50 border border-amber-200 text-amber-700">
+    html += `<div class="mb-3 flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700">
       <i class="fa-solid fa-triangle-exclamation"></i>
       <span>Verification not yet run — showing raw LMRB observations found in this period.</span>
     </div>`;
   }
-  html += '<div class="flex flex-wrap gap-6 text-xs">';
+
+  html += '<div class="flex flex-wrap gap-4 text-xs">';
+
   // PT / Non-PT bar
   if (total > 0) {
     const ptPct = Math.round(pt / total * 100);
-    html += `<div class="flex-1 min-w-[180px]">
-      <div class="font-semibold text-slate-600 mb-1">Prime-time Split</div>
-      <div class="pt-bar mb-1">
-        <div class="pt-prime" style="width:${ptPct}%"></div>
-        <div class="pt-nonprime" style="width:${100-ptPct}%"></div>
+    html += `<div class="flex-1 min-w-[180px] bg-white rounded-xl border border-slate-100 p-3">
+      <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+        <i class="fa-solid fa-clock mr-1 text-violet-400"></i> Prime-time Split
       </div>
-      <div class="flex justify-between text-[10px] text-slate-500">
-        <span class="text-violet-700 font-semibold">${ptPct}% Prime (${pt})</span>
-        <span class="text-cyan-700 font-semibold">${100-ptPct}% Non-PT (${npt})</span>
+      <div class="h-3 rounded-full overflow-hidden bg-sky-100 flex mb-1.5">
+        <div class="bg-violet-500" style="width:${ptPct}%"></div>
+        <div class="bg-sky-400" style="width:${100-ptPct}%"></div>
+      </div>
+      <div class="flex justify-between text-[10px]">
+        <span class="text-violet-700 font-bold">${ptPct}% Prime <span class="font-normal text-violet-500">(${pt})</span></span>
+        <span class="text-sky-700 font-bold">${100-ptPct}% Non-PT <span class="font-normal text-sky-500">(${npt})</span></span>
       </div>
     </div>`;
   }
+
   // Per-date aired bar chart
   if (dates.length) {
     const chartId = 'cd_' + Math.random().toString(36).slice(2);
-    html += `<div class="flex-[2] min-w-[260px]">
-      <div class="font-semibold text-slate-600 mb-1">Aired by Date</div>
-      <div style="position:relative;height:100px;">
-        <canvas data-chartid="${chartId}" style="width:100%;height:100%;"></canvas>
+    html += `<div class="flex-[2] min-w-[260px] bg-white rounded-xl border border-slate-100 p-3">
+      <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+        <i class="fa-solid fa-calendar-days mr-1 text-blue-400"></i> Aired by Date
+      </div>
+      <div style="position:relative;height:90px;">
+        <canvas data-chartid="${chartId}"></canvas>
       </div>
     </div>`;
-    // Render chart after DOM is updated
     setTimeout(() => {
       const canvas = detailTr.querySelector(`canvas[data-chartid="${chartId}"]`);
       if (!canvas) return;
@@ -1620,11 +1861,15 @@ function toggleCommDetails(btn) {
       window._commDetailCharts[chartId] = new Chart(canvas, {
         type: 'bar',
         data: {
-          labels: dates.map(d => d.date),
+          labels: dates.map(d => {
+            const dt = new Date(d.date);
+            return (dt.getDate()).toString().padStart(2,'0') + ' ' +
+              dt.toLocaleString('en-GB', {month:'short'});
+          }),
           datasets: [{
             label: 'Aired',
             data: dates.map(d => d.count),
-            backgroundColor: '#3b82f6cc',
+            backgroundColor: '#3b82f6bb',
             borderColor: '#2563eb',
             borderWidth: 1,
             borderRadius: 3,
@@ -1635,100 +1880,102 @@ function toggleCommDetails(btn) {
           maintainAspectRatio: false,
           plugins: {
             legend: { display: false },
-            tooltip: {
-              callbacks: {
-                title: items => items[0].label,
-                label: item => `${item.raw} aired`,
-              },
-            },
+            tooltip: { callbacks: { label: item => item.raw + ' aired' } },
           },
           scales: {
-            x: {
-              ticks: { font: { size: 9 }, maxRotation: 45, minRotation: 30 },
-              grid: { display: false },
-            },
-            y: {
-              beginAtZero: true,
-              ticks: { font: { size: 9 }, stepSize: 1, precision: 0 },
-              grid: { color: '#e2e8f0' },
-            },
+            x: { ticks: { font: { size: 9 }, maxRotation: 45 }, grid: { display: false } },
+            y: { beginAtZero: true, ticks: { font: { size: 9 }, stepSize: 1, precision: 0 }, grid: { color: '#f1f5f9' } },
           },
         },
       });
     }, 0);
   }
+
   // Programme breakdown
   if (progs.length) {
-    html += '<div class="flex-1 min-w-[200px]"><div class="font-semibold text-slate-600 mb-1">Programmes Aired</div><ul class="space-y-0.5">';
+    html += `<div class="flex-1 min-w-[200px] bg-white rounded-xl border border-slate-100 p-3">
+      <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+        <i class="fa-solid fa-tv mr-1 text-indigo-400"></i> Programmes Aired
+      </div>
+      <ul class="space-y-1">`;
     progs.slice(0, 8).forEach(p => {
       const isPt = p.prime > p.non_prime;
-      html += `<li class="flex items-center justify-between gap-2">
-        <span class="truncate max-w-[200px]">${p.name}</span>
-        <span class="flex items-center gap-1">
-          <span class="font-bold text-slate-700">${p.count}</span>
-          ${isPt ? '<span class="text-[9px] px-1 py-0.5 rounded bg-violet-100 text-violet-700">PT</span>'
-                 : '<span class="text-[9px] px-1 py-0.5 rounded bg-cyan-50 text-cyan-700">Non-PT</span>'}
+      html += `<li class="flex items-center justify-between gap-2 py-0.5 border-b border-slate-50 last:border-0">
+        <span class="truncate text-slate-700 text-[11px]" title="${p.name}">${p.name}</span>
+        <span class="flex items-center gap-1 shrink-0">
+          <span class="font-bold text-slate-800">${p.count}</span>
+          ${isPt
+            ? '<span class="text-[8px] px-1 py-0.5 rounded bg-violet-100 text-violet-700 font-semibold">PT</span>'
+            : '<span class="text-[8px] px-1 py-0.5 rounded bg-sky-50 text-sky-600 font-semibold">NPT</span>'}
         </span>
       </li>`;
     });
+    if (progs.length > 8) {
+      html += `<li class="text-[10px] text-slate-400 pt-1">+ ${progs.length - 8} more programmes</li>`;
+    }
     html += '</ul></div>';
   }
+
   html += '</div>';
   detailTr.querySelector('.comm-detail-content').innerHTML = html;
   detailTr.classList.remove('hidden');
-  btn.innerHTML = '<i class="fa-solid fa-chevron-up"></i> Close';
+  btn.innerHTML = '<i class="fa-solid fa-chevron-up text-[9px]"></i> Close';
 }
 
 {% if spon_kw_breakdown %}
-/* ── Sponsorship Keyword Type Chart ───────────────────────────── */
+/* ── Sponsorship Keyword Type Chart (Planned vs Aired) ─────────── */
 (function() {
   const raw = {{ spon_kw_breakdown_json|safe }};
   if (!raw.length) return;
   const el = document.getElementById('sponKwChart');
   if (!el) return;
-  const labels  = raw.map(r => r.kw);
-  const ptData  = raw.map(r => r.pt);
-  const nptData = raw.map(r => r.non_pt);
+  const labels    = raw.map(r => r.kw);
+  const planned   = raw.map(r => r.planned || 0);
+  const airedData = raw.map(r => r.total);
   new Chart(el, {
     type: 'bar',
     data: {
       labels,
       datasets: [
         {
-          label: 'PT Aired',
-          data: ptData,
-          backgroundColor: '#7c3aedcc',
-          borderColor: '#7c3aed',
-          borderWidth: 1,
+          label: 'Planned',
+          data: planned,
+          backgroundColor: '#d9770699',
+          borderColor: '#b45309',
+          borderWidth: 1.5,
           borderRadius: 4,
         },
         {
-          label: 'Non-PT Aired',
-          data: nptData,
-          backgroundColor: '#0891b2cc',
-          borderColor: '#0891b2',
-          borderWidth: 1,
+          label: 'Aired (LMRB)',
+          data: airedData,
+          backgroundColor: '#f59e0b99',
+          borderColor: '#d97706',
+          borderWidth: 1.5,
           borderRadius: 4,
         },
       ],
     },
     options: {
+      _showBarValues: true,
       responsive: true,
       maintainAspectRatio: false,
+      layout: { padding: { top: 20 } },
       plugins: {
         legend: { position: 'top', labels: { font: { size: 10 }, boxWidth: 12 } },
         tooltip: {
+          backgroundColor: '#1e293b',
           callbacks: {
             afterBody: function(ctx) {
               const idx = ctx[0].dataIndex;
-              const total = raw[idx].total;
-              return ['Total: ' + total];
-            }
-          }
-        }
+              const r = raw[idx];
+              const pct = r.planned > 0 ? Math.round(r.total / r.planned * 100) : 0;
+              return ['Coverage: ' + pct + '%', 'PT: ' + r.pt + '  |  Non-PT: ' + r.non_pt];
+            },
+          },
+        },
       },
       scales: {
-        x: { stacked: false, ticks: { font: { size: 10 } }, grid: { color: '#f1f5f9' } },
+        x: { ticks: { font: { size: 10 }, color: '#94a3b8' }, grid: { color: '#f1f5f9' } },
         y: { ticks: { font: { size: 10 }, stepSize: 1 }, grid: { color: '#f1f5f9' } },
       },
     },
@@ -1950,9 +2197,9 @@ function buildModalCharts() {
     const labels = [], plannedVals = [], airedVals = [];
     products.forEach(prod => {
       prod.themes.forEach(t => {
-        labels.push(t.theme + (t.duration ? ' (' + t.duration + 's)' : ''));
+        labels.push(t.brand + (t.duration ? ' · ' + t.duration + 's' : ''));
         plannedVals.push(t.planned);
-        airedVals.push(t.aired);
+        airedVals.push(t.aired > 0 ? t.aired : (t.raw_lmrb_count || 0));
       });
     });
     const el = document.getElementById('commChartModal');
@@ -1962,14 +2209,19 @@ function buildModalCharts() {
       data: {
         labels,
         datasets: [
-          { label: 'Planned', data: plannedVals, backgroundColor: '#2563ebaa', borderColor: '#2563eb', borderWidth: 1, borderRadius: 4 },
-          { label: 'Aired',   data: airedVals,   backgroundColor: '#059669aa', borderColor: '#059669', borderWidth: 1, borderRadius: 4 },
+          { label: 'Planned', data: plannedVals, backgroundColor: '#2563ebcc', borderColor: '#2563eb', borderWidth: 1.5, borderRadius: 4 },
+          { label: 'Aired',   data: airedVals,   backgroundColor: '#10b981bb', borderColor: '#059669', borderWidth: 1.5, borderRadius: 4 },
         ],
       },
       options: {
+        _showBarValues: true,
         indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        layout: { padding: { right: 30 } },
         plugins: { legend: { display: true, position: 'top', labels: { font: { size: 9 }, boxWidth: 10 } } },
-        scales: { x: { ticks: { font: { size: 9 } }, beginAtZero: true }, y: { ticks: { font: { size: 9 } } } },
+        scales: {
+          x: { ticks: { font: { size: 9 } }, beginAtZero: true, grid: { color: '#f1f5f9' } },
+          y: { ticks: { font: { size: 9 } }, grid: { display: false } },
+        },
       },
     });
   })();

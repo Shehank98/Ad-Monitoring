@@ -115,7 +115,9 @@ class ScheduleRow(models.Model):
     start_time  = models.CharField(max_length=30, blank=True)
     end_time    = models.CharField(max_length=30, blank=True)
     duration    = models.IntegerField(null=True, blank=True)
-    ad_type     = models.CharField(max_length=100, blank=True)   # 'COMMERCIAL BENEFITS' | 'SPONSORSHIP'
+    ad_type          = models.CharField(max_length=100, blank=True)   # 'COMMERCIAL BENEFITS' | 'SPONSORSHIP'
+    sponsorship_type = models.CharField(max_length=100, blank=True, default='',
+                         help_text='Type of sponsorship e.g. BB, Tag, Opening/Closing — set at upload')
 
     # Row-level locking — commercial reconciliation
     is_matched   = models.BooleanField(default=False, db_index=True)

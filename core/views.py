@@ -520,7 +520,14 @@ def schedule_upload(request):
             schedule.save()
 
             # ── Parse Schedule rows into DB ────────────────────────────────────
-            _parse_schedule_rows(df, schedule, account, channel_name, month)
+            # Collect brand→sponsorship_type assignments submitted via the form
+            brand_type_map = {}
+            for key, val in request.POST.items():
+                if key.startswith('spon_type_') and val.strip():
+                    brand_name = key[len('spon_type_'):]
+                    brand_type_map[brand_name] = val.strip()
+            _parse_schedule_rows(df, schedule, account, channel_name, month,
+                                 brand_type_map=brand_type_map)
 
             messages.success(request,
                 f'Schedule #{schedule.schedule_number} v{version} for {account} '
@@ -544,11 +551,18 @@ def schedule_upload(request):
         ('BRAND',       'Brand name (optional inline col)',   False),
         ('[date cols]', 'Date values → spot count per day',   True),
     ]
-    return render(request, 'schedules/upload.html', {'form': form, 'schedule_col_guide': col_guide})
+    # Provide available sponsorship type options from system settings
+    spon_type_options = get_setting_list('lmrb_sponsorship_keywords')
+    return render(request, 'schedules/upload.html', {
+        'form': form,
+        'schedule_col_guide': col_guide,
+        'spon_type_options': spon_type_options,
+    })
 
 
-def _parse_schedule_rows(df, schedule, account, channel, month):
+def _parse_schedule_rows(df, schedule, account, channel, month, brand_type_map=None):
     """Parse a schedule DataFrame and bulk-create ScheduleRow records."""
+    brand_type_map = brand_type_map or {}
     rows = []
     for _, r in df.iterrows():
         ad_type = _safe_str(r.get('Advertisement_Type', '')).upper().strip()
@@ -557,19 +571,24 @@ def _parse_schedule_rows(df, schedule, account, channel, month):
             ad_type = 'SPONSORSHIP'
         if ad_type not in ('COMMERCIAL BENEFITS', 'SPONSORSHIP'):
             continue
+        brand = _safe_str(r.get('Brand', ''))
+        spon_type = ''
+        if ad_type == 'SPONSORSHIP':
+            spon_type = brand_type_map.get(brand, '')
         rows.append(ScheduleRow(
-            schedule   = schedule,
-            account    = account,
-            channel    = channel,
-            month      = month,
-            brand      = _safe_str(r.get('Brand', '')),
-            product    = _safe_str(r.get('Product', '')),
-            programme  = _safe_str(r.get('Programme', '')),
-            date       = _safe_date(r.get('Date')),
-            start_time = _safe_str(r.get('Start_Time', '')),
-            end_time   = _safe_str(r.get('End_Time', '')),
-            duration   = _safe_int(r.get('Duration')),
-            ad_type    = ad_type,
+            schedule         = schedule,
+            account          = account,
+            channel          = channel,
+            month            = month,
+            brand            = brand,
+            product          = _safe_str(r.get('Product', '')),
+            programme        = _safe_str(r.get('Programme', '')),
+            date             = _safe_date(r.get('Date')),
+            start_time       = _safe_str(r.get('Start_Time', '')),
+            end_time         = _safe_str(r.get('End_Time', '')),
+            duration         = _safe_int(r.get('Duration')),
+            ad_type          = ad_type,
+            sponsorship_type = spon_type,
         ))
     if rows:
         ScheduleRow.objects.bulk_create(rows, batch_size=500)
@@ -590,13 +609,26 @@ def schedule_detect(request):
             excel_file.seek(0)
             df = pd.read_excel(excel_file)
         month, start_date, end_date = _detect_schedule_meta(df)
+
+        # Extract unique sponsorship brands if Advertisement_Type column exists
+        spon_brands = []
+        if 'Advertisement_Type' in df.columns and 'Brand' in df.columns:
+            spon_mask = df['Advertisement_Type'].astype(str).str.strip().str.upper().isin(
+                ['SPONSORSHIP BENEFITS', 'SPONSORSHIP']
+            )
+            spon_brands = sorted(
+                b for b in df.loc[spon_mask, 'Brand'].dropna().unique()
+                if str(b).strip()
+            )
+
         return JsonResponse({
-            'ok':         True,
-            'month':      month,
-            'start_date': str(start_date) if start_date else '',
-            'end_date':   str(end_date)   if end_date   else '',
-            'row_count':  len(df),
-            'is_pivot':   pivot,
+            'ok':          True,
+            'month':       month,
+            'start_date':  str(start_date) if start_date else '',
+            'end_date':    str(end_date)   if end_date   else '',
+            'row_count':   len(df),
+            'is_pivot':    pivot,
+            'spon_brands': spon_brands,
         })
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)})
@@ -1997,6 +2029,8 @@ def monitoring_dashboard(request):
         # For each keyword in lmrb_sponsorship_keywords, count LMRB rows that
         # contain that keyword (case-insensitive) grouped by PT / Non-PT, and
         # list the top programmes they aired in.
+        # Also count planned sponsorship rows that have sponsorship_type matching
+        # that keyword (set at schedule upload time).
         spon_kw_breakdown = []
         if spon_kw:
             for kw in spon_kw:
@@ -2004,7 +2038,11 @@ def monitoring_dashboard(request):
                     continue
                 kw_qs = lmrb_qs.filter(advt_theme__icontains=kw)
                 kw_total = kw_qs.count()
-                if kw_total == 0:
+                # Count planned rows whose sponsorship_type matches this keyword
+                kw_planned = _sr_base.filter(
+                    ad_type='SPONSORSHIP', sponsorship_type__iexact=kw
+                ).count()
+                if kw_total == 0 and kw_planned == 0:
                     continue
                 kw_pt = kw_non_pt = 0
                 for r in kw_qs.values('advt_time'):
@@ -2019,6 +2057,7 @@ def monitoring_dashboard(request):
                 )
                 spon_kw_breakdown.append({
                     'kw':      kw,
+                    'planned': kw_planned,
                     'total':   kw_total,
                     'pt':      kw_pt,
                     'non_pt':  kw_non_pt,
@@ -2110,6 +2149,7 @@ def monitoring_dashboard(request):
         commercial_chart_json = '[]'
         sponsorship_chart_json = '[]'
         lmrb_spon_pool = []
+        pt_all = pt_comm = pt_spon = sch_pt_comm = sch_pt_spon = {}
 
     return render(request, 'monitoring/dashboard.html', {
         'accounts':                  account_qs,
