@@ -232,14 +232,16 @@
     const fileInput  = document.getElementById('fileInput');
     const uploadBtn  = document.getElementById('uploadBtn');
 
-    // Drag-and-drop
-    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-violet-500','bg-violet-50'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-violet-500','bg-violet-50'));
-    dropZone.addEventListener('drop', e => {
-      e.preventDefault();
-      dropZone.classList.remove('border-violet-500','bg-violet-50');
-      if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; detectFile(fileInput); }
-    });
+    // Drag-and-drop (only present on the upload tab)
+    if (dropZone) {
+      dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-violet-500','bg-violet-50'); });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-violet-500','bg-violet-50'));
+      dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('border-violet-500','bg-violet-50');
+        if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; detectFile(fileInput); }
+      });
+    }
 
     function detectFile(inp) {
       if (!inp.files.length) return;
