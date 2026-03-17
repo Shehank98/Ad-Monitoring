@@ -1,0 +1,1292 @@
+{% extends "base.html" %}
+{% load competitor_extras %}
+{% block title %}Competitor Analysis{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-slate-50">
+
+  <!-- ── Page header ──────────────────────────────────────────────────── -->
+  <div class="bg-white border-b border-slate-200 px-6 py-4">
+    <div class="flex items-center justify-between flex-wrap gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-700 flex items-center justify-center shadow-lg">
+          <i class="fa-solid fa-chart-bar text-white text-sm"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold text-slate-800">Competitor Analysis</h1>
+          <p class="text-xs text-slate-500">Advertising intelligence &amp; market insights</p>
+        </div>
+      </div>
+
+      <!-- Account selector -->
+      <form method="get" id="accountForm" class="flex items-center gap-2">
+        <input type="hidden" name="tab" value="{{ tab }}">
+        <label class="text-sm font-medium text-slate-600">Account:</label>
+        <select name="account_id" onchange="document.getElementById('accountForm').submit()"
+                class="select-field w-52">
+          <option value="">— Select Account —</option>
+          {% for acc in account_qs %}
+          <option value="{{ acc.id }}" {% if acc.id|stringformat:"s" == account_id %}selected{% endif %}>{{ acc.name }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Tab bar ──────────────────────────────────────────────────────── -->
+  <div class="bg-white border-b border-slate-200 px-6">
+    <nav class="flex gap-1 -mb-px overflow-x-auto" id="tabNav">
+      {% for t_id, t_label, t_icon in tab_defs %}
+      <a href="?tab={{ t_id }}&account_id={{ account_id }}"
+         class="tab-link flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors
+                {% if tab == t_id %}border-violet-600 text-violet-700{% else %}border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300{% endif %}">
+        <i class="fa-solid {{ t_icon }} text-xs"></i>{{ t_label }}
+      </a>
+      {% endfor %}
+    </nav>
+  </div>
+
+  <!-- ── Main content ─────────────────────────────────────────────────── -->
+  <div class="px-6 py-6 max-w-screen-2xl mx-auto">
+
+    {% if messages %}
+    <div class="mb-4 space-y-2">
+      {% for msg in messages %}
+      <div class="rounded-lg px-4 py-3 text-sm font-medium flex items-center gap-2
+                  {% if msg.tags == 'success' %}bg-emerald-50 text-emerald-800 border border-emerald-200
+                  {% elif msg.tags == 'error' %}bg-red-50 text-red-800 border border-red-200
+                  {% else %}bg-blue-50 text-blue-800 border border-blue-200{% endif %}">
+        <i class="fa-solid {% if msg.tags == 'success' %}fa-circle-check{% elif msg.tags == 'error' %}fa-circle-exclamation{% else %}fa-circle-info{% endif %}"></i>
+        {{ msg }}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 1 — DATA UPLOAD
+    ═══════════════════════════════════════════════════════════════ -->
+    {% if tab == 'upload' %}
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+      <!-- Upload card -->
+      <div class="xl:col-span-1 card">
+        <h2 class="text-base font-bold text-slate-800 mb-1 flex items-center gap-2">
+          <i class="fa-solid fa-cloud-arrow-up text-violet-600"></i> Upload Competitor Data
+        </h2>
+        <p class="text-xs text-slate-500 mb-4">Select an account then upload an LMRB-style Excel file.</p>
+
+        {% if not selected_account %}
+        <div class="rounded-lg bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800 flex items-start gap-2">
+          <i class="fa-solid fa-triangle-exclamation mt-0.5"></i>
+          <span>Please select an <strong>account</strong> from the header dropdown before uploading.</span>
+        </div>
+        {% else %}
+        <form method="post" action="{% url 'competitor_upload' %}" enctype="multipart/form-data" id="uploadForm">
+          {% csrf_token %}
+          <input type="hidden" name="account_id" value="{{ account_id }}">
+
+          <!-- File drop zone -->
+          <div id="dropZone"
+               class="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center cursor-pointer transition-colors hover:border-violet-400 hover:bg-violet-50/30 mb-4"
+               onclick="document.getElementById('fileInput').click()">
+            <i class="fa-solid fa-file-excel text-4xl text-slate-300 mb-2"></i>
+            <p class="text-sm font-medium text-slate-600">Drop Excel file here or <span class="text-violet-600">browse</span></p>
+            <p class="text-xs text-slate-400 mt-1">.xlsx / .xls only</p>
+          </div>
+          <input type="file" id="fileInput" name="file" accept=".xlsx,.xls" class="hidden" onchange="detectFile(this)">
+
+          <!-- Detection results -->
+          <div id="detectResult" class="hidden mb-4 rounded-xl bg-slate-50 border border-slate-200 p-4 text-sm space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-slate-500">Detected period:</span>
+              <span id="detPeriod" class="font-semibold text-slate-800"></span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-slate-500">Valid rows:</span>
+              <span id="detRows" class="font-semibold text-slate-800"></span>
+            </div>
+            <div id="dupWarning" class="hidden rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-amber-800 flex items-start gap-2">
+              <i class="fa-solid fa-triangle-exclamation mt-0.5 flex-shrink-0"></i>
+              <span id="dupText"></span>
+            </div>
+            <div id="advPreview" class="hidden">
+              <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Advertisers found</p>
+              <div id="advTags" class="flex flex-wrap gap-1"></div>
+            </div>
+          </div>
+
+          <!-- Skip dupes -->
+          <label class="flex items-center gap-2 text-sm text-slate-600 mb-4 cursor-pointer">
+            <input type="checkbox" name="skip_dupes" value="true" checked class="rounded border-slate-300 text-violet-600 focus:ring-violet-500">
+            Skip duplicate rows
+          </label>
+
+          <button type="submit" id="uploadBtn" disabled
+                  class="btn-primary w-full justify-center opacity-50 cursor-not-allowed" id="submitBtn">
+            <i class="fa-solid fa-cloud-arrow-up"></i> Upload Data
+          </button>
+        </form>
+        {% endif %}
+      </div>
+
+      <!-- Upload history -->
+      <div class="xl:col-span-2 card">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+            <i class="fa-solid fa-clock-rotate-left text-violet-600"></i> Upload History
+          </h2>
+          {% if selected_account %}
+          <span class="badge bg-violet-100 text-violet-700">{{ batches|length }} batch{{ batches|length|pluralize:"es" }}</span>
+          {% endif %}
+        </div>
+
+        {% if not selected_account %}
+        <div class="text-center py-12 text-slate-400">
+          <i class="fa-solid fa-arrow-up-from-bracket text-5xl mb-3 block opacity-30"></i>
+          <p class="text-sm">Select an account to view upload history</p>
+        </div>
+        {% elif not batches %}
+        <div class="text-center py-12 text-slate-400">
+          <i class="fa-solid fa-inbox text-5xl mb-3 block opacity-30"></i>
+          <p class="text-sm">No data uploaded yet for <strong class="text-slate-600">{{ selected_account }}</strong></p>
+        </div>
+        {% else %}
+        <div class="overflow-x-auto rounded-lg border border-slate-100">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Uploaded</th>
+                <th>Period</th>
+                <th>Rows</th>
+                <th>File</th>
+                <th>By</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for b in batches %}
+              <tr>
+                <td class="whitespace-nowrap">{{ b.uploaded_at|date:"d M Y H:i" }}</td>
+                <td class="whitespace-nowrap">
+                  {% if b.start_date %}{{ b.start_date|date:"d M Y" }} – {{ b.end_date|date:"d M Y" }}{% else %}—{% endif %}
+                </td>
+                <td class="font-semibold">{{ b.row_count|default:0 }}</td>
+                <td class="text-slate-500 text-xs max-w-xs truncate">{{ b.original_filename }}</td>
+                <td class="text-slate-500 text-xs">{{ b.uploaded_by.get_full_name|default:b.uploaded_by.username }}</td>
+                <td>
+                  {% if b.is_locked %}
+                  <span class="badge bg-amber-100 text-amber-700"><i class="fa-solid fa-lock text-xs mr-1"></i>Locked</span>
+                  {% else %}
+                  <span class="badge bg-emerald-100 text-emerald-700">Active</span>
+                  {% endif %}
+                </td>
+                <td class="whitespace-nowrap">
+                  <div class="flex items-center gap-1">
+                    {% if request.user.role in 'super_admin,admin' %}
+                    <form method="post" action="{% url 'competitor_toggle_lock' b.batch_id %}"
+                          class="inline" onsubmit="return confirm('Toggle lock status?')">
+                      {% csrf_token %}
+                      <input type="hidden" name="account_id" value="{{ account_id }}">
+                      <button type="submit" class="btn-secondary py-1 px-2 text-xs">
+                        <i class="fa-solid {% if b.is_locked %}fa-lock-open{% else %}fa-lock{% endif %}"></i>
+                      </button>
+                    </form>
+                    {% endif %}
+                    {% if not b.is_locked %}
+                    <form method="post" action="{% url 'competitor_delete_batch' b.batch_id %}"
+                          class="inline" onsubmit="return confirm('Delete this batch and all its {{ b.row_count }} rows?')">
+                      {% csrf_token %}
+                      <input type="hidden" name="account_id" value="{{ account_id }}">
+                      <button type="submit" class="btn-danger py-1 px-2 text-xs">
+                        <i class="fa-solid fa-trash"></i>
+                      </button>
+                    </form>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Upload JS -->
+    <script>
+    const DETECT_URL = "{% url 'competitor_detect' %}";
+    const CSRF       = "{{ csrf_token }}";
+    const ACCOUNT_ID = "{{ account_id }}";
+
+    const dropZone   = document.getElementById('dropZone');
+    const fileInput  = document.getElementById('fileInput');
+    const uploadBtn  = document.getElementById('uploadBtn');
+
+    // Drag-and-drop
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-violet-500','bg-violet-50'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-violet-500','bg-violet-50'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('border-violet-500','bg-violet-50');
+      if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; detectFile(fileInput); }
+    });
+
+    function detectFile(inp) {
+      if (!inp.files.length) return;
+      const file = inp.files[0];
+      const fname = file.name;
+      dropZone.innerHTML = `<i class="fa-solid fa-file-excel text-4xl text-emerald-500 mb-2"></i><p class="text-sm font-semibold text-slate-700">${fname}</p><p class="text-xs text-slate-400 mt-1">Scanning…</p>`;
+
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('account_id', ACCOUNT_ID);
+      fd.append('csrfmiddlewaretoken', CSRF);
+
+      fetch(DETECT_URL, { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+          if (!data.ok) { alert('Detection error: ' + data.error); return; }
+          const res = document.getElementById('detectResult');
+          res.classList.remove('hidden');
+
+          const fmt = d => { if (!d) return '—'; const [y,m,mo] = d.split('-'); const mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return `${mo} ${mn[parseInt(m)-1]} ${y}`; };
+          document.getElementById('detPeriod').textContent = `${fmt(data.min_date)} – ${fmt(data.max_date)}`;
+          document.getElementById('detRows').textContent   = `${data.row_count.toLocaleString()} rows`;
+
+          const dupWarn = document.getElementById('dupWarning');
+          if (data.dup_count > 0) {
+            dupWarn.classList.remove('hidden');
+            document.getElementById('dupText').textContent = `${data.dup_count} duplicate rows detected. These will be skipped if "Skip duplicates" is checked.`;
+          } else { dupWarn.classList.add('hidden'); }
+
+          const advPreview = document.getElementById('advPreview');
+          if (data.advertisers && data.advertisers.length) {
+            advPreview.classList.remove('hidden');
+            document.getElementById('advTags').innerHTML = data.advertisers
+              .map(a => `<span class="badge bg-indigo-100 text-indigo-700">${a}</span>`).join('');
+          }
+
+          dropZone.innerHTML = `<i class="fa-solid fa-file-excel text-4xl text-emerald-500 mb-2"></i><p class="text-sm font-semibold text-slate-700">${fname}</p><p class="text-xs text-emerald-600 mt-1"><i class="fa-solid fa-circle-check"></i> File ready</p>`;
+          uploadBtn.disabled = false;
+          uploadBtn.classList.remove('opacity-50','cursor-not-allowed');
+        })
+        .catch(() => alert('Failed to scan file.'));
+    }
+    </script>
+    {% endif %}
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 2 — INSIGHTS DASHBOARD
+    ═══════════════════════════════════════════════════════════════ -->
+    {% if tab == 'dashboard' %}
+
+    {% if not selected_account %}
+    <div class="card text-center py-16 text-slate-400">
+      <i class="fa-solid fa-chart-pie text-6xl mb-4 block opacity-20"></i>
+      <p class="text-lg font-semibold text-slate-500">Select an account to view the insights dashboard</p>
+    </div>
+    {% else %}
+
+    <!-- Filter bar -->
+    <form method="get" class="card mb-6" id="filterForm">
+      <input type="hidden" name="tab" value="dashboard">
+      <input type="hidden" name="account_id" value="{{ account_id }}">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">From</label>
+          <input type="date" name="date_from" value="{{ date_from|default:'' }}" class="input-field">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">To</label>
+          <input type="date" name="date_to" value="{{ date_to|default:'' }}" class="input-field">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Advertiser</label>
+          <select name="advertiser" multiple class="input-field" style="height:2.4rem;overflow:hidden" id="advFilter">
+            {% for a in all_advertisers %}<option value="{{ a }}" {% if a in sel_adv %}selected{% endif %}>{{ a }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Channel</label>
+          <select name="channel" multiple class="input-field" style="height:2.4rem;overflow:hidden">
+            {% for c in all_channels %}<option value="{{ c }}" {% if c in sel_ch %}selected{% endif %}>{{ c }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Product</label>
+          <select name="product" multiple class="input-field" style="height:2.4rem;overflow:hidden">
+            {% for p in all_products %}<option value="{{ p }}" {% if p in sel_prod %}selected{% endif %}>{{ p }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Programme</label>
+          <select name="programme" multiple class="input-field" style="height:2.4rem;overflow:hidden">
+            {% for p in all_programmes %}<option value="{{ p }}" {% if p in sel_prog %}selected{% endif %}>{{ p }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="flex flex-col justify-end gap-1.5">
+          <button type="submit" class="btn-primary justify-center text-xs py-2">
+            <i class="fa-solid fa-filter"></i> Apply
+          </button>
+          <a href="?tab=dashboard&account_id={{ account_id }}" class="btn-secondary justify-center text-xs py-2">
+            <i class="fa-solid fa-rotate-left"></i> Reset
+          </a>
+        </div>
+      </div>
+    </form>
+
+    {% if no_data %}
+    <div class="card text-center py-16 text-slate-400">
+      <i class="fa-solid fa-magnifying-glass-chart text-6xl mb-4 block opacity-20"></i>
+      <p class="text-lg font-semibold text-slate-500">No competitor data found for the selected filters</p>
+      <p class="text-sm mt-1">Upload data in the <a href="?tab=upload&account_id={{ account_id }}" class="text-violet-600 hover:underline">Data Upload</a> tab first.</p>
+    </div>
+    {% else %}
+
+    <!-- ── Insights alerts ──────────────────────────────────────── -->
+    {% if insights %}
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mb-6">
+      {% for ins in insights %}
+      <div class="rounded-xl border p-4 flex items-start gap-3
+                  {% if ins.color == 'emerald' %}bg-emerald-50 border-emerald-200
+                  {% elif ins.color == 'blue' %}bg-blue-50 border-blue-200
+                  {% elif ins.color == 'violet' %}bg-violet-50 border-violet-200
+                  {% elif ins.color == 'red' %}bg-red-50 border-red-200
+                  {% elif ins.color == 'amber' %}bg-amber-50 border-amber-200
+                  {% elif ins.color == 'yellow' %}bg-yellow-50 border-yellow-200
+                  {% else %}bg-slate-50 border-slate-200{% endif %}">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
+                    {% if ins.color == 'emerald' %}bg-emerald-100 text-emerald-700
+                    {% elif ins.color == 'blue' %}bg-blue-100 text-blue-700
+                    {% elif ins.color == 'violet' %}bg-violet-100 text-violet-700
+                    {% elif ins.color == 'red' %}bg-red-100 text-red-700
+                    {% elif ins.color == 'amber' %}bg-amber-100 text-amber-700
+                    {% elif ins.color == 'yellow' %}bg-yellow-100 text-yellow-700
+                    {% else %}bg-slate-100 text-slate-700{% endif %}">
+          <i class="fa-solid {{ ins.icon }} text-sm"></i>
+        </div>
+        <div>
+          <p class="text-xs font-bold text-slate-700">{{ ins.title }}</p>
+          <p class="text-xs text-slate-500 mt-0.5">{{ ins.detail }}</p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- ── KPI Cards ────────────────────────────────────────────── -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
+      {% with k=kpis %}
+      <div class="card p-4 text-center">
+        <p class="text-xs text-slate-500 mb-1">Total Spend</p>
+        <p class="text-xl font-extrabold text-slate-800">{{ k.total_spend|floatformat:0 }}</p>
+        <p class="text-xs text-slate-400">LKR</p>
+      </div>
+      <div class="card p-4 text-center">
+        <p class="text-xs text-slate-500 mb-1">Ads Aired</p>
+        <p class="text-xl font-extrabold text-violet-700">{{ k.total_ads }}</p>
+        <p class="text-xs text-slate-400">spots</p>
+      </div>
+      <div class="card p-4 text-center">
+        <p class="text-xs text-slate-500 mb-1">Avg Duration</p>
+        <p class="text-xl font-extrabold text-indigo-700">{{ k.avg_duration }}s</p>
+        <p class="text-xs text-slate-400">seconds</p>
+      </div>
+      <div class="card p-4 text-center">
+        <p class="text-xs text-slate-500 mb-1">Top Spender</p>
+        <p class="text-sm font-bold text-slate-800 leading-tight">{{ k.top_advertiser }}</p>
+        <p class="text-xs text-slate-400">advertiser</p>
+      </div>
+      <div class="card p-4 text-center">
+        <p class="text-xs text-slate-500 mb-1">Top Channel</p>
+        <p class="text-sm font-bold text-slate-800 leading-tight">{{ k.top_channel }}</p>
+        <p class="text-xs text-slate-400">most ads</p>
+      </div>
+      <div class="card p-4 text-center">
+        <p class="text-xs text-slate-500 mb-1">Top Programme</p>
+        <p class="text-sm font-bold text-slate-800 leading-tight truncate">{{ k.top_programme }}</p>
+        <p class="text-xs text-slate-400">most ads</p>
+      </div>
+      <div class="card p-4 text-center">
+        <p class="text-xs text-slate-500 mb-1">Prime Time %</p>
+        <p class="text-xl font-extrabold text-amber-600">{{ k.prime_pct }}%</p>
+        <p class="text-xs text-slate-400">of all spots</p>
+      </div>
+      <div class="card p-4 text-center bg-gradient-to-br from-violet-600 to-indigo-700 text-white border-0">
+        <p class="text-xs opacity-80 mb-1">Market Leader</p>
+        <p class="text-sm font-bold leading-tight">{{ k.market_leader }}</p>
+        <p class="text-xs opacity-70">{{ k.market_leader_spend|floatformat:0 }} LKR</p>
+      </div>
+      {% endwith %}
+    </div>
+
+    <!-- ── Chart grid row 1 ─────────────────────────────────────── -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+
+      <!-- Chart 1: Spend Comparison -->
+      <div class="card">
+        <h3 class="chart-title">Competitor Spend Comparison</h3>
+        <p class="chart-sub">Market dominance overview</p>
+        <div class="h-72"><canvas id="chartSpendComp"></canvas></div>
+      </div>
+
+      <!-- Chart 2: Spend Trend -->
+      <div class="card">
+        <h3 class="chart-title">Spend Trend Pattern</h3>
+        <p class="chart-sub">Campaign bursts &amp; pressure waves (top 5)</p>
+        <div class="h-72"><canvas id="chartSpendTrend"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ── Chart grid row 2 ─────────────────────────────────────── -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+
+      <!-- Chart 3: Channel Strategy -->
+      <div class="card lg:col-span-2">
+        <h3 class="chart-title">Channel Strategy Analysis</h3>
+        <p class="chart-sub">Spend distribution by channel per advertiser</p>
+        <div class="h-72"><canvas id="chartChannel"></canvas></div>
+      </div>
+
+      <!-- Chart 5: Duration Distribution -->
+      <div class="card">
+        <h3 class="chart-title">Duration Strategy</h3>
+        <p class="chart-sub">Creative length distribution</p>
+        <div class="h-72"><canvas id="chartDuration"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ── Chart grid row 3 ─────────────────────────────────────── -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+
+      <!-- Chart 6: Break Position -->
+      <div class="card">
+        <h3 class="chart-title">Break Position Strategy</h3>
+        <p class="chart-sub">Premium inventory usage</p>
+        <div class="h-64"><canvas id="chartBreakPos"></canvas></div>
+      </div>
+
+      <!-- Chart 7: Time Band Strategy -->
+      <div class="card">
+        <h3 class="chart-title">Time Band Strategy</h3>
+        <p class="chart-sub">Audience targeting pattern (top 5)</p>
+        <div class="h-64"><canvas id="chartTimeBand"></canvas></div>
+      </div>
+
+      <!-- Chart 8: Ad Frequency -->
+      <div class="card">
+        <h3 class="chart-title">Ad Frequency Intensity</h3>
+        <p class="chart-sub">Daily spot count per competitor</p>
+        <div class="h-64"><canvas id="chartFreq"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ── Chart grid row 4 ─────────────────────────────────────── -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+
+      <!-- Chart 9: Cost Efficiency Scatter -->
+      <div class="card">
+        <h3 class="chart-title">Cost Efficiency Scatter</h3>
+        <p class="chart-sub">Duration vs cost — bubble size = total spend</p>
+        <div class="h-72"><canvas id="chartCostEff"></canvas></div>
+      </div>
+
+      <!-- Chart 10: Programme Dominance -->
+      <div class="card">
+        <h3 class="chart-title">Programme Dominance Index</h3>
+        <p class="chart-sub">Share of voice per programme</p>
+        <div class="h-72"><canvas id="chartProgDom"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ── Language Strategy ─────────────────────────────────────── -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+      <div class="card">
+        <h3 class="chart-title">Language Strategy</h3>
+        <p class="chart-sub">Sinhala / Tamil / English breakdown</p>
+        <div class="h-64"><canvas id="chartLang"></canvas></div>
+      </div>
+
+      <!-- Programme Heatmap -->
+      <div class="card lg:col-span-2">
+        <h3 class="chart-title mb-3">Programme Targeting Heatmap</h3>
+        <p class="chart-sub mb-3">Ad count per advertiser per programme</p>
+        {% if programme_heatmap %}
+        <div class="overflow-x-auto">
+          <table class="text-xs w-full">
+            <thead>
+              <tr>
+                <th class="text-left py-1 pr-3 font-semibold text-slate-500 whitespace-nowrap">Programme</th>
+                {% for adv in top_adv_list %}<th class="py-1 px-2 font-semibold text-slate-500 whitespace-nowrap max-w-24 truncate" title="{{ adv }}">{{ adv|truncatechars:14 }}</th>{% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in programme_heatmap %}
+              <tr class="border-t border-slate-100">
+                <td class="py-1.5 pr-3 font-medium text-slate-700 whitespace-nowrap max-w-36 truncate" title="{{ row.program }}">{{ row.program|truncatechars:22 }}</td>
+                {% for adv in top_adv_list %}
+                {% with cnt=row.advertisers|get_item:adv %}
+                <td class="py-1.5 px-2 text-center rounded
+                           {% if cnt > 20 %}bg-violet-700 text-white font-bold
+                           {% elif cnt > 10 %}bg-violet-500 text-white font-semibold
+                           {% elif cnt > 5 %}bg-violet-200 text-violet-900
+                           {% elif cnt > 0 %}bg-violet-100 text-violet-800
+                           {% else %}text-slate-300{% endif %}">
+                  {{ cnt|default:"—" }}
+                </td>
+                {% endwith %}
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-sm text-slate-400 text-center py-8">No programme data available</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Charts JS -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script>
+    const PALETTE = [
+      '#7c3aed','#4f46e5','#0891b2','#059669','#d97706','#dc2626',
+      '#db2777','#ea580c','#65a30d','#0284c7','#7e22ce','#166534',
+    ];
+
+    function shortNum(n) {
+      if (n >= 1e6) return (n/1e6).toFixed(1)+'M';
+      if (n >= 1e3) return (n/1e3).toFixed(0)+'K';
+      return Math.round(n).toString();
+    }
+
+    // Chart 1 — Spend Comparison
+    (function(){
+      const raw = {{ spend_comparison_json|safe }};
+      if (!raw.length) return;
+      new Chart(document.getElementById('chartSpendComp'), {
+        type: 'bar',
+        data: {
+          labels: raw.map(r=>r.advertiser),
+          datasets: [{
+            label: 'Total Spend',
+            data: raw.map(r=>parseFloat(r.spend||0)),
+            backgroundColor: raw.map((_,i)=>PALETTE[i%PALETTE.length]),
+            borderRadius: 6,
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: ctx => ' LKR ' + shortNum(ctx.parsed.y) }}},
+          scales: {
+            y: { ticks: { callback: v => shortNum(v) }, grid: { color: '#f1f5f9' }},
+            x: { ticks: { maxRotation: 30, font: { size: 10 }}, grid: { display: false }},
+          }
+        }
+      });
+    })();
+
+    // Chart 2 — Spend Trend
+    (function(){
+      const raw = {{ spend_trend_json|safe }};
+      const top5 = {{ top5_adv_json|safe }};
+      if (!raw.length || !top5.length) return;
+      const dates = [...new Set(raw.map(r=>r.date))].sort();
+      const datasets = top5.map((adv,i) => ({
+        label: adv,
+        data: dates.map(d => {
+          const r = raw.find(x=>x.date===d && x.advertiser===adv);
+          return r ? parseFloat(r.spend||0) : null;
+        }),
+        borderColor: PALETTE[i%PALETTE.length],
+        backgroundColor: PALETTE[i%PALETTE.length]+'22',
+        tension: 0.3, pointRadius: 2, fill: false, spanGaps: true,
+      }));
+      new Chart(document.getElementById('chartSpendTrend'), {
+        type: 'line',
+        data: { labels: dates, datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 }}}},
+          scales: {
+            y: { ticks: { callback: v => shortNum(v) }, grid: { color: '#f1f5f9' }},
+            x: { ticks: { maxTicksLimit: 12, font: { size: 9 }}, grid: { display: false }},
+          }
+        }
+      });
+    })();
+
+    // Chart 3 — Channel Strategy
+    (function(){
+      const raw = {{ channel_strategy_json|safe }};
+      if (!raw.length) return;
+      const channels = [...new Set(raw.map(r=>r.channel))];
+      const advertisers = [...new Set(raw.map(r=>r.advertiser))];
+      const datasets = advertisers.slice(0,8).map((adv,i) => ({
+        label: adv,
+        data: channels.map(ch => {
+          const r = raw.find(x=>x.channel===ch && x.advertiser===adv);
+          return r ? parseFloat(r.spend||0) : 0;
+        }),
+        backgroundColor: PALETTE[i%PALETTE.length],
+        borderRadius: 3,
+      }));
+      new Chart(document.getElementById('chartChannel'), {
+        type: 'bar',
+        data: { labels: channels, datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 }}}},
+          scales: {
+            x: { stacked: true, ticks: { maxRotation: 30, font: { size: 10 }}, grid: { display: false }},
+            y: { stacked: true, ticks: { callback: v => shortNum(v) }, grid: { color: '#f1f5f9' }},
+          }
+        }
+      });
+    })();
+
+    // Chart 5 — Duration Distribution
+    (function(){
+      const raw = {{ duration_dist_json|safe }};
+      if (!raw.length) return;
+      new Chart(document.getElementById('chartDuration'), {
+        type: 'doughnut',
+        data: {
+          labels: raw.map(r => (r.duration||'?')+'s'),
+          datasets: [{
+            data: raw.map(r=>r.count),
+            backgroundColor: PALETTE,
+            borderWidth: 2, borderColor: '#fff',
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 }}}}
+        }
+      });
+    })();
+
+    // Chart 6 — Break Position
+    (function(){
+      const raw = {{ break_pos_json|safe }};
+      const vals = Object.values(raw);
+      if (!vals.some(v=>v>0)) return;
+      new Chart(document.getElementById('chartBreakPos'), {
+        type: 'bar',
+        data: {
+          labels: Object.keys(raw),
+          datasets: [{ data: vals, backgroundColor: ['#7c3aed','#a78bfa','#c4b5fd'], borderRadius: 6 }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }},
+          scales: { y: { grid: { color: '#f1f5f9' }}, x: { grid: { display: false }}}
+        }
+      });
+    })();
+
+    // Chart 7 — Time Band
+    (function(){
+      const raw = {{ time_band_json|safe }};
+      const bands = ['morning','daytime','primetime','latenight'];
+      const bandLabels = ['Morning','Daytime','Prime Time','Late Night'];
+      const advertisers = Object.keys(raw);
+      if (!advertisers.length) return;
+      const datasets = advertisers.map((adv,i) => ({
+        label: adv,
+        data: bands.map(b => raw[adv][b]||0),
+        backgroundColor: PALETTE[i%PALETTE.length],
+        borderRadius: 3,
+      }));
+      new Chart(document.getElementById('chartTimeBand'), {
+        type: 'bar',
+        data: { labels: bandLabels, datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 }}}},
+          scales: {
+            x: { grid: { display: false }},
+            y: { grid: { color: '#f1f5f9' }},
+          }
+        }
+      });
+    })();
+
+    // Chart 8 — Frequency
+    (function(){
+      const raw = {{ freq_data_json|safe }};
+      const top5 = {{ top5_adv_json|safe }};
+      if (!raw.length) return;
+      const dates = [...new Set(raw.map(r=>r.date))].sort();
+      const datasets = top5.map((adv,i) => ({
+        label: adv,
+        data: dates.map(d => { const r=raw.find(x=>x.date===d&&x.advertiser===adv); return r?r.count:0; }),
+        backgroundColor: PALETTE[i%PALETTE.length]+'88',
+        borderColor: PALETTE[i%PALETTE.length],
+        borderWidth: 1,
+      }));
+      new Chart(document.getElementById('chartFreq'), {
+        type: 'bar',
+        data: { labels: dates, datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 }}}},
+          scales: {
+            x: { stacked: true, ticks: { maxTicksLimit: 10, font: { size: 9 }}, grid: { display: false }},
+            y: { stacked: true, grid: { color: '#f1f5f9' }},
+          }
+        }
+      });
+    })();
+
+    // Chart 9 — Cost Efficiency Scatter
+    (function(){
+      const raw = {{ cost_eff_json|safe }};
+      if (!raw.length) return;
+      const maxSpend = Math.max(...raw.map(r=>parseFloat(r.total_spend||0)));
+      const datasets = raw.map((r,i) => ({
+        label: r.advertiser,
+        data: [{ x: parseFloat(r.avg_dur||0), y: parseFloat(r.avg_cost||0),
+                 r: Math.max(5, Math.sqrt(parseFloat(r.total_spend||0)/maxSpend)*30) }],
+        backgroundColor: PALETTE[i%PALETTE.length]+'99',
+        borderColor: PALETTE[i%PALETTE.length],
+        borderWidth: 1.5,
+      }));
+      new Chart(document.getElementById('chartCostEff'), {
+        type: 'bubble',
+        data: { datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 }}}},
+          scales: {
+            x: { title: { display: true, text: 'Avg Duration (s)', font: { size: 10 }}, grid: { color: '#f1f5f9' }},
+            y: { title: { display: true, text: 'Avg Cost', font: { size: 10 }}, ticks: { callback: v=>shortNum(v) }, grid: { color: '#f1f5f9' }},
+          }
+        }
+      });
+    })();
+
+    // Chart 10 — Programme Dominance
+    (function(){
+      const raw = {{ prog_dom_json|safe }};
+      if (!raw.length) return;
+      const programmes = [...new Set(raw.map(r=>r.program))];
+      const advertisers = [...new Set(raw.map(r=>r.advertiser))];
+      const datasets = advertisers.map((adv,i) => ({
+        label: adv,
+        data: programmes.map(p => { const r=raw.find(x=>x.program===p&&x.advertiser===adv); return r?r.share:0; }),
+        backgroundColor: PALETTE[i%PALETTE.length]+'99',
+        borderColor: PALETTE[i%PALETTE.length],
+        borderWidth: 1.5, borderRadius: 4,
+      }));
+      new Chart(document.getElementById('chartProgDom'), {
+        type: 'bar',
+        data: { labels: programmes.map(p=>p.length>18?p.slice(0,16)+'…':p), datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 }}}},
+          scales: {
+            x: { ticks: { font: { size: 9 }}, grid: { display: false }},
+            y: { max: 100, ticks: { callback: v=>v+'%' }, grid: { color: '#f1f5f9' }},
+          }
+        }
+      });
+    })();
+
+    // Language chart
+    (function(){
+      const raw = {{ lang_data_json|safe }};
+      if (!raw.length) return;
+      const langs = [...new Set(raw.map(r=>r.language))];
+      const advertisers = [...new Set(raw.map(r=>r.advertiser))];
+      const datasets = advertisers.slice(0,5).map((adv,i) => ({
+        label: adv,
+        data: langs.map(l => { const r=raw.find(x=>x.language===l&&x.advertiser===adv); return r?r.count:0; }),
+        backgroundColor: PALETTE[i%PALETTE.length],
+        borderRadius: 3,
+      }));
+      new Chart(document.getElementById('chartLang'), {
+        type: 'bar',
+        data: { labels: langs, datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 }}}},
+          scales: {
+            x: { stacked: true, grid: { display: false }},
+            y: { stacked: true, grid: { color: '#f1f5f9' }},
+          }
+        }
+      });
+    })();
+    </script>
+    {% endif %} {# end no_data #}
+    {% endif %} {# end selected_account #}
+    {% endif %} {# end tab == dashboard #}
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 3 — DEEP COMPETITOR ANALYSIS
+    ═══════════════════════════════════════════════════════════════ -->
+    {% if tab == 'deep' %}
+    {% if not selected_account %}
+    <div class="card text-center py-16 text-slate-400">
+      <i class="fa-solid fa-user-magnifying-glass text-6xl mb-4 block opacity-20"></i>
+      <p class="text-lg font-semibold text-slate-500">Select an account to start deep analysis</p>
+    </div>
+    {% elif not deep_stats %}
+    <div class="card text-center py-16 text-slate-400">
+      <i class="fa-solid fa-inbox text-6xl mb-4 block opacity-20"></i>
+      <p class="text-lg font-semibold text-slate-500">No competitor data available for this account</p>
+    </div>
+    {% else %}
+
+    <!-- Advertiser selector -->
+    <form method="get" class="flex items-center gap-3 mb-6 flex-wrap">
+      <input type="hidden" name="tab" value="deep">
+      <input type="hidden" name="account_id" value="{{ account_id }}">
+      <label class="text-sm font-semibold text-slate-600">Advertiser:</label>
+      <select name="advertiser" onchange="this.form.submit()" class="select-field w-64">
+        {% for adv in all_advertisers %}
+        <option value="{{ adv }}" {% if adv == deep_advertiser %}selected{% endif %}>{{ adv }}</option>
+        {% endfor %}
+      </select>
+    </form>
+
+    <!-- Profile header -->
+    <div class="card mb-6 bg-gradient-to-r from-violet-700 to-indigo-800 text-white border-0">
+      <div class="flex items-center justify-between flex-wrap gap-4">
+        <div class="flex items-center gap-4">
+          <div class="w-14 h-14 rounded-xl bg-white/20 flex items-center justify-center text-2xl font-extrabold">
+            {{ deep_advertiser|slice:":1"|upper }}
+          </div>
+          <div>
+            <h2 class="text-xl font-extrabold">{{ deep_advertiser }}</h2>
+            <p class="text-sm opacity-75">
+              {{ deep_stats.first_date|date:"d M Y" }} → {{ deep_stats.last_date|date:"d M Y" }} &nbsp;·&nbsp;
+              {{ deep_stats.creative_count }} creative{{ deep_stats.creative_count|pluralize }}
+            </p>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-6 text-center">
+          <div>
+            <p class="text-2xl font-extrabold">{{ deep_stats.total_spend|floatformat:0 }}</p>
+            <p class="text-xs opacity-70">Total Spend</p>
+          </div>
+          <div>
+            <p class="text-2xl font-extrabold">{{ deep_stats.total_ads }}</p>
+            <p class="text-xs opacity-70">Total Spots</p>
+          </div>
+          <div>
+            <p class="text-2xl font-extrabold">{{ deep_stats.prime_pct }}%</p>
+            <p class="text-xs opacity-70">Prime Time</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 1: Radar + Time Band + Break Pos -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+      <div class="card">
+        <h3 class="chart-title">Competitive Radar</h3>
+        <p class="chart-sub">vs all advertisers in this account</p>
+        <div class="h-64"><canvas id="chartRadar"></canvas></div>
+      </div>
+      <div class="card">
+        <h3 class="chart-title">Time Band Distribution</h3>
+        <p class="chart-sub">When they advertise</p>
+        <div class="h-64"><canvas id="chartDeepTimeBand"></canvas></div>
+      </div>
+      <div class="card">
+        <h3 class="chart-title">Break Position</h3>
+        <p class="chart-sub">Inventory preference</p>
+        <div class="h-64"><canvas id="chartDeepBreakPos"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Row 2: Spend Trend + Campaign Cycles -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+      <div class="card">
+        <h3 class="chart-title">Spend Trend Over Time</h3>
+        <p class="chart-sub">Daily spend trajectory</p>
+        <div class="h-72"><canvas id="chartDeepTrend"></canvas></div>
+      </div>
+      <div class="card">
+        <h3 class="chart-title">Campaign Cycles</h3>
+        <p class="chart-sub">Ad frequency over time</p>
+        <div class="h-72"><canvas id="chartDeepCycles"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Row 3: Top Channels + Top Programmes + Durations -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+      <div class="card">
+        <h3 class="chart-title">Top Channels</h3>
+        <p class="chart-sub">By spend</p>
+        <div class="h-64"><canvas id="chartDeepChannels"></canvas></div>
+      </div>
+      <div class="card">
+        <h3 class="chart-title">Top Programmes</h3>
+        <p class="chart-sub">By spend</p>
+        <div class="h-64"><canvas id="chartDeepProgs"></canvas></div>
+      </div>
+      <div class="card">
+        <h3 class="chart-title">Duration Mix</h3>
+        <p class="chart-sub">Spot length strategy</p>
+        <div class="h-64"><canvas id="chartDeepDur"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Row 4: Products + Themes + Peak days table -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+      <div class="card">
+        <h3 class="chart-title">Product Portfolio</h3>
+        <p class="chart-sub">By ad count &amp; spend</p>
+        <div class="h-64"><canvas id="chartDeepProducts"></canvas></div>
+      </div>
+      <div class="card">
+        <h3 class="chart-title">Campaign Creatives</h3>
+        <p class="chart-sub">Top ad themes</p>
+        <div class="h-64"><canvas id="chartDeepThemes"></canvas></div>
+      </div>
+      <div class="card">
+        <h3 class="chart-title">Peak Spend Days</h3>
+        <p class="chart-sub">Highest activity dates</p>
+        <div class="overflow-x-auto mt-2">
+          <table class="data-table text-xs">
+            <thead><tr><th>Date</th><th>Spots</th><th>Spend</th></tr></thead>
+            <tbody>
+              {% for d in deep_peak_days %}
+              <tr>
+                <td>{{ d.date|date:"d M Y" }}</td>
+                <td class="font-bold text-violet-700">{{ d.count }}</td>
+                <td>{{ d.spend|floatformat:0 }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="3" class="text-slate-400 text-center">—</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script>
+    const PALETTE2 = ['#7c3aed','#4f46e5','#0891b2','#059669','#d97706','#dc2626','#db2777','#ea580c','#65a30d','#0284c7'];
+    function sn(n){if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(0)+'K';return Math.round(n).toString();}
+
+    // Radar
+    (function(){
+      const raw = {{ deep_radar_json|safe }};
+      const labels = Object.keys(raw);
+      const vals   = Object.values(raw);
+      new Chart(document.getElementById('chartRadar'), {
+        type: 'radar',
+        data: {
+          labels,
+          datasets: [{ label: '{{ deep_advertiser|escapejs }}', data: vals,
+            backgroundColor: 'rgba(124,58,237,.2)', borderColor: '#7c3aed',
+            pointBackgroundColor: '#7c3aed', pointRadius: 4, borderWidth: 2 }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          scales: { r: { min: 0, max: 100, ticks: { stepSize: 25, font: { size: 9 }},
+            grid: { color: '#e2e8f0' }, pointLabels: { font: { size: 10 }}}},
+          plugins: { legend: { display: false }}
+        }
+      });
+    })();
+
+    // Time Band
+    (function(){
+      const raw = {{ deep_time_band_json|safe }};
+      new Chart(document.getElementById('chartDeepTimeBand'), {
+        type: 'doughnut',
+        data: { labels: Object.keys(raw), datasets: [{ data: Object.values(raw), backgroundColor: PALETTE2, borderWidth:2, borderColor:'#fff' }]},
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:10, font:{ size:10 }}}}}
+      });
+    })();
+
+    // Break Position
+    (function(){
+      const raw = {{ deep_break_pos_json|safe }};
+      new Chart(document.getElementById('chartDeepBreakPos'), {
+        type: 'bar',
+        data: { labels: Object.keys(raw), datasets: [{ data: Object.values(raw), backgroundColor: ['#7c3aed','#a78bfa','#c4b5fd'], borderRadius:6 }]},
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false }}, scales:{ y:{ grid:{ color:'#f1f5f9' }}, x:{ grid:{ display:false }}}}
+      });
+    })();
+
+    // Spend Trend
+    (function(){
+      const raw = {{ deep_spend_trend_json|safe }};
+      if(!raw.length) return;
+      new Chart(document.getElementById('chartDeepTrend'), {
+        type: 'line',
+        data: { labels: raw.map(r=>r.date), datasets:[{ label:'Spend', data:raw.map(r=>parseFloat(r.spend||0)),
+          borderColor:'#7c3aed', backgroundColor:'rgba(124,58,237,.1)', fill:true, tension:0.3, pointRadius:2 }]},
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false }},
+          scales:{ y:{ ticks:{ callback:v=>sn(v) }, grid:{ color:'#f1f5f9' }}, x:{ ticks:{ maxTicksLimit:12, font:{ size:9 }}, grid:{ display:false }}}}
+      });
+    })();
+
+    // Campaign Cycles
+    (function(){
+      const raw = {{ deep_campaign_cycles_json|safe }};
+      if(!raw.length) return;
+      new Chart(document.getElementById('chartDeepCycles'), {
+        type: 'bar',
+        data: { labels: raw.map(r=>r.date), datasets:[{ label:'Spots/Day', data:raw.map(r=>r.count),
+          backgroundColor:'rgba(79,70,229,.7)', borderRadius:2 }]},
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false }},
+          scales:{ y:{ grid:{ color:'#f1f5f9' }}, x:{ ticks:{ maxTicksLimit:14, font:{ size:9 }}, grid:{ display:false }}}}
+      });
+    })();
+
+    // Top Channels
+    (function(){
+      const raw = {{ deep_top_channels_json|safe }};
+      if(!raw.length) return;
+      new Chart(document.getElementById('chartDeepChannels'), {
+        type: 'bar',
+        data: { labels: raw.map(r=>r.channel), datasets:[{ label:'Spend', data:raw.map(r=>parseFloat(r.spend||0)),
+          backgroundColor: PALETTE2, borderRadius:5 }]},
+        options: { indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false }},
+          scales:{ x:{ ticks:{ callback:v=>sn(v) }, grid:{ color:'#f1f5f9' }}, y:{ grid:{ display:false }, ticks:{ font:{ size:10 }}}}}
+      });
+    })();
+
+    // Top Programmes
+    (function(){
+      const raw = {{ deep_top_programmes_json|safe }};
+      if(!raw.length) return;
+      new Chart(document.getElementById('chartDeepProgs'), {
+        type: 'bar',
+        data: { labels: raw.map(r=>r.program.length>16?r.program.slice(0,14)+'…':r.program),
+          datasets:[{ label:'Spend', data:raw.map(r=>parseFloat(r.spend||0)), backgroundColor:PALETTE2, borderRadius:5 }]},
+        options: { indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false }},
+          scales:{ x:{ ticks:{ callback:v=>sn(v) }, grid:{ color:'#f1f5f9' }}, y:{ grid:{ display:false }, ticks:{ font:{ size:9 }}}}}
+      });
+    })();
+
+    // Duration Mix
+    (function(){
+      const raw = {{ deep_top_durations_json|safe }};
+      if(!raw.length) return;
+      new Chart(document.getElementById('chartDeepDur'), {
+        type: 'doughnut',
+        data: { labels: raw.map(r=>(r.duration||'?')+'s'),
+          datasets:[{ data:raw.map(r=>r.count), backgroundColor:PALETTE2, borderWidth:2, borderColor:'#fff' }]},
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:10, font:{ size:10 }}}}}
+      });
+    })();
+
+    // Products
+    (function(){
+      const raw = {{ deep_products_json|safe }};
+      if(!raw.length) return;
+      new Chart(document.getElementById('chartDeepProducts'), {
+        type: 'bar',
+        data: { labels: raw.map(r=>r.product.length>16?r.product.slice(0,14)+'…':r.product),
+          datasets:[{ label:'Spend', data:raw.map(r=>parseFloat(r.spend||0)), backgroundColor:PALETTE2, borderRadius:5 }]},
+        options: { indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false }},
+          scales:{ x:{ ticks:{ callback:v=>sn(v) }, grid:{ color:'#f1f5f9' }}, y:{ grid:{ display:false }, ticks:{ font:{ size:9 }}}}}
+      });
+    })();
+
+    // Themes
+    (function(){
+      const raw = {{ deep_themes_json|safe }};
+      if(!raw.length) return;
+      new Chart(document.getElementById('chartDeepThemes'), {
+        type: 'bar',
+        data: { labels: raw.map(r=>r.advt_theme.length>20?r.advt_theme.slice(0,18)+'…':r.advt_theme),
+          datasets:[{ label:'Spots', data:raw.map(r=>r.count), backgroundColor:PALETTE2, borderRadius:5 }]},
+        options: { indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false }},
+          scales:{ x:{ grid:{ color:'#f1f5f9' }}, y:{ grid:{ display:false }, ticks:{ font:{ size:9 }}}}}
+      });
+    })();
+    </script>
+    {% endif %} {# end deep_stats #}
+    {% endif %} {# end tab == deep #}
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 4 — DATA MANAGEMENT
+    ═══════════════════════════════════════════════════════════════ -->
+    {% if tab == 'management' %}
+    {% if not selected_account %}
+    <div class="card text-center py-16 text-slate-400">
+      <i class="fa-solid fa-database text-6xl mb-4 block opacity-20"></i>
+      <p class="text-lg font-semibold text-slate-500">Select an account to manage data</p>
+    </div>
+    {% else %}
+
+    <!-- Action bar -->
+    <div class="flex items-center gap-3 flex-wrap mb-6">
+      <h2 class="text-lg font-bold text-slate-800 flex-1">Data Management — <span class="text-violet-700">{{ selected_account }}</span></h2>
+      <a href="{% url 'competitor_export' %}?account_id={{ account_id }}"
+         class="btn-secondary text-sm">
+        <i class="fa-solid fa-file-excel text-emerald-600"></i> Export All Data
+      </a>
+    </div>
+
+    <!-- Stats summary cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+      <div class="card p-4 text-center">
+        <p class="text-3xl font-extrabold text-violet-700">{{ batches|length }}</p>
+        <p class="text-xs text-slate-500 mt-1">Upload Batches</p>
+      </div>
+      <div class="card p-4 text-center">
+        <p class="text-3xl font-extrabold text-indigo-700">{{ total_rows }}</p>
+        <p class="text-xs text-slate-500 mt-1">Total Ad Rows</p>
+      </div>
+      <div class="card p-4 text-center">
+        <p class="text-3xl font-extrabold text-amber-600">{{ locked_count }}</p>
+        <p class="text-xs text-slate-500 mt-1">Locked Batches</p>
+      </div>
+      <div class="card p-4 text-center">
+        <a href="{% url 'competitor_export' %}?account_id={{ account_id }}"
+           class="block text-3xl font-extrabold text-emerald-600 hover:text-emerald-700">
+          <i class="fa-solid fa-download"></i>
+        </a>
+        <p class="text-xs text-slate-500 mt-1">Export Excel</p>
+      </div>
+    </div>
+
+    <!-- Batch management table -->
+    {% if not batches %}
+    <div class="card text-center py-12 text-slate-400">
+      <i class="fa-solid fa-inbox text-5xl mb-3 block opacity-20"></i>
+      <p class="text-sm">No upload batches found. Upload data first.</p>
+    </div>
+    {% else %}
+    <div class="card p-0 overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+        <h3 class="font-bold text-slate-800">Upload Batches</h3>
+        <span class="badge bg-slate-100 text-slate-600">{{ batches|length }} total</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Uploaded At</th>
+              <th>File</th>
+              <th>Period</th>
+              <th>Rows</th>
+              <th>Uploaded By</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for b in batches %}
+            <tr>
+              <td class="whitespace-nowrap text-xs">{{ b.uploaded_at|date:"d M Y H:i" }}</td>
+              <td class="text-xs text-slate-500 max-w-xs">
+                <span class="truncate block max-w-48" title="{{ b.original_filename }}">{{ b.original_filename }}</span>
+              </td>
+              <td class="whitespace-nowrap text-xs">
+                {% if b.start_date %}{{ b.start_date|date:"d M Y" }} – {{ b.end_date|date:"d M Y" }}{% else %}—{% endif %}
+              </td>
+              <td class="font-bold text-violet-700">{{ b.row_count|default:0 }}</td>
+              <td class="text-xs text-slate-500">{{ b.uploaded_by.get_full_name|default:b.uploaded_by.username|default:"—" }}</td>
+              <td>
+                {% if b.is_locked %}
+                <span class="badge bg-amber-100 text-amber-700"><i class="fa-solid fa-lock text-xs mr-1"></i>Locked</span>
+                {% else %}
+                <span class="badge bg-emerald-100 text-emerald-700"><i class="fa-solid fa-circle-check text-xs mr-1"></i>Active</span>
+                {% endif %}
+              </td>
+              <td>
+                <div class="flex items-center gap-2">
+                  <!-- Export this batch -->
+                  <a href="{% url 'competitor_export' %}?account_id={{ account_id }}&batch_id={{ b.batch_id }}"
+                     class="btn-secondary py-1 px-2 text-xs" title="Export batch">
+                    <i class="fa-solid fa-file-excel text-emerald-600"></i>
+                  </a>
+
+                  {% if request.user.role in 'super_admin,admin' %}
+                  <!-- Lock / Unlock -->
+                  <form method="post" action="{% url 'competitor_toggle_lock' b.batch_id %}" class="inline"
+                        onsubmit="return confirm('{% if b.is_locked %}Unlock this batch?{% else %}Lock this batch to prevent deletion?{% endif %}')">
+                    {% csrf_token %}
+                    <button type="submit" class="btn-secondary py-1 px-2 text-xs"
+                            title="{% if b.is_locked %}Unlock{% else %}Lock{% endif %}">
+                      <i class="fa-solid {% if b.is_locked %}fa-lock-open text-amber-600{% else %}fa-lock text-slate-500{% endif %}"></i>
+                    </button>
+                  </form>
+                  {% endif %}
+
+                  <!-- Delete -->
+                  {% if not b.is_locked %}
+                  <form method="post" action="{% url 'competitor_delete_batch' b.batch_id %}" class="inline"
+                        onsubmit="return confirm('Permanently delete this batch and all {{ b.row_count }} rows? This cannot be undone.')">
+                    {% csrf_token %}
+                    <button type="submit" class="btn-danger py-1 px-2 text-xs" title="Delete batch">
+                      <i class="fa-solid fa-trash"></i>
+                    </button>
+                  </form>
+                  {% else %}
+                  <span class="btn-secondary py-1 px-2 text-xs opacity-40 cursor-not-allowed" title="Unlock to delete">
+                    <i class="fa-solid fa-trash text-slate-300"></i>
+                  </span>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Export section -->
+    <div class="card mt-6">
+      <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+        <i class="fa-solid fa-file-export text-emerald-600"></i> Export Analysis Data
+      </h3>
+      <form method="get" action="{% url 'competitor_export' %}" class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <input type="hidden" name="account_id" value="{{ account_id }}">
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">From Date</label>
+          <input type="date" name="date_from" class="input-field">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">To Date</label>
+          <input type="date" name="date_to" class="input-field">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Advertiser (optional)</label>
+          <select name="advertiser" class="select-field">
+            <option value="">All Advertisers</option>
+            {% for adv in all_advertisers %}
+            <option value="{{ adv }}">{{ adv }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="flex items-end">
+          <button type="submit" class="btn-primary w-full justify-center">
+            <i class="fa-solid fa-download"></i> Download Excel
+          </button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+    {% endif %} {# end selected_account #}
+    {% endif %} {# end tab == management #}
+
+  </div><!-- /main content -->
+</div><!-- /page -->
+
+<style>
+.chart-title { font-size: .875rem; font-weight: 700; color: #1e293b; }
+.chart-sub   { font-size: .7rem; color: #94a3b8; margin-bottom: .75rem; }
+</style>
+{% endblock %}

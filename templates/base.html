@@ -494,6 +494,13 @@
         <i class="nav-icon fa-solid fa-link"></i><span class="nav-text">Manual Reconcile</span>
       </a>
 
+      {% if ur in 'super_admin,admin,team_head,planner' %}
+      <p class="nav-label"><span class="nav-text">Intelligence</span></p>
+      <a href="/dashboard/competitor/" class="nav-item {% if '/competitor/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-chess"></i><span class="nav-text">Competitor Analysis</span>
+      </a>
+      {% endif %}
+
       {% endwith %}
     </nav>
 

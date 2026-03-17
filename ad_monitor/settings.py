@@ -21,6 +21,7 @@ INSTALLED_APPS = [
     'accounts',
     'core',
     'verification',
+    'competitor',
 ]
 
 MIDDLEWARE = [

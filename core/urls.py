@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import path, include
 from . import views
 from accounts import views as acc_views
 
@@ -92,4 +92,7 @@ urlpatterns = [
     path('commercial/candidates/',     views.commercial_candidates,    name='commercial_candidates'),
     path('commercial/unmatched-rows/', views.commercial_unmatched_rows, name='commercial_unmatched_rows'),
     path('commercial/assign/',         views.commercial_assign,         name='commercial_assign'),
+
+    # Competitor Analysis
+    path('competitor/', include('competitor.urls')),
 ]
