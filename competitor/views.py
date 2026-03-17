@@ -318,9 +318,14 @@ def competitor_upload(request):
         messages.error(request, f'Cannot read file: {e}')
         return redirect(_comp_url(account_id, 'upload'))
 
-    rows = _parse_competitor_df(df, account.id)
+    try:
+        rows = _parse_competitor_df(df, account.id)
+    except Exception as e:
+        messages.error(request, f'Error parsing file: {e}')
+        return redirect(_comp_url(account_id, 'upload'))
+
     if not rows:
-        messages.error(request, 'No valid rows found. Check Dd/Mn/Yr columns.')
+        messages.error(request, 'No valid rows found. Check that the file has Dd, Mn, Yr date columns.')
         return redirect(_comp_url(account_id, 'upload'))
 
     # Date range
@@ -328,33 +333,40 @@ def competitor_upload(request):
     start_date = min(dates) if dates else None
     end_date   = max(dates) if dates else None
 
-    # Skip or replace duplicates
-    existing_keys = set(
-        CompetitorAd.objects.filter(
-            account=account,
-            dedup_key__in=[r['dedup_key'] for r in rows],
-        ).values_list('dedup_key', flat=True)
-    )
+    try:
+        # Duplicate detection
+        existing_keys = set(
+            CompetitorAd.objects.filter(
+                account=account,
+                dedup_key__in=[r['dedup_key'] for r in rows],
+            ).values_list('dedup_key', flat=True)
+        )
 
-    if skip_dupes:
-        rows = [r for r in rows if r['dedup_key'] not in existing_keys]
+        if skip_dupes:
+            rows = [r for r in rows if r['dedup_key'] not in existing_keys]
 
-    # Create batch
-    batch = CompetitorUploadBatch.objects.create(
-        account           = account,
-        original_filename = excel_file.name,
-        start_date        = start_date,
-        end_date          = end_date,
-        row_count         = len(rows),
-        uploaded_by       = request.user,
-    )
+        # Create batch header
+        batch = CompetitorUploadBatch.objects.create(
+            account           = account,
+            original_filename = excel_file.name[:500],
+            start_date        = start_date,
+            end_date          = end_date,
+            row_count         = len(rows),
+            uploaded_by       = request.user,
+        )
 
-    # Bulk insert
-    ad_objs = [
-        CompetitorAd(account=account, upload_batch=batch, **r)
-        for r in rows
-    ]
-    CompetitorAd.objects.bulk_create(ad_objs, batch_size=500)
+        # Bulk insert rows
+        ad_objs = [
+            CompetitorAd(account=account, upload_batch=batch, **r)
+            for r in rows
+        ]
+        CompetitorAd.objects.bulk_create(ad_objs, batch_size=500)
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception('competitor_upload DB error')
+        messages.error(request, f'Database error during upload: {e}')
+        return redirect(_comp_url(account_id, 'upload'))
 
     skipped = len(existing_keys) if skip_dupes else 0
     messages.success(
