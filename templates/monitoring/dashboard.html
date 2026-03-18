@@ -1817,9 +1817,9 @@ function toggleCommDetails(btn) {
   }
 
   if (isRaw) {
-    html += `<div class="mb-3 flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700">
-      <i class="fa-solid fa-triangle-exclamation"></i>
-      <span>Verification not yet run - showing raw LMRB observations found in this period.</span>
+    html += `<div class="mb-3 flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-700">
+      <i class="fa-solid fa-circle-info"></i>
+      <span>Verification engine not yet run - counts below are raw LMRB observations. Run verification to get matched/unmatched status.</span>
     </div>`;
   }
 

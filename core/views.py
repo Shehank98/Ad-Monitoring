@@ -1756,6 +1756,46 @@ def monitoring_dashboard(request):
                         _sr_base.filter(ad_type=ad_type_val, brand=brand)
                         .exclude(product='').values_list('product', flat=True).first() or ''
                     )
+                    # Sponsorship without BrandMapping: use sponsorship_type keyword
+                    # to match raw LMRB observations within the schedule period.
+                    kw_lmrb_count = 0
+                    kw_progs: list = []
+                    kw_pt = kw_non_pt = 0
+                    kw_dates: list = []
+                    if ad_type_val == 'SPONSORSHIP':
+                        spon_type_val = (
+                            _sr_base.filter(ad_type='SPONSORSHIP', brand=brand)
+                            .exclude(sponsorship_type='')
+                            .values_list('sponsorship_type', flat=True)
+                            .first() or ''
+                        )
+                        if spon_type_val:
+                            kw_qs2 = lmrb_qs.filter(advt_theme__icontains=spon_type_val)
+                            kw_lmrb_count = kw_qs2.count()
+                            _kw_progs_raw: dict = {}
+                            _kw_dates_raw: dict = {}
+                            for _lr in kw_qs2.values('program', 'advt_time', 'date'):
+                                _prog = _lr['program'] or 'Unknown'
+                                _bucket = _time_bucket(_lr['advt_time'] or '') if _lr['advt_time'] else 'other'
+                                _e = _kw_progs_raw.setdefault(_prog, {'count': 0, 'prime': 0, 'non_prime': 0})
+                                _e['count'] += 1
+                                if _bucket == 'prime':
+                                    _e['prime'] += 1
+                                    kw_pt += 1
+                                else:
+                                    _e['non_prime'] += 1
+                                    kw_non_pt += 1
+                                _d = str(_lr['date']) if _lr['date'] else ''
+                                if _d:
+                                    _kw_dates_raw[_d] = _kw_dates_raw.get(_d, 0) + 1
+                            kw_progs = sorted(
+                                [{'name': k, 'count': v['count'],
+                                  'prime': v['prime'], 'non_prime': v['non_prime']}
+                                 for k, v in _kw_progs_raw.items()],
+                                key=lambda x: -x['count'],
+                            )
+                            kw_dates = [{'date': d, 'count': c}
+                                        for d, c in sorted(_kw_dates_raw.items())]
                     rows.append({
                         'product': sr_product.strip() or brand,
                         'brand': brand,
@@ -1763,14 +1803,14 @@ def monitoring_dashboard(request):
                         'duration': None,
                         'planned': planned,
                         'aired': 0,
-                        'lmrb_count': 0,
-                        'raw_lmrb_count': 0,
+                        'lmrb_count': kw_lmrb_count,
+                        'raw_lmrb_count': kw_lmrb_count,
                         'is_mapped': False,
-                        'programmes': [],
-                        'programmes_json': '[]',
-                        'pt_count': 0,
-                        'non_pt_count': 0,
-                        'dates_json': '[]',
+                        'programmes': kw_progs,
+                        'programmes_json': _to_js(kw_progs),
+                        'pt_count': kw_pt,
+                        'non_pt_count': kw_non_pt,
+                        'dates_json': _to_js(kw_dates),
                     })
                     continue
                 for bm in mappings:
@@ -1803,56 +1843,15 @@ def monitoring_dashboard(request):
                         dates_data = [{'date': d, 'count': c}
                                       for d, c in sorted(dates_raw.items())]
                     else:
-                        # Sponsorship: count from SponsorshipLmrbAssignment
+                        # Sponsorship: use raw LMRB observations directly.
+                        # No formal reconciliation is run for sponsorship rows -
+                        # raw LMRB count within the schedule period is the best
+                        # available proxy for "aired".
                         aired = 0
-                        spon_assigns = list(
-                            SponsorshipLmrbAssignment.objects.filter(
-                                account_id=account_id,
-                                schedule_row__in=sr_q,
-                            ).select_related('lmrb_row')
+                        raw_lmrb_count, _raw_progs_map, _raw_dates_map = _agg_raw_lmrb(
+                            t_lower, bm.duration, bm.product
                         )
-                        lmrb_count = len(spon_assigns)
-                        # Build programme details from matched LMRB rows
-                        progs_raw = {}
-                        for sa in spon_assigns:
-                            if sa.lmrb_row:
-                                prog = sa.lmrb_row.program or 'Unknown'
-                                time_val = sa.lmrb_row.advt_time or ''
-                                bucket = _time_bucket(time_val) if time_val else 'other'
-                                entry = progs_raw.setdefault(
-                                    prog, {'count': 0, 'prime': 0, 'non_prime': 0}
-                                )
-                                entry['count'] += 1
-                                if bucket == 'prime':
-                                    entry['prime'] += 1
-                                else:
-                                    entry['non_prime'] += 1
-                        progs = sorted(
-                            [{'name': k, 'count': v['count'],
-                              'prime': v['prime'], 'non_prime': v['non_prime']}
-                             for k, v in progs_raw.items()],
-                            key=lambda x: -x['count'],
-                        )
-                        dates_by_date = {}
-                        for sa in spon_assigns:
-                            if sa.lmrb_row and sa.lmrb_row.date:
-                                d = str(sa.lmrb_row.date)
-                                dates_by_date[d] = dates_by_date.get(d, 0) + 1
-                        dates_data = [{'date': d, 'count': c}
-                                      for d, c in sorted(dates_by_date.items())]
-
-                    pt_count    = sum(p['prime'] for p in progs)
-                    non_pt_count = sum(p['non_prime'] for p in progs)
-
-                    # Raw LMRB fallback - product-aware so that shared themes
-                    # (e.g. "BB") are only counted for this product, not all products.
-                    raw_lmrb_count, _raw_progs_map, _raw_dates_map = _agg_raw_lmrb(
-                        t_lower, bm.duration, bm.product
-                    )
-
-                    # If no matched details exist yet, populate progs/dates from raw LMRB
-                    # so the Details panel is never blank.
-                    if not progs and raw_lmrb_count > 0:
+                        lmrb_count = raw_lmrb_count
                         progs = sorted(
                             [{'name': k, 'count': v['count'],
                               'prime': v['prime'], 'non_prime': v['non_prime']}
@@ -1861,8 +1860,27 @@ def monitoring_dashboard(request):
                         )
                         dates_data = [{'date': d, 'count': c}
                                       for d, c in sorted(_raw_dates_map.items())]
-                        pt_count     = sum(p['prime']     for p in progs)
-                        non_pt_count = sum(p['non_prime'] for p in progs)
+
+                    pt_count    = sum(p['prime'] for p in progs)
+                    non_pt_count = sum(p['non_prime'] for p in progs)
+
+                    # For commercial: compute raw LMRB fallback if not already done above
+                    if ad_type_val == 'COMMERCIAL BENEFITS':
+                        raw_lmrb_count, _raw_progs_map, _raw_dates_map = _agg_raw_lmrb(
+                            t_lower, bm.duration, bm.product
+                        )
+                        # Populate progs/dates from raw LMRB when no matched details exist
+                        if not progs and raw_lmrb_count > 0:
+                            progs = sorted(
+                                [{'name': k, 'count': v['count'],
+                                  'prime': v['prime'], 'non_prime': v['non_prime']}
+                                 for k, v in _raw_progs_map.items()],
+                                key=lambda x: -x['count'],
+                            )
+                            dates_data = [{'date': d, 'count': c}
+                                          for d, c in sorted(_raw_dates_map.items())]
+                            pt_count     = sum(p['prime']     for p in progs)
+                            non_pt_count = sum(p['non_prime'] for p in progs)
 
                     # Product resolution: BrandMapping.product → ScheduleRow.product →
                     # LMRBRow product → brand
