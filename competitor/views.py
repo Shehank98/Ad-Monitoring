@@ -245,6 +245,16 @@ def competitor_analysis(request):
             logging.getLogger(__name__).exception('_build_deep_data error')
             ctx['db_error'] = str(e)
 
+    if tab == 'management' and selected_account and not _db_error:
+        try:
+            ad_qs = CompetitorAd.objects.filter(account=selected_account).order_by('-date', 'advertiser')
+            ctx['total_ad_count'] = ad_qs.count()
+            ctx['recent_ads'] = list(ad_qs.select_related('upload_batch')[:200])
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception('management tab DB error')
+            ctx['db_error'] = str(e)
+
     return render(request, 'competitor/analysis.html', ctx)
 
 
@@ -899,7 +909,11 @@ def competitor_export(request):
     except (Account.DoesNotExist, ValueError):
         return HttpResponse('Access denied.', status=403)
 
+    batch_id = request.GET.get('batch_id') or None
+
     qs = CompetitorAd.objects.filter(account=account)
+    if batch_id:
+        qs = qs.filter(upload_batch__batch_id=batch_id)
     if date_from:
         qs = qs.filter(date__gte=date_from)
     if date_to:
