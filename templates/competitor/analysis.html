@@ -181,7 +181,7 @@
                 </td>
                 <td class="font-semibold">{{ b.row_count|default:0 }}</td>
                 <td class="text-slate-500 text-xs max-w-xs truncate">{{ b.original_filename }}</td>
-                <td class="text-slate-500 text-xs">{{ b.uploaded_by.get_full_name|default:b.uploaded_by.username }}</td>
+                <td class="text-slate-500 text-xs">{{ b.uploaded_by.get_full_name|default:b.uploaded_by.email|default:"—" }}</td>
                 <td>
                   {% if b.is_locked %}
                   <span class="badge bg-amber-100 text-amber-700"><i class="fa-solid fa-lock text-xs mr-1"></i>Locked</span>
@@ -1365,7 +1365,7 @@
                 {% if b.start_date %}{{ b.start_date|date:"d M Y" }} – {{ b.end_date|date:"d M Y" }}{% else %}—{% endif %}
               </td>
               <td class="font-bold text-violet-700">{{ b.row_count|default:0 }}</td>
-              <td class="text-xs text-slate-500">{{ b.uploaded_by.get_full_name|default:b.uploaded_by.username|default:"—" }}</td>
+              <td class="text-xs text-slate-500">{{ b.uploaded_by.get_full_name|default:b.uploaded_by.email|default:"—" }}</td>
               <td>
                 {% if b.is_locked %}
                 <span class="badge bg-amber-100 text-amber-700"><i class="fa-solid fa-lock text-xs mr-1"></i>Locked</span>
