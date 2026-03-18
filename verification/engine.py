@@ -108,24 +108,25 @@ def _build_mon_pool(lmrb_qs):
     """
     records = list(lmrb_qs.values(
         'id', 'advt_theme', 'date', 'advt_time', 'duration', 'source',
-        'prog_time', 'program',
+        'prog_time', 'program', 'is_sponsorship_matched',
     ))
     if not records:
         return pd.DataFrame(columns=[
             '_lmrb_db_id', 'Advt_Theme', 'Date', 'Advt_time',
             'Dur', '_source', '_norm_theme', '_air_secs',
-            'Prog_time', 'Program', '_prog_secs',
+            'Prog_time', 'Program', '_prog_secs', '_is_spon_matched',
         ])
     df = pd.DataFrame(records)
     df.rename(columns={
-        'id':         '_lmrb_db_id',
-        'advt_theme': 'Advt_Theme',
-        'date':       'Date',
-        'advt_time':  'Advt_time',
-        'duration':   'Dur',
-        'source':     '_source',
-        'prog_time':  'Prog_time',
-        'program':    'Program',
+        'id':                    '_lmrb_db_id',
+        'advt_theme':            'Advt_Theme',
+        'date':                  'Date',
+        'advt_time':             'Advt_time',
+        'duration':              'Dur',
+        'source':                '_source',
+        'prog_time':             'Prog_time',
+        'program':               'Program',
+        'is_sponsorship_matched': '_is_spon_matched',
     }, inplace=True)
     df['Date']        = pd.to_datetime(df['Date'], errors='coerce')
     df['_norm_theme'] = df['Advt_Theme'].apply(normalize)
@@ -431,11 +432,14 @@ def run_scope(account_id, channel, month, mode='smart'):
     not_aired_df = _concat(all_not_aired_dfs)
 
     # ── Rule 11: Extra Airings - pool rows not consumed by any schedule ────────
-    # These are genuine extra airings; if a second schedule had claimed them they
-    # would have been consumed above and not appear here.
+    # Only COMMERCIAL spots within the schedule period are shown as extra.
+    # Rows already claimed by the sponsorship engine (_is_spon_matched=True)
+    # are excluded - they belong to the sponsorship reconciliation, not here.
     extra_rows = []
     for idx, mon_row in mon_pool.iterrows():
         if idx not in global_consumed_idx:
+            if mon_row.get('_is_spon_matched', False):
+                continue  # already claimed by sponsorship engine
             extra_rows.append({
                 'Theme':    mon_row.get('Advt_Theme', ''),
                 'Date':     mon_row.get('Date', ''),

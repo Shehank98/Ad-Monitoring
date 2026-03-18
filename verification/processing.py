@@ -285,6 +285,7 @@ def _word_overlap_score(sch_prog: str, lmrb_prog) -> float:
 
 
 _PROG_MISMATCH_TOLERANCE = 600   # 10 minutes in seconds
+_PROG_NAME_MATCH_THRESHOLD = 0.5  # minimum word-overlap for Pass 2b programme-name fallback
 
 
 def match_ads(
@@ -452,11 +453,15 @@ def match_ads(
 
     # ═══════════════════════════════════════════════════════════════════════════
     # PASS 2 - Programme Mismatch
-    #   • Same date  • advt_time AFTER end_time  • Within 10 minutes  • Theme  • Duration
+    #   2a: Same date • Theme • Duration • advt_time AFTER end_time • within 10 min
+    #   2b: Same date • Theme • Duration • Programme name match (any time)
+    #       Only tried when 2a finds nothing — no time constraint required.
     # ═══════════════════════════════════════════════════════════════════════════
-    prog_mis_rows = []
-    after_pass2: list = []
+    prog_mis_rows  = []
+    after_pass2a: list = []   # rows that failed the 10-min window check
+    after_pass2: list  = []   # rows that also failed the programme-name fallback
 
+    # ── Pass 2a: within 10 minutes after end_time ─────────────────────────────
     for row, sch_key, themes in after_pass1:
         sch_date  = row.get('Date')
         sch_dur   = row.get('_dur')
@@ -466,7 +471,7 @@ def match_ads(
         cands     = _dur_filter(_candidates(themes, date_mask), sch_dur)
 
         if cands.empty or not pool_has_air_secs or sch_end is None:
-            after_pass2.append((row, sch_key, themes))
+            after_pass2a.append((row, sch_key, themes))
             continue
 
         # After end_time, within 10-minute tolerance
@@ -476,11 +481,49 @@ def match_ads(
         ]
 
         if after_window.empty:
-            after_pass2.append((row, sch_key, themes))
+            after_pass2a.append((row, sch_key, themes))
             continue
 
         # Pick the closest one (smallest overshoot)
         best_idx = (after_window['_air_secs'] - sch_end).idxmin()
+        matched_idx.add(best_idx)
+        prog_mis_rows.append(
+            _make_record(row, mon_pool.loc[best_idx], 'Programme Mismatch', sch_key)
+        )
+
+    # ── Pass 2b: programme name match, same date, any time ────────────────────
+    # Triggered only when 2a found nothing.  Requires the schedule row to have a
+    # non-empty Programme name and at least one candidate whose Programme column
+    # has >= _PROG_NAME_MATCH_THRESHOLD word overlap with the scheduled name.
+    for row, sch_key, themes in after_pass2a:
+        sch_date = row.get('Date')
+        sch_dur  = row.get('_dur')
+        sch_prog = str(row.get('Programme', '')).strip()
+
+        date_mask = mon_pool['Date'] == sch_date if sch_date is not None and pd.notna(sch_date) else (mon_pool['Date'] != mon_pool['Date'])
+        cands     = _dur_filter(_candidates(themes, date_mask), sch_dur)
+
+        if cands.empty or not sch_prog or 'Program' not in cands.columns:
+            after_pass2.append((row, sch_key, themes))
+            continue
+
+        prog_matches = cands[
+            cands['Program'].apply(
+                lambda p: _word_overlap_score(sch_prog, p) >= _PROG_NAME_MATCH_THRESHOLD
+            )
+        ]
+
+        if prog_matches.empty:
+            after_pass2.append((row, sch_key, themes))
+            continue
+
+        # Pick the earliest air time among programme-matched candidates
+        if pool_has_air_secs and '_air_secs' in prog_matches.columns:
+            valid = prog_matches.dropna(subset=['_air_secs'])
+            best_idx = valid['_air_secs'].idxmin() if not valid.empty else prog_matches.index[0]
+        else:
+            best_idx = prog_matches.index[0]
+
         matched_idx.add(best_idx)
         prog_mis_rows.append(
             _make_record(row, mon_pool.loc[best_idx], 'Programme Mismatch', sch_key)
