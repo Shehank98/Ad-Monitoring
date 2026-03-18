@@ -533,7 +533,7 @@
       <!-- Ads Aired -->
       <div class="card p-5">
         <p class="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Ads Aired</p>
-        <p class="text-3xl font-extrabold text-violet-700 leading-none">{{ k.total_ads|fmt_m }}</p>
+        <p class="text-3xl font-extrabold text-violet-700 leading-none">{{ k.total_ads }}</p>
         <p class="text-xs text-slate-400 mt-1">spots monitored</p>
       </div>
 
@@ -1038,8 +1038,8 @@
         </div>
         <div class="grid grid-cols-3 gap-6 text-center">
           <div>
-            <p class="text-2xl font-extrabold">{{ deep_stats.total_spend|floatformat:0 }}</p>
-            <p class="text-xs opacity-70">Total Spend</p>
+            <p class="text-2xl font-extrabold">{{ deep_stats.total_spend|fmt_m }}</p>
+            <p class="text-xs opacity-70">Total Spend (LKR)</p>
           </div>
           <div>
             <p class="text-2xl font-extrabold">{{ deep_stats.total_ads }}</p>
@@ -1128,7 +1128,7 @@
               <tr>
                 <td>{{ d.date|date:"d M Y" }}</td>
                 <td class="font-bold text-violet-700">{{ d.count }}</td>
-                <td>{{ d.spend|floatformat:0 }}</td>
+                <td class="text-emerald-700 font-semibold">{{ d.spend|fmt_m }}</td>
               </tr>
               {% empty %}
               <tr><td colspan="3" class="text-slate-400 text-center">—</td></tr>
