@@ -6173,15 +6173,19 @@ def db_tools(request):
     from django.db import connection
     from django.db.models import Count as _Count
 
+    from competitor.models import CompetitorAd as _CompetitorAd, CompetitorUploadBatch as _CompetitorBatch
+
     def _counts():
         return {
-            'schedules':    Schedule.objects.count(),
-            'schedule_rows': ScheduleRow.objects.count(),
-            'lmrb_rows':    LMRBRow.objects.count(),
-            'monitoring':   MonitoringData.objects.count(),
-            'match_results': MatchResult.objects.count(),
-            'tc_rows':      TCRow.objects.count(),
-            'tc_reports':   TransmissionReport.objects.count(),
+            'schedules':        Schedule.objects.count(),
+            'schedule_rows':    ScheduleRow.objects.count(),
+            'lmrb_rows':        LMRBRow.objects.count(),
+            'monitoring':       MonitoringData.objects.count(),
+            'match_results':    MatchResult.objects.count(),
+            'tc_rows':          TCRow.objects.count(),
+            'tc_reports':       TransmissionReport.objects.count(),
+            'competitor_ads':   _CompetitorAd.objects.count(),
+            'competitor_batches': _CompetitorBatch.objects.count(),
         }
 
     msg = None
@@ -6258,6 +6262,37 @@ def db_tools(request):
             LMRBRow.objects.update(is_matched=False, matched_schedule=None, matched_at=None)
             msg = 'ALL data deleted. The system is now empty.'
             _audit(request, 'db_delete', 'NUCLEAR DELETE — all data wiped.')
+
+        elif action == 'delete_competitor_account' and confirm == 'DELETE':
+            from competitor.models import CompetitorAd as _CA, CompetitorUploadBatch as _CB
+            acct_id = request.POST.get('competitor_account_id', '')
+            if acct_id:
+                try:
+                    from core.models import Account as _Acc
+                    acct = _Acc.objects.get(id=int(acct_id))
+                    n_ads = _CA.objects.filter(account=acct).count()
+                    n_batches = _CB.objects.filter(account=acct).count()
+                    _CB.objects.filter(account=acct).delete()  # cascades to CompetitorAd
+                    msg = f'Deleted {n_ads:,} competitor ad rows and {n_batches} batches for "{acct.name}".'
+                    _audit(request, 'db_delete', msg)
+                except (Account.DoesNotExist, ValueError):
+                    msg = 'Account not found.'
+                    msg_type = 'error'
+            else:
+                msg = 'No account selected.'
+                msg_type = 'error'
+
+        elif action == 'delete_competitor_all' and confirm == 'DELETE':
+            from competitor.models import CompetitorAd as _CA, CompetitorUploadBatch as _CB
+            n_ads = _CA.objects.count()
+            n_batches = _CB.objects.count()
+            _CB.objects.all().delete()  # cascades to all CompetitorAd rows
+            msg = f'Deleted all {n_ads:,} competitor ad rows and {n_batches} batches.'
+            _audit(request, 'db_delete', msg)
+
+        elif action in ('delete_competitor_account', 'delete_competitor_all'):
+            msg = 'Delete cancelled — confirmation text did not match.'
+            msg_type = 'error'
 
         elif action in ('delete_schedules', 'delete_lmrb', 'delete_tc', 'delete_all'):
             msg = 'Delete cancelled — confirmation text did not match.'
@@ -6338,6 +6373,16 @@ def db_tools(request):
         'tc':         TransmissionReport.objects.aggregate(last=_Max('uploaded_at'))['last'],
     }
 
+    from competitor.models import CompetitorUploadBatch as _CB2
+    competitor_account_summary = list(
+        _CB2.objects.values('account__id', 'account__name')
+        .annotate(
+            batches=_Count('id'),
+            ads=_Count('ads'),
+        )
+        .order_by('account__name')
+    )
+
     return render(request, 'admin_panel/db_tools.html', {
         'counts':        _counts(),
         'msg':           msg,
@@ -6346,4 +6391,6 @@ def db_tools(request):
         'tc_quality':    tc_quality,
         'match_quality': match_quality,
         'freshness':     freshness,
+        'competitor_accounts': competitor_account_summary,
+        'all_accounts':  Account.objects.all().order_by('name'),
     })

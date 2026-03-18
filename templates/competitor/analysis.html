@@ -1284,6 +1284,12 @@
          TAB 4 — DATA MANAGEMENT
     ═══════════════════════════════════════════════════════════════ -->
     {% if tab == 'management' %}
+    {% if db_error %}
+    <div class="card border-red-200 bg-red-50 p-5 mb-4">
+      <p class="text-sm font-semibold text-red-700"><i class="fa-solid fa-circle-exclamation mr-1"></i> Database error</p>
+      <p class="text-xs text-red-600 mt-1 font-mono break-all">{{ db_error }}</p>
+    </div>
+    {% endif %}
     {% if not selected_account %}
     <div class="card text-center py-16 text-slate-400">
       <i class="fa-solid fa-database text-6xl mb-4 block opacity-20"></i>
