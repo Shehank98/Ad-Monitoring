@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Admin Database Export{% endblock %}
 {% block page_title %}Admin Database Export{% endblock %}
-{% block page_subtitle %}Full database export with filters — admin only{% endblock %}
+{% block page_subtitle %}Full database export with filters - admin only{% endblock %}
 
 {% block content %}
 <div class="max-w-3xl mx-auto">
@@ -54,7 +54,7 @@
 
         <!-- Schedule Number -->
         <div>
-          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Schedule Number <span class="text-slate-400 font-normal">(optional — filters Schedule Rows sheet)</span></label>
+          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Schedule Number <span class="text-slate-400 font-normal">(optional - filters Schedule Rows sheet)</span></label>
           <select name="schedule_number" id="scheduleSelect" class="select-field" disabled>
             <option value="">All schedules</option>
           </select>
@@ -62,7 +62,7 @@
 
         <!-- Brand / Theme keyword -->
         <div>
-          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Brand / Theme keyword <span class="text-slate-400 font-normal">(optional — searches brand / advt_theme)</span></label>
+          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Brand / Theme keyword <span class="text-slate-400 font-normal">(optional - searches brand / advt_theme)</span></label>
           <input type="text" name="brand" class="input-field" placeholder="e.g. MOBITEL, DIALOG…">
         </div>
 
@@ -100,14 +100,14 @@
       <div class="mt-5 p-4 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-700 space-y-1.5">
         <p class="font-bold text-blue-800 mb-1"><i class="fa-solid fa-table mr-1"></i> Sheets included in the export:</p>
         <div class="grid grid-cols-2 gap-x-6 gap-y-1">
-          <p><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> <strong>Matched LMRB</strong> — LMRB rows matched to schedule</p>
-          <p><i class="fa-solid fa-circle-xmark text-rose-400 mr-1"></i> <strong>Unmatched LMRB</strong> — LMRB rows with no match</p>
-          <p><i class="fa-solid fa-calendar-days text-blue-500 mr-1"></i> <strong>Schedule Rows</strong> — all planned ad spots</p>
-          <p><i class="fa-solid fa-file-certificate text-violet-500 mr-1"></i> <strong>TC Rows</strong> — transmission certificate data</p>
-          <p><i class="fa-solid fa-chart-bar text-orange-500 mr-1"></i> <strong>Full Ad Report</strong> — all match results with status</p>
-          <p><i class="fa-solid fa-tags text-teal-500 mr-1"></i> <strong>Brand Mappings</strong> — LMRB & TC theme mappings</p>
-          <p><i class="fa-solid fa-link text-pink-500 mr-1"></i> <strong>Manual Matches</strong> — manually confirmed matches</p>
-          <p><i class="fa-solid fa-star text-amber-500 mr-1"></i> <strong>Sponsorship Assignments</strong> — sponsorship LMRB assignments</p>
+          <p><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> <strong>Matched LMRB</strong> - LMRB rows matched to schedule</p>
+          <p><i class="fa-solid fa-circle-xmark text-rose-400 mr-1"></i> <strong>Unmatched LMRB</strong> - LMRB rows with no match</p>
+          <p><i class="fa-solid fa-calendar-days text-blue-500 mr-1"></i> <strong>Schedule Rows</strong> - all planned ad spots</p>
+          <p><i class="fa-solid fa-file-certificate text-violet-500 mr-1"></i> <strong>TC Rows</strong> - transmission certificate data</p>
+          <p><i class="fa-solid fa-chart-bar text-orange-500 mr-1"></i> <strong>Full Ad Report</strong> - all match results with status</p>
+          <p><i class="fa-solid fa-tags text-teal-500 mr-1"></i> <strong>Brand Mappings</strong> - LMRB & TC theme mappings</p>
+          <p><i class="fa-solid fa-link text-pink-500 mr-1"></i> <strong>Manual Matches</strong> - manually confirmed matches</p>
+          <p><i class="fa-solid fa-star text-amber-500 mr-1"></i> <strong>Sponsorship Assignments</strong> - sponsorship LMRB assignments</p>
         </div>
         <p class="mt-2 text-blue-600">Each sheet has a metadata row at the top showing the row count and active filters.</p>
       </div>

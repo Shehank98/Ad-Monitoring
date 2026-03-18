@@ -432,7 +432,7 @@ def schedule_upload(request):
                 from verification.schedule_converter import convert_schedule_excel
                 df = convert_schedule_excel(excel_file)
                 if df is None or df.empty:
-                    # Not pivot format — fall back to plain flat read
+                    # Not pivot format - fall back to plain flat read
                     excel_file.seek(0)
                     df = pd.read_excel(excel_file)
                     df.columns = df.columns.str.strip()
@@ -467,7 +467,7 @@ def schedule_upload(request):
                         ('PROGRAMME',   'Programme / show name',              True),
                         ('DAY',         'Day abbreviation (MON, TUE…)',       True),
                         ('TIME',        'Ad start time (HH:MM:SS)',           True),
-                        ('End Time',    'Ad end time — column after TIME',    False),
+                        ('End Time',    'Ad end time - column after TIME',    False),
                         ('DUR',         'Duration in seconds',                True),
                         ('BRAND',       'Brand name (optional inline col)',   False),
                         ('[date cols]', 'Date values → spot count per day',   True),
@@ -531,7 +531,7 @@ def schedule_upload(request):
 
             messages.success(request,
                 f'Schedule #{schedule.schedule_number} v{version} for {account} '
-                f'({month}, {start_date} → {end_date}) uploaded — {row_count:,} rows.')
+                f'({month}, {start_date} → {end_date}) uploaded - {row_count:,} rows.')
 
             # Auto-run verification for all available scopes
             try:
@@ -546,7 +546,7 @@ def schedule_upload(request):
         ('PROGRAMME',   'Programme / show name',              True),
         ('DAY',         'Day abbreviation (MON, TUE…)',       True),
         ('TIME',        'Ad start time (HH:MM:SS)',           True),
-        ('End Time',    'Ad end time — column after TIME',    False),
+        ('End Time',    'Ad end time - column after TIME',    False),
         ('DUR',         'Duration in seconds',                True),
         ('BRAND',       'Brand name (optional inline col)',   False),
         ('[date cols]', 'Date values → spot count per day',   True),
@@ -850,10 +850,10 @@ def monitoring_upload(request):
             _parse_lmrb_rows(df, data_type, account, batch_id=uuid.UUID(group_id))
 
             ch_names = ', '.join(m['channel'] for m in channel_metas)
-            print(f"[monitoring_upload] DONE — {len(channel_metas)} channel(s): {ch_names}")
+            print(f"[monitoring_upload] DONE - {len(channel_metas)} channel(s): {ch_names}")
             messages.success(request,
-                f'{"MapOnline" if data_type == "maponline" else "MediaWatch (LMRB)"} — '
-                f'{account} — {len(channel_metas)} channel(s): {ch_names}. Uploaded successfully.')
+                f'{"MapOnline" if data_type == "maponline" else "MediaWatch (LMRB)"} - '
+                f'{account} - {len(channel_metas)} channel(s): {ch_names}. Uploaded successfully.')
 
             # Auto-run verification
             try:
@@ -872,7 +872,7 @@ def _parse_lmrb_rows(df, data_type, account, batch_id=None):
     """
     Parse monitoring DataFrame and append into the LMRBRow master table.
 
-    APPEND MODE — rows are never deleted or replaced.
+    APPEND MODE - rows are never deleted or replaced.
     Dedup key = SHA-256 of all meaningful columns.  If a row with the same key
     already exists it is silently skipped (bulk_create with ignore_conflicts=True).
     This means:
@@ -1001,7 +1001,7 @@ def _parse_lmrb_rows(df, data_type, account, batch_id=None):
         print("[_parse_lmrb_rows] WARNING: no valid rows to insert (check column names and key fields)")
         return 0
 
-    # ── Append-only insert — skip any rows that already exist ─────────────────
+    # ── Append-only insert - skip any rows that already exist ─────────────────
     new_rows = list(rows_by_key.values())
     created = LMRBRow.objects.bulk_create(new_rows, batch_size=500, ignore_conflicts=True)
     inserted = len(created)
@@ -1055,7 +1055,7 @@ def monitoring_delete(request, pk):
     print(f"[monitoring_delete] pk={pk}  channel={mon.channel}  file_group_id={mon.file_group_id}  user={user}")
 
     if not _is_admin(user) and mon.account and mon.account not in _account_qs(user):
-        print(f"[monitoring_delete] ACCESS DENIED — user has no access to account {mon.account}")
+        print(f"[monitoring_delete] ACCESS DENIED - user has no access to account {mon.account}")
         messages.error(request, 'You do not have access to this data.')
         return redirect('/dashboard/monitoring/')
 
@@ -1064,13 +1064,13 @@ def monitoring_delete(request, pk):
         sibling_count = siblings.count()
         print(f"[monitoring_delete] siblings in same group={sibling_count}")
         if not siblings.exists():
-            print(f"[monitoring_delete] no siblings — deleting shared file {mon.file.name}")
+            print(f"[monitoring_delete] no siblings - deleting shared file {mon.file.name}")
             mon.file.delete(save=False)
         mon.delete()
         print(f"[monitoring_delete] deleted MonitoringData pk={pk}")
         messages.success(request, 'Dataset deleted.')
     else:
-        print(f"[monitoring_delete] DENIED — not admin and not uploaded today by this user")
+        print(f"[monitoring_delete] DENIED - not admin and not uploaded today by this user")
         messages.error(request, 'You can only delete datasets you uploaded today.')
     return redirect('/dashboard/monitoring/')
 
@@ -1098,12 +1098,12 @@ def monitoring_delete_group(request, group_id):
     print(f"[monitoring_delete_group] first.account={first.account}  first.uploaded_by={first.uploaded_by}  first.uploaded_at={first.uploaded_at}")
 
     if not _is_admin(user) and first.account and first.account not in _account_qs(user):
-        print(f"[monitoring_delete_group] ACCESS DENIED — user has no access to account {first.account}")
+        print(f"[monitoring_delete_group] ACCESS DENIED - user has no access to account {first.account}")
         messages.error(request, 'You do not have access to this data.')
         return redirect('/dashboard/monitoring/')
 
     if not _is_admin(user) and not (first.uploaded_by == user and first.uploaded_at.date() == today):
-        print(f"[monitoring_delete_group] DENIED — not admin and not uploaded today by this user")
+        print(f"[monitoring_delete_group] DENIED - not admin and not uploaded today by this user")
         messages.error(request, 'You can only delete datasets you uploaded today.')
         return redirect('/dashboard/monitoring/')
 
@@ -1170,7 +1170,7 @@ def monitoring_delete_group(request, group_id):
     group_qs.delete()
     print(f"[monitoring_delete_group] deleted {count} MonitoringData record(s) successfully")
     messages.success(request,
-        f'Deleted upload batch ({", ".join(channels)}) — '
+        f'Deleted upload batch ({", ".join(channels)}) - '
         f'{lmrb_count:,} LMRB row(s) removed.')
     return redirect('/dashboard/monitoring/')
 
@@ -1494,7 +1494,7 @@ def monitoring_dashboard(request):
         n_commercial  = _sr_base.filter(ad_type='COMMERCIAL BENEFITS').count()
 
         # Compliance is against the planned commercial rows, not just the verified
-        # subset — rows past the LMRB date cap are counted as unverified (not ignored).
+        # subset - rows past the LMRB date cap are counted as unverified (not ignored).
         # Programme Mismatch and Late Telecast both count as "aired" for compliance.
         compliance = round((n_matched + n_prog_mis + n_late) / n_commercial * 100, 1) if n_commercial else 0
 
@@ -1515,7 +1515,7 @@ def monitoring_dashboard(request):
 
         tab_data = {
             'full':     list(qs.select_related('lmrb_row').order_by('scheduled_date', 'brand')),
-            # Programme mismatch = valid match (same day, brand, theme — time offset only)
+            # Programme mismatch = valid match (same day, brand, theme - time offset only)
             'matched':  list(qs.filter(status__in=['matched', 'programme_mismatch']).select_related('lmrb_row').order_by('scheduled_date', 'brand')),
             'not_aired': list(qs.filter(status__in=['not_aired', 'no_mapping']).order_by('scheduled_date', 'brand')),
             'prog_mis': list(qs.filter(status='programme_mismatch').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
@@ -1670,7 +1670,7 @@ def monitoring_dashboard(request):
         def _agg_raw_lmrb(t_lower, duration, bm_product):
             """Aggregate raw LMRB count + programme details + date counts.
 
-            bm_product — BrandMapping.product value.  When set, only LMRBRows
+            bm_product - BrandMapping.product value.  When set, only LMRBRows
             whose product field matches are included (so "Mobitel Broadband BB"
             is never mixed with "SLT Broadband BB").  When the product field on
             the LMRB rows is empty or doesn't match (common for sponsorship/BB
@@ -1816,7 +1816,7 @@ def monitoring_dashboard(request):
                     pt_count    = sum(p['prime'] for p in progs)
                     non_pt_count = sum(p['non_prime'] for p in progs)
 
-                    # Raw LMRB fallback — product-aware so that shared themes
+                    # Raw LMRB fallback - product-aware so that shared themes
                     # (e.g. "BB") are only counted for this product, not all products.
                     raw_lmrb_count, _raw_progs_map, _raw_dates_map = _agg_raw_lmrb(
                         t_lower, bm.duration, bm.product
@@ -2097,7 +2097,7 @@ def monitoring_dashboard(request):
                 'advt_time':  lr.advt_time,
                 'advt_theme': lr.advt_theme,
                 'duration':   lr.duration,
-                'program':    lr.program or '—',
+                'program':    lr.program or '-',
                 'is_assigned': lr.id in _assigned_lmrb_ids,
                 'is_mapped_spon': is_mapped_spon,
                 'is_kw':      is_kw,
@@ -2173,7 +2173,7 @@ def monitoring_dashboard(request):
         'sponsorship_chart_data':    sponsorship_chart_data,
         'commercial_chart_json':     commercial_chart_json,
         'sponsorship_chart_json':    sponsorship_chart_json,
-        # Pre-serialised JSON — safe to emit with |safe in templates (no Python None/True/False)
+        # Pre-serialised JSON - safe to emit with |safe in templates (no Python None/True/False)
         'lmrb_chart_json':           _to_js(list(lmrb_chart)),
         'lmrb_theme_detail':         lmrb_theme_detail if selected_account and channel and month else [],
         'lmrb_theme_detail_json':    _to_js(lmrb_theme_detail if selected_account and channel and month else []),
@@ -2452,7 +2452,7 @@ def _build_missed_ad_pdf(account_name, channel, month, rows, schedule_number='')
     story = []
 
     # ── Header ────────────────────────────────────────────────────────────────
-    story.append(Paragraph(f'Missed Ad Report — {channel}', h_title))
+    story.append(Paragraph(f'Missed Ad Report - {channel}', h_title))
     meta_parts = [f'Account: {account_name}']
     if schedule_number:
         meta_parts.append(f'Schedule No: {schedule_number}')
@@ -2481,14 +2481,14 @@ def _build_missed_ad_pdf(account_name, channel, month, rows, schedule_number='')
     for mr in rows:
         status_label = dict(mr.STATUS_CHOICES).get(mr.status, mr.status)
         table_data.append([
-            Paragraph(mr.brand or '—', h_cell),
-            Paragraph(str(mr.duration or '—'), h_cell),
-            Paragraph(mr.programme or '—', h_cell),
-            Paragraph(str(mr.scheduled_date or '—'), h_cell),
-            Paragraph(mr.planned_start or '—', h_cell),
-            Paragraph(mr.planned_end or '—', h_cell),
-            Paragraph(str(mr.aired_date or '—'), h_cell),
-            Paragraph(mr.air_time or '—', h_cell),
+            Paragraph(mr.brand or '-', h_cell),
+            Paragraph(str(mr.duration or '-'), h_cell),
+            Paragraph(mr.programme or '-', h_cell),
+            Paragraph(str(mr.scheduled_date or '-'), h_cell),
+            Paragraph(mr.planned_start or '-', h_cell),
+            Paragraph(mr.planned_end or '-', h_cell),
+            Paragraph(str(mr.aired_date or '-'), h_cell),
+            Paragraph(mr.air_time or '-', h_cell),
             Paragraph(status_label, ParagraphStyle(
                 'st', fontSize=7.5, fontName='Helvetica-Bold',
                 textColor=STATUS_COLOR.get(status_label, colors.black),
@@ -2523,7 +2523,7 @@ def _build_missed_ad_pdf(account_name, channel, month, rows, schedule_number='')
 @login_required
 def full_ad_report_pdf(request):
     """
-    Full Ad Report PDF — all MatchResult statuses for a scope:
+    Full Ad Report PDF - all MatchResult statuses for a scope:
     Matched, Programme Mismatch, Late Telecast, Not Aired, No Brand Mapping.
 
     Placed in the Verification section of the dashboard export bar and in
@@ -2569,7 +2569,7 @@ def full_ad_report_pdf(request):
 
 
 def _build_full_ad_report_pdf(account_name, channel, month, rows, schedule_number=''):
-    """Build Full Ad Report PDF — identical layout to missed-ad PDF but includes
+    """Build Full Ad Report PDF - identical layout to missed-ad PDF but includes
     all statuses (matched, programme_mismatch, late_telecast, not_aired, no_mapping)
     with green colouring for Matched rows."""
     from reportlab.lib import colors
@@ -2614,7 +2614,7 @@ def _build_full_ad_report_pdf(account_name, channel, month, rows, schedule_numbe
                               textColor=colors.white)
 
     story = []
-    story.append(Paragraph(f'Full Ad Report — {channel}', h_title))
+    story.append(Paragraph(f'Full Ad Report - {channel}', h_title))
     meta_parts = [f'Account: {account_name}']
     if schedule_number:
         meta_parts.append(f'Schedule No: {schedule_number}')
@@ -2642,14 +2642,14 @@ def _build_full_ad_report_pdf(account_name, channel, month, rows, schedule_numbe
     for mr in rows:
         status_label = dict(mr.STATUS_CHOICES).get(mr.status, mr.status)
         table_data.append([
-            Paragraph(mr.brand or '—', h_cell),
-            Paragraph(str(mr.duration or '—'), h_cell),
-            Paragraph(mr.programme or '—', h_cell),
-            Paragraph(str(mr.scheduled_date or '—'), h_cell),
-            Paragraph(mr.planned_start or '—', h_cell),
-            Paragraph(mr.planned_end or '—', h_cell),
-            Paragraph(str(mr.aired_date or '—'), h_cell),
-            Paragraph(mr.air_time or '—', h_cell),
+            Paragraph(mr.brand or '-', h_cell),
+            Paragraph(str(mr.duration or '-'), h_cell),
+            Paragraph(mr.programme or '-', h_cell),
+            Paragraph(str(mr.scheduled_date or '-'), h_cell),
+            Paragraph(mr.planned_start or '-', h_cell),
+            Paragraph(mr.planned_end or '-', h_cell),
+            Paragraph(str(mr.aired_date or '-'), h_cell),
+            Paragraph(mr.air_time or '-', h_cell),
             Paragraph(status_label, ParagraphStyle(
                 'st', fontSize=7.5, fontName='Helvetica-Bold',
                 textColor=STATUS_COLOR.get(status_label, colors.black),
@@ -3004,7 +3004,7 @@ def tc_upload_parsed(request):
         })
 
     if not records:
-        messages.error(request, 'No valid rows found — all rows were missing a valid date.')
+        messages.error(request, 'No valid rows found - all rows were missing a valid date.')
         return redirect('/dashboard/tc/upload/')
 
     df = pd.DataFrame(records)
@@ -3066,8 +3066,8 @@ def tc_list(request):
 @role_required(['super_admin', 'admin', 'operations'])
 def tc_pdf_convert(request):
     """
-    GET  — render the PDF TC converter page.
-    POST — receive converted rows as JSON, save to DB, return summary.
+    GET  - render the PDF TC converter page.
+    POST - receive converted rows as JSON, save to DB, return summary.
     """
     user       = request.user
     account_qs = _account_qs(user)
@@ -3276,7 +3276,7 @@ def tc_upload(request):
         messages.success(request, f'TC uploaded: {count} rows for {channel} / {month}.')
         return redirect('/dashboard/tc/')
 
-    # GET — show upload form
+    # GET - show upload form
     schedules = Schedule.objects.filter(account__in=account_qs).select_related('account').order_by('-uploaded_at')
     return render(request, 'tc/upload.html', {
         'accounts':  account_qs,
@@ -3403,9 +3403,9 @@ def tc_reconcile(request):
 def tc_three_way(request):
     """
     Three-way evidence view for each planned ad in a scope:
-      PLAN  — what was scheduled  (ScheduleRow)
-      LMRB  — what 3rd-party monitoring observed  (matched LMRBRow)
-      TC    — what the channel's own certificate says  (matched TCRow)
+      PLAN  - what was scheduled  (ScheduleRow)
+      LMRB  - what 3rd-party monitoring observed  (matched LMRBRow)
+      TC    - what the channel's own certificate says  (matched TCRow)
 
     Matching priority applied by the engines (already in DB):
       1. Theme  (via BrandMapping)
@@ -3484,7 +3484,7 @@ def tc_three_way(request):
         }
 
         # Pre-load LMRB rows for nearest-match search on tc_only rows.
-        # (is_lmrb_confirmed lives on TCRow, not LMRBRow — no such filter here.)
+        # (is_lmrb_confirmed lives on TCRow, not LMRBRow - no such filter here.)
         scope_lmrb_pool = list(
             LMRBRow.objects.filter(
                 account_id=account_id,
@@ -3522,7 +3522,7 @@ def tc_three_way(request):
 
             # ── Display LMRB: prefer the LMRB that TC was confirmed against ──────
             # When TC is confirmed, tc.matched_lmrb is the LMRB row within ±tolerance
-            # seconds of the TC aired time — i.e. the SAME physical broadcast.
+            # seconds of the TC aired time - i.e. the SAME physical broadcast.
             # Using sr.matched_lmrb (Schedule↔LMRB engine result) can show a
             # different LMRB from a completely different time slot, which confuses
             # users into thinking the pair is wrong.  When TC is not confirmed we
@@ -3625,7 +3625,7 @@ def tc_three_way(request):
                 'plan_programme': sr.programme,
                 'plan_start':     sr.start_time,
                 'plan_end':       sr.end_time,
-                # LMRB (3rd-party monitoring) — uses TC-confirmed LMRB when available
+                # LMRB (3rd-party monitoring) - uses TC-confirmed LMRB when available
                 'lmrb_date':      display_lmrb.date       if display_lmrb else None,
                 'lmrb_programme': display_lmrb.program    if display_lmrb else '',
                 'lmrb_time':      display_lmrb.advt_time  if display_lmrb else '',
@@ -3856,7 +3856,7 @@ def summary_excel(request):
     left   = Alignment(horizontal='left',   vertical='center', wrap_text=True)
     right  = Alignment(horizontal='right',  vertical='center')
 
-    # Column widths (7 data columns — Avg 30s removed)
+    # Column widths (7 data columns - Avg 30s removed)
     ws.column_dimensions['A'].width = 36
     ws.column_dimensions['B'].width = 8
     ws.column_dimensions['C'].width = 10
@@ -3958,7 +3958,7 @@ def summary_excel(request):
                     c.alignment = centre if col_i > 1 else left
                     c.border = border()
                 row += 1
-            # No per-programme subtotal — only grand total at end
+            # No per-programme subtotal - only grand total at end
 
         # Sponsorship Grand Total
         st = data['sponsorship_total']
@@ -4351,7 +4351,7 @@ def summary_pdf(request):
     story = []
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # PAGE 1 — COVER  (drawn by canvas; Platypus renders info card in white area)
+    # PAGE 1 - COVER  (drawn by canvas; Platypus renders info card in white area)
     # ═══════════════════════════════════════════════════════════════════════════
 
     content_w = PORT_W - 2 * MARGIN
@@ -4435,12 +4435,12 @@ def summary_pdf(request):
     ))
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # PAGE 2 — RECONCILIATION SUMMARY TABLES (Portrait)
+    # PAGE 2 - RECONCILIATION SUMMARY TABLES (Portrait)
     # ═══════════════════════════════════════════════════════════════════════════
     story.append(NextPageTemplate('portrait'))
     story.append(PageBreak())
 
-    # Section heading helper — left gold bar via table padding trick
+    # Section heading helper - left gold bar via table padding trick
     def _section_heading(title, subtitle=''):
         rows = [[Paragraph(title, S['section'])]]
         if subtitle:
@@ -4584,7 +4584,7 @@ def summary_pdf(request):
                 story.append(Paragraph(line, S['sub']))
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # PAGE 3+ — MATCHED LMRB REPORT (Landscape)
+    # PAGE 3+ - MATCHED LMRB REPORT (Landscape)
     # ═══════════════════════════════════════════════════════════════════════════
     story.append(NextPageTemplate('landscape'))
     story.append(PageBreak())
@@ -4699,7 +4699,7 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month):
     Sponsorship matched = LMRBRow rows linked via SponsorshipLmrbAssignment
     Both sets are deduplicated so a row appearing in both groups is written once.
     """
-    import openpyxl  # noqa — imported by callers too; ensure available
+    import openpyxl  # noqa - imported by callers too; ensure available
     from openpyxl.styles import Font, Alignment, PatternFill
     from django.db.models import Min, Max
     from core.models import SponsorshipLmrbAssignment
@@ -4880,7 +4880,7 @@ def admin_export(request):
             'months': months,
         })
 
-    # ── POST — build export ──────────────────────────────────────────────────
+    # ── POST - build export ──────────────────────────────────────────────────
     account_id      = request.POST.get('account_id', '').strip()
     channel         = request.POST.get('channel', '').strip()
     month           = request.POST.get('month', '').strip()
@@ -5227,7 +5227,7 @@ def _month_date_range(month_str):
 @role_required(['super_admin', 'admin'])
 def system_settings(request):
     """
-    Site-wide configuration page — super_admin only.
+    Site-wide configuration page - super_admin only.
 
     On first visit, any missing settings are auto-created from SETTING_DEFAULTS
     so the page always shows the full list even on a fresh installation.
@@ -5244,7 +5244,7 @@ def system_settings(request):
                 s.save()
                 updated += 1
         if updated:
-            messages.success(request, f'Settings saved — {updated} value(s) updated.')
+            messages.success(request, f'Settings saved - {updated} value(s) updated.')
             _audit(request, 'settings_change', f'{updated} setting(s) updated.')
         else:
             messages.success(request, 'Settings saved (no changes).')
@@ -5282,7 +5282,7 @@ def branding_upload(request):
         asset_type = request.POST.get('asset_type')   # 'logo' or 'tartan'
         uploaded   = request.FILES.get('file')
         if asset_type not in ('logo', 'tartan') or not uploaded:
-            messages.error(request, 'Invalid upload — specify logo or tartan and provide a file.')
+            messages.error(request, 'Invalid upload - specify logo or tartan and provide a file.')
             return redirect('system_settings')
         # Determine extension
         orig_name = uploaded.name.lower()
@@ -5380,7 +5380,7 @@ def sponsorship_candidates(request):
         brand_lower = brand.lower().strip() if brand else ''
         themes = set()
 
-        # Pass 1 — match BrandMapping by product (row.product from template)
+        # Pass 1 - match BrandMapping by product (row.product from template)
         for bm in bm_all:
             if brand_lower and (bm.product or '').lower().strip() != brand_lower:
                 continue
@@ -5393,7 +5393,7 @@ def sponsorship_candidates(request):
             if bm.theme:
                 themes.add(bm.theme.lower().strip())
 
-        # Pass 2 — fallback: match by brand name directly
+        # Pass 2 - fallback: match by brand name directly
         if not themes and brand_lower:
             for bm in bm_all:
                 if bm.brand.lower().strip() != brand_lower:
@@ -5595,7 +5595,7 @@ def manual_reconciliation(request):
         ).aggregate(mn=_Min('date'), mx=_Max('date'))
         sch_date_range = (dr['mn'], dr['mx'])
 
-        # Unmatched TC rows — all TC rows not yet linked to a schedule or a
+        # Unmatched TC rows - all TC rows not yet linked to a schedule or a
         # ManualMatch.  This deliberately includes is_extra=True rows (spots the
         # reconcile engine couldn't match to any schedule row) so they can be
         # manually paired with an LMRB row via the tc_lmrb match mode.
@@ -5610,7 +5610,7 @@ def manual_reconciliation(request):
             .order_by('tc_theme', 'duration', 'date', 'aired_time')[:500]
         )
 
-        # Unmatched LMRB rows for this channel — NOT date-filtered so out-of-range
+        # Unmatched LMRB rows for this channel - NOT date-filtered so out-of-range
         # rows (the whole purpose of manual matching) are visible.
         unmatched_lmrb = list(
             LMRBRow.objects.filter(
@@ -5649,9 +5649,9 @@ def manual_reconciliation(request):
 def manual_match_create(request):
     """
     POST: Create a ManualMatch.  Supports three modes:
-      schedule_lmrb — Schedule + LMRB  (original)
-      3way          — Schedule + TC + LMRB
-      tc_lmrb       — TC + LMRB only (no schedule row)
+      schedule_lmrb - Schedule + LMRB  (original)
+      3way          - Schedule + TC + LMRB
+      tc_lmrb       - TC + LMRB only (no schedule row)
     """
     from core.models import ManualMatch, MatchResult
 
@@ -6013,7 +6013,7 @@ def commercial_assign(request):
 @login_required
 @role_required(['super_admin', 'admin'])
 def audit_log(request):
-    """Show the last 500 AuditLog entries — super_admin / admin only."""
+    """Show the last 500 AuditLog entries - super_admin / admin only."""
     from django.db.models import Q as _Q
     action_filter = request.GET.get('action', '')
     user_filter   = request.GET.get('user', '')
@@ -6167,7 +6167,7 @@ def admin_analytics(request):
 @role_required(['super_admin', 'admin'])
 def db_tools(request):
     """
-    Database management page — admin/super_admin only.
+    Database management page - admin/super_admin only.
     Provides data reset, selective delete, and database backup tools.
     """
     from django.db import connection
@@ -6218,7 +6218,7 @@ def db_tools(request):
             dupes = Schedule.objects.exclude(id__in=keeper_ids)
             n_schedules = dupes.count()
             if n_schedules == 0:
-                msg = 'No duplicate schedules found — database is already clean.'
+                msg = 'No duplicate schedules found - database is already clean.'
                 msg_type = 'info'
             else:
                 # Delete ScheduleRows belonging to duplicate schedules, then the schedules
@@ -6261,7 +6261,7 @@ def db_tools(request):
             ScheduleRow.objects.update(is_matched=False, matched_lmrb=None, matched_at=None)
             LMRBRow.objects.update(is_matched=False, matched_schedule=None, matched_at=None)
             msg = 'ALL data deleted. The system is now empty.'
-            _audit(request, 'db_delete', 'NUCLEAR DELETE — all data wiped.')
+            _audit(request, 'db_delete', 'NUCLEAR DELETE - all data wiped.')
 
         elif action == 'delete_competitor_account' and confirm == 'DELETE':
             from competitor.models import CompetitorAd as _CA, CompetitorUploadBatch as _CB
@@ -6291,11 +6291,11 @@ def db_tools(request):
             _audit(request, 'db_delete', msg)
 
         elif action in ('delete_competitor_account', 'delete_competitor_all'):
-            msg = 'Delete cancelled — confirmation text did not match.'
+            msg = 'Delete cancelled - confirmation text did not match.'
             msg_type = 'error'
 
         elif action in ('delete_schedules', 'delete_lmrb', 'delete_tc', 'delete_all'):
-            msg = 'Delete cancelled — confirmation text did not match.'
+            msg = 'Delete cancelled - confirmation text did not match.'
             msg_type = 'error'
 
         elif action == 'backup_db':

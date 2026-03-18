@@ -1,5 +1,5 @@
 """
-Generic TC PDF parser — heuristic, channel-agnostic.
+Generic TC PDF parser - heuristic, channel-agnostic.
 
 Works by grouping PDF text items by Y position, identifying lines that contain
 a date (DD/MM/YYYY or DD-MM-YYYY), extracting times and duration from each

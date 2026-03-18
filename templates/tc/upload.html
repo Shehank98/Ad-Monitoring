@@ -43,7 +43,7 @@
       </div>
       <div>
         <h2 class="font-bold text-slate-800">Upload TC File</h2>
-        <p class="text-xs text-slate-400">Excel (.xlsx / .xls) or PDF — columns detected automatically</p>
+        <p class="text-xs text-slate-400">Excel (.xlsx / .xls) or PDF - columns detected automatically</p>
       </div>
     </div>
 
@@ -109,7 +109,7 @@
                       file:rounded-lg file:border-0 file:bg-amber-50 file:text-amber-700
                       file:font-semibold file:text-xs hover:file:bg-amber-100 cursor-pointer"
                onchange="onFileChange(this)" required>
-        <p class="mt-1 text-[10px] text-slate-400">Excel (.xlsx / .xls) or PDF — PDF is parsed locally in your browser</p>
+        <p class="mt-1 text-[10px] text-slate-400">Excel (.xlsx / .xls) or PDF - PDF is parsed locally in your browser</p>
       </div>
 
       <!-- Excel detect result -->
@@ -178,15 +178,15 @@
       <!-- Stats -->
       <div class="px-6 py-4 grid grid-cols-3 gap-4 border-b border-slate-50">
         <div class="text-center">
-          <p class="text-2xl font-bold text-slate-800" id="pRowCount">—</p>
+          <p class="text-2xl font-bold text-slate-800" id="pRowCount">-</p>
           <p class="text-[11px] text-slate-400 mt-0.5">Valid Rows</p>
         </div>
         <div class="text-center border-x border-slate-100">
-          <p class="text-sm font-semibold text-slate-700 mt-1" id="pDateRange">—</p>
+          <p class="text-sm font-semibold text-slate-700 mt-1" id="pDateRange">-</p>
           <p class="text-[11px] text-slate-400 mt-0.5">Date Range</p>
         </div>
         <div class="text-center">
-          <p class="text-2xl font-bold text-orange-500" id="pSkipped">—</p>
+          <p class="text-2xl font-bold text-orange-500" id="pSkipped">-</p>
           <p class="text-[11px] text-slate-400 mt-0.5">Rows Skipped</p>
         </div>
       </div>
@@ -589,7 +589,7 @@ function buildPreviewSummary(rows) {
     ok: true,
     row_count:    rows.length,
     skipped:      0,
-    date_range:   dates.length ? `${dates[0]} → ${dates[dates.length-1]}` : '—',
+    date_range:   dates.length ? `${dates[0]} → ${dates[dates.length-1]}` : '-',
     themes,
     dur_breakdown,
     sample_rows:  rows.slice(0, 10),
@@ -613,13 +613,13 @@ function renderPreview(data, method) {
   const themeBody = document.getElementById('themeTableBody');
   themeBody.innerHTML = '';
   (data.themes || []).forEach(({theme, duration, count}) => {
-    themeBody.innerHTML += `<tr class="hover:bg-slate-50"><td class="py-1.5 pr-3 text-slate-700 max-w-xs truncate" title="${esc(theme)}">${esc(theme)}</td><td class="py-1.5 text-center text-slate-500">${duration??'—'}s</td><td class="py-1.5 text-center font-semibold text-slate-800">${count}</td></tr>`;
+    themeBody.innerHTML += `<tr class="hover:bg-slate-50"><td class="py-1.5 pr-3 text-slate-700 max-w-xs truncate" title="${esc(theme)}">${esc(theme)}</td><td class="py-1.5 text-center text-slate-500">${duration??'-'}s</td><td class="py-1.5 text-center font-semibold text-slate-800">${count}</td></tr>`;
   });
 
   const sampleBody = document.getElementById('sampleTableBody');
   sampleBody.innerHTML = '';
   (data.sample_rows || []).forEach(r => {
-    sampleBody.innerHTML += `<tr class="hover:bg-slate-50"><td class="py-1.5 pr-2 text-slate-600">${esc(r.date)}</td><td class="py-1.5 pr-2 text-slate-600 whitespace-nowrap">${esc(r.time||r.Advt_time||'')}</td><td class="py-1.5 pr-2 text-slate-700 max-w-[180px] truncate" title="${esc(r.theme||r.Advt_theme||'')}">${esc(r.theme||r.Advt_theme||'')}</td><td class="py-1.5 pr-2 text-slate-500 max-w-[120px] truncate">${esc(r.programme||r.PROGRAMME||'—')}</td><td class="py-1.5 text-center text-slate-500">${r.duration??'—'}s</td></tr>`;
+    sampleBody.innerHTML += `<tr class="hover:bg-slate-50"><td class="py-1.5 pr-2 text-slate-600">${esc(r.date)}</td><td class="py-1.5 pr-2 text-slate-600 whitespace-nowrap">${esc(r.time||r.Advt_time||'')}</td><td class="py-1.5 pr-2 text-slate-700 max-w-[180px] truncate" title="${esc(r.theme||r.Advt_theme||'')}">${esc(r.theme||r.Advt_theme||'')}</td><td class="py-1.5 pr-2 text-slate-500 max-w-[120px] truncate">${esc(r.programme||r.PROGRAMME||'-')}</td><td class="py-1.5 text-center text-slate-500">${r.duration??'-'}s</td></tr>`;
   });
 
   document.getElementById('previewLoading').classList.add('hidden');

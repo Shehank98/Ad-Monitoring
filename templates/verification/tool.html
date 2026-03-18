@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Verify Ads{% endblock %}
 {% block page_title %}Verify Ads{% endblock %}
-{% block page_subtitle %}Campaign verification dashboard — schedule vs LMRB monitoring data{% endblock %}
+{% block page_subtitle %}Campaign verification dashboard - schedule vs LMRB monitoring data{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -95,7 +95,7 @@
       <!-- Status dot -->
       <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 dot-{{ row.dot }}"
             id="dot-{{ idx }}"
-            title="{% if row.dot == 'none' %}Never verified{% elif row.dot == 'ok' %}Verified — no issues{% elif row.dot == 'missed' %}Missed spots detected{% endif %}"></span>
+            title="{% if row.dot == 'none' %}Never verified{% elif row.dot == 'ok' %}Verified - no issues{% elif row.dot == 'missed' %}Missed spots detected{% endif %}"></span>
 
       <!-- Channel + Account + Month -->
       <div class="min-w-0 flex-1">
@@ -125,7 +125,7 @@
         <p class="font-semibold text-slate-600 text-[10px] uppercase tracking-wide">Schedule</p>
         {% if row.sch_start %}
           {{ row.sch_start|date:"d M" }} – {{ row.sch_end|date:"d M Y" }}
-        {% else %}<span class="text-slate-300">—</span>{% endif %}
+        {% else %}<span class="text-slate-300">-</span>{% endif %}
       </div>
 
       <!-- LMRB range -->
@@ -191,39 +191,39 @@
         <div id="kpi-bar-{{ idx }}" class="hidden flex flex-wrap gap-2 mb-4">
           <div class="kpi-pill bg-blue-50 border border-blue-200">
             <span class="text-[10px] text-blue-600 font-semibold uppercase">Planned</span>
-            <span class="text-lg font-bold text-blue-700" id="kb-planned-{{ idx }}">—</span>
+            <span class="text-lg font-bold text-blue-700" id="kb-planned-{{ idx }}">-</span>
           </div>
           <div class="kpi-pill bg-slate-50 border border-slate-200">
             <span class="text-[10px] text-slate-500 font-semibold uppercase">Verified</span>
-            <span class="text-lg font-bold text-slate-800" id="kb-total-{{ idx }}">—</span>
+            <span class="text-lg font-bold text-slate-800" id="kb-total-{{ idx }}">-</span>
           </div>
           <div id="kb-pending-pill-{{ idx }}" class="kpi-pill bg-yellow-50 border border-yellow-300 hidden">
             <span class="text-[10px] text-yellow-600 font-semibold uppercase">Pending LMRB</span>
-            <span class="text-lg font-bold text-yellow-700" id="kb-pending-{{ idx }}">—</span>
+            <span class="text-lg font-bold text-yellow-700" id="kb-pending-{{ idx }}">-</span>
           </div>
           <div class="kpi-pill bg-emerald-50 border border-emerald-200">
             <span class="text-[10px] text-emerald-600 font-semibold uppercase">Matched</span>
-            <span class="text-lg font-bold text-emerald-700" id="kb-matched-{{ idx }}">—</span>
+            <span class="text-lg font-bold text-emerald-700" id="kb-matched-{{ idx }}">-</span>
           </div>
           <div class="kpi-pill bg-amber-50 border border-amber-200">
             <span class="text-[10px] text-amber-600 font-semibold uppercase">Prog. Mismatch</span>
-            <span class="text-lg font-bold text-amber-700" id="kb-mis-{{ idx }}">—</span>
+            <span class="text-lg font-bold text-amber-700" id="kb-mis-{{ idx }}">-</span>
           </div>
           <div class="kpi-pill bg-violet-50 border border-violet-200">
             <span class="text-[10px] text-violet-600 font-semibold uppercase">Late</span>
-            <span class="text-lg font-bold text-violet-700" id="kb-late-{{ idx }}">—</span>
+            <span class="text-lg font-bold text-violet-700" id="kb-late-{{ idx }}">-</span>
           </div>
           <div class="kpi-pill bg-red-50 border border-red-200">
             <span class="text-[10px] text-red-600 font-semibold uppercase">Not Aired</span>
-            <span class="text-lg font-bold text-red-700" id="kb-notaired-{{ idx }}">—</span>
+            <span class="text-lg font-bold text-red-700" id="kb-notaired-{{ idx }}">-</span>
           </div>
           <div class="kpi-pill bg-sky-50 border border-sky-200">
             <span class="text-[10px] text-sky-600 font-semibold uppercase">Extra Aired</span>
-            <span class="text-lg font-bold text-sky-700" id="kb-extra-{{ idx }}">—</span>
+            <span class="text-lg font-bold text-sky-700" id="kb-extra-{{ idx }}">-</span>
           </div>
           <div class="kpi-pill bg-slate-100 border border-slate-200">
             <span class="text-[10px] text-slate-500 font-semibold uppercase">No Mapping</span>
-            <span class="text-lg font-bold text-slate-600" id="kb-nomap-{{ idx }}">—</span>
+            <span class="text-lg font-bold text-slate-600" id="kb-nomap-{{ idx }}">-</span>
           </div>
         </div>
 
@@ -260,7 +260,7 @@
               <div class="ml-auto flex items-center gap-2 flex-shrink-0 pr-2">
                 <a href="/verify/export-missed/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
                    class="text-xs text-red-600 hover:text-red-800 hover:underline flex items-center gap-1" target="_blank"
-                   title="Missed Ad Report PDF — confirmed not-aired spots within LMRB coverage (send to channel for makeup)">
+                   title="Missed Ad Report PDF - confirmed not-aired spots within LMRB coverage (send to channel for makeup)">
                   <i class="fa-solid fa-file-pdf"></i> Missed Ad Report
                 </a>
                 <span class="text-slate-300">|</span>
@@ -329,15 +329,15 @@ function buildTable(rows, showStatus) {
     const cls = STATUS_CLS[r.status] || '';
     html += '<tr>';
     html += `<td class="font-medium">${esc(r.brand)}</td>`;
-    html += `<td>${r.duration ? r.duration + 's' : '—'}</td>`;
-    html += `<td>${esc(r.programme) || '—'}</td>`;
-    html += `<td>${esc(r.planned_date) || '—'}</td>`;
-    html += `<td>${esc(r.planned_start) || '—'}</td>`;
-    html += `<td>${esc(r.planned_end) || '—'}</td>`;
+    html += `<td>${r.duration ? r.duration + 's' : '-'}</td>`;
+    html += `<td>${esc(r.programme) || '-'}</td>`;
+    html += `<td>${esc(r.planned_date) || '-'}</td>`;
+    html += `<td>${esc(r.planned_start) || '-'}</td>`;
+    html += `<td>${esc(r.planned_end) || '-'}</td>`;
     if (hasAired) {
-      html += `<td>${esc(r.aired_date) || '—'}</td>`;
-      html += `<td class="font-mono text-xs">${esc(r.air_time) || '—'}</td>`;
-      html += `<td class="text-slate-400">${esc(r.source) || '—'}</td>`;
+      html += `<td>${esc(r.aired_date) || '-'}</td>`;
+      html += `<td class="font-mono text-xs">${esc(r.air_time) || '-'}</td>`;
+      html += `<td class="text-slate-400">${esc(r.source) || '-'}</td>`;
     }
     if (showStatus) {
       html += `<td><span class="status-badge ${cls}">${esc(r.status)}</span></td>`;

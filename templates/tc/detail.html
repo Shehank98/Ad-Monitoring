@@ -253,10 +253,10 @@
 
 <!-- ── Colour legend + hint ───────────────────────────────────── -->
 <div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
-  <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Aired — confirmed by both TC &amp; LMRB</span>
-  <span class="badge badge-amber"><i class="fa-solid fa-file-certificate"></i> TC only — TC says aired, LMRB not confirmed</span>
-  <span class="badge badge-blue"><i class="fa-solid fa-eye"></i> LMRB only — LMRB found a match, no TC record</span>
-  <span class="badge badge-red"><i class="fa-solid fa-circle-xmark"></i> Not aired — neither source confirms</span>
+  <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Aired - confirmed by both TC &amp; LMRB</span>
+  <span class="badge badge-amber"><i class="fa-solid fa-file-certificate"></i> TC only - TC says aired, LMRB not confirmed</span>
+  <span class="badge badge-blue"><i class="fa-solid fa-eye"></i> LMRB only - LMRB found a match, no TC record</span>
+  <span class="badge badge-red"><i class="fa-solid fa-circle-xmark"></i> Not aired - neither source confirms</span>
   <span class="text-slate-400 ml-2"><i class="fa-solid fa-hand-pointer mr-1"></i>Click any row to see match confidence details</span>
 </div>
 
@@ -362,7 +362,7 @@
           </td>
           <td class="text-slate-600 max-w-[120px] truncate" title="{{ r.lmrb_theme }}">{{ r.lmrb_theme }}</td>
         {% else %}
-          <td class="group-sep text-red-400 italic text-center" colspan="4">— not found —</td>
+          <td class="group-sep text-red-400 italic text-center" colspan="4">- not found -</td>
         {% endif %}
 
         <!-- TC -->
@@ -387,7 +387,7 @@
           </td>
           <td class="text-slate-600 max-w-[120px] truncate" title="{{ r.tc_theme }}">{{ r.tc_theme }}</td>
         {% else %}
-          <td class="group-sep text-red-400 italic text-center" colspan="4">— not found —</td>
+          <td class="group-sep text-red-400 italic text-center" colspan="4">- not found -</td>
         {% endif %}
 
         <!-- Status + mini confidence bar -->
@@ -405,7 +405,7 @@
           {% endif %}
           <!-- Mini confidence bar -->
           {% if r.status != 'not_aired' %}
-          <div class="conf-track conf-{{ r.confidence_label }}" title="{{ r.confidence_pct }}% confidence — {{ r.confidence_label }}">
+          <div class="conf-track conf-{{ r.confidence_label }}" title="{{ r.confidence_pct }}% confidence - {{ r.confidence_label }}">
             <div class="conf-fill" style="width: {{ r.confidence_pct }}%;"></div>
           </div>
           <div class="conf-label-txt">{{ r.confidence_pct }}%</div>
@@ -434,7 +434,7 @@
                 <div class="detail-row-val mt-2 text-xs text-slate-500">
                   {% if r.status == 'aired' %}
                     TC confirmed by LMRB
-                    {% if r.tc_lmrb_delta_secs is not None %} — gap: {{ r.tc_lmrb_delta_secs }}s{% endif %}
+                    {% if r.tc_lmrb_delta_secs is not None %} - gap: {{ r.tc_lmrb_delta_secs }}s{% endif %}
                   {% elif r.status == 'tc_only' %}
                     TC matched schedule but LMRB did not confirm
                   {% elif r.status == 'lmrb_only' %}
@@ -453,7 +453,7 @@
                 <div class="detail-row-val">
                   <div><span class="lbl">Date</span> {{ r.plan_date|date:"d M Y" }}</div>
                   <div><span class="lbl">Window</span> {{ r.plan_start }} – {{ r.plan_end }}</div>
-                  <div><span class="lbl">Programme</span> {{ r.plan_programme|default:"—" }}</div>
+                  <div><span class="lbl">Programme</span> {{ r.plan_programme|default:"-" }}</div>
                   <div><span class="lbl">Duration</span> {{ r.duration }}s</div>
                 </div>
               </div>
@@ -471,8 +471,8 @@
                     {% if r.lmrb_delta_secs == 0 %}<span class="delta-pill delta-ok ml-1">✓ in window</span>
                     {% elif r.lmrb_delta_secs is not None %}<span class="delta-pill {% if r.lmrb_delta_secs <= 300 %}delta-near{% else %}delta-far{% endif %} ml-1">+{{ r.lmrb_delta_secs }}s outside</span>{% endif %}
                   </div>
-                  <div><span class="lbl">Theme</span> {{ r.lmrb_theme|default:"—" }}</div>
-                  <div><span class="lbl">Programme</span> {{ r.lmrb_programme|default:"—" }}</div>
+                  <div><span class="lbl">Theme</span> {{ r.lmrb_theme|default:"-" }}</div>
+                  <div><span class="lbl">Programme</span> {{ r.lmrb_programme|default:"-" }}</div>
                 </div>
               </div>
               {% endif %}
@@ -493,8 +493,8 @@
                   {% if r.tc_lmrb_delta_secs is not None %}
                   <div><span class="lbl">TC↔LMRB gap</span> {{ r.tc_lmrb_delta_secs }}s</div>
                   {% endif %}
-                  <div><span class="lbl">Theme</span> {{ r.tc_theme|default:"—" }}</div>
-                  <div><span class="lbl">Programme</span> {{ r.tc_programme|default:"—" }}</div>
+                  <div><span class="lbl">Theme</span> {{ r.tc_theme|default:"-" }}</div>
+                  <div><span class="lbl">Programme</span> {{ r.tc_programme|default:"-" }}</div>
                 </div>
               </div>
               {% endif %}
@@ -507,18 +507,18 @@
                   <div><span class="lbl">LMRB time</span> <strong>{{ r.near_lmrb_time }}</strong></div>
                   <div><span class="lbl">Distance from TC</span>
                     {% if r.near_lmrb_delta <= 5 %}
-                      <span class="delta-pill delta-ok">{{ r.near_lmrb_delta }}s — within tolerance</span>
+                      <span class="delta-pill delta-ok">{{ r.near_lmrb_delta }}s - within tolerance</span>
                     {% elif r.near_lmrb_delta <= 30 %}
-                      <span class="delta-pill delta-near">{{ r.near_lmrb_delta }}s — very close</span>
+                      <span class="delta-pill delta-near">{{ r.near_lmrb_delta }}s - very close</span>
                     {% elif r.near_lmrb_delta <= 120 %}
-                      <span class="delta-pill delta-near">{{ r.near_lmrb_delta }}s — close</span>
+                      <span class="delta-pill delta-near">{{ r.near_lmrb_delta }}s - close</span>
                     {% else %}
-                      <span class="delta-pill delta-far">{{ r.near_lmrb_delta }}s — far</span>
+                      <span class="delta-pill delta-far">{{ r.near_lmrb_delta }}s - far</span>
                     {% endif %}
                   </div>
                   <div class="text-slate-500 text-xs mt-1">
                     {% if r.near_lmrb_delta <= 5 %}
-                      This LMRB row is within the ±5s tolerance — re-running reconciliation may confirm it.
+                      This LMRB row is within the ±5s tolerance - re-running reconciliation may confirm it.
                     {% elif r.near_lmrb_delta <= 60 %}
                       An LMRB row is nearby. Consider increasing the TC–LMRB time tolerance in Settings if this is a systematic offset.
                     {% else %}

@@ -5,19 +5,19 @@ Converts the "pivot" agency schedule format (rows = programme/time-slots,
 columns = dates, cell values = number of spots) into the flat ScheduleRow
 format expected by the upload pipeline.
 
-Works for all channels — no channel-specific logic.
+Works for all channels - no channel-specific logic.
 
 Flat output columns
 -------------------
-    Advertisement_Type  — 'COMMERCIAL BENEFITS' or 'SPONSORSHIP BENEFITS'
-    Programme           — programme name
-    Date                — 'YYYY-MM-DD' string
-    Day                 — day abbreviation (MON, TUE, …)
-    Start_Time          — 'HH:MM:SS'
-    End_Time            — 'HH:MM:SS'
-    Duration            — integer seconds
-    Brand               — brand / copy title
-    Spot_Number         — 1-based spot index within that date
+    Advertisement_Type  - 'COMMERCIAL BENEFITS' or 'SPONSORSHIP BENEFITS'
+    Programme           - programme name
+    Date                - 'YYYY-MM-DD' string
+    Day                 - day abbreviation (MON, TUE, …)
+    Start_Time          - 'HH:MM:SS'
+    End_Time            - 'HH:MM:SS'
+    Duration            - integer seconds
+    Brand               - brand / copy title
+    Spot_Number         - 1-based spot index within that date
 
 If the file is already in flat format (no detectable header row or no date
 columns), `convert_schedule_excel` returns None so the caller can fall back

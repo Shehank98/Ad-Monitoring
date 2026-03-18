@@ -1,5 +1,5 @@
 """
-Competitor Analysis module — completely independent from the core reconciliation system.
+Competitor Analysis module - completely independent from the core reconciliation system.
 Handles: upload, detect, insights dashboard, deep competitor profiling, data management.
 """
 import hashlib
@@ -477,11 +477,11 @@ def _build_dashboard_data(request, account):
         'total_spend':    total_spend,
         'total_ads':      total_ads,
         'avg_duration':   avg_duration,
-        'top_advertiser': top_adv_kpi['advertiser'] if top_adv_kpi else '—',
-        'top_channel':    top_ch_kpi['channel'] if top_ch_kpi else '—',
-        'top_programme':  top_prog_kpi['program'] if top_prog_kpi else '—',
+        'top_advertiser': top_adv_kpi['advertiser'] if top_adv_kpi else '-',
+        'top_channel':    top_ch_kpi['channel'] if top_ch_kpi else '-',
+        'top_programme':  top_prog_kpi['program'] if top_prog_kpi else '-',
         'prime_pct':      prime_pct,
-        'market_leader':  top_adv_kpi['advertiser'] if top_adv_kpi else '—',
+        'market_leader':  top_adv_kpi['advertiser'] if top_adv_kpi else '-',
         'market_leader_spend': float(top_adv_kpi['s'] or 0) if top_adv_kpi else 0,
     }
 
@@ -688,7 +688,7 @@ def _compute_insights(account, filtered_qs, top5_adv):
             'detail': ', '.join(sorted(new_channels)),
         })
 
-    # Competitive pressure — programmes with 3+ advertisers
+    # Competitive pressure - programmes with 3+ advertisers
     pressure = list(
         filtered_qs.exclude(program='')
         .values('program')
@@ -703,7 +703,7 @@ def _compute_insights(account, filtered_qs, top5_adv):
             'icon':   'fa-fire',
             'color':  'red',
             'title':  'High Competitive Pressure Zone',
-            'detail': f'"{p0["program"]}" has {p0["adv_count"]} competitors — heavy inventory competition.',
+            'detail': f'"{p0["program"]}" has {p0["adv_count"]} competitors - heavy inventory competition.',
         })
 
     # Weekend heavy detection
@@ -803,7 +803,7 @@ def _build_deep_data(request, account, all_advertisers):
         else:
             bp['Middle'] += 1
 
-    # Radar metrics — normalised against all advertisers in this account
+    # Radar metrics - normalised against all advertisers in this account
     all_adv_agg = list(
         CompetitorAd.objects.filter(account=account)
         .values('advertiser')

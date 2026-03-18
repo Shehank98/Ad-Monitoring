@@ -15,7 +15,7 @@
     </summary>
     <div class="px-4 pb-3 text-xs text-blue-700 leading-relaxed">
       <p>The schedule uses <strong>Brand</strong> names. <strong>LMRB Theme</strong> connects to monitoring data.
-      <strong>TC Theme(s)</strong> connect to the Transmission Certificate — multiple TC names can map to one brand row.
+      <strong>TC Theme(s)</strong> connect to the Transmission Certificate - multiple TC names can map to one brand row.
       Select <strong>Channel → Month → Schedule</strong> to filter the dropdowns to just the data you need.</p>
     </div>
   </details>
@@ -81,11 +81,11 @@
           </div>
           <!-- ── end scope filter ───────────────────────────────────────── -->
 
-          <!-- Product (Step 1 — filters LMRB themes) -->
+          <!-- Product (Step 1 - filters LMRB themes) -->
           <div>
             <label class="field-label">
               <i class="fa-solid fa-boxes-stacked mr-1 text-slate-400"></i>
-              Step 1 — Product
+              Step 1 - Product
               <span class="text-slate-400 font-normal normal-case ml-1">optional · from LMRB</span>
             </label>
             <input type="text" name="product" id="productInput" list="productOptions"
@@ -96,7 +96,7 @@
             <div id="productQuickPick" class="mt-2 hidden">
               <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">
                 <i class="fa-solid fa-layer-group text-[9px] mr-0.5"></i>
-                Products in LMRB — click to select:
+                Products in LMRB - click to select:
               </p>
               <div id="productQuickPickItems" class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto"></div>
             </div>
@@ -105,7 +105,7 @@
 
           <!-- Brand -->
           <div>
-            <label class="field-label"><i class="fa-solid fa-tag mr-1 text-slate-400"></i> Step 2 — Brand (Schedule) <span class="text-red-400">*</span></label>
+            <label class="field-label"><i class="fa-solid fa-tag mr-1 text-slate-400"></i> Step 2 - Brand (Schedule) <span class="text-red-400">*</span></label>
             <input type="text" name="brand" id="brandInput" list="brandOptions"
                    placeholder="Type or select…" class="input-field" required autocomplete="off">
             <datalist id="brandOptions"></datalist>
@@ -113,7 +113,7 @@
             <div id="brandQuickPick" class="mt-2 hidden">
               <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">
                 <i class="fa-solid fa-filter text-[9px] mr-0.5"></i>
-                Brands in this schedule — click to fill:
+                Brands in this schedule - click to fill:
               </p>
               <div id="brandQuickPickItems" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto"></div>
             </div>
@@ -122,7 +122,7 @@
 
           <!-- LMRB Theme -->
           <div>
-            <label class="field-label"><i class="fa-solid fa-chart-line mr-1 text-slate-400"></i> Step 3 — LMRB Theme <span class="text-red-400">*</span></label>
+            <label class="field-label"><i class="fa-solid fa-chart-line mr-1 text-slate-400"></i> Step 3 - LMRB Theme <span class="text-red-400">*</span></label>
             <input type="text" name="theme" id="themeInput" list="themeOptions"
                    placeholder="Type or select…" class="input-field" required autocomplete="off">
             <datalist id="themeOptions"></datalist>
@@ -130,7 +130,7 @@
             <div id="lmrbQuickPick" class="mt-2 hidden">
               <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">
                 <i class="fa-solid fa-filter text-[9px] mr-0.5"></i>
-                <span id="lmrbQuickPickLabel">Themes for this channel/period — click to fill:</span>
+                <span id="lmrbQuickPickLabel">Themes for this channel/period - click to fill:</span>
               </p>
               <div id="lmrbQuickPickItems" class="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto"></div>
             </div>
@@ -138,7 +138,7 @@
             <p class="field-hint text-amber-600"><i class="fa-solid fa-asterisk text-[9px] mr-1"></i>Tip: End with <code class="bg-amber-50 px-1 rounded">*</code> for prefix wildcard matching (e.g. <code class="bg-amber-50 px-1 rounded">Brand Name 2025*</code>)</p>
           </div>
 
-          <!-- TC Themes — multi-select chip picker -->
+          <!-- TC Themes - multi-select chip picker -->
           <div>
             <label class="field-label">
               <i class="fa-solid fa-file-invoice mr-1 text-slate-400"></i> TC Theme(s)
@@ -162,7 +162,7 @@
                              hover:bg-amber-200 transition-colors flex-shrink-0">Add</button>
             </div>
             <div id="addTcQuickPick" class="mt-2 hidden">
-              <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">Known TC themes — click to add:</p>
+              <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">Known TC themes - click to add:</p>
               <div id="addTcQuickPickItems" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto"></div>
             </div>
             <input type="hidden" name="tc_theme" id="addTcHidden">
@@ -261,7 +261,7 @@
                       <span class="truncate">{{ m.product }}</span>
                     </span>
                     {% else %}
-                    <span class="text-[11px] text-slate-400 italic">—</span>
+                    <span class="text-[11px] text-slate-400 italic">-</span>
                     {% endif %}
                     <button onclick="openEditFieldModal({{ m.id }}, 'product', '{{ m.product|escapejs }}')"
                             class="inline-flex items-center px-1 py-0.5 rounded text-[10px] text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 transition-colors border border-transparent hover:border-indigo-200"
@@ -427,7 +427,7 @@
                      hover:bg-amber-200 transition-colors flex-shrink-0">Add</button>
     </div>
     <div id="editTcQuickPick" class="mb-4 hidden">
-      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">Known TC themes — click to add:</p>
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">Known TC themes - click to add:</p>
       <div id="editTcQuickPickItems" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto"></div>
     </div>
     <form method="post" id="editTcForm">
@@ -666,8 +666,8 @@ function _renderLmrbQuickPick(themes) {
   }
   if (label) {
     label.textContent = _curProduct
-      ? `Themes for "${_curProduct}" — click to fill:`
-      : 'Themes for this channel/period — click to fill:';
+      ? `Themes for "${_curProduct}" - click to fill:`
+      : 'Themes for this channel/period - click to fill:';
   }
   wrap.classList.remove('hidden');
   items.innerHTML = themes.map(t =>

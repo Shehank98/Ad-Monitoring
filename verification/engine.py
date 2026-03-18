@@ -1,5 +1,5 @@
 """
-Verification engine — queries ScheduleRow and LMRBRow from the database.
+Verification engine - queries ScheduleRow and LMRBRow from the database.
 
 Row-level locking:
   When a ScheduleRow is matched to an LMRBRow, both have is_matched=True set.
@@ -234,9 +234,9 @@ def _active_schedules_for_scope(account_id, channel, month):
     Return the list of Schedule objects to use for matching, in ascending
     schedule_number order.
 
-    Rule 12 — versioning: when multiple uploads share the same schedule_number,
+    Rule 12 - versioning: when multiple uploads share the same schedule_number,
     only the one with the highest version number (latest upload) is kept.
-    Rule 10 — ordering: the resulting distinct schedules are sorted by
+    Rule 10 - ordering: the resulting distinct schedules are sorted by
     schedule_number so overlapping date ranges are processed in booking order.
     """
     all_schedules = list(
@@ -274,7 +274,7 @@ def run_scope(account_id, channel, month, mode='smart'):
     across all schedules so monitoring rows cannot be double-claimed.
 
     Verification is capped at the latest date for which LMRB data exists
-    (Rule 8) — schedule rows beyond that date are left unmatched until more
+    (Rule 8) - schedule rows beyond that date are left unmatched until more
     data is uploaded.
 
     Returns (matched_df, prog_mis_df, late_df, not_aired_df, extra_df), total_sch.
@@ -350,7 +350,7 @@ def run_scope(account_id, channel, month, mode='smart'):
     # Case-insensitive channel match so "Sirasa TV" / "SIRASA TV" resolve to the
     # same pool regardless of how the LMRB file spells the channel name.
     lmrb_qs = LMRBRow.objects.filter(account_id=account_id, channel__iexact=channel)
-    # Always exclude manually matched LMRB rows — permanently locked once a
+    # Always exclude manually matched LMRB rows - permanently locked once a
     # ManualMatch record exists.  This filter applies in both smart and reset modes.
     lmrb_qs = lmrb_qs.filter(is_manual_matched=False)
     if mode == 'smart':
@@ -365,7 +365,7 @@ def run_scope(account_id, channel, month, mode='smart'):
 
     # ── Process each schedule in order, sharing the LMRB pool ─────────────────
     # Rule 10: schedules are ordered by schedule_number ascending.
-    # consumed_idx carries over — a pool row used by an earlier schedule cannot
+    # consumed_idx carries over - a pool row used by an earlier schedule cannot
     # be claimed again by a later one (Rule 11: "Extra Airings unless matched to
     # a second schedule" is handled naturally because later schedules see the
     # remaining unconsumed pool).
@@ -383,13 +383,13 @@ def run_scope(account_id, channel, month, mode='smart'):
                 schedule=sched, ad_type='COMMERCIAL BENEFITS',
             )
         else:
-            # No Schedule headers found — fall back to all rows for the scope
+            # No Schedule headers found - fall back to all rows for the scope
             sch_qs = ScheduleRow.objects.filter(
                 account_id=account_id, channel=channel, month=month,
                 ad_type='COMMERCIAL BENEFITS',
             )
 
-        # Always exclude manually matched rows — they are locked and must never
+        # Always exclude manually matched rows - they are locked and must never
         # appear as Not Aired, Late Telecast, or be re-processed by the engine.
         sch_qs = sch_qs.filter(is_manual_matched=False)
 
@@ -430,7 +430,7 @@ def run_scope(account_id, channel, month, mode='smart'):
     late_df      = _concat(all_late_dfs)
     not_aired_df = _concat(all_not_aired_dfs)
 
-    # ── Rule 11: Extra Airings — pool rows not consumed by any schedule ────────
+    # ── Rule 11: Extra Airings - pool rows not consumed by any schedule ────────
     # These are genuine extra airings; if a second schedule had claimed them they
     # would have been consumed above and not appear here.
     extra_rows = []
@@ -481,7 +481,7 @@ def auto_run_all_for_account(account_id):
     Trigger smart verification for every (channel × month) scope that has both
     ScheduleRow records AND LMRBRow records for the account.
 
-    Per-scope errors are caught — a single failure never blocks other scopes.
+    Per-scope errors are caught - a single failure never blocks other scopes.
     Returns list of {'channel', 'month', 'ok', 'error'} dicts.
     """
     sch_channels = list(

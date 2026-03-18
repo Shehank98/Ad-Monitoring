@@ -344,8 +344,8 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
     Column definitions:
     - Aired       : TC rows that are schedule-matched AND LMRB-confirmed (TC ∩ LMRB)
     - 3rd Party   : Total LMRB row count for this brand/theme (independent 3rd-party count)
-    - Extra       : max(0, LMRB_count - Planned)  — LMRB found more than planned
-    - Missed      : max(0, Planned - LMRB_count)  — LMRB found fewer than planned
+    - Extra       : max(0, LMRB_count - Planned)  - LMRB found more than planned
+    - Missed      : max(0, Planned - LMRB_count)  - LMRB found fewer than planned
 
     Returns:
     {
@@ -433,7 +433,7 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
 
         # FIX 7: If there is no tc_theme mapping for this brand+duration,
         # ALL three sources (Schedule, TC, LMRB) cannot be reconciled.
-        # Show Aired=0, 3rd Party=0 — do not count unverified matches.
+        # Show Aired=0, 3rd Party=0 - do not count unverified matches.
         if not tc_themes:
             manual_q = ManualMatch.objects.filter(
                 account_id=account_id, channel=channel, month=month,
@@ -517,9 +517,9 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
     # This replaces the old TC-based aired count for sponsorships.
     #
     # status per row:
-    #   'complete'   — aired >= planned
-    #   'incomplete' — aired < planned but leftover LMRB rows exist (auto ran)
-    #   'no_data'    — no brand mapping or zero leftover LMRB rows anywhere
+    #   'complete'   - aired >= planned
+    #   'incomplete' - aired < planned but leftover LMRB rows exist (auto ran)
+    #   'no_data'    - no brand mapping or zero leftover LMRB rows anywhere
     #
     # available_lmrb = count of unmatched LMRBRows for the scope that map to this
     # brand/duration.  Used by the "Add from LMRB" picker to decide whether to
@@ -619,7 +619,7 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
                 status = 'incomplete' if (aired > 0 or available_lmrb > 0) else 'no_data'
 
             # 3rd Party for sponsorship = total unique LMRB observations confirmed
-            # (same set as aired — TC-confirmed + SponsorshipLmrbAssignment, deduplicated).
+            # (same set as aired - TC-confirmed + SponsorshipLmrbAssignment, deduplicated).
             third_party = aired
 
             missed = max(0, planned - aired)

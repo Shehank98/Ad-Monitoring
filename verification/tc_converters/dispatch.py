@@ -39,7 +39,7 @@ def get_converter(channel: str):
 
     Returns
     -------
-    module  (always non-None — generic is the fallback)
+    module  (always non-None - generic is the fallback)
     """
     norm = channel.lower().strip()
     for key, module in CHANNEL_CONVERTERS.items():

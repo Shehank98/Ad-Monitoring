@@ -2,8 +2,8 @@
 Verification views.
 
 Run modes (used by run_verification):
-  smart  (default) — skip already-matched schedule rows; pre-lock consumed LMRB rows.
-  reset             — delete all MatchResults for the scope, then run from scratch.
+  smart  (default) - skip already-matched schedule rows; pre-lock consumed LMRB rows.
+  reset             - delete all MatchResults for the scope, then run from scratch.
 
 Exports are DB-based: they read persisted MatchResult records and never re-run
 the matching engine.  This makes downloads instant regardless of file size.
@@ -252,7 +252,7 @@ def _build_campaign_rows(user):
         channel = c['channel']
         month   = c['month']
 
-        # --- Schedule row count — COMMERCIAL BENEFITS only, active schedules only ---
+        # --- Schedule row count - COMMERCIAL BENEFITS only, active schedules only ---
         # Use the same active-schedule logic as the engine (highest version per
         # schedule_number) so duplicate uploads don't inflate the planned count.
         active_ids = active_schedule_ids(a_id, channel, month)
@@ -323,7 +323,7 @@ def _build_campaign_rows(user):
 
 @login_required
 def tool(request):
-    """Verify Ads — summary dashboard (FIX 24/25/26)."""
+    """Verify Ads - summary dashboard (FIX 24/25/26)."""
     rows = _build_campaign_rows(request.user)
     return render(request, 'verification/tool.html', {'campaign_rows': rows})
 
@@ -332,7 +332,7 @@ def tool(request):
 
 @login_required
 def verify_row(request):
-    """AJAX POST — run verification for one (account, channel, month) and return updated row data."""
+    """AJAX POST - run verification for one (account, channel, month) and return updated row data."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
@@ -377,7 +377,7 @@ def verify_row(request):
 
 @login_required
 def load_results(request):
-    """GET — return persisted MatchResult rows for a scope, grouped by status."""
+    """GET - return persisted MatchResult rows for a scope, grouped by status."""
     account_id = request.GET.get('account_id')
     channel    = request.GET.get('channel')
     month      = request.GET.get('month')
@@ -620,7 +620,7 @@ def run_verification(request):
 def export_excel(request):
     """
     DB-based export for a specific (account, channel, month) scope.
-    Reads MatchResult records — no engine re-run required.
+    Reads MatchResult records - no engine re-run required.
     """
     account_id = request.POST.get('account_id') or request.GET.get('account_id')
     channel    = request.POST.get('channel')    or request.GET.get('channel')
@@ -646,7 +646,7 @@ def export_missed(request):
     Export a 'Missed Ad Report' PDF for a specific scope.
 
     Only includes Not Aired spots whose planned date is on or before the last
-    date that LMRB data covers — i.e. ads we can confirm were not aired, not
+    date that LMRB data covers - i.e. ads we can confirm were not aired, not
     ads that are simply waiting for future monitoring data.
 
     PDF format matches the dashboard Missed Ads PDF.
@@ -744,7 +744,7 @@ def export_all(request):
 @login_required
 def report(request):
     """
-    Global report page — per-scope (channel × month) summary from MatchResult.
+    Global report page - per-scope (channel × month) summary from MatchResult.
 
     Query param: ?account_id=<id>
     """

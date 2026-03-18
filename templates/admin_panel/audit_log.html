@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Audit Log{% endblock %}
 {% block page_title %}Audit Log{% endblock %}
-{% block page_subtitle %}Record of sensitive admin actions — settings changes, data deletions, user management{% endblock %}
+{% block page_subtitle %}Record of sensitive admin actions - settings changes, data deletions, user management{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -116,11 +116,11 @@
           </td>
           <td class="px-3 py-2.5 max-w-xs">
             <p class="text-xs text-slate-600 truncate" title="{{ log.detail }}">
-              {{ log.detail|default:"—" }}
+              {{ log.detail|default:"-" }}
             </p>
           </td>
           <td class="px-3 py-2.5 text-right">
-            <span class="text-[10px] font-mono text-slate-400">{{ log.ip|default:"—" }}</span>
+            <span class="text-[10px] font-mono text-slate-400">{{ log.ip|default:"-" }}</span>
           </td>
         </tr>
         {% endfor %}

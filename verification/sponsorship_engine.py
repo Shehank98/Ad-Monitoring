@@ -9,18 +9,18 @@ using the same BrandMapping.theme lookup that the commercial engine uses.
 
 Three-step Aired count strategy (per business rules):
 
-Step 1 — Auto (reconcile_sponsorship):
+Step 1 - Auto (reconcile_sponsorship):
   Takes LMRBRows that are NOT commercially matched (is_matched=False) and NOT
   already sponsorship-matched (is_sponsorship_matched=False), then pairs them
   one-to-one with unmatched SPONSORSHIP ScheduleRows in brand/duration order.
   When leftovers >= planned the product is fully covered; otherwise flagged
   incomplete.  Locked rows: is_sponsorship_matched=True, SponsorshipLmrbAssignment created.
 
-Step 2 — Manual (manual_assign):
+Step 2 - Manual (manual_assign):
   The operations user picks specific LMRB rows from a list of remaining
   unmatched rows to cover any gap.  Same locking applies.
 
-Step 3 — Count-only fallback:
+Step 3 - Count-only fallback:
   If a sponsorship product has no mapping and no leftover rows, build_summary_data
   in tc_engine.py will show Aired=0 with status='no_data' so the user can fill it
   manually.
@@ -106,7 +106,7 @@ def _scope_date_range(account_id, channel, month):
 def reconcile_sponsorship(account_id: int, channel: str, month: str,
                           mode: str = 'smart', schedule_id=None) -> dict:
     """
-    Step 1 — Auto: match leftover LMRBRows to SPONSORSHIP ScheduleRows.
+    Step 1 - Auto: match leftover LMRBRows to SPONSORSHIP ScheduleRows.
 
     mode='smart'  Skip schedule rows that already have a SponsorshipLmrbAssignment.
     mode='reset'  Call reset_sponsorship first, then run fresh.
@@ -163,7 +163,7 @@ def reconcile_sponsorship(account_id: int, channel: str, month: str,
     if d_max:
         lmrb_qs = lmrb_qs.filter(date__lte=d_max)
 
-    # Index by (norm_theme, duration) — sorted by date for stable ordering
+    # Index by (norm_theme, duration) - sorted by date for stable ordering
     lmrb_pool: dict[tuple, list] = {}
     for lr in lmrb_qs.order_by('date', 'advt_time'):
         key = (_normalize(lr.advt_theme), int(lr.duration) if lr.duration is not None else None)
@@ -251,7 +251,7 @@ def lmrb_candidates(account_id: int, channel: str, month: str) -> list:
 def manual_assign(account_id: int, channel: str, month: str,
                   assignments: list, user) -> dict:
     """
-    Step 2 — Manual: create SponsorshipLmrbAssignments chosen by the user.
+    Step 2 - Manual: create SponsorshipLmrbAssignments chosen by the user.
 
     assignments: list of (schedule_row_id, lmrb_row_id) tuples.
     Returns {'created': int, 'skipped': int}.

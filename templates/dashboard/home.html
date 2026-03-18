@@ -58,7 +58,7 @@
        style="background:radial-gradient(circle,rgba(99,102,241,.12) 0%,transparent 70%);transform:translateY(40%);"></div>
 
   <div class="relative px-7 py-7 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
-    {# Left — avatar + greeting #}
+    {# Left - avatar + greeting #}
     <div class="flex items-center gap-4">
       <div class="w-14 h-14 rounded-2xl flex items-center justify-center text-white font-extrabold text-xl flex-shrink-0"
            style="background:linear-gradient(135deg,#EB3F43,#c4292d);box-shadow:0 8px 24px rgba(235,63,67,.35);">
@@ -87,7 +87,7 @@
       </div>
     </div>
 
-    {# Right — date / time / quick links #}
+    {# Right - date / time / quick links #}
     <div class="flex flex-col items-end gap-3">
       <div class="text-right">
         <p class="font-bold text-white" id="hero-date" style="font-size:.95rem;"></p>
@@ -210,7 +210,7 @@
       <div class="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 text-xs">
         <i class="fa-solid fa-triangle-exclamation text-amber-500 text-[10px]"></i>
         <span class="font-semibold text-amber-700">{{ a.name }}</span>
-        <span class="text-amber-500">— no LMRB</span>
+        <span class="text-amber-500">- no LMRB</span>
       </div>
       {% endfor %}
 
@@ -218,7 +218,7 @@
       <div class="flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5 text-xs">
         <i class="fa-solid fa-circle-info text-blue-400 text-[10px]"></i>
         <span class="font-semibold text-blue-700">{{ a.name }}</span>
-        <span class="text-blue-500">— no schedule</span>
+        <span class="text-blue-500">- no schedule</span>
       </div>
       {% endfor %}
 
@@ -226,7 +226,7 @@
       <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs">
         <i class="fa-solid fa-clock text-slate-400 text-[10px]"></i>
         <span class="font-semibold text-slate-600">{{ s.name }}</span>
-        <span class="text-slate-400">— {{ s.days }}d since upload</span>
+        <span class="text-slate-400">- {{ s.days }}d since upload</span>
       </div>
       {% endfor %}
 

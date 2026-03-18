@@ -310,7 +310,7 @@
       <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-blue-100">
         <i class="fa-solid fa-rectangle-ad text-blue-600 text-xs"></i>
       </span>
-      Commercial Benefits — Planned vs Aired
+      Commercial Benefits - Planned vs Aired
     </h3>
     <div class="flex items-center gap-3 text-xs text-slate-500">
       <span class="flex items-center gap-1.5">
@@ -321,7 +321,7 @@
       </span>
     </div>
   </div>
-  <p class="text-[10px] text-slate-400 mb-4">By Product &amp; Theme — values shown on bars</p>
+  <p class="text-[10px] text-slate-400 mb-4">By Product &amp; Theme - values shown on bars</p>
 
   <!-- Modern bar chart -->
   {% with row_count=commercial_chart_data|length %}
@@ -383,11 +383,11 @@
                 <span class="ml-1 text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700">unmapped</span>
               {% endif %}
             </td>
-            <td class="text-right text-slate-500">{{ row.duration|default:"—" }}</td>
+            <td class="text-right text-slate-500">{{ row.duration|default:"-" }}</td>
             <td class="text-right font-bold text-blue-700">{{ row.planned }}</td>
             <td class="text-right font-bold {% if row.aired >= row.planned %}text-emerald-700{% elif row.aired > 0 %}text-amber-600{% else %}text-red-500{% endif %}">
               {% if row.aired == 0 and row.raw_lmrb_count > 0 %}
-                <span title="Verification not run yet — {{ row.raw_lmrb_count }} raw LMRB observation{{ row.raw_lmrb_count|pluralize }}">
+                <span title="Verification not run yet - {{ row.raw_lmrb_count }} raw LMRB observation{{ row.raw_lmrb_count|pluralize }}">
                   {{ row.raw_lmrb_count }}
                   <span class="ml-0.5 text-[8px] font-normal px-1 py-0.5 rounded bg-slate-200 text-slate-500 align-middle">LMRB</span>
                 </span>
@@ -404,7 +404,7 @@
                 </div>
                 <span class="text-[10px] font-semibold text-slate-500">{% if row.planned > 0 %}{% widthratio row.aired row.planned 100 %}{% else %}0{% endif %}%</span>
               </div>
-              {% else %}—{% endif %}
+              {% else %}-{% endif %}
             </td>
             <td class="text-right">
               {% if row.programmes or row.raw_lmrb_count %}
@@ -423,7 +423,7 @@
                              hover:bg-blue-100 hover:text-blue-800 transition">
                 <i class="fa-solid fa-chart-column text-[9px]"></i> Details
               </button>
-              {% else %}—{% endif %}
+              {% else %}-{% endif %}
             </td>
           </tr>
           <!-- Expandable detail row -->
@@ -449,7 +449,7 @@
       <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-amber-100">
         <i class="fa-solid fa-award text-amber-600 text-xs"></i>
       </span>
-      Sponsorship Benefits — Planned vs Aired
+      Sponsorship Benefits - Planned vs Aired
     </h3>
     <div class="flex items-center gap-3 text-xs text-slate-500">
       <span class="flex items-center gap-1.5">
@@ -460,7 +460,7 @@
       </span>
     </div>
   </div>
-  <p class="text-[10px] text-slate-400 mb-4">By sponsorship type — uses LMRB keyword matching for aired counts</p>
+  <p class="text-[10px] text-slate-400 mb-4">By sponsorship type - uses LMRB keyword matching for aired counts</p>
 
   {% if spon_kw_breakdown %}
   <!-- Sponsorship by type: planned vs aired -->
@@ -560,11 +560,11 @@
                 <span class="ml-1 text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700">unmapped</span>
               {% endif %}
             </td>
-            <td class="text-right text-slate-500">{{ row.duration|default:"—" }}</td>
+            <td class="text-right text-slate-500">{{ row.duration|default:"-" }}</td>
             <td class="text-right font-bold text-amber-700">{{ row.planned }}</td>
             <td class="text-right font-bold {% if row.lmrb_count >= row.planned %}text-emerald-700{% elif row.lmrb_count > 0 %}text-amber-600{% else %}text-red-500{% endif %}">
               {% if row.lmrb_count == 0 and row.raw_lmrb_count > 0 %}
-                <span title="No assignment yet — {{ row.raw_lmrb_count }} raw LMRB observation{{ row.raw_lmrb_count|pluralize }}">
+                <span title="No assignment yet - {{ row.raw_lmrb_count }} raw LMRB observation{{ row.raw_lmrb_count|pluralize }}">
                   {{ row.raw_lmrb_count }}
                   <span class="ml-0.5 text-[8px] font-normal px-1 py-0.5 rounded bg-slate-200 text-slate-500 align-middle">LMRB</span>
                 </span>
@@ -581,7 +581,7 @@
                 </div>
                 <span class="text-[10px] font-semibold text-slate-500">{% widthratio row.lmrb_count row.planned 100 %}%</span>
               </div>
-              {% else %}—{% endif %}
+              {% else %}-{% endif %}
             </td>
             <td class="text-right">
               {% if row.programmes or row.raw_lmrb_count %}
@@ -599,7 +599,7 @@
                              hover:bg-amber-100 hover:text-amber-900 transition">
                 <i class="fa-solid fa-chart-column text-[9px]"></i> Details
               </button>
-              {% else %}—{% endif %}
+              {% else %}-{% endif %}
             </td>
           </tr>
           <!-- Expandable detail row -->
@@ -938,7 +938,7 @@
       <!-- Planned PT/Non-PT reference row -->
       <div class="flex gap-3 mb-3">
         <div class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs">
-          <span class="font-semibold text-slate-600">Planned Sponsorship —</span>
+          <span class="font-semibold text-slate-600">Planned Sponsorship -</span>
           <span class="ml-2 text-violet-700 font-bold">PT: {{ spon_planned_pt }}</span>
           <span class="ml-2 text-sky-700 font-bold">Non-PT: {{ spon_planned_non_pt }}</span>
           <span class="ml-2 text-slate-500">Total: {{ spon_planned_pt|add:spon_planned_non_pt }}</span>
@@ -966,7 +966,7 @@
             {% for kb in spon_kw_breakdown %}
             <tr>
               <td class="font-bold text-slate-800">{{ kb.kw }}</td>
-              <td class="text-right font-bold text-blue-700">{{ kb.planned|default:"—" }}</td>
+              <td class="text-right font-bold text-blue-700">{{ kb.planned|default:"-" }}</td>
               <td class="text-right font-bold {% if kb.total >= kb.planned and kb.planned %}text-emerald-700{% elif kb.total > 0 %}text-amber-700{% else %}text-slate-400{% endif %}">{{ kb.total }}</td>
               <td class="text-right">
                 {% if kb.planned %}
@@ -976,7 +976,7 @@
                   {% else %}bg-red-100 text-red-600{% endif %}">
                   {% widthratio kb.total kb.planned 100 %}%
                 </span>
-                {% else %}—{% endif %}
+                {% else %}-{% endif %}
               </td>
               <td class="text-right font-bold text-violet-700">{{ kb.pt }}</td>
               <td class="text-right font-bold text-sky-700">{{ kb.non_pt }}</td>
@@ -1191,7 +1191,7 @@
               <td class="max-w-[220px]">
                 {% for p in ta.programmes %}
                   <span class="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-blue-50 text-blue-700 text-[9px] mr-0.5 mb-0.5">{{ p.program }} <span class="font-bold">({{ p.cnt }})</span></span>
-                {% empty %}<span class="text-slate-400 text-[10px]">—</span>{% endfor %}
+                {% empty %}<span class="text-slate-400 text-[10px]">-</span>{% endfor %}
               </td>
               <td class="text-[10px] text-slate-500">
                 {{ ta.daily|length }} day{{ ta.daily|length|pluralize }}<br>
@@ -1258,7 +1258,7 @@
         <!-- Commercial chart in modal -->
         <div class="bg-slate-50 rounded-xl p-4">
           <h4 class="text-xs font-bold text-slate-600 uppercase tracking-wider mb-3">
-            <i class="fa-solid fa-rectangle-ad text-blue-500 mr-1"></i>Commercial — Planned vs Aired
+            <i class="fa-solid fa-rectangle-ad text-blue-500 mr-1"></i>Commercial - Planned vs Aired
           </h4>
           {% if commercial_chart_data %}
           <canvas id="commChartModal" style="max-height:260px;"></canvas>
@@ -1819,7 +1819,7 @@ function toggleCommDetails(btn) {
   if (isRaw) {
     html += `<div class="mb-3 flex items-center gap-2 text-[10px] px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700">
       <i class="fa-solid fa-triangle-exclamation"></i>
-      <span>Verification not yet run — showing raw LMRB observations found in this period.</span>
+      <span>Verification not yet run - showing raw LMRB observations found in this period.</span>
     </div>`;
   }
 
