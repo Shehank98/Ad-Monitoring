@@ -459,28 +459,28 @@
         <i class="nav-icon fa-solid fa-file-arrow-up"></i><span class="nav-text">Upload Schedule</span>
       </a>
 
-      <p class="nav-label"><span class="nav-text">Monitoring</span></p>
+      <p class="nav-label"><span class="nav-text">LMRB Data</span></p>
       <a href="/dashboard/monitoring/" class="nav-item {% if '/monitoring/' in path and 'upload' not in path and '/monitor/' not in path and 'matched-lmrb' not in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-chart-bar"></i><span class="nav-text">View Data</span>
+        <i class="nav-icon fa-solid fa-chart-bar"></i><span class="nav-text">View LMRB Data</span>
       </a>
       <a href="/dashboard/monitoring/upload/" class="nav-item {% if 'monitoring/upload' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload Data</span>
-      </a>
-      <a href="/dashboard/monitor/" class="nav-item {% if '/monitor/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-gauge-high"></i><span class="nav-text">Dashboard</span>
+        <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload LMRB Data</span>
       </a>
 
-      <p class="nav-label"><span class="nav-text">Tools</span></p>
+      <p class="nav-label"><span class="nav-text">Monitoring</span></p>
       <a href="/verify/" class="nav-item {% if '/verify/' in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-magnifying-glass-chart"></i><span class="nav-text">Verify Ads</span>
       </a>
       <a href="/dashboard/brand-mappings/" class="nav-item {% if '/brand-mappings/' in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-tags"></i><span class="nav-text">Brand Mappings</span>
       </a>
+      <a href="/dashboard/monitor/" class="nav-item {% if '/monitor/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-gauge-high"></i><span class="nav-text">Monitoring Dashboard</span>
+      </a>
 
       <p class="nav-label"><span class="nav-text">Transmission (TC)</span></p>
       <a href="/dashboard/tc/" class="nav-item {% if '/tc/' in path and 'upload' not in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-file-invoice"></i><span class="nav-text">TC Reports</span>
+        <i class="nav-icon fa-solid fa-file-invoice"></i><span class="nav-text">View TC Reports</span>
       </a>
       <a href="/dashboard/tc/upload/" class="nav-item {% if 'tc/upload' in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload TC</span>
