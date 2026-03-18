@@ -182,14 +182,10 @@ def convert_schedule_excel(file_obj) -> pd.DataFrame | None:
             if _should_skip(c1_str):
                 continue
 
-            # Section header?
-            section = _normalise_section(c1_str)
-            if section:
-                current_section = section
-                current_brand   = ''
-                continue
-
-            # Determine if this is a data row or a brand/sub-header row
+            # Determine if this is a data row or a brand/sub-header row.
+            # Check day/time FIRST so that brand names containing 'BONUS' or
+            # 'COMMERCIAL' (e.g. "Bonus Promo", "Commercial Deal") are never
+            # misidentified as section headers.
             day_val  = raw.iloc[r, col_map['day']]
             time_val = raw.iloc[r, col_map['start_time']]
             has_day  = not (pd.isna(day_val)  or str(day_val).strip() == '')
@@ -234,8 +230,14 @@ def convert_schedule_excel(file_obj) -> pd.DataFrame | None:
                             'Spot_Number':        spot_num,
                         })
             else:
-                # ── Brand / sub-header row ────────────────────────────────
-                current_brand = c1_str
+                # Not a data row - check for section header first, then brand
+                section = _normalise_section(c1_str)
+                if section:
+                    current_section = section
+                    current_brand   = ''
+                else:
+                    # ── Brand / sub-header row ────────────────────────────
+                    current_brand = c1_str
 
         except Exception:
             continue
