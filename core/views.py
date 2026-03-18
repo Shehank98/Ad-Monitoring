@@ -540,7 +540,7 @@ def schedule_upload(request):
             except Exception:
                 pass
 
-            return redirect('/dashboard/schedules/')
+            return redirect(f'/dashboard/schedules/upload/?uploaded={schedule.id}')
 
     col_guide = [
         ('PROGRAMME',   'Programme / show name',              True),
@@ -553,10 +553,38 @@ def schedule_upload(request):
     ]
     # Provide available sponsorship type options from system settings
     spon_type_options = get_setting_list('lmrb_sponsorship_keywords')
+
+    # Upload summary: shown after a successful upload redirect
+    upload_summary = None
+    uploaded_id = request.GET.get('uploaded')
+    if uploaded_id:
+        try:
+            _sch = Schedule.objects.get(pk=uploaded_id)
+            from django.db.models import Count as _Cnt
+            _rows = (
+                ScheduleRow.objects
+                .filter(schedule=_sch)
+                .values('ad_type', 'brand', 'duration')
+                .annotate(spots=_Cnt('id'))
+                .order_by('ad_type', 'brand', 'duration')
+            )
+            _commercial = [r for r in _rows if r['ad_type'] == 'COMMERCIAL BENEFITS']
+            _sponsorship = [r for r in _rows if r['ad_type'] == 'SPONSORSHIP']
+            upload_summary = {
+                'schedule':    _sch,
+                'commercial':  _commercial,
+                'sponsorship': _sponsorship,
+                'total_commercial': sum(r['spots'] for r in _commercial),
+                'total_sponsorship': sum(r['spots'] for r in _sponsorship),
+            }
+        except Schedule.DoesNotExist:
+            pass
+
     return render(request, 'schedules/upload.html', {
         'form': form,
         'schedule_col_guide': col_guide,
         'spon_type_options': spon_type_options,
+        'upload_summary': upload_summary,
     })
 
 

@@ -6,11 +6,111 @@
 {% block content %}
 <div class="max-w-4xl space-y-6">
 
-  <!-- ── Visual format guide ──────────────────────────────────────────────── -->
-  <div class="card">
-    <h3 class="text-sm font-bold text-slate-700 mb-1 flex items-center gap-2">
-      <i class="fa-solid fa-table text-blue-500"></i> Expected Schedule File Format
-    </h3>
+  <!-- ── Upload summary (shown after a successful upload) ─────────────────── -->
+  {% if upload_summary %}
+  <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5">
+    <div class="flex items-center gap-3 mb-4">
+      <span class="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-circle-check text-white"></i>
+      </span>
+      <div>
+        <p class="font-bold text-emerald-800 text-sm">Schedule uploaded successfully</p>
+        <p class="text-xs text-emerald-600">
+          #{{ upload_summary.schedule.schedule_number }} &middot;
+          {{ upload_summary.schedule.channel }} &middot;
+          {{ upload_summary.schedule.month }} &middot;
+          {{ upload_summary.schedule.start_date|date:"d M Y" }} - {{ upload_summary.schedule.end_date|date:"d M Y" }}
+        </p>
+      </div>
+      <a href="/dashboard/schedules/" class="ml-auto btn-secondary text-xs">
+        <i class="fa-solid fa-list mr-1"></i> View All Schedules
+      </a>
+    </div>
+
+    <!-- Spot count summary -->
+    <div class="grid grid-cols-2 gap-3 mb-4">
+      <div class="bg-white rounded-xl border border-blue-100 p-3 text-center">
+        <p class="text-2xl font-black text-blue-700">{{ upload_summary.total_commercial }}</p>
+        <p class="text-[10px] font-bold text-blue-500 uppercase tracking-wider mt-0.5">Commercial Spots</p>
+      </div>
+      <div class="bg-white rounded-xl border border-amber-100 p-3 text-center">
+        <p class="text-2xl font-black text-amber-700">{{ upload_summary.total_sponsorship }}</p>
+        <p class="text-[10px] font-bold text-amber-500 uppercase tracking-wider mt-0.5">Sponsorship Spots</p>
+      </div>
+    </div>
+
+    {% if upload_summary.commercial %}
+    <details class="group mb-3">
+      <summary class="flex items-center gap-2 cursor-pointer select-none px-3 py-2 bg-blue-50 border border-blue-200 rounded-xl text-xs font-bold text-blue-700">
+        <i class="fa-solid fa-rectangle-ad text-blue-400"></i>
+        Commercial Benefits - {{ upload_summary.commercial|length }} brand/duration group{{ upload_summary.commercial|length|pluralize }}
+        ({{ upload_summary.total_commercial }} spots total)
+        <i class="fa-solid fa-chevron-down text-blue-400 ml-auto group-open:rotate-180 transition-transform"></i>
+      </summary>
+      <div class="mt-2 overflow-x-auto rounded-xl border border-slate-200">
+        <table class="min-w-full text-xs">
+          <thead>
+            <tr class="bg-slate-50 border-b border-slate-200">
+              <th class="px-3 py-2 text-left font-bold text-slate-600">Brand</th>
+              <th class="px-3 py-2 text-right font-bold text-slate-600">Duration (s)</th>
+              <th class="px-3 py-2 text-right font-bold text-slate-600">Spots</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {% for row in upload_summary.commercial %}
+            <tr class="hover:bg-slate-50">
+              <td class="px-3 py-1.5 font-medium text-slate-800">{{ row.brand|default:"-" }}</td>
+              <td class="px-3 py-1.5 text-right text-slate-600">{{ row.duration|default:"-" }}</td>
+              <td class="px-3 py-1.5 text-right font-bold text-blue-700">{{ row.spots }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% endif %}
+
+    {% if upload_summary.sponsorship %}
+    <details class="group">
+      <summary class="flex items-center gap-2 cursor-pointer select-none px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-700">
+        <i class="fa-solid fa-award text-amber-400"></i>
+        Sponsorship Benefits - {{ upload_summary.sponsorship|length }} brand/duration group{{ upload_summary.sponsorship|length|pluralize }}
+        ({{ upload_summary.total_sponsorship }} spots total)
+        <i class="fa-solid fa-chevron-down text-amber-400 ml-auto group-open:rotate-180 transition-transform"></i>
+      </summary>
+      <div class="mt-2 overflow-x-auto rounded-xl border border-slate-200">
+        <table class="min-w-full text-xs">
+          <thead>
+            <tr class="bg-slate-50 border-b border-slate-200">
+              <th class="px-3 py-2 text-left font-bold text-slate-600">Brand</th>
+              <th class="px-3 py-2 text-right font-bold text-slate-600">Duration (s)</th>
+              <th class="px-3 py-2 text-right font-bold text-slate-600">Spots</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {% for row in upload_summary.sponsorship %}
+            <tr class="hover:bg-slate-50">
+              <td class="px-3 py-1.5 font-medium text-slate-800">{{ row.brand|default:"-" }}</td>
+              <td class="px-3 py-1.5 text-right text-slate-600">{{ row.duration|default:"-" }}</td>
+              <td class="px-3 py-1.5 text-right font-bold text-amber-700">{{ row.spots }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- ── Visual format guide (collapsible) ────────────────────────────────── -->
+  <details class="group bg-white border border-slate-200 rounded-2xl shadow-sm">
+    <summary class="flex items-center gap-2 px-5 py-4 cursor-pointer select-none text-slate-700 font-bold text-sm">
+      <i class="fa-solid fa-table text-blue-500"></i>
+      Expected Schedule File Format
+      <i class="fa-solid fa-chevron-down text-slate-400 ml-auto group-open:rotate-180 transition-transform"></i>
+    </summary>
+    <div class="px-5 pb-5">
     <p class="text-xs text-slate-500 mb-4">
       The system auto-detects and converts both the <strong>agency pivot format</strong> (shown below)
       and the flat pre-processed format. Month and date range are detected automatically.
@@ -130,7 +230,8 @@
         <p class="mt-2 text-[10px] text-slate-400"><span class="inline-block w-2 h-2 rounded-full bg-red-400 mr-1"></span>Required &nbsp; <span class="inline-block w-2 h-2 rounded-full bg-slate-300 mr-1"></span>Optional</p>
       </div>
     </div>
-  </div>
+    </div><!-- end collapsible content -->
+  </details>
 
   <!-- ── Upload form ───────────────────────────────────────────────────────── -->
   <div class="card max-w-2xl">
