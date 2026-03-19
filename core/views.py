@@ -1545,8 +1545,33 @@ def monitoring_dashboard(request):
             'sponsorship':  n_sponsorship,
         }
 
+        # Full Report: ALL active commercial schedule rows, not just verified ones.
+        # Rows without a MatchResult (pending LMRB data) appear as synthetic dicts
+        # with status='pending' so the table is always complete.
+        _mr_by_sr_id = {
+            mr.schedule_row_id: mr
+            for mr in qs.select_related('lmrb_row').all()
+        }
+        _full_rows = []
+        for _sr in _sr_base.filter(ad_type='COMMERCIAL BENEFITS').order_by('date', 'brand'):
+            if _sr.id in _mr_by_sr_id:
+                _full_rows.append(_mr_by_sr_id[_sr.id])
+            else:
+                _full_rows.append({
+                    'brand':          _sr.brand,
+                    'programme':      _sr.programme or '',
+                    'scheduled_date': _sr.date,
+                    'planned_start':  _sr.start_time or '',
+                    'planned_end':    _sr.end_time   or '',
+                    'duration':       _sr.duration,
+                    'aired_date':     None,
+                    'air_time':       None,
+                    'status':         'pending',
+                    'lmrb_row':       None,
+                })
+
         tab_data = {
-            'full':     list(qs.select_related('lmrb_row').order_by('scheduled_date', 'brand')),
+            'full':     _full_rows,
             # Programme mismatch = valid match (same day, brand, theme - time offset only)
             'matched':  list(qs.filter(status__in=['matched', 'programme_mismatch']).select_related('lmrb_row').order_by('scheduled_date', 'brand')),
             'not_aired': list(qs.filter(status__in=['not_aired', 'no_mapping']).order_by('scheduled_date', 'brand')),

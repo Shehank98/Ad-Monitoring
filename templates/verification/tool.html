@@ -66,6 +66,7 @@
   .b-notaired { background:#fee2e2; color:#991b1b; }
   .b-nomap    { background:#f1f5f9; color:#475569; }
   .b-extra    { background:#e0f2fe; color:#075985; }
+  .b-pending  { background:#fef9c3; color:#854d0e; }
   .status-badge { display:inline-flex; padding:2px 7px; border-radius:4px;
                   font-size:.67rem; font-weight:700; }
 </style>
@@ -310,6 +311,7 @@ const STATUS_CLS = {
   'Not Aired':          'b-notaired',
   'No Brand Mapping':   'b-nomap',
   'Extra Aired':        'b-extra',
+  'Pending':            'b-pending',
 };
 
 // ── Build a result table HTML string ─────────────────────────────────────────
@@ -365,6 +367,9 @@ function renderResults(idx, data) {
     emptyEl.classList.remove('hidden');
     return;
   }
+  // If only pending rows exist (no verification run yet), show them in the All
+  // tab but hide the empty message — the table will show Pending status rows.
+  const onlyPending = !data.total && (data.pending_rows || []).length > 0;
 
   // KPI bar
   kpiBar.classList.remove('hidden');
@@ -395,11 +400,12 @@ function renderResults(idx, data) {
   document.getElementById('tc-extra-' + idx).textContent   = data.summary.extra;
   document.getElementById('tc-nomap-' + idx).textContent   = data.summary.no_mapping;
 
-  // Tab panels
+  // Tab panels — "All" includes pending rows (planned but LMRB not yet available)
   const allRows = [
     ...data.matched, ...data.prog_mismatch, ...data.late_telecast,
     ...data.not_aired, ...data.no_mapping, ...data.extra,
-  ];
+    ...(data.pending_rows || []),
+  ].sort((a, b) => (a.planned_date || '').localeCompare(b.planned_date || '') || (a.brand || '').localeCompare(b.brand || ''));
   document.getElementById('vtab-all-' + idx).innerHTML     = buildTable(allRows,           true);
   document.getElementById('vtab-matched-' + idx).innerHTML = buildTable(data.matched,      false);
   document.getElementById('vtab-mis-' + idx).innerHTML     = buildTable(data.prog_mismatch,false);

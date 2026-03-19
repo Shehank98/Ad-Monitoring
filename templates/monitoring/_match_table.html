@@ -58,6 +58,8 @@
             <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-700">Late Telecast</span>
           {% elif mr.status == 'no_mapping' %}
             <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">No Mapping</span>
+          {% elif mr.status == 'pending' %}
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-yellow-100 text-yellow-700">Pending</span>
           {% else %}
             <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">Not Aired</span>
           {% endif %}

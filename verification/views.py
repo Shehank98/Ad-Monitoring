@@ -415,17 +415,35 @@ def load_results(request):
     no_mapping     = [r for r in all_rows if r['status'] == 'No Brand Mapping']
     last_run = qs.order_by('-run_at').values_list('run_at', flat=True).first()
 
-    # Planned = actual schedule rows (active version only); may exceed len(all_rows)
-    # when some rows are past the LMRB date cap and have no MatchResult yet.
+    # Pending rows: COMMERCIAL BENEFITS schedule rows that have no MatchResult yet
+    # (e.g. dates past the current LMRB date cap). Shown in the "All" tab so
+    # users always see the complete picture of what is planned.
     active_ids = active_schedule_ids(account_id, channel, month)
-    planned    = ScheduleRow.objects.filter(
+    all_sr = ScheduleRow.objects.filter(
         schedule_id__in=active_ids, ad_type='COMMERCIAL BENEFITS',
-    ).count()
-    pending = max(0, planned - len(all_rows))  # rows awaiting LMRB data
+    ).order_by('date', 'brand', 'start_time')
+    planned = all_sr.count()
+    matched_sr_ids = set(qs.values_list('schedule_row_id', flat=True))
+    pending_rows = []
+    for sr in all_sr:
+        if sr.id not in matched_sr_ids:
+            pending_rows.append({
+                'brand':         sr.brand,
+                'duration':      sr.duration,
+                'programme':     sr.programme or '',
+                'planned_date':  str(sr.date) if sr.date else '',
+                'planned_start': sr.start_time or '',
+                'planned_end':   sr.end_time   or '',
+                'aired_date':    '',
+                'air_time':      '',
+                'source':        '',
+                'status':        'Pending',
+            })
+    pending = len(pending_rows)
 
     return JsonResponse({
         'ok':            True,
-        'has_results':   bool(all_rows),
+        'has_results':   bool(all_rows) or bool(pending_rows),
         'total':         len(all_rows),
         'matched':       matched,
         'prog_mismatch': prog_mismatch,
@@ -433,6 +451,7 @@ def load_results(request):
         'not_aired':     not_aired,
         'extra':         extra,
         'no_mapping':    no_mapping,
+        'pending_rows':  pending_rows,
         'summary': {
             'total':         len(all_rows),
             'planned':       planned,
