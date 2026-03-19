@@ -298,6 +298,12 @@ def _build_campaign_rows(user):
                     'start_date', 'end_date', 'original_filename', 'is_superseded')
         )
 
+        # period_over: schedule end date has passed → stop auto-verification,
+        # show "Reconcile Now" button linking to the summary sheet instead.
+        from django.utils import timezone
+        today = timezone.localdate()
+        period_over = bool(sch_end and sch_end < today)
+
         rows.append({
             'account_id':   a_id,
             'account_name': c['account__name'],
@@ -314,6 +320,7 @@ def _build_campaign_rows(user):
             'last_run':     last_run,
             'dot':          dot,
             'versions':     versions,
+            'period_over':  period_over,
         })
 
     return rows

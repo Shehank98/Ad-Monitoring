@@ -150,6 +150,17 @@
       </div>
       {% endif %}
 
+      {% if row.period_over %}
+      <!-- Schedule period has ended → show Reconcile Now, disable Run -->
+      <span class="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-lg flex-shrink-0">
+        <i class="fa-solid fa-lock text-slate-400 mr-0.5"></i> Period ended
+      </span>
+      <a href="/dashboard/summary/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
+         class="btn-primary text-xs px-3 py-1.5 flex-shrink-0"
+         title="Schedule period is over — go to reconciliation summary">
+        <i class="fa-solid fa-file-contract text-white"></i> Reconcile Now
+      </a>
+      {% else %}
       <!-- Run button -->
       <button type="button" id="run-btn-{{ idx }}"
               class="btn-secondary text-xs px-3 py-1.5 flex-shrink-0"
@@ -157,6 +168,7 @@
               title="Run verification for this campaign">
         <i class="fa-solid fa-play text-emerald-500"></i> Run
       </button>
+      {% endif %}
 
       <!-- Expand chevron -->
       <i class="fa-solid fa-chevron-down text-slate-400 text-xs flex-shrink-0 transition-transform duration-200"
