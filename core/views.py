@@ -1770,7 +1770,15 @@ def monitoring_dashboard(request):
                             .first() or ''
                         )
                         if spon_type_val:
-                            kw_qs2 = lmrb_qs.filter(advt_theme__icontains=spon_type_val)
+                            _kw_all = lmrb_qs.filter(advt_theme__icontains=spon_type_val)
+                            # Product-aware filter: avoid mixing Mobitel and SLT
+                            # rows that share the same sponsorship keyword.
+                            _prod_hint = (
+                                sr_product or brand.split()[0]
+                            ).lower().strip()
+                            kw_qs2 = _kw_all.filter(product__icontains=_prod_hint)
+                            if not kw_qs2.exists():
+                                kw_qs2 = _kw_all  # fallback when no product metadata
                             kw_lmrb_count = kw_qs2.count()
                             _kw_progs_raw: dict = {}
                             _kw_dates_raw: dict = {}
@@ -2083,24 +2091,93 @@ def monitoring_dashboard(request):
                 if not kw:
                     continue
                 kw_qs = lmrb_qs.filter(advt_theme__icontains=kw)
-                kw_total = kw_qs.count()
+                kw_total_all = kw_qs.count()
                 # Count planned rows whose sponsorship_type matches this keyword
-                kw_planned = _sr_base.filter(
+                kw_planned_all = _sr_base.filter(
                     ad_type='SPONSORSHIP', sponsorship_type__iexact=kw
                 ).count()
-                if kw_total == 0 and kw_planned == 0:
+                if kw_total_all == 0 and kw_planned_all == 0:
                     continue
-                kw_pt = kw_non_pt = 0
-                for r in kw_qs.values('advt_time'):
-                    b = _time_bucket(r['advt_time'])
-                    if b == 'prime':
-                        kw_pt += 1
-                    elif b == 'non_prime':
-                        kw_non_pt += 1
-                progs = list(
-                    kw_qs.exclude(program='').exclude(program__isnull=True)
-                    .values('program').annotate(cnt=Count('id')).order_by('-cnt')[:8]
+
+                # ── Per-brand breakdown ──────────────────────────────────────────
+                # Find all brands that have this sponsorship_type keyword so we can
+                # separate e.g. "Mobitel Tags" from "SLT Tags" when both brands
+                # share the same keyword.
+                kw_brands_qs = (
+                    _sr_base.filter(ad_type='SPONSORSHIP', sponsorship_type__iexact=kw)
+                    .values_list('brand', flat=True).distinct()
                 )
+                kw_brand_list = sorted(set(kw_brands_qs))
+
+                brand_entries = []
+                for br in kw_brand_list:
+                    br_planned = _sr_base.filter(
+                        ad_type='SPONSORSHIP', brand=br
+                    ).count()
+                    # Derive product hint: BrandMapping.product → first word of brand
+                    bm_prod = (
+                        BrandMapping.objects.filter(account_id=account_id, brand=br)
+                        .exclude(product='').values_list('product', flat=True).first() or ''
+                    )
+                    product_hint = (bm_prod or br.split()[0]).lower().strip()
+
+                    # Product-aware LMRB filter with fallback
+                    br_qs = kw_qs.filter(product__icontains=product_hint)
+                    if not br_qs.exists():
+                        br_qs = kw_qs  # fallback: no product metadata → use all
+
+                    br_total = br_qs.count()
+                    br_pt = br_non_pt = 0
+                    for r in br_qs.values('advt_time'):
+                        b = _time_bucket(r['advt_time'])
+                        if b == 'prime':
+                            br_pt += 1
+                        elif b == 'non_prime':
+                            br_non_pt += 1
+                    br_progs = list(
+                        br_qs.exclude(program='').exclude(program__isnull=True)
+                        .values('program').annotate(cnt=Count('id')).order_by('-cnt')[:6]
+                    )
+                    brand_entries.append({
+                        'brand':   br,
+                        'planned': br_planned,
+                        'total':   br_total,
+                        'pt':      br_pt,
+                        'non_pt':  br_non_pt,
+                        'progs':   br_progs,
+                    })
+
+                # When only one brand uses this keyword (or no brands in schedule
+                # but LMRB rows exist), keep the old aggregate behaviour as well.
+                # Aggregate totals = sum of per-brand entries when brands exist,
+                # else fall back to the raw keyword query total.
+                if brand_entries:
+                    kw_planned = sum(b['planned'] for b in brand_entries)
+                    kw_total   = kw_total_all   # always show full LMRB keyword count
+                    kw_pt      = sum(b['pt']     for b in brand_entries)
+                    kw_non_pt  = sum(b['non_pt'] for b in brand_entries)
+                    progs_agg: dict = {}
+                    for be in brand_entries:
+                        for p in be['progs']:
+                            e = progs_agg.setdefault(p['program'], 0)
+                            progs_agg[p['program']] = e + p['cnt']
+                    progs = [{'program': p, 'cnt': c}
+                             for p, c in sorted(progs_agg.items(), key=lambda x: -x[1])[:8]]
+                else:
+                    kw_planned = kw_planned_all
+                    kw_total   = kw_total_all
+                    kw_pt = kw_non_pt = 0
+                    for r in kw_qs.values('advt_time'):
+                        b = _time_bucket(r['advt_time'])
+                        if b == 'prime':
+                            kw_pt += 1
+                        elif b == 'non_prime':
+                            kw_non_pt += 1
+                    progs = list(
+                        kw_qs.exclude(program='').exclude(program__isnull=True)
+                        .values('program').annotate(cnt=Count('id')).order_by('-cnt')[:8]
+                    )
+
                 spon_kw_breakdown.append({
                     'kw':      kw,
                     'planned': kw_planned,
@@ -2108,6 +2185,7 @@ def monitoring_dashboard(request):
                     'pt':      kw_pt,
                     'non_pt':  kw_non_pt,
                     'progs':   progs,
+                    'brands':  brand_entries,
                 })
 
         # Planned sponsorship PT/Non-PT for comparison
