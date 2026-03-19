@@ -520,12 +520,16 @@ def schedule_upload(request):
             schedule.save()
 
             # ── Parse Schedule rows into DB ────────────────────────────────────
-            # Collect brand→sponsorship_type assignments submitted via the form
+            # Collect brand→sponsorship_type assignments submitted via the form.
+            # Each brand can have MULTIPLE types selected (checkboxes), stored
+            # pipe-separated, e.g. "-Intro|-Extro" for Opening/Closing.
             brand_type_map = {}
-            for key, val in request.POST.items():
-                if key.startswith('spon_type_') and val.strip():
+            for key in request.POST.keys():
+                if key.startswith('spon_type_'):
                     brand_name = key[len('spon_type_'):]
-                    brand_type_map[brand_name] = val.strip()
+                    vals = [v.strip() for v in request.POST.getlist(key) if v.strip()]
+                    if vals:
+                        brand_type_map[brand_name] = '|'.join(vals)
             _parse_schedule_rows(df, schedule, account, channel_name, month,
                                  brand_type_map=brand_type_map)
 
@@ -1770,7 +1774,14 @@ def monitoring_dashboard(request):
                             .first() or ''
                         )
                         if spon_type_val:
-                            _kw_all = lmrb_qs.filter(advt_theme__icontains=spon_type_val)
+                            # sponsorship_type may be pipe-separated (e.g. "-Intro|-Extro");
+                            # build an OR query so all selected keywords are included.
+                            from django.db.models import Q as _Q
+                            _spon_parts = [t.strip() for t in spon_type_val.split('|') if t.strip()]
+                            _kw_q = _Q()
+                            for _part in _spon_parts:
+                                _kw_q |= _Q(advt_theme__icontains=_part)
+                            _kw_all = lmrb_qs.filter(_kw_q)
                             # Product-aware filter: avoid mixing Mobitel and SLT
                             # rows that share the same sponsorship keyword.
                             _prod_hint = (
@@ -2092,9 +2103,11 @@ def monitoring_dashboard(request):
                     continue
                 kw_qs = lmrb_qs.filter(advt_theme__icontains=kw)
                 kw_total_all = kw_qs.count()
-                # Count planned rows whose sponsorship_type matches this keyword
+                # Count planned rows whose sponsorship_type includes this keyword.
+                # sponsorship_type may be pipe-separated (e.g. "-Intro|-Extro"),
+                # so use icontains rather than iexact.
                 kw_planned_all = _sr_base.filter(
-                    ad_type='SPONSORSHIP', sponsorship_type__iexact=kw
+                    ad_type='SPONSORSHIP', sponsorship_type__icontains=kw
                 ).count()
                 if kw_total_all == 0 and kw_planned_all == 0:
                     continue
@@ -2104,7 +2117,7 @@ def monitoring_dashboard(request):
                 # separate e.g. "Mobitel Tags" from "SLT Tags" when both brands
                 # share the same keyword.
                 kw_brands_qs = (
-                    _sr_base.filter(ad_type='SPONSORSHIP', sponsorship_type__iexact=kw)
+                    _sr_base.filter(ad_type='SPONSORSHIP', sponsorship_type__icontains=kw)
                     .values_list('brand', flat=True).distinct()
                 )
                 kw_brand_list = sorted(set(kw_brands_qs))

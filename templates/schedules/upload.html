@@ -273,7 +273,8 @@
             Sponsorship Brands Detected - Assign Types
           </p>
           <p class="text-xs text-amber-700 mb-3">
-            The file contains SPONSORSHIP rows. Please assign a type to each brand so the dashboard can show Planned vs Aired by type.
+            The file contains SPONSORSHIP rows. Select one or more types per brand — the dashboard will count LMRB observations for all selected keywords.
+            <span class="font-semibold">Tip: Opening/Closing sponsorships usually need both <code class="bg-amber-100 px-1 rounded">-Intro</code> and <code class="bg-amber-100 px-1 rounded">-Extro</code> selected.</span>
           </p>
           <div id="spon-brand-rows" class="space-y-2"></div>
         </div>
@@ -398,26 +399,26 @@
           ? SPON_TYPE_OPTIONS
           : ['-BB', 'Tag', '-Intro', '-Extro', '-LLogo', 'Com Break', 'DJ', 'Time Check', '-Tr'];
         data.spon_brands.forEach(brand => {
-          const safeKey = brand.replace(/[^a-zA-Z0-9]/g, '_');
-          const opts = typeOptions.map(t =>
-            `<option value="${t}">${t.trim()}</option>`
-          ).join('');
+          // Multiple checkboxes allow e.g. Opening/Closing → -Intro + -Extro both selected.
+          // All checked values are submitted under the same name and stored pipe-separated.
+          const checkboxes = typeOptions.map(t => {
+            const id = `spon_cb_${brand}_${t}`.replace(/[^a-zA-Z0-9_]/g, '_');
+            return `<label for="${id}" class="inline-flex items-center gap-1 text-[11px] cursor-pointer
+                          px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100
+                          has-[:checked]:bg-amber-200 has-[:checked]:border-amber-400 transition-colors select-none">
+              <input type="checkbox" id="${id}" name="spon_type_${brand}" value="${t}"
+                     class="accent-amber-500 w-3 h-3">
+              <span class="font-medium text-slate-700">${t.trim()}</span>
+            </label>`;
+          }).join('');
           sponBrands.insertAdjacentHTML('beforeend', `
-            <div class="flex items-center gap-3 bg-white rounded-lg border border-amber-200 px-3 py-2">
-              <div class="flex-1">
+            <div class="bg-white rounded-lg border border-amber-200 px-3 py-2.5">
+              <div class="flex items-center gap-2 mb-2">
                 <span class="text-xs font-semibold text-slate-700">${brand}</span>
-                <span class="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">Sponsorship</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">Sponsorship</span>
+                <span class="text-[10px] text-slate-400 italic ml-auto">Select one or more types</span>
               </div>
-              <div class="flex items-center gap-2">
-                <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Type:</label>
-                <select name="spon_type_${brand}"
-                        class="border border-amber-300 rounded-md px-2 py-1 text-xs bg-white text-slate-700 focus:ring-2 focus:ring-amber-300 focus:outline-none min-w-[120px]">
-                  <option value="">- Select type -</option>
-                  ${opts}
-                  <option value="Opening/Closing">Opening/Closing</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
+              <div class="flex flex-wrap gap-1.5">${checkboxes}</div>
             </div>`);
         });
       }
