@@ -253,6 +253,28 @@ def _active_schedules_for_scope(account_id, channel, month):
     return active   # already in schedule_number ascending order
 
 
+def _makeup_schedules_for_scope(active_schedules):
+    """
+    Return makeup Schedule objects linked via parent_schedule FK to any of the
+    active schedules.  Applies the same versioning rule (Rule 12) to deduplicate
+    by schedule_number within the makeup set.
+    """
+    parent_ids = [s.id for s in active_schedules]
+    if not parent_ids:
+        return []
+    all_makeup = list(
+        Schedule.objects.filter(parent_schedule_id__in=parent_ids)
+        .order_by('schedule_number', '-version')
+    )
+    seen_nums = set()
+    makeup = []
+    for s in all_makeup:
+        if s.schedule_number not in seen_nums:
+            seen_nums.add(s.schedule_number)
+            makeup.append(s)
+    return makeup
+
+
 def active_schedule_ids(account_id, channel, month):
     """Return the list of Schedule PKs that are active for this scope (public helper)."""
     return [s.id for s in _active_schedules_for_scope(account_id, channel, month)]
@@ -283,6 +305,14 @@ def run_scope(account_id, channel, month, mode='smart'):
     # ── Resolve active schedules (latest version per schedule_number) ──────────
     active_schedules = _active_schedules_for_scope(account_id, channel, month)
 
+    # ── Makeup schedules: formally rescheduled spots linked to active schedules ─
+    # These are separate Schedule uploads (possibly a different month) that a
+    # planner has linked via parent_schedule.  Their rows are included in this
+    # scope's matching run so missed spots from the parent month are resolved.
+    makeup_schedules = _makeup_schedules_for_scope(active_schedules)
+
+    all_scope_schedules = active_schedules + makeup_schedules
+
     # ── Date range: union of all active schedule windows ──────────────────────
     date_start = None
     date_end   = None
@@ -300,6 +330,22 @@ def run_scope(account_id, channel, month, mode='smart'):
         date_start = date_start or row_dates['min']
         date_end   = date_end   or row_dates['max']
 
+    # ── Extend date_end for makeup support ────────────────────────────────────
+    # 1. makeup_end_date: planner explicitly extends the LMRB window so late-aired
+    #    spots can be found after the schedule's nominal end date.
+    # 2. makeup_schedules: formal reschedule uploads whose rows may have dates
+    #    beyond the parent schedule's end_date.
+    makeup_end_candidates = [s.makeup_end_date for s in active_schedules if s.makeup_end_date]
+    for ms in makeup_schedules:
+        if ms.end_date:
+            makeup_end_candidates.append(ms.end_date)
+        if ms.makeup_end_date:
+            makeup_end_candidates.append(ms.makeup_end_date)
+    if makeup_end_candidates:
+        latest_makeup = max(makeup_end_candidates)
+        if date_end is None or latest_makeup > date_end:
+            date_end = latest_makeup
+
     # ── Rule 8: cap LMRB date_end at the latest available monitoring date ──────
     max_lmrb_date = LMRBRow.objects.filter(
         account_id=account_id, channel__iexact=channel,
@@ -316,12 +362,22 @@ def run_scope(account_id, channel, month, mode='smart'):
 
     # ── Reset mode: unlock all rows for this scope ─────────────────────────────
     if mode == 'reset':
+        # Unlock primary scope rows
         scope_sch_ids = list(
             ScheduleRow.objects.filter(
                 account_id=account_id, channel=channel, month=month,
                 ad_type='COMMERCIAL BENEFITS',
             ).values_list('id', flat=True)
         )
+        # Also unlock makeup schedule rows linked to this scope
+        if makeup_schedules:
+            makeup_sch_ids = list(
+                ScheduleRow.objects.filter(
+                    schedule__in=makeup_schedules, ad_type='COMMERCIAL BENEFITS',
+                ).values_list('id', flat=True)
+            )
+            scope_sch_ids = scope_sch_ids + makeup_sch_ids
+
         LMRBRow.objects.filter(matched_schedule_id__in=scope_sch_ids).update(
             is_matched=False, matched_schedule=None, matched_at=None,
         )
@@ -336,10 +392,16 @@ def run_scope(account_id, channel, month, mode='smart'):
 
     # ── Total schedule rows count (for caller info) ────────────────────────────
     # Includes manually matched rows in the total so the planned count is accurate.
+    # Also includes makeup schedule rows (linked via parent_schedule) since they
+    # represent planned spots that belong to this campaign's reconciliation.
     total_sch = ScheduleRow.objects.filter(
         account_id=account_id, channel=channel, month=month,
         ad_type='COMMERCIAL BENEFITS',
     ).count()
+    if makeup_schedules:
+        total_sch += ScheduleRow.objects.filter(
+            schedule__in=makeup_schedules, ad_type='COMMERCIAL BENEFITS',
+        ).count()
 
     if total_sch == 0:
         raise ValueError(
@@ -376,7 +438,10 @@ def run_scope(account_id, channel, month, mode='smart'):
     all_not_aired_dfs = []
     global_consumed_idx: set = set()
 
+    # Primary schedules run first, then makeup schedules (which hold formally
+    # rescheduled spots from previous months).  Both share the same LMRB pool.
     schedules_to_run = active_schedules if active_schedules else [None]
+    schedules_to_run = schedules_to_run + makeup_schedules
 
     for sched in schedules_to_run:
         if sched is not None:

@@ -146,6 +146,28 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
         sch_start = sch_start or row_dates.get('d_min')
         sch_end   = sch_end   or row_dates.get('d_max')
 
+    # ── Extend date range for makeup/late-airing support ──────────────────────
+    # 1. makeup_end_date on any active schedule extends sch_end so the LMRB
+    #    cross-check can confirm spots that aired after the nominal schedule end.
+    # 2. Makeup schedules (parent_schedule FK) linked to this scope may have rows
+    #    with dates beyond sch_end; include their date range too.
+    makeup_end_candidates = list(
+        schedules.exclude(makeup_end_date__isnull=True)
+        .values_list('makeup_end_date', flat=True)
+    )
+    # Find makeup schedules linked to this scope's schedules
+    parent_ids = list(schedules.values_list('id', flat=True))
+    makeup_schedules_qs = Schedule.objects.filter(parent_schedule_id__in=parent_ids) if parent_ids else Schedule.objects.none()
+    for ms in makeup_schedules_qs:
+        if ms.end_date:
+            makeup_end_candidates.append(ms.end_date)
+        if ms.makeup_end_date:
+            makeup_end_candidates.append(ms.makeup_end_date)
+    if makeup_end_candidates:
+        latest_makeup = max(makeup_end_candidates)
+        if sch_end is None or latest_makeup > sch_end:
+            sch_end = latest_makeup
+
     # ── Reset mode ────────────────────────────────────────────────────────────
     if mode == 'reset':
         TCRow.objects.filter(account_id=account_id, channel=channel,
@@ -165,6 +187,15 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
     )
     if schedule_id:
         sch_qs = sch_qs.filter(schedule_id=schedule_id)
+    # Include rows from makeup schedules (linked via parent_schedule) so that
+    # formally rescheduled spots from a previous month are reconciled here.
+    if not schedule_id and makeup_schedules_qs.exists():
+        from django.db.models import Q
+        makeup_sch_ids = list(makeup_schedules_qs.values_list('id', flat=True))
+        sch_qs = ScheduleRow.objects.filter(
+            Q(account_id=account_id, channel__iexact=channel, month=month) |
+            Q(schedule_id__in=makeup_sch_ids)
+        )
     sch_qs = sch_qs.order_by('date', 'start_time')
 
     # ── Load unmatched TCRows for scope ───────────────────────────────────────

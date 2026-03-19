@@ -255,6 +255,55 @@
         {{ form.schedule_number }}
       </div>
 
+      <!-- ── Makeup / Late-airing options (collapsible) ─────────────────────── -->
+      <details class="group bg-amber-50 border border-amber-200 rounded-xl" id="makeup-details">
+        <summary class="flex items-center gap-2 px-4 py-3 cursor-pointer select-none text-amber-800 font-semibold text-sm">
+          <i class="fa-solid fa-calendar-plus text-amber-500"></i>
+          Makeup / Late-Airing Options
+          <span class="ml-1 text-[11px] font-normal text-amber-600">(optional — for rescheduled or late-aired spots)</span>
+          <i class="fa-solid fa-chevron-down text-amber-400 ml-auto group-open:rotate-180 transition-transform"></i>
+        </summary>
+        <div class="px-4 pb-4 pt-1 space-y-4">
+          <p class="text-xs text-amber-700">
+            Use these fields when spots from this schedule may air <strong>after</strong> the schedule's end date,
+            or when this schedule is a formal makeup/reschedule of missed spots from a previous month.
+          </p>
+
+          <!-- makeup_end_date -->
+          <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1" for="id_makeup_end_date">
+              Late-Airing Until
+            </label>
+            <p class="text-xs text-slate-500 mb-1.5">
+              If spots from this schedule may air after the last date in the file, set the latest date
+              to search for LMRB data. E.g. Jan schedule with spots that may air up to Feb 10.
+            </p>
+            <input type="date" id="id_makeup_end_date" name="makeup_end_date"
+                   class="input-field max-w-xs"
+                   placeholder="YYYY-MM-DD">
+          </div>
+
+          <!-- parent_schedule -->
+          <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1" for="id_parent_schedule">
+              Parent Schedule (this is a makeup for…)
+            </label>
+            <p class="text-xs text-slate-500 mb-1.5">
+              If this upload is a formal reschedule of missed spots from a <em>different month</em>,
+              select the original schedule here. Its reconciliation run will include this upload's spots.
+            </p>
+            <select id="id_parent_schedule" name="parent_schedule" class="select-field max-w-lg">
+              <option value="">— None (standalone schedule) —</option>
+              {% for ps in parent_schedule_choices %}
+              <option value="{{ ps.id }}">
+                {{ ps.account__name }} | {{ ps.channel }} | {{ ps.month }} | #{{ ps.schedule_number }} v{{ ps.version }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </details>
+
       <!-- Auto-detect preview -->
       <div id="detect-preview" class="hidden">
         <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl">

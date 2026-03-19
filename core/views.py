@@ -503,6 +503,27 @@ def schedule_upload(request):
             )
             version = last_ver + 1
 
+            # ── Optional makeup fields ─────────────────────────────────────────
+            makeup_end_date_raw = request.POST.get('makeup_end_date', '').strip()
+            makeup_end_date = None
+            if makeup_end_date_raw:
+                from datetime import date as _date_type
+                try:
+                    from datetime import datetime as _dt
+                    makeup_end_date = _dt.strptime(makeup_end_date_raw, '%Y-%m-%d').date()
+                except ValueError:
+                    pass
+
+            parent_schedule_id_raw = request.POST.get('parent_schedule', '').strip()
+            parent_schedule_obj = None
+            if parent_schedule_id_raw:
+                try:
+                    parent_schedule_obj = Schedule.objects.get(
+                        pk=int(parent_schedule_id_raw), account=account,
+                    )
+                except (Schedule.DoesNotExist, ValueError):
+                    pass
+
             excel_file.seek(0)
             schedule = Schedule(
                 account           = account,
@@ -515,6 +536,8 @@ def schedule_upload(request):
                 end_date          = end_date,
                 version           = version,
                 uploaded_by       = user,
+                makeup_end_date   = makeup_end_date,
+                parent_schedule   = parent_schedule_obj,
             )
             schedule.file.save(excel_file.name, excel_file)
             schedule.save()
@@ -584,11 +607,21 @@ def schedule_upload(request):
         except Schedule.DoesNotExist:
             pass
 
+    # Provide schedules that can be selected as parent (same account, all months)
+    # for the makeup/reschedule parent_schedule dropdown.
+    parent_schedule_choices = list(
+        Schedule.objects
+        .filter(account__in=(_is_admin(user) and Account.objects.all() or user.accounts.all()))
+        .order_by('account__name', '-uploaded_at')
+        .values('id', 'account__name', 'channel', 'month', 'schedule_number', 'version')
+    )
+
     return render(request, 'schedules/upload.html', {
         'form': form,
         'schedule_col_guide': col_guide,
         'spon_type_options': spon_type_options,
         'upload_summary': upload_summary,
+        'parent_schedule_choices': parent_schedule_choices,
     })
 
 

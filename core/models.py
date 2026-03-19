@@ -49,6 +49,22 @@ class Schedule(models.Model):
     version           = models.PositiveIntegerField(default=1)
     # Superseded by a later replacement upload with the same schedule_number
     is_superseded     = models.BooleanField(default=False)
+    # Makeup / late-airing support
+    # If set, the LMRB pool extends to this date when reconciling this schedule,
+    # allowing Late Telecast matching to find spots aired after the schedule period.
+    makeup_end_date   = models.DateField(
+        null=True, blank=True,
+        help_text='If spots may air after the schedule ends, set this date as the latest '
+                  'date to look for LMRB data (e.g. Feb 10 for a Jan schedule with makeup spots).',
+    )
+    # If this schedule is a formal makeup/reschedule uploaded under a different month,
+    # link it to the original schedule so its rows are reconciled under the parent month.
+    parent_schedule   = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='makeup_schedules',
+        help_text='Link to the original schedule if this is a makeup/reschedule uploaded '
+                  'for missed spots from a previous month.',
+    )
     uploaded_by       = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
                                           null=True, related_name='uploaded_schedules')
     uploaded_at       = models.DateTimeField(auto_now_add=True)
