@@ -5526,11 +5526,12 @@ def system_settings(request):
 
     # Group settings by their category display label
     from collections import OrderedDict
-    CATEGORY_ORDER = ['reconciliation', 'tc_parsing', 'lmrb_parsing']
+    CATEGORY_ORDER = ['reconciliation', 'tc_parsing', 'lmrb_parsing', 'whatsapp']
     CATEGORY_LABELS = {
         'reconciliation': 'Reconciliation',
         'tc_parsing':     'TC File Parsing',
         'lmrb_parsing':   'LMRB / MapOnline File Parsing',
+        'whatsapp':       'WhatsApp Notifications',
     }
     all_settings = list(SystemSetting.objects.all())
     categories = OrderedDict()
@@ -6832,12 +6833,19 @@ def channel_officer_create(request):
             'accounts': accounts,
             'channels': channels,
             'errors':   errors,
-            'post':     request.POST,
+            'fd': {
+                'name':             request.POST.get('name', ''),
+                'whatsapp_number':  request.POST.get('whatsapp_number', ''),
+                'account_id':       request.POST.get('account_id', ''),
+                'channel':          request.POST.get('channel', ''),
+                'email':            request.POST.get('email', ''),
+            },
         })
 
     return render(request, 'channel_officers/form.html', {
         'accounts': accounts,
         'channels': channels,
+        'fd': {'name': '', 'whatsapp_number': '', 'account_id': '', 'channel': '', 'email': ''},
     })
 
 
@@ -6887,6 +6895,7 @@ def channel_officer_edit(request, pk):
         'accounts': accounts,
         'channels': channels,
         'edit':     True,
+        'fd': {'name': '', 'whatsapp_number': '', 'account_id': '', 'channel': '', 'email': ''},
     })
 
 

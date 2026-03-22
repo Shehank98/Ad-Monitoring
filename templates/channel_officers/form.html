@@ -32,14 +32,14 @@
 
   <div>
     <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Officer Name</label>
-    <input type="text" name="name" value="{{ officer.name|default:post.name|default:'' }}"
+    <input type="text" name="name" value="{{ officer.name|default:fd.name }}"
            class="input-field" placeholder="e.g. Nimal Perera" required>
   </div>
 
   <div>
     <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">WhatsApp Number</label>
     <input type="text" name="whatsapp_number"
-           value="{{ officer.whatsapp_number|default:post.whatsapp_number|default:'' }}"
+           value="{{ officer.whatsapp_number|default:fd.whatsapp_number }}"
            class="input-field font-mono" placeholder="+94771234567">
     <p class="text-xs text-slate-400 mt-1">Include country code. This number receives missed-spot alerts and TC reminders.</p>
   </div>
@@ -50,7 +50,8 @@
       <option value="">Select account…</option>
       {% for acc in accounts %}
         <option value="{{ acc.id }}"
-          {% if officer.account_id == acc.id or post.account_id == acc.id|stringformat:"s" %}selected{% endif %}>
+          {% if officer.account_id == acc.id %}selected
+          {% elif fd.account_id == acc.id|stringformat:"s" %}selected{% endif %}>
           {{ acc.name }}
         </option>
       {% endfor %}
@@ -63,7 +64,8 @@
       <option value="">Select channel…</option>
       {% for ch in channels %}
         <option value="{{ ch.name }}"
-          {% if officer.channel == ch.name or post.channel == ch.name %}selected{% endif %}>
+          {% if officer.channel == ch.name %}selected
+          {% elif fd.channel == ch.name %}selected{% endif %}>
           {{ ch.name }}
         </option>
       {% endfor %}
@@ -87,7 +89,7 @@
       </div>
       <div>
         <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Email (login)</label>
-        <input type="email" name="email" value="{{ post.email|default:'' }}"
+        <input type="email" name="email" value="{{ fd.email }}"
                class="input-field" placeholder="officer@channelname.com">
       </div>
     </div>
