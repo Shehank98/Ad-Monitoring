@@ -297,3 +297,87 @@ def notify_reconciliation_done(ops_whatsapp: str, account_name: str, channel: st
         lines += [f'', f'View summary: {link}']
     body = '\n'.join(lines)
     return send_text(ops_whatsapp, body)
+
+
+def notify_new_user_created(whatsapp: str, name: str, email: str,
+                             password: str, role_label: str,
+                             login_url: str) -> bool:
+    """Send login credentials to a newly created staff user via WhatsApp.
+
+    Called immediately after the admin creates a new user.
+    """
+    from core.models import get_setting
+    company = get_setting('whatsapp_company_name', 'Ogilvy Nova')
+
+    lines = [
+        f'👋 *Welcome to {company}!*',
+        f'',
+        f'Hi *{name}*, your Ad-Monitoring account has been created.',
+        f'',
+        f'*Your login details:*',
+        f'• Role:     {role_label}',
+        f'• Email:    {email}',
+        f'• Password: `{password}`',
+        f'',
+        f'*Login here:*',
+        f'{login_url}',
+        f'',
+        f'⚠️ You will be asked to change your password on first login.',
+        f'',
+        f'Please reply *CONFIRM* to this message to activate WhatsApp notifications on this number.',
+        f'',
+        f'_(Automated message — do not share your password)_',
+    ]
+    return send_text(whatsapp, '\n'.join(lines))
+
+
+def notify_new_officer_created(whatsapp: str, name: str, account_name: str,
+                                channel: str, email: str, password: str,
+                                login_url: str) -> bool:
+    """Send welcome + login instructions to a newly created channel officer via WhatsApp.
+
+    Called immediately after admin creates a ChannelOfficer with a login account.
+    If no login account (email/password blank) sends a shorter welcome only.
+    """
+    from core.models import get_setting
+    company = get_setting('whatsapp_company_name', 'Ogilvy Nova')
+
+    lines = [
+        f'👋 *Welcome to {company}!*',
+        f'',
+        f'Hi *{name}*,',
+        f'',
+        f'You have been registered as the channel marketing officer for:',
+        f'• Account: {account_name}',
+        f'• Channel: {channel}',
+        f'',
+    ]
+
+    if email and password:
+        lines += [
+            f'*Your login details:*',
+            f'• Email:    {email}',
+            f'• Password: `{password}`',
+            f'',
+            f'*Steps to get started:*',
+            f'1️⃣ Open the link below and log in using your email.',
+            f'2️⃣ You will be asked to set a new password on first login.',
+            f'3️⃣ After the campaign ends, log in to upload the Transmission Certificate (TC).',
+            f'4️⃣ You will receive WhatsApp alerts when ad spots need attention.',
+            f'',
+            f'*Login here:*',
+            f'{login_url}',
+            f'',
+        ]
+    else:
+        lines += [
+            f'You will receive WhatsApp alerts for missed spots and TC upload reminders.',
+            f'',
+        ]
+
+    lines += [
+        f'Please reply *CONFIRM* to activate your WhatsApp notifications.',
+        f'',
+        f'_(Automated message from the Ad-Monitoring system)_',
+    ]
+    return send_text(whatsapp, '\n'.join(lines))

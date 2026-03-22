@@ -189,6 +189,27 @@ def create_user(request):
                     detail=f'Created {new_user.name} ({new_user.email}) as {new_user.role}.',
                     ip=ip or None,
                 )
+
+                # Send WhatsApp welcome + credentials if number provided
+                wa = form.cleaned_data.get('whatsapp_number', '').strip()
+                if wa:
+                    try:
+                        from core.whatsapp import notify_new_user_created
+                        from core.models import get_setting
+                        base_url = get_setting('whatsapp_app_base_url', '').rstrip('/')
+                        login_url = f'{base_url}/auth/login/' if base_url else '/auth/login/'
+                        plain_pw = form.cleaned_data['password']
+                        notify_new_user_created(
+                            whatsapp=wa,
+                            name=new_user.name,
+                            email=new_user.email,
+                            password=plain_pw,
+                            role_label=new_user.role_label,
+                            login_url=login_url,
+                        )
+                    except Exception as _e:
+                        pass  # non-fatal
+
                 return redirect('/dashboard/users/')
     else:
         form = CreateUserForm(allowed_roles=allowed_roles, account_qs=account_qs)

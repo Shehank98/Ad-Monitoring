@@ -6856,6 +6856,25 @@ def channel_officer_create(request):
             if temp_password:
                 msg += f' Login: {email} / Temp password: <code class="font-mono font-bold">{temp_password}</code>'
             messages.success(request, msg)
+
+            # Send WhatsApp welcome + credentials if number provided
+            if whatsapp:
+                try:
+                    from core.whatsapp import notify_new_officer_created
+                    base_url = get_setting('whatsapp_app_base_url', '').rstrip('/')
+                    login_url = f'{base_url}/auth/login/' if base_url else '/auth/login/'
+                    notify_new_officer_created(
+                        whatsapp=whatsapp,
+                        name=name,
+                        account_name=str(account_obj),
+                        channel=channel,
+                        email=email if create_login else '',
+                        password=temp_password or '',
+                        login_url=login_url,
+                    )
+                except Exception as _e:
+                    logger.warning('[WhatsApp] officer welcome failed (non-fatal): %s', _e)
+
             return redirect('/dashboard/channel-officers/')
 
         return render(request, 'channel_officers/form.html', {
@@ -7072,8 +7091,8 @@ def whatsapp_webhook(request):
 
 
 def _handle_incoming_whatsapp(msg: dict):
-    """Process one incoming WhatsApp message — handle officer registration."""
-    from core.whatsapp import send_welcome_registration, send_text
+    """Process one incoming WhatsApp message — handle registration for officers and staff users."""
+    from core.whatsapp import send_text
     from core.models import get_setting
 
     from_number = msg.get('from', '').strip()
@@ -7081,44 +7100,61 @@ def _handle_incoming_whatsapp(msg: dict):
         return
 
     # Normalise: add + if missing
-    if not from_number.startswith('+'):
-        from_number_lookup = '+' + from_number
-    else:
-        from_number_lookup = from_number
-
-    # Try to find ChannelOfficer whose whatsapp_number matches (with or without +)
-    officer = (
-        ChannelOfficer.objects.filter(whatsapp_number=from_number_lookup).first()
-        or ChannelOfficer.objects.filter(whatsapp_number=from_number).first()
-    )
-
-    if not officer:
-        logger.info('[WhatsApp webhook] message from unknown number %s — ignored', from_number)
-        return
+    from_number_lookup = ('+' + from_number) if not from_number.startswith('+') else from_number
 
     msg_type = msg.get('type', '')
     msg_text = ''
     if msg_type == 'text':
         msg_text = msg.get('text', {}).get('body', '').strip().upper()
 
-    if not officer.is_whatsapp_registered:
-        # First contact — send welcome and register immediately
-        company = get_setting('whatsapp_company_name', 'Ogilvy Nova')
-        send_welcome_registration(
-            officer_whatsapp=from_number_lookup,
-            officer_name=officer.name,
-            company_name=company,
-        )
-        officer.is_whatsapp_registered = True
-        officer.save(update_fields=['is_whatsapp_registered'])
-        logger.info('[WhatsApp webhook] registered officer %s (%s)', officer.name, from_number_lookup)
-    else:
-        # Already registered — acknowledge if they sent CONFIRM, otherwise ignore
-        if msg_text in ('CONFIRM', 'YES', 'OK'):
+    # ── 1. Check ChannelOfficer ────────────────────────────────────────────────
+    officer = (
+        ChannelOfficer.objects.filter(whatsapp_number=from_number_lookup).first()
+        or ChannelOfficer.objects.filter(whatsapp_number=from_number).first()
+    )
+    if officer:
+        if not officer.is_whatsapp_registered:
+            # Welcome message was already sent at creation — this is their reply/confirm
+            officer.is_whatsapp_registered = True
+            officer.save(update_fields=['is_whatsapp_registered'])
             send_text(
                 from_number_lookup,
-                f'✅ *{officer.name}* — your notifications are active. '
-                f'You will receive alerts for *{officer.channel}* on this number.',
+                f'✅ *{officer.name}* — you are now registered!\n\n'
+                f'You will receive Ad-Monitoring alerts for *{officer.channel}* on this number.\n\n'
+                f'_(Reply *HELP* any time for support)_',
             )
+            logger.info('[WhatsApp webhook] channel officer registered: %s (%s)', officer.name, from_number_lookup)
         else:
-            logger.info('[WhatsApp webhook] message from registered officer %s — no action needed', officer.name)
+            if msg_text in ('CONFIRM', 'YES', 'OK', 'HELP'):
+                send_text(
+                    from_number_lookup,
+                    f'✅ *{officer.name}* — your WhatsApp notifications are already active for *{officer.channel}*.',
+                )
+        return
+
+    # ── 2. Check staff User ────────────────────────────────────────────────────
+    staff_user = (
+        User.objects.filter(whatsapp_number=from_number_lookup).first()
+        or User.objects.filter(whatsapp_number=from_number).first()
+    )
+    if staff_user:
+        if not staff_user.is_whatsapp_registered:
+            staff_user.is_whatsapp_registered = True
+            staff_user.save(update_fields=['is_whatsapp_registered'])
+            company = get_setting('whatsapp_company_name', 'Ogilvy Nova')
+            send_text(
+                from_number_lookup,
+                f'✅ *{staff_user.name}* — you are now registered with *{company}*!\n\n'
+                f'Your WhatsApp notifications are active.\n\n'
+                f'Log in at: {get_setting("whatsapp_app_base_url", "").rstrip("/")}/auth/login/',
+            )
+            logger.info('[WhatsApp webhook] staff user registered: %s (%s)', staff_user.name, from_number_lookup)
+        else:
+            if msg_text in ('CONFIRM', 'YES', 'OK', 'HELP'):
+                send_text(
+                    from_number_lookup,
+                    f'✅ *{staff_user.name}* — your WhatsApp notifications are already active.',
+                )
+        return
+
+    logger.info('[WhatsApp webhook] message from unknown number %s — no matching user/officer', from_number)
