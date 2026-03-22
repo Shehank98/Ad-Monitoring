@@ -104,4 +104,5 @@ urlpatterns = [
     # WhatsApp
     path('whatsapp/test/',                 views.whatsapp_test,             name='whatsapp_test'),
     path('whatsapp/tc-reminders/',         views.whatsapp_send_tc_reminders, name='whatsapp_send_tc_reminders'),
+    path('whatsapp/webhook/',              views.whatsapp_webhook,           name='whatsapp_webhook'),
 ]

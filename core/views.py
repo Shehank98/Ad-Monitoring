@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 import os
 import uuid
 import pandas as pd
@@ -12,7 +13,10 @@ from django.db.models import Max, Min, Count
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
+
+logger = logging.getLogger(__name__)
 
 from accounts.decorators import role_required
 from accounts.models import User
@@ -6677,7 +6681,7 @@ def db_tools(request):
 
 def _notify_missed_spots_whatsapp(account):
     """After verification runs, send WhatsApp to each channel officer that has
-    missed spots in any schedule for this account."""
+    missed spots in any schedule for this account. Attaches a missed-spots PDF."""
     from core.whatsapp import notify_missed_spots
     from core.models import MatchResult
 
@@ -6686,23 +6690,43 @@ def _notify_missed_spots_whatsapp(account):
         wa = officer.effective_whatsapp
         if not wa:
             continue
-        # Find missed spots count for this officer's channel (latest month with data)
+
+        # Latest schedule for this channel
+        schedule = Schedule.objects.filter(
+            account=account, channel=officer.channel,
+        ).order_by('-uploaded_at').first()
+
+        schedule_pk     = schedule.pk             if schedule else 0
+        month           = schedule.month          if schedule else ''
+        schedule_number = schedule.schedule_number if schedule else ''
+        start_date      = schedule.start_date      if schedule else None
+        end_date        = schedule.end_date        if schedule else None
+
         missed_qs = MatchResult.objects.filter(
             account=account,
             channel=officer.channel,
+            month=month,
             status__in=['not_aired', 'no_mapping'],
         )
         missed_count = missed_qs.count()
         if missed_count == 0:
             continue
 
-        # Get latest schedule for this channel to build the upload link
-        schedule = Schedule.objects.filter(
-            account=account, channel=officer.channel,
-        ).order_by('-uploaded_at').first()
-
-        schedule_pk = schedule.pk if schedule else 0
-        month = schedule.month if schedule else ''
+        # Build PDF bytes for attachment
+        pdf_bytes = b''
+        try:
+            all_rows = list(MatchResult.objects.filter(
+                account=account,
+                channel=officer.channel,
+                month=month,
+                status__in=['not_aired', 'no_mapping', 'programme_mismatch', 'late_telecast'],
+            ).order_by('scheduled_date', 'brand'))
+            pdf_bytes = _build_missed_ad_pdf(
+                str(account), officer.channel, month, all_rows,
+                schedule_number=schedule_number or '',
+            )
+        except Exception as e:
+            print(f'[whatsapp notify] PDF generation failed (non-fatal): {e}')
 
         notify_missed_spots(
             officer_whatsapp=wa,
@@ -6712,6 +6736,11 @@ def _notify_missed_spots_whatsapp(account):
             missed_count=missed_count,
             schedule_pk=schedule_pk,
             account_id=account.id,
+            officer_name=officer.name,
+            schedule_number=schedule_number or '',
+            start_date=start_date,
+            end_date=end_date,
+            pdf_bytes=pdf_bytes,
         )
 
 
@@ -6994,3 +7023,102 @@ def whatsapp_send_tc_reminders(request):
 
     messages.success(request, f'TC upload reminders sent: {sent} message(s).')
     return redirect('/dashboard/channel-officers/')
+
+
+# ── WhatsApp Webhook (incoming message handler) ────────────────────────────────
+
+@csrf_exempt
+def whatsapp_webhook(request):
+    """
+    GET  — Meta webhook verification challenge
+    POST — Receive incoming WhatsApp messages (for officer auto-registration)
+
+    Setup in Meta Developer Console:
+      WhatsApp → Configuration → Webhook URL: https://yourapp.railway.app/dashboard/whatsapp/webhook/
+      Verify Token: same value as whatsapp_webhook_verify_token in Settings
+      Subscribe to: messages
+    """
+    if request.method == 'GET':
+        # Meta sends hub.mode, hub.verify_token, hub.challenge
+        mode      = request.GET.get('hub.mode', '')
+        token     = request.GET.get('hub.verify_token', '')
+        challenge = request.GET.get('hub.challenge', '')
+        expected  = get_setting('whatsapp_webhook_verify_token', '')
+        if mode == 'subscribe' and token == expected and expected:
+            logger.info('[WhatsApp webhook] verification OK')
+            return HttpResponse(challenge, content_type='text/plain')
+        logger.warning('[WhatsApp webhook] verification failed: token=%s expected=%s', token, expected)
+        return HttpResponse('Forbidden', status=403)
+
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return HttpResponse('Bad JSON', status=400)
+
+        try:
+            for entry in data.get('entry', []):
+                for change in entry.get('changes', []):
+                    value = change.get('value', {})
+                    for msg in value.get('messages', []):
+                        _handle_incoming_whatsapp(msg)
+        except Exception as exc:
+            logger.error('[WhatsApp webhook] processing error: %s', exc)
+
+        # Meta requires a 200 OK regardless of processing outcome
+        return JsonResponse({'status': 'ok'})
+
+    return HttpResponse('Method not allowed', status=405)
+
+
+def _handle_incoming_whatsapp(msg: dict):
+    """Process one incoming WhatsApp message — handle officer registration."""
+    from core.whatsapp import send_welcome_registration, send_text
+    from core.models import get_setting
+
+    from_number = msg.get('from', '').strip()
+    if not from_number:
+        return
+
+    # Normalise: add + if missing
+    if not from_number.startswith('+'):
+        from_number_lookup = '+' + from_number
+    else:
+        from_number_lookup = from_number
+
+    # Try to find ChannelOfficer whose whatsapp_number matches (with or without +)
+    officer = (
+        ChannelOfficer.objects.filter(whatsapp_number=from_number_lookup).first()
+        or ChannelOfficer.objects.filter(whatsapp_number=from_number).first()
+    )
+
+    if not officer:
+        logger.info('[WhatsApp webhook] message from unknown number %s — ignored', from_number)
+        return
+
+    msg_type = msg.get('type', '')
+    msg_text = ''
+    if msg_type == 'text':
+        msg_text = msg.get('text', {}).get('body', '').strip().upper()
+
+    if not officer.is_whatsapp_registered:
+        # First contact — send welcome and register immediately
+        company = get_setting('whatsapp_company_name', 'Ogilvy Nova')
+        send_welcome_registration(
+            officer_whatsapp=from_number_lookup,
+            officer_name=officer.name,
+            company_name=company,
+        )
+        officer.is_whatsapp_registered = True
+        officer.save(update_fields=['is_whatsapp_registered'])
+        logger.info('[WhatsApp webhook] registered officer %s (%s)', officer.name, from_number_lookup)
+    else:
+        # Already registered — acknowledge if they sent CONFIRM, otherwise ignore
+        if msg_text in ('CONFIRM', 'YES', 'OK'):
+            send_text(
+                from_number_lookup,
+                f'✅ *{officer.name}* — your notifications are active. '
+                f'You will receive alerts for *{officer.channel}* on this number.',
+            )
+        else:
+            logger.info('[WhatsApp webhook] message from registered officer %s — no action needed', officer.name)

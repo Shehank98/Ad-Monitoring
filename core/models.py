@@ -767,6 +767,28 @@ SETTING_DEFAULTS = [
         ),
         'category': 'whatsapp',
     },
+    {
+        'key': 'whatsapp_webhook_verify_token',
+        'value': '',
+        'label': 'Webhook Verify Token',
+        'description': (
+            'A secret token you choose (any random string) — set the same value in '
+            'Meta Developer Console → WhatsApp → Configuration → Webhook Verify Token. '
+            'Required to receive incoming WhatsApp messages for auto-registration. '
+            'Example: ad-monitor-secret-2025'
+        ),
+        'category': 'whatsapp',
+    },
+    {
+        'key': 'whatsapp_company_name',
+        'value': 'Ogilvy Nova',
+        'label': 'Company Name for Welcome Message',
+        'description': (
+            'Company name shown in the WhatsApp welcome message sent to new channel officers. '
+            'e.g. "Welcome to Ogilvy Nova, [Name]!"'
+        ),
+        'category': 'whatsapp',
+    },
 ]
 
 
@@ -895,6 +917,10 @@ class ChannelOfficer(models.Model):
     name           = models.CharField(max_length=150)
     whatsapp_number = models.CharField(max_length=20, blank=True, default='',
                                        help_text='Include country code, e.g. +94771234567')
+    is_whatsapp_registered = models.BooleanField(
+        default=False,
+        help_text='True once the officer has sent their first WhatsApp message to the business number.',
+    )
     created_at     = models.DateTimeField(auto_now_add=True)
     updated_at     = models.DateTimeField(auto_now=True)
 
