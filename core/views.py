@@ -7063,6 +7063,18 @@ def whatsapp_webhook(request):
         token     = request.GET.get('hub.verify_token', '')
         challenge = request.GET.get('hub.challenge', '')
         expected  = get_setting('whatsapp_webhook_verify_token', '')
+
+        # Debug: plain GET with no hub.mode → show status (helps confirm endpoint is live)
+        if not mode and not token and not challenge:
+            configured = bool(expected)
+            return JsonResponse({
+                'status': 'webhook endpoint is live',
+                'verify_token_configured': configured,
+                'hint': ('Set whatsapp_webhook_verify_token in /dashboard/settings/ '
+                         'then use the same value as the Verify Token in Meta.') if not configured else
+                        'Token is set. Use the same value in Meta Webhook Verify Token field.',
+            })
+
         if mode == 'subscribe' and token == expected and expected:
             logger.info('[WhatsApp webhook] verification OK')
             return HttpResponse(challenge, content_type='text/plain')
