@@ -394,22 +394,29 @@ def schedule_list(request):
     account_id = request.GET.get('account')
     channel    = request.GET.get('channel', '').strip()
     month      = request.GET.get('month', '').strip()
+    media_type = request.GET.get('media_type', '').strip()   # 'tv' | 'radio' | 'press' | ''
+    q_search   = request.GET.get('q', '').strip()
     if account_id:
         qs = qs.filter(account_id=account_id)
     if channel:
         qs = qs.filter(channel__icontains=channel)
     if month:
         qs = qs.filter(month__icontains=month)
+    if media_type:
+        qs = qs.filter(media_type=media_type)
+    if q_search:
+        qs = qs.filter(original_filename__icontains=q_search)
 
     today    = date_cls.today()
     accounts = _account_qs(user)
     channels = Channel.objects.all()
     return render(request, 'schedules/list.html', {
-        'schedules': qs,
-        'accounts':  accounts,
-        'channels':  channels,
-        'filters':   {'account': account_id, 'channel': channel, 'month': month},
-        'today':     today,
+        'schedules':  qs,
+        'accounts':   accounts,
+        'channels':   channels,
+        'filters':    {'account': account_id, 'channel': channel, 'month': month,
+                       'media_type': media_type, 'q': q_search},
+        'today':      today,
     })
 
 
@@ -450,6 +457,8 @@ def schedule_upload(request):
 
             sched_number   = form.cleaned_data['schedule_number'].strip()
             channel_name   = channel_obj.name
+            from core.models import parse_channel_media_type as _pmt
+            _sch_media_type, _ = _pmt(channel_name)
             dup_action     = request.POST.get('duplicate_action', '')
 
             # Check for duplicate ref number within same (account, channel, month)
@@ -528,6 +537,7 @@ def schedule_upload(request):
             schedule = Schedule(
                 account           = account,
                 channel           = channel_name,
+                media_type        = _sch_media_type,
                 month             = month,
                 schedule_number   = sched_number,
                 original_filename = excel_file.name,
@@ -911,8 +921,18 @@ def monitoring_upload(request):
                 print(f"[monitoring_upload]   saved MonitoringData pk={mon.pk}  channel={meta['channel']}  rows={meta['row_count']}")
 
             # ── Parse LMRB rows into master DB table (append mode) ────────────
+            # Read advertiser filter selections submitted by the user.
+            # These are the advertiser names (from the Advertiser column in the
+            # LMRB file) that belong to this account.  Only rows matching these
+            # advertisers will be stored; all others are ignored.
+            selected_advertisers = [
+                v.strip() for v in request.POST.getlist('selected_advertisers')
+                if v.strip()
+            ]
             print(f"[monitoring_upload] parsing LMRB rows (append mode) …")
-            _parse_lmrb_rows(df, data_type, account, batch_id=uuid.UUID(group_id))
+            print(f"[monitoring_upload] advertiser filter: {selected_advertisers or 'ALL'}")
+            _parse_lmrb_rows(df, data_type, account, batch_id=uuid.UUID(group_id),
+                             advertiser_filter=selected_advertisers or None)
 
             ch_names = ', '.join(m['channel'] for m in channel_metas)
             print(f"[monitoring_upload] DONE - {len(channel_metas)} channel(s): {ch_names}")
@@ -933,7 +953,7 @@ def monitoring_upload(request):
     return render(request, 'monitoring/upload.html', {'form': form})
 
 
-def _parse_lmrb_rows(df, data_type, account, batch_id=None):
+def _parse_lmrb_rows(df, data_type, account, batch_id=None, advertiser_filter=None):
     """
     Parse monitoring DataFrame and append into the LMRBRow master table.
 
@@ -1008,6 +1028,12 @@ def _parse_lmrb_rows(df, data_type, account, batch_id=None):
 
     ch_col = _find_col(df, 'Channel', 'Station')
 
+    # ── Advertiser filter: normalise to lowercase set for fast membership test ──
+    adv_col_name = _find_col(df, 'Advertiser', 'advertiser', 'ADVERTISER', 'Adv', 'Client')
+    _adv_filter_set = (
+        {a.lower() for a in advertiser_filter} if advertiser_filter else None
+    )
+
     # ── Build rows dict keyed by dedup_key ────────────────────────────────────
     rows_by_key = {}
 
@@ -1019,7 +1045,11 @@ def _parse_lmrb_rows(df, data_type, account, batch_id=None):
         date_val  = _safe_date(r.get('Date'))
         brk_no    = _safe_int(r.get('BrkNo'))
         pos_in_brk = _safe_int(r.get('PosinBrk'))
-        advertiser = _safe_str(r.get('Advertiser', ''))
+        advertiser = _safe_str(r.get(adv_col_name, '') if adv_col_name else '')
+
+        # Skip rows whose advertiser is not in the selected filter
+        if _adv_filter_set and advertiser.lower() not in _adv_filter_set:
+            continue
         product    = _safe_str(r.get('Product', ''))
 
         if not (theme and advt_time and date_val and channel):
@@ -1078,7 +1108,7 @@ def _parse_lmrb_rows(df, data_type, account, batch_id=None):
 @login_required
 @require_POST
 def monitoring_detect(request):
-    """AJAX: parse an uploaded monitoring file and return detected channels/dates."""
+    """AJAX: parse an uploaded monitoring file and return detected channels/dates + advertisers."""
     excel_file = request.FILES.get('file')
     data_type  = request.POST.get('data_type', 'mediawatch')
     if not excel_file:
@@ -1087,7 +1117,22 @@ def monitoring_detect(request):
         df = pd.read_excel(excel_file)
         df.columns = df.columns.str.strip()
         metas = _detect_monitoring_meta(df, data_type)
-        return JsonResponse({'ok': True, 'channels': metas, 'total_rows': len(df)})
+
+        # Detect unique advertisers so the uploader can filter by account
+        adv_col = _find_col(df, 'Advertiser', 'advertiser', 'ADVERTISER', 'Adv', 'Client')
+        advertisers = []
+        if adv_col:
+            advertisers = sorted(
+                v for v in df[adv_col].dropna().astype(str).str.strip().unique()
+                if v and v.lower() not in ('nan', 'none', '')
+            )
+
+        return JsonResponse({
+            'ok': True,
+            'channels': metas,
+            'total_rows': len(df),
+            'advertisers': advertisers,
+        })
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)})
 

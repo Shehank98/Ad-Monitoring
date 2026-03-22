@@ -5,8 +5,29 @@
 
 {% block content %}
 
+<!-- ── Media type tabs ────────────────────────────────────────── -->
+<div class="flex gap-2 mb-4">
+  <a href="?{% if filters.account %}account={{ filters.account }}&{% endif %}{% if filters.month %}month={{ filters.month }}{% endif %}"
+     class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all {% if not filters.media_type %}bg-slate-700 text-white border-slate-700{% else %}bg-white text-slate-600 border-slate-200 hover:border-slate-400{% endif %}">
+    <i class="fa-solid fa-layer-group"></i> All
+  </a>
+  <a href="?media_type=tv{% if filters.account %}&account={{ filters.account }}{% endif %}{% if filters.month %}&month={{ filters.month }}{% endif %}"
+     class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all {% if filters.media_type == 'tv' %}bg-blue-600 text-white border-blue-600{% else %}bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600{% endif %}">
+    <i class="fa-solid fa-tv"></i> TV
+  </a>
+  <a href="?media_type=radio{% if filters.account %}&account={{ filters.account }}{% endif %}{% if filters.month %}&month={{ filters.month }}{% endif %}"
+     class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all {% if filters.media_type == 'radio' %}bg-purple-600 text-white border-purple-600{% else %}bg-white text-slate-600 border-slate-200 hover:border-purple-300 hover:text-purple-600{% endif %}">
+    <i class="fa-solid fa-radio"></i> Radio
+  </a>
+  <a href="?media_type=press{% if filters.account %}&account={{ filters.account }}{% endif %}{% if filters.month %}&month={{ filters.month }}{% endif %}"
+     class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all {% if filters.media_type == 'press' %}bg-emerald-600 text-white border-emerald-600{% else %}bg-white text-slate-600 border-slate-200 hover:border-emerald-300 hover:text-emerald-600{% endif %}">
+    <i class="fa-solid fa-newspaper"></i> Press
+  </a>
+</div>
+
 <!-- ── Filter bar ─────────────────────────────────────────────── -->
 <form method="get" class="bg-white rounded-xl border border-slate-100 shadow-sm px-5 py-4 mb-5 flex flex-wrap gap-3 items-end">
+  <input type="hidden" name="media_type" value="{{ filters.media_type }}">
   <div class="flex-1 min-w-[140px]">
     <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Account</label>
     <select name="account" class="select-field">

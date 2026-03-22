@@ -40,13 +40,26 @@ import logging
 from datetime import datetime
 
 import pandas as pd
-from django.db.models import Max, Min
+from django.db.models import Max, Min, Q
 from django.utils import timezone
 
-from core.models import Account, BrandMapping, LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow
+from core.models import Account, BrandMapping, LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow, parse_channel_media_type
 from .processing import (
     _parse_time_to_seconds, lmrb_fingerprint, match_ads, normalize,
 )
+
+
+def _lmrb_channel_q(channel: str) -> Q:
+    """Return a Q filter for LMRBRow.channel that handles the 'TYPE - Name' prefix.
+
+    Schedules store 'TV - Sirasa TV' (from the Channel model) while LMRB rows
+    store the clean name 'Sirasa TV' (after _canon_channel strips the prefix).
+    This filter matches both forms so reconciliation never silently drops rows.
+    """
+    _, clean = parse_channel_media_type(channel)
+    if clean != channel:
+        return Q(channel__iexact=channel) | Q(channel__iexact=clean)
+    return Q(channel__iexact=channel)
 
 logger = logging.getLogger(__name__)
 
@@ -348,7 +361,7 @@ def run_scope(account_id, channel, month, mode='smart'):
 
     # ── Rule 8: cap LMRB date_end at the latest available monitoring date ──────
     max_lmrb_date = LMRBRow.objects.filter(
-        account_id=account_id, channel__iexact=channel,
+        _lmrb_channel_q(channel), account_id=account_id,
     ).aggregate(d=Max('date'))['d']
 
     if max_lmrb_date:
@@ -410,9 +423,9 @@ def run_scope(account_id, channel, month, mode='smart'):
         )
 
     # ── Build shared LMRB pool ─────────────────────────────────────────────────
-    # Case-insensitive channel match so "Sirasa TV" / "SIRASA TV" resolve to the
-    # same pool regardless of how the LMRB file spells the channel name.
-    lmrb_qs = LMRBRow.objects.filter(account_id=account_id, channel__iexact=channel)
+    # Channel matching handles both 'TV - Sirasa TV' (schedule form) and
+    # 'Sirasa TV' (LMRB after prefix stripping) via _lmrb_channel_q.
+    lmrb_qs = LMRBRow.objects.filter(_lmrb_channel_q(channel), account_id=account_id)
     # Always exclude manually matched LMRB rows - permanently locked once a
     # ManualMatch record exists.  This filter applies in both smart and reset modes.
     lmrb_qs = lmrb_qs.filter(is_manual_matched=False)

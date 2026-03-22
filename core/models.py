@@ -4,9 +4,36 @@ import hashlib
 import uuid
 
 
+MEDIA_TYPE_CHOICES = [
+    ('tv',    'TV'),
+    ('radio', 'Radio'),
+    ('press', 'Press'),
+    ('other', 'Other'),
+]
+
+_MEDIA_PREFIXES = ['tv', 'radio', 'press']
+
+
+def parse_channel_media_type(name: str):
+    """Parse 'TV - Sirasa TV' → ('tv', 'Sirasa TV').
+    Returns (media_type, clean_name).  clean_name has the 'TYPE - ' prefix stripped.
+    Unrecognised prefix → ('other', original_name).
+    """
+    parts = name.split(' - ', 1)
+    if len(parts) == 2:
+        prefix = parts[0].strip().lower()
+        if prefix in _MEDIA_PREFIXES:
+            return prefix, parts[1].strip()
+    return 'other', name.strip()
+
+
 class Channel(models.Model):
     """A TV/radio channel that admins can manage and planners select from."""
     name       = models.CharField(max_length=200, unique=True)
+    media_type = models.CharField(
+        max_length=10, choices=MEDIA_TYPE_CHOICES, blank=True, default='',
+        help_text='Detected from name prefix (TV - / Radio - / Press -)',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -14,6 +41,11 @@ class Channel(models.Model):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.media_type:
+            self.media_type, _ = parse_channel_media_type(self.name)
+        super().save(*args, **kwargs)
 
 
 class Account(models.Model):
@@ -37,6 +69,10 @@ class Schedule(models.Model):
     """
     account           = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='schedules')
     channel           = models.CharField(max_length=200)
+    media_type        = models.CharField(
+        max_length=10, choices=MEDIA_TYPE_CHOICES, blank=True, default='',
+        help_text='TV / Radio / Press — auto-detected from channel name prefix at upload',
+    )
     month             = models.CharField(max_length=50)
     schedule_number   = models.CharField(max_length=50)
     file              = models.FileField(upload_to='schedules/')

@@ -36,8 +36,17 @@ from django.utils import timezone
 from core.models import (
     Account, BrandMapping, LMRBRow, ManualMatch, Schedule, ScheduleRow,
     SponsorshipLmrbAssignment, SummaryReportMeta, TCRow, TransmissionReport,
-    get_setting_int,
+    get_setting_int, parse_channel_media_type,
 )
+
+
+def _lmrb_channel_q(channel: str) -> Q:
+    """Match LMRBRow.channel handling 'TV - Sirasa TV' vs 'Sirasa TV' prefix forms."""
+    _, clean = parse_channel_media_type(channel)
+    if clean != channel:
+        return Q(channel__iexact=channel) | Q(channel__iexact=clean)
+    return Q(channel__iexact=channel)
+
 
 # ── LMRB theme helpers ────────────────────────────────────────────────────────
 
@@ -287,7 +296,7 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
     lmrb_loaded = 0
     if sch_start and sch_end:
         for lr in LMRBRow.objects.filter(
-            account_id=account_id, channel__iexact=channel,
+            _lmrb_channel_q(channel), account_id=account_id,
             date__range=(sch_start, sch_end),
         ):
             k = (_normalize(lr.channel), lr.date, int(lr.duration) if lr.duration else None)
@@ -420,9 +429,8 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
         (is_sponsorship_matched=True), so they are not double-counted in the
         commercial 3rd-party column.
         """
-        # channel__iexact: LMRB file may store the channel name in a different case
-        # (e.g. "SIRASA TV" in the Excel vs "Sirasa TV" in the schedule/TC form).
-        q = LMRBRow.objects.filter(account_id=account_id, channel__iexact=channel)
+        # _lmrb_channel_q handles both case differences and 'TV - Name' prefix format.
+        q = LMRBRow.objects.filter(_lmrb_channel_q(channel), account_id=account_id)
         if exclude_spon:
             q = q.filter(is_sponsorship_matched=False)
         if date_min and date_max:
@@ -559,7 +567,7 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
     def _leftover_lmrb_count(lmrb_themes, dur_int):
         """Count LMRBRows that are not matched commercially or for sponsorship."""
         q = LMRBRow.objects.filter(
-            account_id=account_id, channel__iexact=channel,
+            _lmrb_channel_q(channel), account_id=account_id,
             is_matched=False, is_sponsorship_matched=False,
         )
         if date_min and date_max:
