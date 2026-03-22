@@ -9,7 +9,8 @@ urlpatterns = [
     # User management (admin+)
     path('users/',              acc_views.user_list,      name='user_list'),
     path('users/create/',       acc_views.create_user,    name='create_user'),
-    path('users/<int:user_id>/edit/', acc_views.edit_user, name='edit_user'),
+    path('users/<int:user_id>/edit/',   acc_views.edit_user,   name='edit_user'),
+    path('users/<int:user_id>/delete/', acc_views.delete_user, name='delete_user'),
 
     # Account management
     path('accounts/',           views.account_list,       name='account_list'),
@@ -96,7 +97,11 @@ urlpatterns = [
     # Competitor Analysis
     path('competitor/', include('competitor.urls')),
 
-    # Channel Officers
+    # Channel Officer self-service
+    path('channel-officer/',               views.channel_officer_dashboard, name='channel_officer_dashboard'),
+    path('tc/<int:pk>/download/',          views.tc_report_download,        name='tc_report_download'),
+
+    # Channel Officers (admin management)
     path('channel-officers/',              views.channel_officer_list,      name='channel_officer_list'),
     path('channel-officers/create/',       views.channel_officer_create,    name='channel_officer_create'),
     path('channel-officers/<int:pk>/edit/', views.channel_officer_edit,     name='channel_officer_edit'),

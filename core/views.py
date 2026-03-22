@@ -3279,6 +3279,8 @@ def tc_upload_parsed(request):
         request,
         f'TC Report uploaded successfully: {rows_count} rows from "{filename}".'
     )
+    if request.user.role == 'channel_officer':
+        return redirect('/dashboard/channel-officer/')
     return redirect('/dashboard/tc/')
 
 
@@ -3534,6 +3536,8 @@ def tc_upload(request):
         tc_report.save(update_fields=['row_count'])
 
         messages.success(request, f'TC uploaded: {count} rows for {channel} / {month}.')
+        if user.role == 'channel_officer':
+            return redirect('/dashboard/channel-officer/')
         return redirect('/dashboard/tc/')
 
     # GET - show upload form (accept pre-fill params from WhatsApp links)
@@ -6769,6 +6773,74 @@ def _notify_reconciliation_done_whatsapp(account_id, channel, month, result):
             lmrb_confirmed=result.get('lmrb_confirmed', 0),
             account_id=account_id,
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Channel Officer — Self-service dashboard
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@login_required
+@role_required(['channel_officer'])
+def channel_officer_dashboard(request):
+    """
+    Landing page for channel officers after login.
+    Shows the schedules for their assigned account/channel and their uploaded TCs.
+    """
+    user = request.user
+    try:
+        profile = ChannelOfficer.objects.select_related('account').get(user=user)
+    except ChannelOfficer.DoesNotExist:
+        profile = None
+
+    schedules = []
+    tc_reports = []
+    if profile:
+        schedules = (
+            Schedule.objects
+            .filter(account=profile.account, channel=profile.channel)
+            .order_by('-start_date', '-uploaded_at')
+        )
+        tc_reports = (
+            TransmissionReport.objects
+            .filter(account=profile.account, channel=profile.channel)
+            .order_by('-uploaded_at')
+        )
+
+    return render(request, 'channel_officers/dashboard.html', {
+        'profile':    profile,
+        'schedules':  schedules,
+        'tc_reports': tc_reports,
+    })
+
+
+@login_required
+def tc_report_download(request, pk):
+    """Serve the original TC file as a download (channel officers + all staff)."""
+    user   = request.user
+    report = get_object_or_404(TransmissionReport, pk=pk)
+
+    # Channel officers may only download their own account/channel
+    if user.role == 'channel_officer':
+        try:
+            profile = ChannelOfficer.objects.get(user=user)
+            if report.account_id != profile.account_id or report.channel != profile.channel:
+                return HttpResponse('Access denied', status=403)
+        except ChannelOfficer.DoesNotExist:
+            return HttpResponse('Access denied', status=403)
+    elif not _account_access(user, report.account_id):
+        return HttpResponse('Access denied', status=403)
+
+    try:
+        file_path = report.file.path
+        if not os.path.exists(file_path):
+            return HttpResponse('File not found on server.', status=404)
+        return FileResponse(
+            open(file_path, 'rb'),
+            as_attachment=True,
+            filename=report.original_filename or os.path.basename(file_path),
+        )
+    except Exception as e:
+        return HttpResponse(f'Download failed: {e}', status=500)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -116,6 +116,20 @@
         </button>
       </form>
 
+      <!-- Delete user (super_admin only, cannot delete another super_admin) -->
+      {% if request.user.role == 'super_admin' and target_user.role != 'super_admin' %}
+      <form method="post" action="/auth/users/{{ target_user.id }}/delete/"
+            onsubmit="return confirm('Permanently delete {{ target_user.name }}?\n\nThis will remove their account and cannot be undone.')">
+        {% csrf_token %}
+        <button type="submit"
+                class="inline-flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700
+                       text-white text-sm font-semibold rounded-xl border border-red-600
+                       transition-all duration-150">
+          <i class="fa-solid fa-trash"></i> Delete User
+        </button>
+      </form>
+      {% endif %}
+
     </div>
   </div>
 

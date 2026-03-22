@@ -455,8 +455,11 @@
       {% endif %}
 
       {% if ur == 'channel_officer' %}
-        <!-- Channel officer: only see TC upload -->
-        <p class="nav-label"><span class="nav-text">TC Upload</span></p>
+        <!-- Channel officer: dashboard + TC upload only -->
+        <p class="nav-label"><span class="nav-text">My Portal</span></p>
+        <a href="/dashboard/channel-officer/" class="nav-item {% if 'channel-officer' in path %}active{% endif %}">
+          <i class="nav-icon fa-solid fa-house"></i><span class="nav-text">My Dashboard</span>
+        </a>
         <a href="/dashboard/tc/upload/" class="nav-item {% if 'tc/upload' in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload TC</span>
         </a>

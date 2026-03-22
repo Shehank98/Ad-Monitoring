@@ -150,17 +150,33 @@
 
           <!-- Actions cell -->
           <td class="px-6 py-4 text-right">
-            {% if u != request.user %}
-              <a href="/dashboard/users/{{ u.id }}/edit/"
-                 class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200
-                        text-xs font-semibold text-slate-600 hover:border-blue-300 hover:text-blue-600
-                        hover:bg-blue-50 transition-all duration-150">
-                <i class="fa-solid fa-pen-to-square"></i> Edit
-              </a>
-            {% else %}
+            {% if u == request.user %}
               <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 text-xs text-slate-400 italic">
                 <i class="fa-solid fa-circle-user"></i> You
               </span>
+            {% elif u.role == 'super_admin' and request.user.role != 'super_admin' %}
+              {# Non-super-admins cannot touch super_admin accounts #}
+            {% else %}
+              <div class="inline-flex items-center gap-2">
+                <a href="/dashboard/users/{{ u.id }}/edit/"
+                   class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200
+                          text-xs font-semibold text-slate-600 hover:border-blue-300 hover:text-blue-600
+                          hover:bg-blue-50 transition-all duration-150">
+                  <i class="fa-solid fa-pen-to-square"></i> Edit
+                </a>
+                {% if request.user.role == 'super_admin' and u.role != 'super_admin' %}
+                <form method="post" action="/auth/users/{{ u.id }}/delete/"
+                      onsubmit="return confirm('Permanently delete {{ u.name }}? This cannot be undone.')">
+                  {% csrf_token %}
+                  <button type="submit"
+                          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200
+                                 text-xs font-semibold text-red-600 hover:bg-red-50 hover:border-red-400
+                                 transition-all duration-150">
+                    <i class="fa-solid fa-trash"></i> Delete
+                  </button>
+                </form>
+                {% endif %}
+              </div>
             {% endif %}
           </td>
         </tr>

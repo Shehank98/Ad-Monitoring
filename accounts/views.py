@@ -46,17 +46,17 @@ def login_view(request):
             email    = form.cleaned_data['email'].strip().lower()
             password = form.cleaned_data['password']
 
-            domain = settings.ALLOWED_EMAIL_DOMAIN
-            if domain and not email.endswith(f'@{domain}'):
-                messages.error(request, f'Only @{domain} email addresses are allowed.')
-                return render(request, 'accounts/login.html', _login_ctx(form))
-
             user = authenticate(request, email=email, password=password)
             if user is None:
                 messages.error(request, 'Invalid email or password.')
             elif not user.is_active:
                 messages.error(request, 'Your account has been deactivated. Contact your administrator.')
             else:
+                # Channel officers may use non-agency email addresses — skip domain check for them
+                domain = settings.ALLOWED_EMAIL_DOMAIN
+                if domain and not email.endswith(f'@{domain}') and user.role != 'channel_officer':
+                    messages.error(request, f'Only @{domain} email addresses are allowed.')
+                    return render(request, 'accounts/login.html', _login_ctx(form))
                 login(request, user)
                 if user.must_change_password:
                     messages.info(request, 'Please change your temporary password to continue.')
@@ -65,7 +65,7 @@ def login_view(request):
                 if next_url and next_url.startswith('/'):
                     return redirect(next_url)
                 if user.role == 'channel_officer':
-                    return redirect('/dashboard/tc/upload/')
+                    return redirect('/dashboard/channel-officer/')
                 return redirect('/dashboard/')
     else:
         form = LoginForm()
@@ -92,6 +92,8 @@ def change_password_view(request):
                 user.save()
                 login(request, user)
                 messages.success(request, 'Password updated successfully!')
+                if user.role == 'channel_officer':
+                    return redirect('/dashboard/channel-officer/')
                 return redirect('/dashboard/')
     else:
         form = ChangePasswordForm()
@@ -100,6 +102,35 @@ def change_password_view(request):
 
 
 # ── User management ────────────────────────────────────────────────────────────
+
+@login_required
+@role_required(['super_admin'])
+def delete_user(request, user_id):
+    """Super admin only: permanently delete a user account."""
+    target = get_object_or_404(User, id=user_id)
+
+    if target == request.user:
+        messages.error(request, 'You cannot delete your own account.')
+        return redirect('/dashboard/users/')
+
+    if target.role == 'super_admin':
+        messages.error(request, 'Super admin accounts cannot be deleted.')
+        return redirect('/dashboard/users/')
+
+    name = target.name
+    email = target.email
+    target.delete()
+
+    ip = (request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+          or request.META.get('REMOTE_ADDR'))
+    AuditLog.objects.create(
+        user=request.user, action='user_delete',
+        detail=f'Deleted user {name} ({email}).',
+        ip=ip or None,
+    )
+    messages.success(request, f'User {name} has been permanently deleted.')
+    return redirect('/dashboard/users/')
+
 
 @login_required
 @role_required(['super_admin', 'admin', 'team_head'])
@@ -165,7 +196,8 @@ def create_user(request):
         if form.is_valid():
             email  = form.cleaned_data['email'].strip().lower()
             domain = settings.ALLOWED_EMAIL_DOMAIN
-            if domain and not email.endswith(f'@{domain}'):
+            # Channel officers work at TV channels — their emails won't match the agency domain
+            if domain and not email.endswith(f'@{domain}') and form.cleaned_data['role'] != 'channel_officer':
                 messages.error(request, f'Email must end with @{domain}.')
             elif User.objects.filter(email=email).exists():
                 messages.error(request, 'An account with this email already exists.')
