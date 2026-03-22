@@ -159,7 +159,7 @@ def send_welcome_registration(officer_whatsapp: str, officer_name: str,
         f'👋 Welcome to *{company_name}*, *{officer_name}*!\n\n'
         f'You have been registered to receive Ad-Monitoring alerts for your channel.\n\n'
         f'Please reply *CONFIRM* to activate your notifications.\n\n'
-        f'_(This is an automated message from the Ad-Monitoring system.)_'
+        f'_(Automated message from {company_name})_'
     )
     return send_text(officer_whatsapp, body)
 
@@ -170,11 +170,15 @@ def notify_missed_spots(officer_whatsapp: str, account_name: str, channel: str,
                         month: str, missed_count: int, schedule_pk: int,
                         account_id: int, officer_name: str = '',
                         schedule_number: str = '', start_date=None,
-                        end_date=None, pdf_bytes: bytes = b'') -> bool:
+                        end_date=None, pdf_bytes: bytes = b'',
+                        company: str = '') -> bool:
     """Notify a channel marketing officer that spots were missed.
 
     Sends a WhatsApp text message with details + attaches the missed-spots PDF.
     """
+    from core.models import get_setting
+    if not company:
+        company = get_setting('whatsapp_company_name', 'Ogilvy Nova')
     cfg = _get_config()
     base_url = cfg['base_url'].rstrip('/')
 
@@ -214,7 +218,7 @@ def notify_missed_spots(officer_whatsapp: str, account_name: str, channel: str,
     ]
     if link:
         lines += [f'', f'Upload TC to review:', f'{link}']
-    lines += [f'', f'_(Login required — use your Ad-Monitor credentials)_']
+    lines += [f'', f'_(Automated message from {company})_']
     body = '\n'.join(lines)
 
     ok = send_text(officer_whatsapp, body)
@@ -264,9 +268,11 @@ def notify_tc_upload_reminder(officer_whatsapp: str, account_name: str,
             f'Upload TC here:',
             f'{link}',
         ]
+    from core.models import get_setting as _gs
+    _company = _gs('whatsapp_company_name', 'Ogilvy Nova')
     lines += [
         f'',
-        f'_(Login required — use your Ad-Monitor credentials)_',
+        f'_(Automated message from {_company})_',
     ]
     body = '\n'.join(lines)
     return send_text(officer_whatsapp, body)
@@ -326,7 +332,7 @@ def notify_new_user_created(whatsapp: str, name: str, email: str,
         f'',
         f'Please reply *CONFIRM* to this message to activate WhatsApp notifications on this number.',
         f'',
-        f'_(Automated message — do not share your password)_',
+        f'_(Automated message from {company} — do not share your password)_',
     ]
     return send_text(whatsapp, '\n'.join(lines))
 
@@ -378,6 +384,6 @@ def notify_new_officer_created(whatsapp: str, name: str, account_name: str,
     lines += [
         f'Please reply *CONFIRM* to activate your WhatsApp notifications.',
         f'',
-        f'_(Automated message from the Ad-Monitoring system)_',
+        f'_(Automated message from {company})_',
     ]
     return send_text(whatsapp, '\n'.join(lines))

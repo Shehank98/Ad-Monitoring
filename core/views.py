@@ -6818,8 +6818,12 @@ def channel_officer_dashboard(request):
     except ChannelOfficer.DoesNotExist:
         profile = None
 
-    # All accounts this officer is assigned to (via User.accounts M2M)
+    # All accounts this officer is assigned to (via User.accounts M2M).
+    # If none are set yet (legacy creation flow), auto-assign from ChannelOfficer.account.
     user_accounts = user.accounts.all().order_by('name')
+    if not user_accounts.exists() and profile and profile.account_id:
+        user.accounts.add(profile.account)
+        user_accounts = user.accounts.all().order_by('name')
 
     # Account filter from GET; default to first account
     filter_account_id = request.GET.get('account_id', '').strip()
@@ -6860,11 +6864,12 @@ def tc_report_download(request, pk):
     user   = request.user
     report = get_object_or_404(TransmissionReport, pk=pk)
 
-    # Channel officers may only download their own account/channel
+    # Channel officers may only download TCs for their own channel/accounts
     if user.role == 'channel_officer':
         try:
             profile = ChannelOfficer.objects.get(user=user)
-            if report.account_id != profile.account_id or report.channel != profile.channel:
+            allowed_accounts = list(user.accounts.values_list('id', flat=True)) or [profile.account_id]
+            if report.account_id not in allowed_accounts or report.channel != profile.channel:
                 return HttpResponse('Access denied', status=403)
         except ChannelOfficer.DoesNotExist:
             return HttpResponse('Access denied', status=403)
@@ -7282,4 +7287,13 @@ def _handle_incoming_whatsapp(msg: dict):
                 )
         return
 
+    # ── 3. Unknown number — send a polite "not registered" reply ──────────────
     logger.info('[WhatsApp webhook] message from unknown number %s — no matching user/officer', from_number)
+    company = get_setting('whatsapp_company_name', 'Ogilvy Nova')
+    send_text(
+        from_number_lookup,
+        f'👋 Hi! This is the *{company}* monitoring system.\n\n'
+        f'Your number is not registered in our system. '
+        f'If you believe this is an error, please contact your administrator.\n\n'
+        f'_(Automated message from {company})_',
+    )
