@@ -5,6 +5,11 @@
 
 {% block extra_head %}
 <style>
+  /* ── Media filter buttons ── */
+  .media-flt-btn { background:#fff; border-color:#e2e8f0; color:#64748b; }
+  .media-flt-btn:hover { border-color:#94a3b8; color:#334155; }
+  .media-flt-btn.active { background:#0f172a; border-color:#0f172a; color:#fff; }
+
   /* ── Campaign row cards ── */
   .camp-row {
     background:#fff; border-radius:1rem; border:1px solid #f1f5f9;
@@ -84,10 +89,31 @@
   </div>
 {% else %}
 
+<!-- ── TV / Radio filter ───────────────────────────────────────────────── -->
+<div class="flex items-center gap-2 mb-4">
+  <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-1">Filter:</span>
+  <button onclick="filterMedia('all')" id="flt-all"
+          class="media-flt-btn px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors active">
+    All
+  </button>
+  <button onclick="filterMedia('tv')" id="flt-tv"
+          class="media-flt-btn px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors">
+    <i class="fa-solid fa-tv mr-1"></i>TV
+  </button>
+  <button onclick="filterMedia('radio')" id="flt-radio"
+          class="media-flt-btn px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors">
+    <i class="fa-solid fa-radio mr-1"></i>Radio
+  </button>
+  <button onclick="filterMedia('press')" id="flt-press"
+          class="media-flt-btn px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors">
+    <i class="fa-solid fa-newspaper mr-1"></i>Press
+  </button>
+</div>
+
 <div class="space-y-3" id="campaign-list">
   {% for row in campaign_rows %}
   {% with idx=forloop.counter %}
-  <div class="camp-row" id="camp-{{ idx }}">
+  <div class="camp-row" id="camp-{{ idx }}" data-media-type="{{ row.media_type }}">
 
     <!-- ── Main summary row (clickable to expand) ── -->
     <div class="px-5 py-4 flex flex-wrap items-center gap-x-5 gap-y-2 cursor-pointer select-none"
@@ -533,6 +559,18 @@ function runVerify(e, idx, accountId, channel, month) {
       btn.innerHTML = '<i class="fa-solid fa-play text-emerald-500"></i> Run';
       alert('Verification error: ' + err.message);
     });
+}
+
+// ── TV / Radio / All filter ────────────────────────────────────────────────────
+let _activeFilter = 'all';
+function filterMedia(type) {
+  _activeFilter = type;
+  document.querySelectorAll('.media-flt-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('flt-' + type)?.classList.add('active');
+  document.querySelectorAll('#campaign-list .camp-row').forEach(el => {
+    const mt = el.dataset.mediaType || '';
+    el.style.display = (type === 'all' || mt === type) ? '' : 'none';
+  });
 }
 </script>
 {% endblock %}

@@ -15,6 +15,7 @@ import pandas as pd
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
+from django.views.decorators.csrf import ensure_csrf_cookie
 
 from django.db.models import Min, Max
 
@@ -237,7 +238,7 @@ def _build_campaign_rows(user):
     combos = (
         Schedule.objects
         .filter(account_id__in=account_ids)
-        .values('account_id', 'account__name', 'channel', 'month')
+        .values('account_id', 'account__name', 'channel', 'month', 'media_type')
         .annotate(
             sch_start=Min('start_date'),
             sch_end=Max('end_date'),
@@ -309,6 +310,7 @@ def _build_campaign_rows(user):
             'account_name': c['account__name'],
             'channel':      channel,
             'month':        month,
+            'media_type':   c.get('media_type', '') or '',
             'planned':      planned,
             'aired':        n_aired,
             'missed':       n_missed,
@@ -329,6 +331,7 @@ def _build_campaign_rows(user):
 # ── Main tool page ─────────────────────────────────────────────────────────────
 
 @login_required
+@ensure_csrf_cookie
 def tool(request):
     """Verify Ads - summary dashboard (FIX 24/25/26)."""
     rows = _build_campaign_rows(request.user)
@@ -343,41 +346,42 @@ def verify_row(request):
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
-    account_id = request.POST.get('account_id')
-    channel    = request.POST.get('channel')
-    month      = request.POST.get('month')
-    mode       = request.POST.get('mode', 'smart')
-
-    if not all([account_id, channel, month]):
-        return JsonResponse({'ok': False, 'error': 'Missing parameters.'})
-    if not _account_access(request.user, account_id):
-        return JsonResponse({'ok': False, 'error': 'Access denied.'})
-
     try:
+        account_id = request.POST.get('account_id')
+        channel    = request.POST.get('channel')
+        month      = request.POST.get('month')
+        mode       = request.POST.get('mode', 'smart')
+
+        if not all([account_id, channel, month]):
+            return JsonResponse({'ok': False, 'error': 'Missing parameters.'})
+        if not _account_access(request.user, account_id):
+            return JsonResponse({'ok': False, 'error': 'Access denied.'})
+
         run_scope(account_id, channel, month, mode=mode)
+
+        # Return updated counts for this row
+        mr_qs      = MatchResult.objects.filter(account_id=account_id, channel=channel, month=month)
+        n_matched  = mr_qs.filter(status='matched').count()
+        n_prog_mis = mr_qs.filter(status='programme_mismatch').count()
+        n_late     = mr_qs.filter(status='late_telecast').count()
+        n_aired    = n_matched + n_prog_mis + n_late
+        n_missed   = mr_qs.filter(status='not_aired').count()
+        active_ids = active_schedule_ids(account_id, channel, month)
+        planned    = ScheduleRow.objects.filter(schedule_id__in=active_ids, ad_type='COMMERCIAL BENEFITS').count()
+        dot        = _status_dot(account_id, channel, month)
+        last_run   = mr_qs.order_by('-run_at').values_list('run_at', flat=True).first()
+
+        return JsonResponse({
+            'ok':       True,
+            'planned':  planned,
+            'aired':    n_aired,
+            'missed':   n_missed,
+            'dot':      dot,
+            'last_run': last_run.strftime('%d %b %Y %H:%M') if last_run else None,
+        })
     except Exception as e:
-        return JsonResponse({'ok': False, 'error': str(e)})
-
-    # Return updated counts for this row
-    mr_qs      = MatchResult.objects.filter(account_id=account_id, channel=channel, month=month)
-    n_matched  = mr_qs.filter(status='matched').count()
-    n_prog_mis = mr_qs.filter(status='programme_mismatch').count()
-    n_late     = mr_qs.filter(status='late_telecast').count()
-    n_aired    = n_matched + n_prog_mis + n_late
-    n_missed   = mr_qs.filter(status='not_aired').count()
-    active_ids = active_schedule_ids(account_id, channel, month)
-    planned    = ScheduleRow.objects.filter(schedule_id__in=active_ids, ad_type='COMMERCIAL BENEFITS').count()
-    dot        = _status_dot(account_id, channel, month)
-    last_run   = mr_qs.order_by('-run_at').values_list('run_at', flat=True).first()
-
-    return JsonResponse({
-        'ok':       True,
-        'planned':  planned,
-        'aired':    n_aired,
-        'missed':   n_missed,
-        'dot':      dot,
-        'last_run': last_run.strftime('%d %b %Y %H:%M') if last_run else None,
-    })
+        import traceback
+        return JsonResponse({'ok': False, 'error': str(e), 'detail': traceback.format_exc()})
 
 
 # ── AJAX: load existing MatchResult rows for display ────────────────────────────
