@@ -201,6 +201,10 @@ def dashboard(request):
     from django.utils import timezone as _tz
     user = request.user
     role = user.role
+
+    if role == 'channel_officer':
+        return redirect('/dashboard/channel-officer/')
+
     ctx  = {'user': user, 'today': _tz.localdate()}
 
     if role in ('super_admin', 'admin'):

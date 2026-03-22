@@ -77,6 +77,7 @@
             {% elif request.user.role == 'team_head' %}Team Head
             {% elif request.user.role == 'planner' %}Planner
             {% elif request.user.role == 'operations' %}Operations
+            {% elif request.user.role == 'channel_officer' %}Marketing Officer
             {% else %}{{ request.user.role }}{% endif %}
           </span>
           <span class="text-xs font-medium" style="color:rgba(255,255,255,.35);">
@@ -93,6 +94,7 @@
         <p class="font-bold text-white" id="hero-date" style="font-size:.95rem;"></p>
         <p class="text-xs font-mono" style="color:rgba(255,255,255,.4);" id="hero-time"></p>
       </div>
+      {% if request.user.role != 'channel_officer' %}
       <div class="flex items-center gap-2">
         <a href="/dashboard/summary/"
            class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg text-white transition-all"
@@ -105,6 +107,7 @@
           <i class="fa-solid fa-chart-line"></i> Analytics
         </a>
       </div>
+      {% endif %}
     </div>
   </div>
 </div>

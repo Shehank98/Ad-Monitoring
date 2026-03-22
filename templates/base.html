@@ -411,10 +411,12 @@
     <nav class="flex-1 py-1 overflow-y-auto" style="scrollbar-width:none;">
       {% with path=request.path ur=request.user.role %}
 
+      {% if ur != 'channel_officer' %}
       <p class="nav-label"><span class="nav-text">Overview</span></p>
       <a href="/dashboard/" class="nav-item {% if path == '/dashboard/' %}active{% endif %}">
         <i class="nav-icon fa-solid fa-house-chimney"></i><span class="nav-text">Dashboard</span>
       </a>
+      {% endif %}
 
       {% if ur in 'super_admin,admin' %}
         <p class="nav-label"><span class="nav-text">Admin</span></p>
