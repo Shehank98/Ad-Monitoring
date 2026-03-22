@@ -581,6 +581,12 @@ def schedule_upload(request):
             except Exception:
                 pass
 
+            # Notify channel officers of any missed spots discovered
+            try:
+                _notify_missed_spots_whatsapp(account)
+            except Exception:
+                pass
+
             return redirect(f'/dashboard/schedules/upload/?uploaded={schedule.id}')
 
     col_guide = [
@@ -3438,14 +3444,17 @@ def tc_upload(request):
     user       = request.user
     account_qs = _account_qs(user)
 
-    # channel_officer: restrict to their assigned account
+    # channel_officer: restrict to their assigned accounts (via User.accounts M2M)
     officer_profile = None
     if user.role == 'channel_officer':
         try:
             officer_profile = ChannelOfficer.objects.select_related('account').get(user=user)
-            account_qs = Account.objects.filter(id=officer_profile.account_id)
         except ChannelOfficer.DoesNotExist:
             pass
+        # Use the accounts assigned to this user (multi-account support)
+        user_acct_qs = user.accounts.all()
+        if user_acct_qs.exists():
+            account_qs = user_acct_qs
 
     if request.method == 'POST':
         account_id = request.POST.get('account_id', '').strip()
@@ -3602,13 +3611,29 @@ def tc_detect(request):
 @require_POST
 def tc_delete(request, pk):
     report = get_object_or_404(TransmissionReport, pk=pk)
-    if not _account_access(request.user, report.account_id):
+    user   = request.user
+
+    # Channel officers can only delete TCs they uploaded for their own channel
+    if user.role == 'channel_officer':
+        try:
+            profile = ChannelOfficer.objects.get(user=user)
+            if (report.account_id not in user.accounts.values_list('id', flat=True)
+                    or report.channel != profile.channel):
+                messages.error(request, 'Access denied.')
+                return redirect('/dashboard/channel-officer/')
+        except ChannelOfficer.DoesNotExist:
+            messages.error(request, 'Access denied.')
+            return redirect('/dashboard/channel-officer/')
+    elif not _account_access(user, report.account_id):
         messages.error(request, 'Access denied.')
         return redirect('/dashboard/tc/')
+
     channel = report.channel
     month   = report.month
     report.delete()
     messages.success(request, f'TC report for {channel} / {month} deleted.')
+    if user.role == 'channel_officer':
+        return redirect('/dashboard/channel-officer/')
     return redirect('/dashboard/tc/')
 
 
@@ -6784,7 +6809,8 @@ def _notify_reconciliation_done_whatsapp(account_id, channel, month, result):
 def channel_officer_dashboard(request):
     """
     Landing page for channel officers after login.
-    Shows the schedules for their assigned account/channel and their uploaded TCs.
+    Supports multiple accounts per officer (via User.accounts M2M).
+    Shows schedules and uploaded TCs filtered by chosen account.
     """
     user = request.user
     try:
@@ -6792,24 +6818,39 @@ def channel_officer_dashboard(request):
     except ChannelOfficer.DoesNotExist:
         profile = None
 
-    schedules = []
+    # All accounts this officer is assigned to (via User.accounts M2M)
+    user_accounts = user.accounts.all().order_by('name')
+
+    # Account filter from GET; default to first account
+    filter_account_id = request.GET.get('account_id', '').strip()
+    selected_account = None
+    if filter_account_id:
+        selected_account = user_accounts.filter(pk=filter_account_id).first()
+    if selected_account is None and user_accounts.exists():
+        selected_account = user_accounts.first()
+
+    schedules  = []
     tc_reports = []
-    if profile:
+    channel = profile.channel if profile else ''
+
+    if selected_account and channel:
         schedules = (
             Schedule.objects
-            .filter(account=profile.account, channel=profile.channel)
+            .filter(account=selected_account, channel=channel)
             .order_by('-start_date', '-uploaded_at')
         )
         tc_reports = (
             TransmissionReport.objects
-            .filter(account=profile.account, channel=profile.channel)
+            .filter(account=selected_account, channel=channel)
             .order_by('-uploaded_at')
         )
 
     return render(request, 'channel_officers/dashboard.html', {
-        'profile':    profile,
-        'schedules':  schedules,
-        'tc_reports': tc_reports,
+        'profile':          profile,
+        'user_accounts':    user_accounts,
+        'selected_account': selected_account,
+        'schedules':        schedules,
+        'tc_reports':       tc_reports,
     })
 
 
