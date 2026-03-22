@@ -61,7 +61,7 @@ def send_text(to_number: str, body: str) -> bool:
         logger.warning('[WhatsApp] no recipient number — skipping')
         return False
 
-    actual_to = _resolve_to(cfg, to_number)
+    actual_to = _resolve_to(cfg, to_number).strip().lstrip('+')
     url = f"{_META_API}/{cfg['phone_number_id']}/messages"
     payload = {
         'messaging_product': 'whatsapp',
