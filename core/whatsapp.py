@@ -213,11 +213,7 @@ def notify_missed_spots(officer_whatsapp: str, account_name: str, channel: str,
     lines += [
         f'',
         f'*{missed_count} spot(s) were not confirmed by 3rd-party monitoring.*',
-        f'',
-        f'Please verify and arrange rescheduling with the channel.',
     ]
-    if link:
-        lines += [f'', f'Upload TC to review:', f'{link}']
     lines += [f'', f'_(Automated message from {company})_']
     body = '\n'.join(lines)
 
