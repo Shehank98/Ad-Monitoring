@@ -430,6 +430,9 @@
         <a href="/dashboard/settings/" class="nav-item {% if '/settings/' in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-sliders"></i><span class="nav-text">Settings</span>
         </a>
+        <a href="/dashboard/channel-officers/" class="nav-item {% if '/channel-officers/' in path %}active{% endif %}">
+          <i class="nav-icon fa-brands fa-whatsapp"></i><span class="nav-text">Channel Officers</span>
+        </a>
         <a href="/dashboard/admin/analytics/" class="nav-item {% if '/admin/analytics/' in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-chart-line"></i><span class="nav-text">Admin Analytics</span>
         </a>
@@ -450,6 +453,14 @@
           <i class="nav-icon fa-solid fa-users"></i><span class="nav-text">Users</span>
         </a>
       {% endif %}
+
+      {% if ur == 'channel_officer' %}
+        <!-- Channel officer: only see TC upload -->
+        <p class="nav-label"><span class="nav-text">TC Upload</span></p>
+        <a href="/dashboard/tc/upload/" class="nav-item {% if 'tc/upload' in path %}active{% endif %}">
+          <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload TC</span>
+        </a>
+      {% else %}
 
       <p class="nav-label"><span class="nav-text">Schedules</span></p>
       <a href="/dashboard/schedules/" class="nav-item {% if '/schedules/' in path and 'upload' not in path %}active{% endif %}">
@@ -500,6 +511,8 @@
         <i class="nav-icon fa-solid fa-chess"></i><span class="nav-text">Competitor Analysis</span>
       </a>
       {% endif %}
+
+      {% endif %}{# end channel_officer else #}
 
       {% endwith %}
     </nav>

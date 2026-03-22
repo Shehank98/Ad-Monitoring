@@ -15,10 +15,11 @@
       <!-- Category header -->
       <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
         <div class="w-8 h-8 rounded-lg flex items-center justify-center
-          {% if 'Reconciliation' in category_label %}bg-blue-100{% elif 'TC' in category_label %}bg-emerald-100{% else %}bg-amber-100{% endif %}">
+          {% if 'Reconciliation' in category_label %}bg-blue-100{% elif 'TC' in category_label %}bg-emerald-100{% elif 'WhatsApp' in category_label %}bg-green-100{% else %}bg-amber-100{% endif %}">
           <i class="text-sm
             {% if 'Reconciliation' in category_label %}fa-solid fa-scale-balanced text-blue-600
             {% elif 'TC' in category_label %}fa-solid fa-file-invoice text-emerald-600
+            {% elif 'WhatsApp' in category_label %}fa-brands fa-whatsapp text-green-600
             {% else %}fa-solid fa-chart-bar text-amber-600{% endif %}"></i>
         </div>
         <div>
@@ -65,8 +66,44 @@
             <p class="text-[11px] text-slate-400 mt-1.5">
               Current: <strong>±{{ s.value|default:"5" }}s</strong> tolerance
             </p>
+            {% elif s.key == 'whatsapp_enabled' %}
+            <!-- Toggle for enable/disable -->
+            <div class="flex items-center gap-3">
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="hidden" name="{{ s.key }}" value="0">
+                <input type="checkbox" name="{{ s.key }}" value="1"
+                       {% if s.value == '1' %}checked{% endif %}
+                       class="sr-only peer"
+                       onchange="this.previousElementSibling.disabled = this.checked">
+                <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer
+                            peer-checked:after:translate-x-full peer-checked:bg-green-500
+                            after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                            after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+              </label>
+              <span class="text-sm {% if s.value == '1' %}text-green-600 font-semibold{% else %}text-slate-400{% endif %}">
+                {% if s.value == '1' %}Enabled{% else %}Disabled{% endif %}
+              </span>
+            </div>
+            {% elif s.key == 'whatsapp_access_token' %}
+            <!-- Password-style for token -->
+            <input
+              type="password"
+              id="field_{{ s.key }}"
+              name="{{ s.key }}"
+              value="{{ s.value }}"
+              class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm
+                     text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-green-400
+                     focus:border-transparent transition"
+              placeholder="EAAxxxx…"
+              autocomplete="off"
+            >
+            {% if s.value %}
+            <p class="text-[11px] text-emerald-600 mt-1.5"><i class="fa-solid fa-circle-check mr-1"></i>Token saved ({{ s.value|length }} chars)</p>
             {% else %}
-            <!-- Text input for comma-separated aliases -->
+            <p class="text-[11px] text-slate-400 mt-1.5">Not configured</p>
+            {% endif %}
+            {% else %}
+            <!-- Text input (default) -->
             <input
               type="text"
               id="field_{{ s.key }}"
@@ -75,17 +112,12 @@
               class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm
                      text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-blue-400
                      focus:border-transparent transition"
-              placeholder="e.g. My Column, AltName"
+              placeholder="{% if 'number' in s.key %}+94771234567{% elif 'url' in s.key %}https://your-app.railway.app{% elif 'id' in s.key %}123456789012345{% else %}e.g. My Column, AltName{% endif %}"
             >
             {% if s.value %}
-            <div class="flex flex-wrap gap-1 mt-2">
-              {% for alias in s.value|make_list %}{% endfor %}
-              <p class="text-[11px] text-slate-400">
-                {{ s.value|default:"(none)" }}
-              </p>
-            </div>
+            <p class="text-[11px] text-slate-400 mt-1.5">{{ s.value }}</p>
             {% else %}
-            <p class="text-[11px] text-slate-400 mt-1.5">No extra aliases configured</p>
+            <p class="text-[11px] text-slate-400 mt-1.5">{% if 'aliases' in s.key %}No extra aliases configured{% else %}Not configured{% endif %}</p>
             {% endif %}
             {% endif %}
           </div>
@@ -104,11 +136,16 @@
         Changes take effect immediately on the next file upload or reconciliation run.
         Re-run reconciliation after changing the time tolerance.
       </div>
-      <button type="submit"
-              class="btn-primary">
-        <i class="fa-solid fa-floppy-disk"></i>
-        Save Settings
-      </button>
+      <div class="flex items-center gap-3">
+        <a href="{% url 'whatsapp_test' %}"
+           class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors">
+          <i class="fa-brands fa-whatsapp"></i> Test WhatsApp
+        </a>
+        <button type="submit" class="btn-primary">
+          <i class="fa-solid fa-floppy-disk"></i>
+          Save Settings
+        </button>
+      </div>
     </div>
 
   </div>

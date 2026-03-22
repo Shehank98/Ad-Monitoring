@@ -20,11 +20,11 @@ from accounts.views import create_user, edit_user, user_list
 
 from .forms import AccountForm, ChannelForm, MonitoringUploadForm, ScheduleUploadForm
 from .models import (
-    Account, AuditLog, BrandMapping, Channel,
+    Account, AuditLog, BrandMapping, Channel, ChannelOfficer,
     LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow,
     SponsorshipLmrbAssignment, SummaryReportMeta, SystemSetting,
     TCRow, TransmissionReport,
-    _ensure_defaults, get_setting_list,
+    _ensure_defaults, get_setting, get_setting_list,
 )
 
 
@@ -947,6 +947,12 @@ def monitoring_upload(request):
                 auto_run_all_for_account(account.id)
             except Exception as e:
                 print(f"[monitoring_upload] auto-verification error (non-fatal): {e}")
+
+            # WhatsApp: notify officers for any channel/month with missed spots
+            try:
+                _notify_missed_spots_whatsapp(account)
+            except Exception as e:
+                print(f"[monitoring_upload] whatsapp notify error (non-fatal): {e}")
 
             return redirect('/dashboard/monitoring/')
 
@@ -3421,9 +3427,19 @@ def tc_pdf_convert(request):
 
 
 @login_required
+@role_required(['super_admin', 'admin', 'team_head', 'operations', 'planner', 'channel_officer'])
 def tc_upload(request):
     user       = request.user
     account_qs = _account_qs(user)
+
+    # channel_officer: restrict to their assigned account
+    officer_profile = None
+    if user.role == 'channel_officer':
+        try:
+            officer_profile = ChannelOfficer.objects.select_related('account').get(user=user)
+            account_qs = Account.objects.filter(id=officer_profile.account_id)
+        except ChannelOfficer.DoesNotExist:
+            pass
 
     if request.method == 'POST':
         account_id = request.POST.get('account_id', '').strip()
@@ -3516,11 +3532,23 @@ def tc_upload(request):
         messages.success(request, f'TC uploaded: {count} rows for {channel} / {month}.')
         return redirect('/dashboard/tc/')
 
-    # GET - show upload form
+    # GET - show upload form (accept pre-fill params from WhatsApp links)
     schedules = Schedule.objects.filter(account__in=account_qs).select_related('account').order_by('-uploaded_at')
+    prefill = {
+        'account_id':  request.GET.get('account_id', ''),
+        'channel':     request.GET.get('channel', ''),
+        'month':       request.GET.get('month', ''),
+        'schedule_pk': request.GET.get('schedule_pk', ''),
+    }
+    # channel_officer: auto-fill from their profile if not already set
+    if officer_profile and not prefill['account_id']:
+        prefill['account_id'] = str(officer_profile.account_id)
+        prefill['channel']    = officer_profile.channel
     return render(request, 'tc/upload.html', {
-        'accounts':  account_qs,
-        'schedules': schedules,
+        'accounts':       account_qs,
+        'schedules':      schedules,
+        'prefill':        prefill,
+        'is_officer':     user.role == 'channel_officer',
     })
 
 
@@ -3603,6 +3631,12 @@ def tc_reconcile(request):
             f'{result["extra"]} extra, {result["lmrb_confirmed"]} LMRB-confirmed.'
         )
         messages.success(request, msg)
+
+        # WhatsApp: notify operations officer that reconciliation is done
+        try:
+            _notify_reconciliation_done_whatsapp(account_id, channel, month, result)
+        except Exception as e:
+            print(f"[tc_reconcile] whatsapp notify error (non-fatal): {e}")
 
         # ── Diagnostic: if 0 TC-Schedule matches, show the unique TC themes so
         # the user knows what to enter in BrandMapping → tc_theme field.
@@ -6634,3 +6668,279 @@ def db_tools(request):
         'competitor_accounts': competitor_account_summary,
         'all_accounts':  Account.objects.all().order_by('name'),
     })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WhatsApp Notification Helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _notify_missed_spots_whatsapp(account):
+    """After verification runs, send WhatsApp to each channel officer that has
+    missed spots in any schedule for this account."""
+    from core.whatsapp import notify_missed_spots
+    from core.models import MatchResult
+
+    officers = ChannelOfficer.objects.filter(account=account).select_related('account')
+    for officer in officers:
+        wa = officer.effective_whatsapp
+        if not wa:
+            continue
+        # Find missed spots count for this officer's channel (latest month with data)
+        missed_qs = MatchResult.objects.filter(
+            account=account,
+            channel=officer.channel,
+            status__in=['not_aired', 'no_mapping'],
+        )
+        missed_count = missed_qs.count()
+        if missed_count == 0:
+            continue
+
+        # Get latest schedule for this channel to build the upload link
+        schedule = Schedule.objects.filter(
+            account=account, channel=officer.channel,
+        ).order_by('-uploaded_at').first()
+
+        schedule_pk = schedule.pk if schedule else 0
+        month = schedule.month if schedule else ''
+
+        notify_missed_spots(
+            officer_whatsapp=wa,
+            account_name=str(account),
+            channel=officer.channel,
+            month=month,
+            missed_count=missed_count,
+            schedule_pk=schedule_pk,
+            account_id=account.id,
+        )
+
+
+def _notify_reconciliation_done_whatsapp(account_id, channel, month, result):
+    """After TC reconciliation, notify operations officers assigned to this channel."""
+    from core.whatsapp import notify_reconciliation_done
+
+    account = Account.objects.filter(id=account_id).first()
+    if not account:
+        return
+
+    # Find operations users with WhatsApp numbers who have access to this account
+    ops_users = User.objects.filter(
+        role='operations',
+        whatsapp_number__gt='',
+        accounts=account,
+    )
+    for ops_user in ops_users:
+        notify_reconciliation_done(
+            ops_whatsapp=ops_user.whatsapp_number,
+            account_name=str(account),
+            channel=channel,
+            month=month,
+            matched=result.get('matched', 0),
+            extra=result.get('extra', 0),
+            lmrb_confirmed=result.get('lmrb_confirmed', 0),
+            account_id=account_id,
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Channel Officer Management
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@login_required
+@role_required(['super_admin', 'admin'])
+def channel_officer_list(request):
+    """List all channel officers with their account/channel assignments."""
+    officers = ChannelOfficer.objects.select_related('account', 'user').order_by('account__name', 'channel')
+    accounts = Account.objects.all().order_by('name')
+    return render(request, 'channel_officers/list.html', {
+        'officers': officers,
+        'accounts': accounts,
+    })
+
+
+@login_required
+@role_required(['super_admin', 'admin'])
+def channel_officer_create(request):
+    """Create a new channel officer + their system login account."""
+    import secrets as _secrets
+    import string as _string
+
+    accounts = Account.objects.all().order_by('name')
+    channels = Channel.objects.all().order_by('name')
+
+    if request.method == 'POST':
+        name            = request.POST.get('name', '').strip()
+        whatsapp        = request.POST.get('whatsapp_number', '').strip()
+        account_id      = request.POST.get('account_id', '').strip()
+        channel         = request.POST.get('channel', '').strip()
+        create_login    = request.POST.get('create_login') == '1'
+        email           = request.POST.get('email', '').strip().lower()
+
+        errors = []
+        if not name:
+            errors.append('Name is required.')
+        if not account_id:
+            errors.append('Account is required.')
+        if not channel:
+            errors.append('Channel is required.')
+
+        account_obj = Account.objects.filter(id=account_id).first()
+        if not account_obj:
+            errors.append('Invalid account.')
+
+        if ChannelOfficer.objects.filter(account_id=account_id, channel=channel, name=name).exists():
+            errors.append('An officer with this name already exists for this account/channel.')
+
+        login_user = None
+        temp_password = None
+        if create_login:
+            if not email:
+                errors.append('Email is required when creating a login.')
+            elif User.objects.filter(email=email).exists():
+                errors.append(f'A user with email {email} already exists.')
+            else:
+                chars = _string.ascii_letters + _string.digits + '!@#'
+                temp_password = ''.join(_secrets.choice(chars) for _ in range(12))
+
+        if not errors:
+            if create_login:
+                login_user = User.objects.create_user(
+                    email=email,
+                    name=name,
+                    password=temp_password,
+                    role='channel_officer',
+                    created_by=request.user,
+                    must_change_password=True,
+                )
+                login_user.whatsapp_number = whatsapp
+                login_user.save()
+
+            officer = ChannelOfficer.objects.create(
+                account=account_obj,
+                channel=channel,
+                name=name,
+                whatsapp_number=whatsapp,
+                user=login_user,
+            )
+
+            msg = f'Officer "{name}" created for {account_obj} / {channel}.'
+            if temp_password:
+                msg += f' Login: {email} / Temp password: <code class="font-mono font-bold">{temp_password}</code>'
+            messages.success(request, msg)
+            return redirect('/dashboard/channel-officers/')
+
+        return render(request, 'channel_officers/form.html', {
+            'accounts': accounts,
+            'channels': channels,
+            'errors':   errors,
+            'post':     request.POST,
+        })
+
+    return render(request, 'channel_officers/form.html', {
+        'accounts': accounts,
+        'channels': channels,
+    })
+
+
+@login_required
+@role_required(['super_admin', 'admin'])
+def channel_officer_edit(request, pk):
+    """Edit or delete a channel officer."""
+    officer  = get_object_or_404(ChannelOfficer, pk=pk)
+    accounts = Account.objects.all().order_by('name')
+    channels = Channel.objects.all().order_by('name')
+
+    if request.method == 'POST':
+        action = request.POST.get('action', 'save')
+
+        if action == 'delete':
+            name = officer.name
+            # Do NOT delete the linked user — just unlink
+            if officer.user:
+                officer.user.is_active = False
+                officer.user.save()
+            officer.delete()
+            messages.success(request, f'Officer "{name}" removed.')
+            return redirect('/dashboard/channel-officers/')
+
+        name       = request.POST.get('name', '').strip()
+        whatsapp   = request.POST.get('whatsapp_number', '').strip()
+        account_id = request.POST.get('account_id', '').strip()
+        channel    = request.POST.get('channel', '').strip()
+
+        if name and account_id and channel:
+            account_obj = Account.objects.filter(id=account_id).first()
+            if account_obj:
+                officer.name            = name
+                officer.whatsapp_number = whatsapp
+                officer.account         = account_obj
+                officer.channel         = channel
+                officer.save()
+                # Sync WhatsApp to linked user too
+                if officer.user:
+                    officer.user.whatsapp_number = whatsapp
+                    officer.user.save()
+                messages.success(request, f'Officer "{name}" updated.')
+                return redirect('/dashboard/channel-officers/')
+
+    return render(request, 'channel_officers/form.html', {
+        'officer':  officer,
+        'accounts': accounts,
+        'channels': channels,
+        'edit':     True,
+    })
+
+
+@login_required
+@role_required(['super_admin', 'admin'])
+def whatsapp_test(request):
+    """Send a test WhatsApp message to the configured test number."""
+    from core.whatsapp import send_text
+    test_number = get_setting('whatsapp_test_number', '')
+    if not test_number:
+        messages.error(request, 'No test number configured. Set whatsapp_test_number in Settings.')
+        return redirect('/dashboard/settings/')
+    ok = send_text(test_number, 'Test message from Ad-Monitoring system. WhatsApp integration is working!')
+    if ok:
+        messages.success(request, f'Test message sent to {test_number}.')
+    else:
+        messages.error(request, 'Failed to send test message. Check access token and phone number ID in Settings.')
+    return redirect('/dashboard/settings/')
+
+
+@login_required
+@role_required(['super_admin', 'admin'])
+def whatsapp_send_tc_reminders(request):
+    """Manually trigger TC upload reminders for all channels whose schedules have ended
+    and have no TC uploaded yet."""
+    from core.whatsapp import notify_tc_upload_reminder
+    from django.utils import timezone as _tz
+    today = _tz.now().date()
+
+    sent = 0
+    for officer in ChannelOfficer.objects.select_related('account').all():
+        wa = officer.effective_whatsapp
+        if not wa:
+            continue
+        # Find schedules for this officer's channel that have ended but have no TC
+        ended_schedules = Schedule.objects.filter(
+            account=officer.account,
+            channel=officer.channel,
+            end_date__lt=today,
+        ).exclude(
+            transmission_reports__isnull=False,
+        ).order_by('-end_date')
+
+        for sch in ended_schedules:
+            notify_tc_upload_reminder(
+                officer_whatsapp=wa,
+                account_name=str(officer.account),
+                channel=officer.channel,
+                month=sch.month,
+                schedule_pk=sch.pk,
+                account_id=officer.account_id,
+                end_date=sch.end_date,
+            )
+            sent += 1
+
+    messages.success(request, f'TC upload reminders sent: {sent} message(s).')
+    return redirect('/dashboard/channel-officers/')

@@ -1,0 +1,114 @@
+{% extends 'base.html' %}
+{% block title %}Channel Officers{% endblock %}
+{% block page_title %}Channel Officers{% endblock %}
+{% block page_subtitle %}Marketing officers per channel who receive WhatsApp notifications{% endblock %}
+
+{% block content %}
+
+<div class="flex items-center justify-between mb-5">
+  <div class="flex gap-2">
+    <a href="{% url 'whatsapp_send_tc_reminders' %}"
+       onclick="return confirm('Send TC upload reminders to all officers with ended schedules?')"
+       class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors">
+      <i class="fa-brands fa-whatsapp"></i> Send TC Reminders
+    </a>
+  </div>
+  <a href="{% url 'channel_officer_create' %}"
+     class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-og-red hover:bg-red-700 text-white text-sm font-semibold transition-colors">
+    <i class="fa-solid fa-plus"></i> Add Officer
+  </a>
+</div>
+
+{% if messages %}
+  {% for msg in messages %}
+    <div class="mb-4 px-4 py-3 rounded-lg text-sm font-medium
+      {% if msg.tags == 'success' %}bg-emerald-50 text-emerald-800 border border-emerald-200
+      {% elif msg.tags == 'error' %}bg-red-50 text-red-800 border border-red-200
+      {% else %}bg-blue-50 text-blue-800 border border-blue-200{% endif %}">
+      {{ msg|safe }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+{% if officers %}
+<div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-slate-100 bg-slate-50">
+        <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Officer</th>
+        <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Account</th>
+        <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Channel</th>
+        <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">WhatsApp</th>
+        <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">System Login</th>
+        <th class="px-4 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-50">
+      {% for officer in officers %}
+      <tr class="hover:bg-slate-50 transition-colors">
+        <td class="px-4 py-3 font-semibold text-slate-800">{{ officer.name }}</td>
+        <td class="px-4 py-3 text-slate-600">{{ officer.account.name }}</td>
+        <td class="px-4 py-3">
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+            {{ officer.channel }}
+          </span>
+        </td>
+        <td class="px-4 py-3 text-slate-600 font-mono text-xs">
+          {% if officer.effective_whatsapp %}
+            <span class="inline-flex items-center gap-1 text-green-700">
+              <i class="fa-brands fa-whatsapp"></i> {{ officer.effective_whatsapp }}
+            </span>
+          {% else %}
+            <span class="text-slate-400 italic">not set</span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3">
+          {% if officer.user %}
+            <div class="text-xs">
+              <div class="font-medium text-slate-700">{{ officer.user.email }}</div>
+              <div class="text-slate-400">
+                {% if officer.user.is_active %}
+                  <span class="text-emerald-600"><i class="fa-solid fa-circle text-[8px]"></i> Active</span>
+                {% else %}
+                  <span class="text-red-500"><i class="fa-solid fa-circle text-[8px]"></i> Inactive</span>
+                {% endif %}
+              </div>
+            </div>
+          {% else %}
+            <span class="text-slate-400 italic text-xs">No login</span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3 text-right">
+          <a href="{% url 'channel_officer_edit' officer.pk %}"
+             class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors">
+            <i class="fa-solid fa-pen-to-square"></i> Edit
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm px-6 py-12 text-center">
+  <div class="text-slate-400 text-4xl mb-3"><i class="fa-brands fa-whatsapp"></i></div>
+  <p class="text-slate-500 font-medium mb-1">No channel officers yet</p>
+  <p class="text-slate-400 text-sm mb-4">Add officers to enable WhatsApp notifications for missed spots and TC reminders.</p>
+  <a href="{% url 'channel_officer_create' %}"
+     class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-og-red hover:bg-red-700 text-white text-sm font-semibold">
+    <i class="fa-solid fa-plus"></i> Add First Officer
+  </a>
+</div>
+{% endif %}
+
+<div class="mt-6 bg-teal-50 border border-teal-200 rounded-xl px-5 py-4 text-sm text-teal-800">
+  <div class="font-semibold mb-1"><i class="fa-brands fa-whatsapp mr-1"></i> How WhatsApp notifications work</div>
+  <ul class="list-disc ml-4 space-y-1 text-teal-700">
+    <li><strong>Missed spots:</strong> Sent automatically after LMRB upload runs verification — officer is notified per channel</li>
+    <li><strong>TC reminder:</strong> Click "Send TC Reminders" above to notify officers whose schedules ended but have no TC uploaded</li>
+    <li><strong>Reconciliation done:</strong> Sent to operations staff (set their WhatsApp in <a href="{% url 'user_list' %}" class="underline">User Management</a>) after TC reconcile</li>
+    <li>Configure API credentials in <a href="{% url 'system_settings' %}" class="underline">Settings → WhatsApp Notifications</a></li>
+  </ul>
+</div>
+
+{% endblock %}

@@ -61,6 +61,11 @@ def login_view(request):
                 if user.must_change_password:
                     messages.info(request, 'Please change your temporary password to continue.')
                     return redirect('/auth/change-password/')
+                next_url = request.GET.get('next', '')
+                if next_url and next_url.startswith('/'):
+                    return redirect(next_url)
+                if user.role == 'channel_officer':
+                    return redirect('/dashboard/tc/upload/')
                 return redirect('/dashboard/')
     else:
         form = LoginForm()

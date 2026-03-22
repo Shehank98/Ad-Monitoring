@@ -51,6 +51,13 @@
     <form method="post" enctype="multipart/form-data" class="px-6 py-6 space-y-5" id="tc-upload-form">
       {% csrf_token %}
 
+      {% if is_officer %}
+      <div class="bg-teal-50 border border-teal-200 rounded-xl px-4 py-3 text-sm text-teal-800 mb-2">
+        <i class="fa-brands fa-whatsapp mr-1"></i>
+        Upload the Transmission Certificate for your channel. Your account and channel are pre-filled.
+      </div>
+      {% endif %}
+
       <!-- Account -->
       <div>
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
@@ -59,7 +66,7 @@
         <select name="account_id" id="selAccount" class="select-field" required onchange="loadSchedules()">
           <option value="">Select account…</option>
           {% for acc in accounts %}
-            <option value="{{ acc.id }}">{{ acc.name }}</option>
+            <option value="{{ acc.id }}" {% if prefill.account_id == acc.id|stringformat:"s" %}selected{% endif %}>{{ acc.name }}</option>
           {% endfor %}
         </select>
       </div>
@@ -69,7 +76,9 @@
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
           <i class="fa-solid fa-tv mr-1 text-slate-400"></i> Channel <span class="text-red-400">*</span>
         </label>
-        <input type="text" name="channel" id="inpChannel" placeholder="e.g. Sirasa TV - Voice" class="input-field" required>
+        <input type="text" name="channel" id="inpChannel" placeholder="e.g. Sirasa TV - Voice"
+               class="input-field{% if is_officer %} bg-teal-50{% endif %}" required
+               value="{{ prefill.channel }}" {% if is_officer %}readonly{% endif %}>
       </div>
 
       <!-- Month -->
@@ -77,7 +86,8 @@
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
           <i class="fa-solid fa-calendar mr-1 text-slate-400"></i> Month <span class="text-red-400">*</span>
         </label>
-        <input type="text" name="month" id="inpMonth" placeholder="e.g. June 2025" class="input-field" required>
+        <input type="text" name="month" id="inpMonth" placeholder="e.g. June 2025" class="input-field" required
+               value="{{ prefill.month }}">
       </div>
 
       <!-- Linked Schedule -->
@@ -92,7 +102,8 @@
             <option value="{{ sch.id }}"
                     data-account="{{ sch.account_id }}"
                     data-channel="{{ sch.channel }}"
-                    data-month="{{ sch.month }}">
+                    data-month="{{ sch.month }}"
+                    {% if prefill.schedule_pk == sch.id|stringformat:"s" %}selected{% endif %}>
               {{ sch.account.name }} | {{ sch.channel }} | {{ sch.month }} | #{{ sch.schedule_number }}
             </option>
           {% endfor %}

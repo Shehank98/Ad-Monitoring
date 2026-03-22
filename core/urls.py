@@ -95,4 +95,13 @@ urlpatterns = [
 
     # Competitor Analysis
     path('competitor/', include('competitor.urls')),
+
+    # Channel Officers
+    path('channel-officers/',              views.channel_officer_list,      name='channel_officer_list'),
+    path('channel-officers/create/',       views.channel_officer_create,    name='channel_officer_create'),
+    path('channel-officers/<int:pk>/edit/', views.channel_officer_edit,     name='channel_officer_edit'),
+
+    # WhatsApp
+    path('whatsapp/test/',                 views.whatsapp_test,             name='whatsapp_test'),
+    path('whatsapp/tc-reminders/',         views.whatsapp_send_tc_reminders, name='whatsapp_send_tc_reminders'),
 ]

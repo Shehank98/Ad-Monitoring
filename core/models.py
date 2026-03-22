@@ -712,6 +712,61 @@ SETTING_DEFAULTS = [
         ),
         'category': 'lmrb_parsing',
     },
+    # ── WhatsApp Business API ──────────────────────────────────────────────────
+    {
+        'key': 'whatsapp_enabled',
+        'value': '0',
+        'label': 'WhatsApp Notifications Enabled',
+        'description': (
+            'Set to 1 to enable WhatsApp notifications. '
+            'Requires Access Token and Phone Number ID to be configured below. '
+            'Set to 0 to disable all WhatsApp messages.'
+        ),
+        'category': 'whatsapp',
+    },
+    {
+        'key': 'whatsapp_access_token',
+        'value': '',
+        'label': 'WhatsApp Access Token',
+        'description': (
+            'Meta WhatsApp Cloud API access token. '
+            'Get this from developers.facebook.com → Your App → WhatsApp → API Setup. '
+            'For testing use the temporary token; for production use a permanent token.'
+        ),
+        'category': 'whatsapp',
+    },
+    {
+        'key': 'whatsapp_phone_number_id',
+        'value': '',
+        'label': 'WhatsApp Phone Number ID',
+        'description': (
+            'The Phone Number ID from Meta WhatsApp API Setup page. '
+            'This is the ID of the number that sends messages (NOT the phone number itself).'
+        ),
+        'category': 'whatsapp',
+    },
+    {
+        'key': 'whatsapp_test_number',
+        'value': '',
+        'label': 'Test WhatsApp Number',
+        'description': (
+            'During testing, ALL notifications go to this number instead of the real officer numbers. '
+            'Include country code, e.g. +94771234567. '
+            'Leave blank to send to real officer numbers (production mode).'
+        ),
+        'category': 'whatsapp',
+    },
+    {
+        'key': 'whatsapp_app_base_url',
+        'value': '',
+        'label': 'App Base URL',
+        'description': (
+            'The public URL of this app, e.g. https://ad-monitor.railway.app. '
+            'Used to generate TC upload links in WhatsApp messages. '
+            'No trailing slash.'
+        ),
+        'category': 'whatsapp',
+    },
 ]
 
 
@@ -727,6 +782,7 @@ class SystemSetting(models.Model):
         ('reconciliation', 'Reconciliation'),
         ('tc_parsing',     'TC File Parsing'),
         ('lmrb_parsing',   'LMRB / MapOnline File Parsing'),
+        ('whatsapp',       'WhatsApp Notifications'),
     ]
 
     key         = models.CharField(max_length=100, unique=True)
@@ -814,3 +870,46 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f'{self.user} — {self.action} — {self.timestamp:%Y-%m-%d %H:%M}'
+
+
+# ── Channel Officer ────────────────────────────────────────────────────────────
+
+class ChannelOfficer(models.Model):
+    """Links a channel_officer User to a specific Account + Channel.
+
+    When a channel officer logs in they are redirected to the TC upload page
+    pre-filled with their account/channel. WhatsApp notifications for missed
+    spots and TC upload reminders are sent to their whatsapp_number on the
+    linked User record.
+    """
+    account        = models.ForeignKey('Account', on_delete=models.CASCADE,
+                                       related_name='channel_officers')
+    channel        = models.CharField(max_length=200)
+    user           = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='channel_officer_profile',
+        null=True, blank=True,
+        help_text='The system login account for this officer',
+    )
+    name           = models.CharField(max_length=150)
+    whatsapp_number = models.CharField(max_length=20, blank=True, default='',
+                                       help_text='Include country code, e.g. +94771234567')
+    created_at     = models.DateTimeField(auto_now_add=True)
+    updated_at     = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['account', 'channel', 'name']
+        unique_together = [('account', 'channel', 'name')]
+
+    def __str__(self):
+        return f'{self.name} — {self.account} / {self.channel}'
+
+    @property
+    def effective_whatsapp(self):
+        """Return officer's own number, or fall back to their linked user's number."""
+        if self.whatsapp_number:
+            return self.whatsapp_number
+        if self.user and self.user.whatsapp_number:
+            return self.user.whatsapp_number
+        return ''

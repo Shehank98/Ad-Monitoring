@@ -1,0 +1,137 @@
+{% extends 'base.html' %}
+{% block title %}{% if edit %}Edit Officer{% else %}Add Channel Officer{% endif %}{% endblock %}
+{% block page_title %}{% if edit %}Edit Channel Officer{% else %}Add Channel Officer{% endif %}{% endblock %}
+{% block page_subtitle %}{% if edit %}Update officer details and login{% else %}Create a marketing officer with WhatsApp notifications and optional system login{% endif %}{% endblock %}
+
+{% block content %}
+
+<div class="max-w-xl">
+
+{% if messages %}
+  {% for msg in messages %}
+    <div class="mb-4 px-4 py-3 rounded-lg text-sm font-medium
+      {% if msg.tags == 'success' %}bg-emerald-50 text-emerald-800 border border-emerald-200
+      {% elif msg.tags == 'error' %}bg-red-50 text-red-800 border border-red-200
+      {% else %}bg-blue-50 text-blue-800 border border-blue-200{% endif %}">
+      {{ msg|safe }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+{% if errors %}
+  <div class="mb-4 px-4 py-3 rounded-lg text-sm bg-red-50 text-red-800 border border-red-200">
+    <div class="font-semibold mb-1">Please fix the following:</div>
+    <ul class="list-disc ml-4 space-y-0.5">
+      {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+    </ul>
+  </div>
+{% endif %}
+
+<form method="post" class="bg-white rounded-xl border border-slate-100 shadow-sm p-6 space-y-5">
+  {% csrf_token %}
+
+  <div>
+    <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Officer Name</label>
+    <input type="text" name="name" value="{{ officer.name|default:post.name|default:'' }}"
+           class="input-field" placeholder="e.g. Nimal Perera" required>
+  </div>
+
+  <div>
+    <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">WhatsApp Number</label>
+    <input type="text" name="whatsapp_number"
+           value="{{ officer.whatsapp_number|default:post.whatsapp_number|default:'' }}"
+           class="input-field font-mono" placeholder="+94771234567">
+    <p class="text-xs text-slate-400 mt-1">Include country code. This number receives missed-spot alerts and TC reminders.</p>
+  </div>
+
+  <div>
+    <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Account</label>
+    <select name="account_id" class="select-field" required>
+      <option value="">Select account…</option>
+      {% for acc in accounts %}
+        <option value="{{ acc.id }}"
+          {% if officer.account_id == acc.id or post.account_id == acc.id|stringformat:"s" %}selected{% endif %}>
+          {{ acc.name }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div>
+    <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel</label>
+    <select name="channel" class="select-field" required>
+      <option value="">Select channel…</option>
+      {% for ch in channels %}
+        <option value="{{ ch.name }}"
+          {% if officer.channel == ch.name or post.channel == ch.name %}selected{% endif %}>
+          {{ ch.name }}
+        </option>
+      {% endfor %}
+    </select>
+    <p class="text-xs text-slate-400 mt-1">Must match the channel name used in schedules exactly.</p>
+  </div>
+
+  {% if not edit %}
+  <!-- Login section (create only) -->
+  <div class="border-t border-slate-100 pt-5">
+    <label class="flex items-center gap-2 cursor-pointer mb-4">
+      <input type="checkbox" name="create_login" value="1" id="createLoginCheck"
+             class="rounded text-og-red" onchange="toggleLoginFields()">
+      <span class="text-sm font-semibold text-slate-700">Create system login for this officer</span>
+    </label>
+    <div id="loginFields" class="hidden space-y-4">
+      <div class="bg-teal-50 border border-teal-200 rounded-lg px-4 py-3 text-xs text-teal-800">
+        <i class="fa-solid fa-circle-info mr-1"></i>
+        A login lets the officer access the TC upload page directly. They will receive a temporary
+        password and be forced to change it on first login. They can <strong>only</strong> access TC upload.
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Email (login)</label>
+        <input type="email" name="email" value="{{ post.email|default:'' }}"
+               class="input-field" placeholder="officer@channelname.com">
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="flex gap-3 pt-2">
+    <button type="submit"
+            class="flex-1 py-2.5 rounded-lg bg-og-red hover:bg-red-700 text-white text-sm font-semibold transition-colors">
+      {% if edit %}Save Changes{% else %}Add Officer{% endif %}
+    </button>
+    <a href="{% url 'channel_officer_list' %}"
+       class="px-4 py-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold transition-colors">
+      Cancel
+    </a>
+  </div>
+</form>
+
+{% if edit %}
+<!-- Delete section -->
+<div class="mt-6 bg-red-50 border border-red-200 rounded-xl px-5 py-4">
+  <div class="font-semibold text-red-800 text-sm mb-2">Remove this officer</div>
+  <p class="text-red-700 text-xs mb-3">
+    This will remove the officer record. Their system login (if any) will be deactivated but not deleted.
+  </p>
+  <form method="post" onsubmit="return confirm('Remove {{ officer.name }}?')">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="delete">
+    <button type="submit"
+            class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-semibold">
+      <i class="fa-solid fa-trash mr-1"></i> Remove Officer
+    </button>
+  </form>
+</div>
+{% endif %}
+
+</div>
+
+<script>
+function toggleLoginFields() {
+  const check = document.getElementById('createLoginCheck');
+  const fields = document.getElementById('loginFields');
+  fields.classList.toggle('hidden', !check.checked);
+}
+</script>
+
+{% endblock %}
