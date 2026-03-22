@@ -27,7 +27,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         ('team_head',       'Team Head'),
         ('planner',         'Planner'),
         ('operations',      'Operations'),
-        ('channel_officer', 'Channel Officer'),
+        ('channel_officer', 'Marketing Officer'),
     ]
 
     ROLE_COLORS = {

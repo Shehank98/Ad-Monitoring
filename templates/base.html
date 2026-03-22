@@ -431,7 +431,7 @@
           <i class="nav-icon fa-solid fa-sliders"></i><span class="nav-text">Settings</span>
         </a>
         <a href="/dashboard/channel-officers/" class="nav-item {% if '/channel-officers/' in path %}active{% endif %}">
-          <i class="nav-icon fa-brands fa-whatsapp"></i><span class="nav-text">Channel Officers</span>
+          <i class="nav-icon fa-brands fa-whatsapp"></i><span class="nav-text">Marketing Officers</span>
         </a>
         <a href="/dashboard/admin/analytics/" class="nav-item {% if '/admin/analytics/' in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-chart-line"></i><span class="nav-text">Admin Analytics</span>
@@ -598,7 +598,15 @@
 </div>
 <!-- ── Mobile bottom tab bar ─────────────────────────────────────── -->
 <nav id="mobile-tab-bar" aria-label="Mobile navigation">
-  {% with path=request.path %}
+  {% with path=request.path ur=request.user.role %}
+  {% if ur == 'channel_officer' %}
+  <a href="/dashboard/channel-officer/" class="mob-tab {% if 'channel-officer' in path %}active{% endif %}">
+    <i class="fa-solid fa-calendar-days"></i><span>Schedules</span>
+  </a>
+  <a href="/dashboard/tc/upload/" class="mob-tab {% if 'tc/upload' in path %}active{% endif %}">
+    <i class="fa-solid fa-cloud-arrow-up"></i><span>Upload TC</span>
+  </a>
+  {% else %}
   <a href="/dashboard/" class="mob-tab {% if path == '/dashboard/' %}active{% endif %}">
     <i class="fa-solid fa-house"></i><span>Home</span>
   </a>
@@ -614,6 +622,7 @@
   <a href="/dashboard/settings/" class="mob-tab {% if '/settings/' in path %}active{% endif %}">
     <i class="fa-solid fa-sliders"></i><span>Settings</span>
   </a>
+  {% endif %}
   {% endwith %}
 </nav>
 

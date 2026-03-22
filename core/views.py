@@ -6836,6 +6836,7 @@ def channel_officer_dashboard(request):
     schedules  = []
     tc_reports = []
     channel = profile.channel if profile else ''
+    summary = {}
 
     if selected_account and channel:
         schedules = (
@@ -6848,6 +6849,18 @@ def channel_officer_dashboard(request):
             .filter(account=selected_account, channel=channel)
             .order_by('-uploaded_at')
         )
+        # Summary stats for the header cards
+        from django.db.models import Sum as _Sum, Max as _Max
+        total_spots    = schedules.aggregate(t=_Sum('row_count'))['t'] or 0
+        latest_schedule = schedules.first()
+        tc_count = tc_reports.count()
+        summary = {
+            'schedule_count': schedules.count(),
+            'total_spots':    total_spots,
+            'tc_count':       tc_count,
+            'latest_month':   latest_schedule.month if latest_schedule else '',
+            'latest_end':     latest_schedule.end_date if latest_schedule else None,
+        }
 
     return render(request, 'channel_officers/dashboard.html', {
         'profile':          profile,
@@ -6855,6 +6868,7 @@ def channel_officer_dashboard(request):
         'selected_account': selected_account,
         'schedules':        schedules,
         'tc_reports':       tc_reports,
+        'summary':          summary,
     })
 
 
