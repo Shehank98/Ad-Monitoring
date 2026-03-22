@@ -60,7 +60,11 @@
           <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
             <i class="fa-solid fa-shield-halved mr-1 text-slate-400"></i> Role <span class="text-red-400">*</span>
           </label>
-          {{ form.role }}
+          <select name="role" id="roleSelect" class="input-field" onchange="toggleWhatsApp(this.value)">
+            {% for value, label in form.role.field.choices %}
+              <option value="{{ value }}" {% if form.role.value == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
           {% if form.role.errors %}
             <p class="mt-1.5 text-xs text-red-500 flex items-center gap-1">
               <i class="fa-solid fa-circle-exclamation"></i> {{ form.role.errors.0 }}
@@ -83,6 +87,19 @@
             User will be asked to change this on first login.
           </p>
         </div>
+      </div>
+
+      <!-- WhatsApp Number (shown for operations role) -->
+      <div id="whatsappField" class="hidden">
+        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+          <i class="fa-brands fa-whatsapp mr-1 text-green-500"></i> WhatsApp Number
+          <span class="ml-1.5 font-normal text-slate-400 normal-case tracking-normal">(optional)</span>
+        </label>
+        {{ form.whatsapp_number }}
+        <p class="mt-1.5 text-xs text-slate-400 flex items-center gap-1">
+          <i class="fa-brands fa-whatsapp text-green-500"></i>
+          Include country code, e.g. <strong>+94771234567</strong>. This person will receive WhatsApp notifications when TC reconciliation completes.
+        </p>
       </div>
 
       <!-- Accounts -->
@@ -140,6 +157,15 @@ function togglePassword(btn) {
     icon.classList.replace('fa-eye-slash', 'fa-eye');
   }
 }
+function toggleWhatsApp(role) {
+  const field = document.getElementById('whatsappField');
+  field.classList.toggle('hidden', role !== 'operations');
+}
+// Run on page load in case role is pre-selected
+document.addEventListener('DOMContentLoaded', function() {
+  const sel = document.getElementById('roleSelect');
+  if (sel) toggleWhatsApp(sel.value);
+});
 </script>
 {% endblock %}
 {% endblock %}

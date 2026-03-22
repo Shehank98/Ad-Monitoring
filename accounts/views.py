@@ -175,6 +175,7 @@ def create_user(request):
                     name=form.cleaned_data['name'],
                     password=form.cleaned_data['password'],
                     role=form.cleaned_data['role'],
+                    whatsapp_number=form.cleaned_data.get('whatsapp_number', '').strip(),
                     created_by=me,
                     must_change_password=True,
                 )
@@ -265,6 +266,12 @@ def edit_user(request, user_id):
                 detail=f'Accounts updated for {target_user.name} ({target_user.email}).',
                 ip=_ip or None,
             )
+
+        elif action == 'update_whatsapp':
+            wa = request.POST.get('whatsapp_number', '').strip()
+            target_user.whatsapp_number = wa
+            target_user.save(update_fields=['whatsapp_number'])
+            messages.success(request, f'WhatsApp number updated for {target_user.name}.')
 
         return redirect('/dashboard/users/')
 

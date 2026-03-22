@@ -119,6 +119,41 @@
     </div>
   </div>
 
+  <!-- ── WhatsApp Number (operations) ─────────────────────────── -->
+  {% if target_user.role == 'operations' %}
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+    <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">
+      <i class="fa-brands fa-whatsapp mr-1.5 text-green-500"></i> WhatsApp Number
+    </h3>
+    <p class="text-xs text-slate-400 mb-4">
+      This number receives a notification when TC reconciliation completes. Include country code.
+    </p>
+    <form method="post" class="flex items-end gap-3">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="update_whatsapp">
+      <div class="flex-1">
+        <input type="text" name="whatsapp_number"
+               value="{{ target_user.whatsapp_number }}"
+               placeholder="+94771234567"
+               class="input-field font-mono w-full">
+      </div>
+      <button type="submit"
+              class="inline-flex items-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-700
+                     text-white text-sm font-semibold rounded-xl transition-all duration-150 whitespace-nowrap">
+        <i class="fa-solid fa-floppy-disk"></i> Save Number
+      </button>
+    </form>
+    {% if target_user.whatsapp_number %}
+    <p class="mt-2 text-xs text-green-600 flex items-center gap-1">
+      <i class="fa-brands fa-whatsapp"></i>
+      Current: <strong class="font-mono ml-1">{{ target_user.whatsapp_number }}</strong>
+    </p>
+    {% else %}
+    <p class="mt-2 text-xs text-slate-400 italic">No WhatsApp number set yet.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <!-- ── Assign Accounts ────────────────────────────────────────── -->
   <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
     <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">

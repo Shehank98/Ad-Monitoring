@@ -26,15 +26,17 @@ class ChangePasswordForm(forms.Form):
 
 
 class CreateUserForm(forms.Form):
-    name     = forms.CharField(max_length=150, widget=forms.TextInput(attrs={
+    name             = forms.CharField(max_length=150, widget=forms.TextInput(attrs={
         'class': 'input-field', 'placeholder': 'Full name'}))
-    email    = forms.EmailField(widget=forms.EmailInput(attrs={
+    email            = forms.EmailField(widget=forms.EmailInput(attrs={
         'class': 'input-field', 'placeholder': 'user@ogilvylk.com'}))
-    role     = forms.ChoiceField(choices=[], widget=forms.Select(attrs={'class': 'input-field'}))
-    accounts = forms.ModelMultipleChoiceField(
+    role             = forms.ChoiceField(choices=[], widget=forms.Select(attrs={'class': 'input-field'}))
+    whatsapp_number  = forms.CharField(max_length=20, required=False, widget=forms.TextInput(attrs={
+        'class': 'input-field font-mono', 'placeholder': '+94771234567'}))
+    accounts         = forms.ModelMultipleChoiceField(
         queryset=None, required=False,
         widget=forms.CheckboxSelectMultiple())
-    password = forms.CharField(
+    password         = forms.CharField(
         min_length=8,
         widget=forms.TextInput(attrs={
             'class': 'input-field font-mono', 'placeholder': 'Set a temporary password'}))
