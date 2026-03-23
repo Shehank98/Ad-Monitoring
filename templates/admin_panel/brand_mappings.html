@@ -231,6 +231,95 @@
         </div>
       </form>
 
+      <!-- ── Coverage panel ────────────────────────────────────────────────── -->
+      {% if coverage_data %}
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+        <!-- Header + progress bar -->
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <p class="text-sm font-bold text-slate-800">
+              <i class="fa-solid fa-map text-blue-500 mr-1.5"></i>Brand Coverage
+            </p>
+            <p class="text-xs text-slate-500 mt-0.5">
+              {{ coverage_data.covered }} of {{ coverage_data.total }} brand{{ coverage_data.total|pluralize }} fully mapped
+              {% if coverage_data.partial %}&nbsp;&middot;&nbsp;<span class="text-amber-600 font-semibold">{{ coverage_data.partial|length }} need TC theme</span>{% endif %}
+              {% if coverage_data.unmapped %}&nbsp;&middot;&nbsp;<span class="text-red-600 font-semibold">{{ coverage_data.unmapped|length }} not mapped</span>{% endif %}
+            </p>
+          </div>
+          <span class="text-2xl font-extrabold {% if coverage_data.pct == 100 %}text-emerald-600{% elif coverage_data.pct >= 50 %}text-amber-500{% else %}text-red-500{% endif %}">
+            {{ coverage_data.pct }}%
+          </span>
+        </div>
+        <div class="w-full bg-slate-100 rounded-full h-2 mb-4 overflow-hidden">
+          <div class="h-2 rounded-full transition-all {% if coverage_data.pct == 100 %}bg-emerald-500{% elif coverage_data.pct >= 50 %}bg-amber-400{% else %}bg-red-400{% endif %}"
+               style="width: {{ coverage_data.pct }}%"></div>
+        </div>
+        <!-- Three columns -->
+        <div class="grid grid-cols-3 gap-3 text-xs">
+          <!-- ❌ Not Mapped -->
+          <div>
+            <p class="font-bold text-red-600 mb-2 flex items-center gap-1">
+              <i class="fa-solid fa-circle-xmark"></i>
+              Not Mapped ({{ coverage_data.unmapped|length }})
+            </p>
+            {% if coverage_data.unmapped %}
+            <div class="space-y-1">
+              {% for item in coverage_data.unmapped %}
+              <div class="flex items-center justify-between gap-1 px-2 py-1 rounded-lg bg-red-50 border border-red-100">
+                <span class="font-semibold text-red-700 truncate" title="{{ item.brand }}">{{ item.brand }}</span>
+                <button type="button" onclick="mapNow('{{ item.brand|escapejs }}')"
+                        class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white hover:bg-red-700 transition-colors">
+                  Map
+                </button>
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-slate-400 italic">None — all brands are mapped</p>
+            {% endif %}
+          </div>
+          <!-- ⚠️ Needs TC Theme -->
+          <div>
+            <p class="font-bold text-amber-600 mb-2 flex items-center gap-1">
+              <i class="fa-solid fa-triangle-exclamation"></i>
+              Needs TC Theme ({{ coverage_data.partial|length }})
+            </p>
+            {% if coverage_data.partial %}
+            <div class="space-y-1">
+              {% for item in coverage_data.partial %}
+              <div class="px-2 py-1 rounded-lg bg-amber-50 border border-amber-100">
+                <p class="font-semibold text-amber-700 truncate" title="{{ item.brand }}">{{ item.brand }}</p>
+                <p class="text-amber-500 truncate text-[10px]" title="{{ item.theme }}">{{ item.theme }}</p>
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-slate-400 italic">None — all mapped brands have a TC theme</p>
+            {% endif %}
+          </div>
+          <!-- ✅ Fully Mapped -->
+          <div>
+            <p class="font-bold text-emerald-600 mb-2 flex items-center gap-1">
+              <i class="fa-solid fa-circle-check"></i>
+              Fully Mapped ({{ coverage_data.mapped|length }})
+            </p>
+            {% if coverage_data.mapped %}
+            <div class="space-y-1 max-h-48 overflow-y-auto pr-1">
+              {% for item in coverage_data.mapped %}
+              <div class="px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-100">
+                <p class="font-semibold text-emerald-700 truncate" title="{{ item.brand }}">{{ item.brand }}</p>
+                <p class="text-emerald-500 truncate text-[10px]" title="{{ item.theme }}">{{ item.theme }}</p>
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-slate-400 italic">No brands fully mapped yet</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
       <!-- Table -->
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {% if mappings %}
@@ -873,17 +962,49 @@ document.getElementById('editTcModal').addEventListener('click', function(e) {
   if (e.target === this) closeEditTcModal();
 });
 
+// ── Map Now: pre-fill brand in add form and scroll to it ──────────────────────
+function mapNow(brand) {
+  const brandInp = document.getElementById('brandInput');
+  if (brandInp) { brandInp.value = brand; }
+  const addForm = document.getElementById('addMappingForm');
+  if (addForm) { addForm.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  if (brandInp) { setTimeout(() => brandInp.focus(), 400); }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 _renderChips('add');
 
 // Auto-load if account is pre-selected (page loaded with ?account=...)
+// Also cascade channel + month from filter params when present.
 (function() {
   const sel = document.getElementById('addAccountSelect');
   if (sel && sel.value) {
     _curAccountId = sel.value;
     fetch(`/dashboard/brand-mappings/channels/?account_id=${enc(sel.value)}`)
       .then(r => r.json())
-      .then(d => _populateSelect('addChannelSelect', d.channels || [], 'All channels'))
+      .then(d => {
+        _populateSelect('addChannelSelect', d.channels || [], 'All channels');
+        {% if filters.channel %}
+        // Pre-select channel from filter
+        const chSel = document.getElementById('addChannelSelect');
+        if (chSel) {
+          chSel.value = '{{ filters.channel|escapejs }}';
+          if (chSel.value) {
+            onChannelChange(chSel.value);
+            {% if filters.month %}
+            // Pre-select month after months load
+            setTimeout(() => {
+              const moSel = document.getElementById('addMonthSelect');
+              if (moSel) {
+                moSel.value = '{{ filters.month|escapejs }}';
+                if (moSel.value) { onMonthChange(moSel.value); }
+              }
+            }, 500);
+            {% endif %}
+          }
+        }
+        {% endif %}
+      })
       .catch(() => {});
 
     // Restore prefill_product from URL if present (set after a successful add)
@@ -895,7 +1016,9 @@ _renderChips('add');
       _curProduct = prefillProduct;
     }
 
+    {% if not filters.channel %}
     _loadOptions();
+    {% endif %}
   }
 })();
 </script>

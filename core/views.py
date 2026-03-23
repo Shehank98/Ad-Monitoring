@@ -1416,6 +1416,41 @@ def brand_mapping_list(request):
         ).values_list('month', flat=True)
     )) if account_id and channel_filter else []
 
+    # ── Coverage panel (only when account + channel + month all set) ──────────
+    coverage_data = None
+    if account_id and channel_filter and month_filter:
+        sch_brands = list(
+            ScheduleRow.objects
+            .filter(account_id=account_id, schedule__channel=channel_filter, schedule__month=month_filter)
+            .exclude(brand='')
+            .values_list('brand', flat=True)
+            .distinct()
+            .order_by('brand')
+        )
+        existing = {
+            bm.brand.lower().strip(): bm
+            for bm in BrandMapping.objects.filter(account_id=account_id)
+        }
+        covered, partial_list, unmapped_list, mapped_list = 0, [], [], []
+        for brand in sch_brands:
+            bm = existing.get(brand.lower().strip())
+            if bm is None:
+                unmapped_list.append({'brand': brand})
+            elif not bm.tc_theme.strip():
+                partial_list.append({'brand': brand, 'theme': bm.theme})
+            else:
+                mapped_list.append({'brand': brand, 'theme': bm.theme, 'tc_theme': bm.tc_theme})
+                covered += 1
+        total = len(sch_brands)
+        coverage_data = {
+            'total':    total,
+            'covered':  covered,
+            'pct':      round(covered / total * 100) if total else 0,
+            'unmapped': unmapped_list,
+            'partial':  partial_list,
+            'mapped':   mapped_list,
+        }
+
     return render(request, 'admin_panel/brand_mappings.html', {
         'mappings':             mappings,
         'accounts':             account_qs,
@@ -1426,6 +1461,7 @@ def brand_mapping_list(request):
         },
         'channels_for_account': channels_for_account,
         'months_for_channel':   months_for_channel,
+        'coverage_data':        coverage_data,
     })
 
 
