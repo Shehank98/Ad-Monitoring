@@ -209,6 +209,12 @@ def convert_schedule_excel(file_obj) -> pd.DataFrame | None:
                     b_raw = raw.iloc[r, col_map['brand']]
                     if not pd.isna(b_raw) and str(b_raw).strip():
                         brand = str(b_raw).strip()
+                # If brand is still empty, use the programme name as brand.
+                # This handles formats (e.g. ITN sponsorship) where each data
+                # row's first column IS the brand/slot type (BB, Opening/Closing,
+                # Trailers) with no separate brand sub-header row.
+                if not brand:
+                    brand = programme
 
                 # Expand each date column into individual spot rows
                 for c_idx, date_str in date_cols.items():
