@@ -320,6 +320,35 @@
       </div>
       {% endif %}
 
+      <!-- ── Unmapped LMRB Themes panel ─────────────────────────────────────── -->
+      {% if unmapped_lmrb_themes %}
+      <div class="bg-white rounded-2xl border border-orange-100 shadow-sm p-4">
+        <div class="flex items-start gap-2.5 mb-3">
+          <span class="w-7 h-7 bg-orange-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+            <i class="fa-solid fa-triangle-exclamation text-orange-500 text-xs"></i>
+          </span>
+          <div>
+            <p class="text-sm font-bold text-slate-800">
+              Unmapped LMRB Themes
+              <span class="ml-1.5 px-1.5 py-0.5 rounded-md bg-orange-100 text-orange-600 text-xs font-bold">{{ unmapped_lmrb_themes|length }}</span>
+            </p>
+            <p class="text-xs text-slate-500 mt-0.5">These LMRB themes in this scope have no brand mapping — they will appear as "Extra Aired". Click any to fill the LMRB Theme field in the Add form.</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-1.5">
+          {% for theme in unmapped_lmrb_themes %}
+          <button type="button" onclick="_pickLmrbTheme('{{ theme|escapejs }}')"
+                  class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-50 border border-orange-200
+                         text-orange-700 text-[11px] font-semibold hover:bg-orange-100 hover:border-orange-400
+                         transition-colors">
+            <i class="fa-solid fa-link text-[9px]"></i>
+            {{ theme }}
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
       <!-- Table -->
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {% if mappings %}
@@ -559,6 +588,7 @@
 let _addTcSelected  = [];
 let _editTcSelected = [];
 let _knownTcThemes  = [];
+let _mappedThemes   = [];  // LMRB themes that already have a BrandMapping
 
 // Current scope selections in the add form
 let _curAccountId  = '';
@@ -665,6 +695,7 @@ function _loadOptions() {
       const themes   = data.themes    || [];
       _knownTcThemes = data.tc_themes || [];
       _allProducts   = data.products  || [];
+      _mappedThemes  = data.mapped_themes || [];
       _fillDatalist('brandOptions',   brands);
       _fillDatalist('themeOptions',   themes);
       _fillDatalist('tcThemeOptions', _knownTcThemes);
@@ -759,12 +790,16 @@ function _renderLmrbQuickPick(themes) {
       : 'Themes for this channel/period - click to fill:';
   }
   wrap.classList.remove('hidden');
-  items.innerHTML = themes.map(t =>
-    `<button type="button" onclick="_pickLmrbTheme('${_esc(t)}')"
-       class="px-2 py-0.5 rounded-md text-[11px] font-semibold border bg-white
-              text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-400
-              transition-all">${_escHtml(t)}</button>`
-  ).join('');
+  items.innerHTML = themes.map(t => {
+    const alreadyMapped = _mappedThemes.map(m => m.toLowerCase()).includes(t.toLowerCase());
+    return `<button type="button" onclick="_pickLmrbTheme('${_esc(t)}')"
+       class="px-2 py-0.5 rounded-md text-[11px] font-semibold border transition-all
+              ${alreadyMapped
+                ? 'bg-emerald-100 text-emerald-700 border-emerald-300 opacity-70'
+                : 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 hover:border-orange-400'}"
+       title="${alreadyMapped ? 'Already mapped to a brand' : 'No mapping yet — click to use'}"
+       >${_escHtml(t)}${alreadyMapped ? ' <i class="fa-solid fa-check text-[9px]"></i>' : ''}</button>`;
+  }).join('');
 }
 
 function _pickLmrbTheme(theme) {

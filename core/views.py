@@ -1418,6 +1418,7 @@ def brand_mapping_list(request):
 
     # ── Coverage panel (only when account + channel + month all set) ──────────
     coverage_data = None
+    unmapped_lmrb_themes = []
     if account_id and channel_filter and month_filter:
         sch_brands = list(
             ScheduleRow.objects
@@ -1451,6 +1452,43 @@ def brand_mapping_list(request):
             'mapped':   mapped_list,
         }
 
+        # ── Unmapped LMRB themes ─────────────────────────────────────────────
+        # Find LMRB themes in this scope that have NO BrandMapping pointing to them.
+        sch_dates = Schedule.objects.filter(
+            account_id=account_id, channel=channel_filter, month=month_filter,
+        ).aggregate(s=Min('start_date'), e=Max('end_date'))
+        lmrb_qs = LMRBRow.objects.filter(
+            account_id=account_id, channel__iexact=channel_filter,
+        ).exclude(advt_theme='')
+        if sch_dates['s']:
+            lmrb_qs = lmrb_qs.filter(date__gte=sch_dates['s'])
+        if sch_dates['e']:
+            lmrb_qs = lmrb_qs.filter(date__lte=sch_dates['e'])
+        all_lmrb_themes = sorted(set(lmrb_qs.values_list('advt_theme', flat=True)))
+
+        # Build set of mapped LMRB themes (case-insensitive, supports wildcard *)
+        mapped_themes_exact = set()
+        mapped_themes_prefix = []
+        for bm in BrandMapping.objects.filter(account_id=account_id):
+            t = bm.theme.strip()
+            if not t:
+                continue
+            if t.endswith('*'):
+                mapped_themes_prefix.append(t[:-1].lower())
+            else:
+                mapped_themes_exact.add(t.lower())
+
+        def _is_theme_mapped(theme):
+            tl = theme.lower().strip()
+            if tl in mapped_themes_exact:
+                return True
+            for prefix in mapped_themes_prefix:
+                if tl.startswith(prefix):
+                    return True
+            return False
+
+        unmapped_lmrb_themes = [t for t in all_lmrb_themes if not _is_theme_mapped(t)]
+
     return render(request, 'admin_panel/brand_mappings.html', {
         'mappings':             mappings,
         'accounts':             account_qs,
@@ -1462,6 +1500,7 @@ def brand_mapping_list(request):
         'channels_for_account': channels_for_account,
         'months_for_channel':   months_for_channel,
         'coverage_data':        coverage_data,
+        'unmapped_lmrb_themes': unmapped_lmrb_themes,
     })
 
 
@@ -1521,6 +1560,24 @@ def brand_mapping_options(request):
         themes_qs = themes_qs.filter(product__iexact=product)
     themes = sorted(set(themes_qs.values_list('advt_theme', flat=True)))
 
+    # ── Check which LMRB themes are already mapped ────────────────────────
+    mapped_exact = set()
+    mapped_prefix = []
+    for bm in BrandMapping.objects.filter(account_id=account_id):
+        t = bm.theme.strip()
+        if not t:
+            continue
+        if t.endswith('*'):
+            mapped_prefix.append(t[:-1].lower())
+        else:
+            mapped_exact.add(t.lower())
+    mapped_themes = []
+    for t in themes:
+        tl = t.lower().strip()
+        is_mapped = tl in mapped_exact or any(tl.startswith(p) for p in mapped_prefix)
+        if is_mapped:
+            mapped_themes.append(t)
+
     # ── TC themes ─────────────────────────────────────────────────────────
     tc_qs = TCRow.objects.filter(account_id=account_id).exclude(tc_theme='')
     if channel:
@@ -1531,7 +1588,10 @@ def brand_mapping_options(request):
         tc_qs = tc_qs.filter(date__lte=sch_dates['e'])
     tc_themes = sorted(set(tc_qs.values_list('tc_theme', flat=True)))
 
-    return JsonResponse({'brands': brands, 'themes': themes, 'tc_themes': tc_themes, 'products': products})
+    return JsonResponse({
+        'brands': brands, 'themes': themes, 'tc_themes': tc_themes,
+        'products': products, 'mapped_themes': mapped_themes,
+    })
 
 
 @login_required
