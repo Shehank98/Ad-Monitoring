@@ -1560,6 +1560,20 @@ def brand_mapping_options(request):
         themes_qs = themes_qs.filter(product__iexact=product)
     themes = sorted(set(themes_qs.values_list('advt_theme', flat=True)))
 
+    # ── Theme → Product map (most common product per theme) ──────────────
+    theme_product_map = {}
+    tp_rows = (
+        lmrb_base.exclude(advt_theme='')
+        .exclude(product='').exclude(product__isnull=True)
+        .values('advt_theme', 'product')
+        .annotate(cnt=Count('id'))
+        .order_by('advt_theme', '-cnt')
+    )
+    for row in tp_rows:
+        t = row['advt_theme']
+        if t not in theme_product_map:  # first = highest count
+            theme_product_map[t] = row['product']
+
     # ── Check which LMRB themes are already mapped ────────────────────────
     mapped_exact = set()
     mapped_prefix = []
@@ -1591,6 +1605,7 @@ def brand_mapping_options(request):
     return JsonResponse({
         'brands': brands, 'themes': themes, 'tc_themes': tc_themes,
         'products': products, 'mapped_themes': mapped_themes,
+        'theme_product_map': theme_product_map,
     })
 
 

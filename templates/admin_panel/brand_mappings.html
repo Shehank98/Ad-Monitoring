@@ -589,6 +589,7 @@ let _addTcSelected  = [];
 let _editTcSelected = [];
 let _knownTcThemes  = [];
 let _mappedThemes   = [];  // LMRB themes that already have a BrandMapping
+let _themeProductMap = {};  // theme → product (most common product per theme)
 
 // Current scope selections in the add form
 let _curAccountId  = '';
@@ -695,7 +696,8 @@ function _loadOptions() {
       const themes   = data.themes    || [];
       _knownTcThemes = data.tc_themes || [];
       _allProducts   = data.products  || [];
-      _mappedThemes  = data.mapped_themes || [];
+      _mappedThemes    = data.mapped_themes || [];
+      _themeProductMap = data.theme_product_map || {};
       _fillDatalist('brandOptions',   brands);
       _fillDatalist('themeOptions',   themes);
       _fillDatalist('tcThemeOptions', _knownTcThemes);
@@ -805,6 +807,13 @@ function _renderLmrbQuickPick(themes) {
 function _pickLmrbTheme(theme) {
   const inp = document.getElementById('themeInput');
   if (inp) { inp.value = theme; inp.focus(); }
+  // Auto-fill product from theme→product map
+  const product = _themeProductMap[theme];
+  if (product) {
+    const prodInp = document.getElementById('productInput');
+    if (prodInp) { prodInp.value = product; }
+    _curProduct = product;
+  }
 }
 
 // ── Filter bar: account → channel → month ─────────────────────────────────────
