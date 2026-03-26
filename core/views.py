@@ -1318,31 +1318,41 @@ def brand_mapping_list(request):
         if action == 'add':
             acc_id   = request.POST.get('account_id', '').strip()
             brand    = request.POST.get('brand', '').strip()
-            theme    = request.POST.get('theme', '').strip()
+            themes_raw = request.POST.get('theme', '').strip()
             tc_theme = request.POST.get('tc_theme', '').strip()
             product  = request.POST.get('product', '').strip()
             dur_raw  = request.POST.get('duration', '').strip()
             duration = int(dur_raw) if dur_raw.isdigit() else None
 
-            if not (acc_id and brand and theme):
-                messages.error(request, 'Account, Brand, and LMRB Theme are all required.')
+            # Support multiple LMRB themes (pipe-separated)
+            theme_list = [t.strip() for t in themes_raw.split('|') if t.strip()]
+
+            if not (acc_id and brand and theme_list):
+                messages.error(request, 'Account, Brand, and at least one LMRB Theme are required.')
             else:
                 account = get_object_or_404(Account, id=acc_id)
                 if not _is_admin(user) and account not in account_qs:
                     messages.error(request, 'No access to that account.')
                 else:
-                    exists = BrandMapping.objects.filter(
-                        account=account, brand=brand, theme=theme,
-                        duration=duration, product=product,
-                    ).exists()
-                    if exists:
-                        messages.warning(request, 'That mapping already exists.')
-                    else:
-                        BrandMapping.objects.create(
+                    created = 0
+                    skipped = 0
+                    for theme in theme_list:
+                        exists = BrandMapping.objects.filter(
                             account=account, brand=brand, theme=theme,
-                            tc_theme=tc_theme, duration=duration, product=product)
-                        dur_str = f' ({duration}s)' if duration else ''
-                        messages.success(request, f'Mapping added: {brand} → {theme}{dur_str}')
+                            duration=duration, product=product,
+                        ).exists()
+                        if exists:
+                            skipped += 1
+                        else:
+                            BrandMapping.objects.create(
+                                account=account, brand=brand, theme=theme,
+                                tc_theme=tc_theme, duration=duration, product=product)
+                            created += 1
+                    dur_str = f' ({duration}s)' if duration else ''
+                    if created:
+                        messages.success(request, f'{created} mapping{"s" if created > 1 else ""} added for {brand}{dur_str}.')
+                    if skipped:
+                        messages.warning(request, f'{skipped} mapping{"s" if skipped > 1 else ""} already existed (skipped).')
             _qs = f'/dashboard/brand-mappings/?account={acc_id}'
             if product:
                 from urllib.parse import quote

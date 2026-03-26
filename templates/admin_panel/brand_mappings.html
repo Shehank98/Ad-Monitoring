@@ -120,21 +120,39 @@
             <p class="field-hint">As it appears in the Schedule file</p>
           </div>
 
-          <!-- LMRB Theme -->
+          <!-- LMRB Theme(s) - multi-select chip picker -->
           <div>
-            <label class="field-label"><i class="fa-solid fa-chart-line mr-1 text-slate-400"></i> Step 3 - LMRB Theme <span class="text-red-400">*</span></label>
-            <input type="text" name="theme" id="themeInput" list="themeOptions"
-                   placeholder="Type or select…" class="input-field" required autocomplete="off">
-            <datalist id="themeOptions"></datalist>
+            <label class="field-label">
+              <i class="fa-solid fa-chart-line mr-1 text-slate-400"></i> Step 3 - LMRB Theme(s) <span class="text-red-400">*</span>
+              <span class="text-slate-400 font-normal normal-case ml-1">multiple allowed · one mapping per theme</span>
+            </label>
+            <div id="addLmrbChips"
+                 class="min-h-[38px] flex flex-wrap gap-1.5 p-2 bg-slate-50 border border-slate-200
+                        rounded-lg mb-2 cursor-text"
+                 onclick="document.getElementById('themeInput').focus()">
+            </div>
+            <div class="flex gap-2">
+              <div class="relative flex-1">
+                <input type="text" id="themeInput" list="themeOptions"
+                       placeholder="Type or pick LMRB themes…"
+                       class="input-field pr-8" autocomplete="off"
+                       onkeydown="handleLmrbInputKey(event)">
+                <datalist id="themeOptions"></datalist>
+              </div>
+              <button type="button" onclick="addLmrbChip()"
+                      class="px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold
+                             hover:bg-emerald-200 transition-colors flex-shrink-0">Add</button>
+            </div>
             <!-- Quick-pick grid (filtered by selected product) -->
             <div id="lmrbQuickPick" class="mt-2 hidden">
               <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">
                 <i class="fa-solid fa-filter text-[9px] mr-0.5"></i>
-                <span id="lmrbQuickPickLabel">Themes for this channel/period - click to fill:</span>
+                <span id="lmrbQuickPickLabel">Themes for this channel/period - click to add:</span>
               </p>
               <div id="lmrbQuickPickItems" class="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto"></div>
             </div>
-            <p class="field-hint">Advt_Theme / MapOnline Theme column</p>
+            <input type="hidden" name="theme" id="addLmrbHidden">
+            <p class="field-hint">Advt_Theme / MapOnline Theme column. Select multiple to bulk-create mappings.</p>
             <p class="field-hint text-amber-600"><i class="fa-solid fa-asterisk text-[9px] mr-1"></i>Tip: End with <code class="bg-amber-50 px-1 rounded">*</code> for prefix wildcard matching (e.g. <code class="bg-amber-50 px-1 rounded">Brand Name 2025*</code>)</p>
           </div>
 
@@ -585,10 +603,11 @@
 {% block extra_js %}
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-let _addTcSelected  = [];
-let _editTcSelected = [];
-let _knownTcThemes  = [];
-let _mappedThemes   = [];  // LMRB themes that already have a BrandMapping
+let _addTcSelected   = [];
+let _editTcSelected  = [];
+let _addLmrbSelected = [];  // selected LMRB themes for bulk add
+let _knownTcThemes   = [];
+let _mappedThemes    = [];  // LMRB themes that already have a BrandMapping
 let _themeProductMap = {};  // theme → product (most common product per theme)
 
 // Current scope selections in the add form
@@ -721,6 +740,8 @@ function _clearOptions() {
   _renderProductQuickPick([]);
   _renderLmrbQuickPick([]);
   _renderQuickPick('add', []);
+  _addLmrbSelected = [];
+  _renderLmrbChips();
 }
 
 // Called when user types in the Product input
@@ -778,7 +799,9 @@ function _pickBrand(brand) {
 }
 
 // ── LMRB Theme quick-pick ─────────────────────────────────────────────────────
+let _lastLmrbThemes = [];  // track last themes list for re-render after chip changes
 function _renderLmrbQuickPick(themes) {
+  _lastLmrbThemes = themes;  // cache for re-render
   const wrap  = document.getElementById('lmrbQuickPick');
   const items = document.getElementById('lmrbQuickPickItems');
   const label = document.getElementById('lmrbQuickPickLabel');
@@ -788,32 +811,95 @@ function _renderLmrbQuickPick(themes) {
   }
   if (label) {
     label.textContent = _curProduct
-      ? `Themes for "${_curProduct}" - click to fill:`
-      : 'Themes for this channel/period - click to fill:';
+      ? `Themes for "${_curProduct}" - click to add:`
+      : 'Themes for this channel/period - click to add:';
   }
   wrap.classList.remove('hidden');
+  const selectedLower = _addLmrbSelected.map(s => s.toLowerCase());
   items.innerHTML = themes.map(t => {
     const alreadyMapped = _mappedThemes.map(m => m.toLowerCase()).includes(t.toLowerCase());
+    const alreadySelected = selectedLower.includes(t.toLowerCase());
     return `<button type="button" onclick="_pickLmrbTheme('${_esc(t)}')"
        class="px-2 py-0.5 rounded-md text-[11px] font-semibold border transition-all
-              ${alreadyMapped
-                ? 'bg-emerald-100 text-emerald-700 border-emerald-300 opacity-70'
-                : 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 hover:border-orange-400'}"
-       title="${alreadyMapped ? 'Already mapped to a brand' : 'No mapping yet — click to use'}"
-       >${_escHtml(t)}${alreadyMapped ? ' <i class="fa-solid fa-check text-[9px]"></i>' : ''}</button>`;
+              ${alreadySelected
+                ? 'bg-emerald-200 text-emerald-800 border-emerald-400 ring-1 ring-emerald-400'
+                : alreadyMapped
+                  ? 'bg-emerald-100 text-emerald-700 border-emerald-300 opacity-70'
+                  : 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 hover:border-orange-400'}"
+       title="${alreadySelected ? 'Already selected above' : alreadyMapped ? 'Already mapped to a brand' : 'Click to add'}"
+       ${alreadySelected ? 'disabled' : ''}
+       >${_escHtml(t)}${alreadySelected ? ' <i class="fa-solid fa-check text-[9px]"></i>' : alreadyMapped ? ' <i class="fa-solid fa-check text-[9px]"></i>' : ''}</button>`;
   }).join('');
 }
 
 function _pickLmrbTheme(theme) {
-  const inp = document.getElementById('themeInput');
-  if (inp) { inp.value = theme; inp.focus(); }
-  // Auto-fill product from theme→product map
-  const product = _themeProductMap[theme];
-  if (product) {
-    const prodInp = document.getElementById('productInput');
-    if (prodInp) { prodInp.value = product; }
-    _curProduct = product;
+  // Add theme as a chip (multi-select)
+  if (!_addLmrbSelected.map(s=>s.toLowerCase()).includes(theme.toLowerCase())) {
+    _addLmrbSelected.push(theme);
+    _renderLmrbChips();
+    _renderLmrbQuickPick(_lastLmrbThemes || []);
   }
+  // Auto-fill product from theme→product map (use first selected theme's product)
+  if (_addLmrbSelected.length === 1) {
+    const product = _themeProductMap[theme];
+    if (product) {
+      const prodInp = document.getElementById('productInput');
+      if (prodInp) { prodInp.value = product; }
+      _curProduct = product;
+    }
+  }
+}
+
+// ── LMRB chip management ──────────────────────────────────────────────────────
+function addLmrbChip() {
+  const inp = document.getElementById('themeInput');
+  const val = inp.value.trim();
+  if (!val) return;
+  if (!_addLmrbSelected.map(s=>s.toLowerCase()).includes(val.toLowerCase())) {
+    _addLmrbSelected.push(val);
+    _renderLmrbChips();
+    _renderLmrbQuickPick(_lastLmrbThemes || []);
+  }
+  // Auto-fill product for first theme
+  if (_addLmrbSelected.length === 1) {
+    const product = _themeProductMap[val];
+    if (product) {
+      const prodInp = document.getElementById('productInput');
+      if (prodInp) { prodInp.value = product; }
+      _curProduct = product;
+    }
+  }
+  inp.value = '';
+  inp.focus();
+}
+
+function handleLmrbInputKey(e) {
+  if (e.key === 'Enter') { e.preventDefault(); addLmrbChip(); }
+}
+
+function _removeLmrbChip(idx) {
+  _addLmrbSelected.splice(idx, 1);
+  _renderLmrbChips();
+  _renderLmrbQuickPick(_lastLmrbThemes || []);
+}
+
+function _renderLmrbChips() {
+  const container = document.getElementById('addLmrbChips');
+  if (!container) return;
+  if (!_addLmrbSelected.length) {
+    container.innerHTML = '<span class="text-[11px] text-slate-400 italic px-1">No LMRB themes selected</span>';
+    return;
+  }
+  container.innerHTML = _addLmrbSelected.map((t, i) =>
+    `<span class="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md bg-emerald-100
+                  text-emerald-800 text-[11px] font-semibold border border-emerald-200">
+       ${_escHtml(t)}
+       <button type="button" onclick="_removeLmrbChip(${i})"
+               class="text-emerald-600 hover:text-red-600 transition-colors ml-0.5">
+         <i class="fa-solid fa-xmark text-[9px]"></i>
+       </button>
+     </span>`
+  ).join('');
 }
 
 // ── Filter bar: account → channel → month ─────────────────────────────────────
@@ -939,7 +1025,10 @@ function handleTcInputKey(e, ctx) {
   if (e.key === 'Enter') { e.preventDefault(); addTcChip(ctx); }
 }
 
-function prepareAddSubmit()  { document.getElementById('addTcHidden').value  = _addTcSelected.join('|'); }
+function prepareAddSubmit()  {
+  document.getElementById('addTcHidden').value   = _addTcSelected.join('|');
+  document.getElementById('addLmrbHidden').value = _addLmrbSelected.join('|');
+}
 function prepareEditSubmit() { document.getElementById('editTcHidden').value = _editTcSelected.join('|'); }
 
 // ── Edit Field modal (Product / Brand / LMRB Theme) ───────────────────────────
@@ -1017,6 +1106,7 @@ function mapNow(brand) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 _renderChips('add');
+_renderLmrbChips();
 
 // Auto-load if account is pre-selected (page loaded with ?account=...)
 // Also cascade channel + month from filter params when present.
