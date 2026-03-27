@@ -1429,6 +1429,7 @@ def brand_mapping_list(request):
     # ── Coverage panel (only when account + channel + month all set) ──────────
     coverage_data = None
     unmapped_lmrb_themes = []
+    missing_variants = []
     if account_id and channel_filter and month_filter:
         sch_brands = list(
             ScheduleRow.objects
@@ -1499,6 +1500,50 @@ def brand_mapping_list(request):
 
         unmapped_lmrb_themes = [t for t in all_lmrb_themes if not _is_theme_mapped(t)]
 
+        # ── Missing language variants ────────────────────────────────────────
+        # For each mapped theme with a (Sin)/(Tam)/(Eng) suffix, check if the
+        # other language variants exist in LMRB data but lack a BrandMapping.
+        import re
+        _LANG_RE = re.compile(r'^(.*)\((Sin|Tam|Eng)\)$')
+        _LANG_SUFFIXES = ['(Sin)', '(Tam)', '(Eng)']
+
+        # All LMRB themes across ALL channels for this account (not just current)
+        all_account_themes = set(
+            LMRBRow.objects.filter(account_id=account_id)
+            .exclude(advt_theme='')
+            .values_list('advt_theme', flat=True)
+        )
+        all_account_lower = {t.lower(): t for t in all_account_themes}
+
+        missing_variants = []  # list of {brand, mapped_theme, missing_theme, lang}
+        for bm in BrandMapping.objects.filter(account_id=account_id):
+            t = bm.theme.strip()
+            m = _LANG_RE.match(t)
+            if not m:
+                continue
+            base, mapped_lang = m.group(1), m.group(2)
+            for sfx in _LANG_SUFFIXES:
+                lang = sfx[1:-1]  # strip parens
+                if lang == mapped_lang:
+                    continue
+                variant = base + sfx
+                variant_lower = variant.lower()
+                # Only show if this variant exists in LMRB but has no mapping
+                if variant_lower in all_account_lower and not _is_theme_mapped(variant):
+                    original_case = all_account_lower[variant_lower]
+                    # Avoid duplicates
+                    if not any(mv['missing_theme'].lower() == variant_lower and mv['brand'] == bm.brand
+                               for mv in missing_variants):
+                        missing_variants.append({
+                            'brand': bm.brand,
+                            'product': bm.product or '',
+                            'mapped_theme': t,
+                            'missing_theme': original_case,
+                            'lang': lang,
+                            'tc_theme': bm.tc_theme or '',
+                            'duration': bm.duration,
+                        })
+
     return render(request, 'admin_panel/brand_mappings.html', {
         'mappings':             mappings,
         'accounts':             account_qs,
@@ -1511,6 +1556,7 @@ def brand_mapping_list(request):
         'months_for_channel':   months_for_channel,
         'coverage_data':        coverage_data,
         'unmapped_lmrb_themes': unmapped_lmrb_themes,
+        'missing_variants':     missing_variants,
     })
 
 

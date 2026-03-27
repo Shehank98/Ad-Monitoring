@@ -152,6 +152,19 @@
               <div id="lmrbQuickPickItems" class="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto"></div>
             </div>
             <input type="hidden" name="theme" id="addLmrbHidden">
+            <!-- Language variant suggestions -->
+            <div id="lmrbVariantSuggestions" class="hidden mt-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
+              <div class="flex items-center gap-1.5 mb-2">
+                <i class="fa-solid fa-language text-blue-500 text-xs"></i>
+                <span class="text-[11px] font-bold text-blue-700 uppercase tracking-wide">Language variants found</span>
+              </div>
+              <div id="lmrbVariantItems" class="flex flex-wrap gap-1.5"></div>
+              <button type="button" onclick="_addAllVariants()"
+                      class="mt-2 px-2.5 py-1 bg-blue-600 text-white rounded-md text-[11px] font-bold
+                             hover:bg-blue-700 transition-colors">
+                <i class="fa-solid fa-plus text-[9px] mr-1"></i>Add all variants
+              </button>
+            </div>
             <p class="field-hint">Advt_Theme / MapOnline Theme column. Select multiple to bulk-create mappings.</p>
             <p class="field-hint text-amber-600"><i class="fa-solid fa-asterisk text-[9px] mr-1"></i>Tip: End with <code class="bg-amber-50 px-1 rounded">*</code> for prefix wildcard matching (e.g. <code class="bg-amber-50 px-1 rounded">Brand Name 2025*</code>)</p>
           </div>
@@ -362,6 +375,42 @@
             <i class="fa-solid fa-link text-[9px]"></i>
             {{ theme }}
           </button>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- ── Missing Language Variants panel ────────────────────────────────── -->
+      {% if missing_variants %}
+      <div class="bg-white rounded-2xl border border-blue-100 shadow-sm p-4">
+        <div class="flex items-start gap-2.5 mb-3">
+          <span class="w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+            <i class="fa-solid fa-language text-blue-500 text-xs"></i>
+          </span>
+          <div>
+            <p class="text-sm font-bold text-slate-800">
+              Missing Language Variants
+              <span class="ml-1.5 px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-600 text-xs font-bold">{{ missing_variants|length }}</span>
+            </p>
+            <p class="text-xs text-slate-500 mt-0.5">These brands have a mapping for one language but are missing the (Sin)/(Tam)/(Eng) variant that exists in LMRB data.</p>
+          </div>
+        </div>
+        <div class="space-y-1.5">
+          {% for mv in missing_variants %}
+          <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-blue-50 border border-blue-100">
+            <div class="flex-1 min-w-0">
+              <span class="text-xs font-bold text-slate-700">{{ mv.brand }}</span>
+              <span class="text-[10px] text-slate-400 mx-1.5">&mdash;</span>
+              <span class="text-[11px] text-slate-500">has <span class="font-semibold text-emerald-600">{{ mv.mapped_theme }}</span></span>
+              <span class="text-[10px] text-slate-400 mx-1">&rarr;</span>
+              <span class="text-[11px] font-semibold text-blue-700">needs {{ mv.missing_theme }}</span>
+              <span class="ml-1 px-1 py-0.5 rounded bg-blue-100 text-blue-600 text-[10px] font-bold">{{ mv.lang }}</span>
+            </div>
+            <button type="button" onclick="_quickAddVariant('{{ mv.brand|escapejs }}', '{{ mv.missing_theme|escapejs }}', '{{ mv.tc_theme|escapejs }}', '{{ mv.product|escapejs }}', '{{ mv.duration|default:""|escapejs }}')"
+                    class="flex-shrink-0 px-2 py-1 rounded-md text-[10px] font-bold bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+              <i class="fa-solid fa-plus text-[9px] mr-0.5"></i> Map
+            </button>
+          </div>
           {% endfor %}
         </div>
       </div>
@@ -838,6 +887,7 @@ function _pickLmrbTheme(theme) {
     _addLmrbSelected.push(theme);
     _renderLmrbChips();
     _renderLmrbQuickPick(_lastLmrbThemes || []);
+    _checkForVariants();
   }
   // Auto-fill product from theme→product map (use first selected theme's product)
   if (_addLmrbSelected.length === 1) {
@@ -859,6 +909,7 @@ function addLmrbChip() {
     _addLmrbSelected.push(val);
     _renderLmrbChips();
     _renderLmrbQuickPick(_lastLmrbThemes || []);
+    _checkForVariants();
   }
   // Auto-fill product for first theme
   if (_addLmrbSelected.length === 1) {
@@ -881,6 +932,7 @@ function _removeLmrbChip(idx) {
   _addLmrbSelected.splice(idx, 1);
   _renderLmrbChips();
   _renderLmrbQuickPick(_lastLmrbThemes || []);
+  _checkForVariants();
 }
 
 function _renderLmrbChips() {
@@ -900,6 +952,89 @@ function _renderLmrbChips() {
        </button>
      </span>`
   ).join('');
+}
+
+// ── Language variant detection ────────────────────────────────────────────────
+const _LANG_SUFFIXES = ['(Sin)', '(Tam)', '(Eng)'];
+let _pendingVariants = [];  // variants available to add
+
+function _detectLangBase(theme) {
+  // Returns {base, lang} if theme ends with a language suffix, else null
+  for (const sfx of _LANG_SUFFIXES) {
+    if (theme.endsWith(sfx)) {
+      return { base: theme.slice(0, -sfx.length), lang: sfx };
+    }
+  }
+  return null;
+}
+
+function _checkForVariants() {
+  // Look at all selected LMRB themes, find any language variants that exist
+  // in the known themes list but aren't selected yet
+  const allKnownLower = (_lastLmrbThemes || []).map(t => t.toLowerCase());
+  const selectedLower = _addLmrbSelected.map(s => s.toLowerCase());
+  _pendingVariants = [];
+
+  for (const selected of _addLmrbSelected) {
+    const parsed = _detectLangBase(selected);
+    if (!parsed) continue;
+    // Check each other language suffix
+    for (const sfx of _LANG_SUFFIXES) {
+      if (sfx === parsed.lang) continue;
+      const variant = parsed.base + sfx;
+      const variantLower = variant.toLowerCase();
+      // Only suggest if it exists in LMRB data AND not already selected
+      if (allKnownLower.includes(variantLower) && !selectedLower.includes(variantLower)) {
+        // Find the original-case version
+        const original = (_lastLmrbThemes || []).find(t => t.toLowerCase() === variantLower);
+        if (original && !_pendingVariants.includes(original)) {
+          _pendingVariants.push(original);
+        }
+      }
+    }
+  }
+  _renderVariantSuggestions();
+}
+
+function _renderVariantSuggestions() {
+  const wrap = document.getElementById('lmrbVariantSuggestions');
+  const items = document.getElementById('lmrbVariantItems');
+  if (!wrap || !items) return;
+  if (!_pendingVariants.length) { wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+  items.innerHTML = _pendingVariants.map(t => {
+    const parsed = _detectLangBase(t);
+    const langLabel = parsed ? parsed.lang : '';
+    return `<button type="button" onclick="_addVariant('${_esc(t)}')"
+       class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-blue-300
+              text-blue-700 text-[11px] font-semibold hover:bg-blue-100 hover:border-blue-400 transition-colors">
+       <i class="fa-solid fa-plus text-[9px]"></i>
+       ${_escHtml(t)}
+       <span class="px-1 py-0.5 rounded bg-blue-100 text-blue-600 text-[10px] font-bold">${_escHtml(langLabel)}</span>
+    </button>`;
+  }).join('');
+}
+
+function _addVariant(theme) {
+  if (!_addLmrbSelected.map(s=>s.toLowerCase()).includes(theme.toLowerCase())) {
+    _addLmrbSelected.push(theme);
+    _renderLmrbChips();
+    _renderLmrbQuickPick(_lastLmrbThemes || []);
+  }
+  _pendingVariants = _pendingVariants.filter(v => v.toLowerCase() !== theme.toLowerCase());
+  _renderVariantSuggestions();
+}
+
+function _addAllVariants() {
+  for (const v of _pendingVariants) {
+    if (!_addLmrbSelected.map(s=>s.toLowerCase()).includes(v.toLowerCase())) {
+      _addLmrbSelected.push(v);
+    }
+  }
+  _pendingVariants = [];
+  _renderLmrbChips();
+  _renderLmrbQuickPick(_lastLmrbThemes || []);
+  _renderVariantSuggestions();
 }
 
 // ── Filter bar: account → channel → month ─────────────────────────────────────
@@ -1094,6 +1229,38 @@ function closeEditTcModal() {
 document.getElementById('editTcModal').addEventListener('click', function(e) {
   if (e.target === this) closeEditTcModal();
 });
+
+// ── Quick-add variant: pre-fill brand + LMRB theme chip + TC themes + scroll ─
+function _quickAddVariant(brand, theme, tcTheme, product, duration) {
+  const brandInp = document.getElementById('brandInput');
+  if (brandInp) { brandInp.value = brand; }
+  // Add the theme as a chip
+  if (!_addLmrbSelected.map(s=>s.toLowerCase()).includes(theme.toLowerCase())) {
+    _addLmrbSelected.push(theme);
+    _renderLmrbChips();
+    _renderLmrbQuickPick(_lastLmrbThemes || []);
+    _checkForVariants();
+  }
+  // Pre-fill product
+  if (product) {
+    const prodInp = document.getElementById('productInput');
+    if (prodInp) { prodInp.value = product; }
+    _curProduct = product;
+  }
+  // Pre-fill TC themes from existing mapping
+  if (tcTheme) {
+    _addTcSelected = tcTheme.split('|').map(t => t.trim()).filter(Boolean);
+    _renderChips('add');
+    _renderQuickPick('add', _knownTcThemes);
+  }
+  // Pre-fill duration
+  if (duration) {
+    const durInp = document.querySelector('input[name="duration"]');
+    if (durInp) { durInp.value = duration; }
+  }
+  const addForm = document.getElementById('addMappingForm');
+  if (addForm) { addForm.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+}
 
 // ── Map Now: pre-fill brand in add form and scroll to it ──────────────────────
 function mapNow(brand) {
