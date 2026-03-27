@@ -510,15 +510,54 @@ def run_scope(account_id, channel, month, mode='smart'):
     late_df      = _concat(all_late_dfs)
     not_aired_df = _concat(all_not_aired_dfs)
 
-    # ── Rule 11: Extra Airings - pool rows not consumed by any schedule ────────
-    # Only COMMERCIAL spots within the schedule period are shown as extra.
-    # Rows already claimed by the sponsorship engine (_is_spon_matched=True)
-    # are excluded - they belong to the sponsorship reconciliation, not here.
+    # ── Rule 11: Extra Airings — brand-mapped LMRB rows not consumed ────────
+    # Includes ALL available LMRB data (not restricted to schedule end date)
+    # so late-aired ads beyond the planned period are visible.  Only rows whose
+    # theme matches a BrandMapping for this account are included.
+    #
+    # Build theme lookup from brand_theme_map (exact + wildcard prefix).
+    _extra_themes_exact = set()
+    _extra_themes_prefix = []
+    for _norms in brand_theme_map.values():
+        for _nt, _nd in _norms:
+            if _nt.endswith('*'):
+                _extra_themes_prefix.append(_nt[:-1])
+            else:
+                _extra_themes_exact.add(_nt)
+
+    def _theme_is_mapped(norm_theme):
+        if norm_theme in _extra_themes_exact:
+            return True
+        for pfx in _extra_themes_prefix:
+            if norm_theme.startswith(pfx):
+                return True
+        return False
+
+    # Build wider LMRB pool: from schedule start to latest available LMRB date
+    _extra_lmrb_qs = LMRBRow.objects.filter(
+        _lmrb_channel_q(channel), account_id=account_id,
+        is_manual_matched=False, is_sponsorship_matched=False,
+    )
+    if mode == 'smart':
+        _extra_lmrb_qs = _extra_lmrb_qs.filter(is_matched=False)
+    if date_start:
+        _extra_lmrb_qs = _extra_lmrb_qs.filter(date__gte=date_start)
+    # No date_end restriction — include all data up to latest LMRB date
+
+    # Exclude IDs already in the main mon_pool to avoid double processing
+    main_pool_ids = set()
+    if '_lmrb_db_id' in mon_pool.columns and not mon_pool.empty:
+        main_pool_ids = set(mon_pool['_lmrb_db_id'].dropna().astype(int))
+
     extra_rows = []
+    # First: unconsumed rows from the main pool (within schedule period)
     for idx, mon_row in mon_pool.iterrows():
         if idx not in global_consumed_idx:
             if mon_row.get('_is_spon_matched', False):
-                continue  # already claimed by sponsorship engine
+                continue
+            nt = mon_row.get('_norm_theme', '')
+            if not _theme_is_mapped(nt):
+                continue
             extra_rows.append({
                 'Theme':      mon_row.get('Advt_Theme', ''),
                 'Aired_Date': mon_row.get('Date', ''),
@@ -528,6 +567,26 @@ def run_scope(account_id, channel, month, mode='smart'):
                 'Programme':  mon_row.get('Program', ''),
                 '_lmrb_row_id': mon_row.get('_lmrb_db_id'),
             })
+
+    # Second: LMRB rows beyond schedule end date (wider pool)
+    _extra_extended = _extra_lmrb_qs.exclude(id__in=main_pool_ids)
+    if date_end:
+        _extra_extended = _extra_extended.filter(date__gt=date_end)
+    for lr in _extra_extended.values(
+        'id', 'advt_theme', 'date', 'advt_time', 'duration', 'source', 'program',
+    ):
+        nt = normalize(lr['advt_theme'] or '')
+        if not _theme_is_mapped(nt):
+            continue
+        extra_rows.append({
+            'Theme':      lr['advt_theme'] or '',
+            'Aired_Date': lr['date'],
+            'Air_Time':   lr['advt_time'] or '',
+            'Duration':   lr['duration'],
+            'Source':     lr['source'] or '',
+            'Programme':  lr['program'] or '',
+            '_lmrb_row_id': lr['id'],
+        })
     extra_df = pd.DataFrame(extra_rows) if extra_rows else pd.DataFrame()
 
     # ── Lock matched rows in DB ────────────────────────────────────────────────
