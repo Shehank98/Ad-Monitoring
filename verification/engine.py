@@ -193,6 +193,7 @@ def _persist_results(account_obj, channel, month, results_by_status):
         'late telecast':      'late_telecast',
         'not aired':          'not_aired',
         'no brand mapping':   'no_mapping',
+        'extra aired':        'extra_aired',
     }
 
     def _str(v):
@@ -519,11 +520,12 @@ def run_scope(account_id, channel, month, mode='smart'):
             if mon_row.get('_is_spon_matched', False):
                 continue  # already claimed by sponsorship engine
             extra_rows.append({
-                'Theme':    mon_row.get('Advt_Theme', ''),
-                'Date':     mon_row.get('Date', ''),
-                'Air_Time': mon_row.get('Advt_time', ''),
-                'Duration': mon_row.get('Dur', ''),
-                'Source':   mon_row.get('_source', ''),
+                'Theme':      mon_row.get('Advt_Theme', ''),
+                'Aired_Date': mon_row.get('Date', ''),
+                'Air_Time':   mon_row.get('Advt_time', ''),
+                'Duration':   mon_row.get('Dur', ''),
+                'Source':     mon_row.get('_source', ''),
+                '_lmrb_row_id': mon_row.get('_lmrb_db_id'),
             })
     extra_df = pd.DataFrame(extra_rows) if extra_rows else pd.DataFrame()
 
@@ -546,6 +548,12 @@ def run_scope(account_id, channel, month, mode='smart'):
             schedule_row_id__in=processed_sch_ids,
         ).exclude(status='manual_match').delete()
 
+    # ── Delete stale extra_aired records for this scope before re-persisting ──
+    MatchResult.objects.filter(
+        account_id=account_id, channel=channel, month=month,
+        status='extra_aired',
+    ).delete()
+
     # ── Persist MatchResult records ────────────────────────────────────────────
     account_obj = Account.objects.get(pk=account_id)
     _persist_results(account_obj, channel, month, [
@@ -553,6 +561,7 @@ def run_scope(account_id, channel, month, mode='smart'):
         (prog_mis_df,  'programme_mismatch'),
         (late_df,      'late_telecast'),
         (not_aired_df, 'not_aired'),
+        (extra_df,     'extra_aired'),
     ])
 
     return (matched_df, prog_mis_df, late_df, not_aired_df, extra_df), total_sch

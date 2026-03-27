@@ -540,6 +540,7 @@ class MatchResult(models.Model):
         ('not_aired',          'Not Aired'),
         ('no_mapping',         'No Brand Mapping'),
         ('manual_match',       'Manually Matched'),
+        ('extra_aired',        'Extra Aired'),
     ]
     account          = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='match_results')
     channel          = models.CharField(max_length=200)

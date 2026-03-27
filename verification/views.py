@@ -404,7 +404,7 @@ def load_results(request):
 
     def _row(mr):
         return {
-            'brand':    mr.brand,
+            'brand':    mr.brand or mr.theme,
             'theme':    mr.theme,
             'duration': mr.duration,
             'programme': mr.programme,
