@@ -514,6 +514,8 @@ def run_scope(account_id, channel, month, mode='smart'):
     # Includes ALL available LMRB data (not restricted to schedule end date)
     # so late-aired ads beyond the planned period are visible.  Only rows whose
     # theme matches a BrandMapping for this account are included.
+    # Rows whose theme contains a sponsorship keyword (-BB, -Tr, etc.) are
+    # excluded — they belong to sponsorship reconciliation, not commercial.
     #
     # Build theme lookup from brand_theme_map (exact + wildcard prefix).
     _extra_themes_exact = set()
@@ -525,11 +527,22 @@ def run_scope(account_id, channel, month, mode='smart'):
             else:
                 _extra_themes_exact.add(_nt)
 
+    # Load sponsorship keywords to exclude from extra aired
+    from core.models import get_setting_list as _get_setting_list
+    _spon_keywords = [kw.lower().strip() for kw in _get_setting_list('lmrb_sponsorship_keywords') if kw.strip()]
+
     def _theme_is_mapped(norm_theme):
         if norm_theme in _extra_themes_exact:
             return True
         for pfx in _extra_themes_prefix:
             if norm_theme.startswith(pfx):
+                return True
+        return False
+
+    def _theme_is_sponsorship(raw_theme):
+        tl = raw_theme.lower().strip()
+        for kw in _spon_keywords:
+            if kw in tl:
                 return True
         return False
 
@@ -555,11 +568,14 @@ def run_scope(account_id, channel, month, mode='smart'):
         if idx not in global_consumed_idx:
             if mon_row.get('_is_spon_matched', False):
                 continue
+            raw_theme = mon_row.get('Advt_Theme', '')
             nt = mon_row.get('_norm_theme', '')
             if not _theme_is_mapped(nt):
                 continue
+            if _theme_is_sponsorship(raw_theme):
+                continue
             extra_rows.append({
-                'Theme':      mon_row.get('Advt_Theme', ''),
+                'Theme':      raw_theme,
                 'Aired_Date': mon_row.get('Date', ''),
                 'Air_Time':   mon_row.get('Advt_time', ''),
                 'Duration':   mon_row.get('Dur', ''),
@@ -575,11 +591,14 @@ def run_scope(account_id, channel, month, mode='smart'):
     for lr in _extra_extended.values(
         'id', 'advt_theme', 'date', 'advt_time', 'duration', 'source', 'program',
     ):
-        nt = normalize(lr['advt_theme'] or '')
+        raw_theme = lr['advt_theme'] or ''
+        nt = normalize(raw_theme)
         if not _theme_is_mapped(nt):
             continue
+        if _theme_is_sponsorship(raw_theme):
+            continue
         extra_rows.append({
-            'Theme':      lr['advt_theme'] or '',
+            'Theme':      raw_theme,
             'Aired_Date': lr['date'],
             'Air_Time':   lr['advt_time'] or '',
             'Duration':   lr['duration'],

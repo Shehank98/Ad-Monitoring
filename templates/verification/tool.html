@@ -421,10 +421,12 @@ function buildNotAiredTable(rows, extraRows, idx) {
   let html = '<table class="res-table"><thead><tr>'
     + '<th>Brand</th><th>Dur</th><th>Programme</th>'
     + '<th>Planned Date</th><th>Start</th><th>End</th>';
-  if (hasExtra) html += '<th>Action</th>';
+  if (hasExtra) html += '<th></th>';
   html += '</tr></thead><tbody>';
 
   for (const r of rows) {
+    // Escape theme for JS string (replace single quotes)
+    const themeJs = (r.theme || '').replace(/'/g, "\\'").replace(/\\/g, "\\\\");
     html += `<tr id="notaired-row-${r.id}">`;
     html += `<td class="font-medium">${esc(r.brand)}</td>`;
     html += `<td>${r.duration ? r.duration + 's' : '-'}</td>`;
@@ -434,7 +436,7 @@ function buildNotAiredTable(rows, extraRows, idx) {
     html += `<td>${esc(r.planned_end) || '-'}</td>`;
     if (hasExtra) {
       html += `<td><button class="text-xs px-2 py-1 rounded bg-indigo-500 text-white hover:bg-indigo-600"
-        onclick="openLinkModal(${idx}, ${r.id}, '${esc(r.brand)}', ${r.duration || 0})">
+        onclick="openLinkModal(${idx}, ${r.id}, '${esc(r.brand)}', ${r.duration || 0}, '${themeJs}', '${esc(r.programme)}', '${esc(r.planned_date)}', '${esc(r.planned_start)}', '${esc(r.planned_end)}')">
         <i class="fa-solid fa-link mr-1"></i>Find in Extra</button></td>`;
     }
     html += '</tr>';
@@ -637,7 +639,7 @@ function filterMedia(type) {
 let _linkModalIdx = null;
 let _linkNotAiredId = null;
 
-function openLinkModal(idx, notAiredId, brand, duration) {
+function openLinkModal(idx, notAiredId, brand, duration, theme, programme, plannedDate, plannedStart, plannedEnd) {
   _linkModalIdx = idx;
   _linkNotAiredId = notAiredId;
   const data = window._verifyData[idx];
@@ -645,14 +647,28 @@ function openLinkModal(idx, notAiredId, brand, duration) {
     alert('No Extra Aired rows available to link.');
     return;
   }
-  // Filter extra rows to same duration first
-  let candidates = data.extra.filter(r => r.duration === duration);
+  // Filter by mapped theme (case-insensitive) + same duration
+  const themeLower = (theme || '').toLowerCase().trim();
+  let candidates = data.extra.filter(r => {
+    const rTheme = (r.theme || r.brand || '').toLowerCase().trim();
+    return rTheme === themeLower && r.duration === duration;
+  });
+  // Fallback: same duration only
+  if (!candidates.length) {
+    candidates = data.extra.filter(r => r.duration === duration);
+  }
+  // Fallback: all extra
   if (!candidates.length) candidates = data.extra;
 
   const modal = document.getElementById('link-modal');
   const body  = document.getElementById('link-modal-body');
   document.getElementById('link-notaired-info').innerHTML =
-    `<span class="font-semibold">${esc(brand)}</span> (${duration}s)`;
+    `<span class="font-semibold">${esc(brand)}</span> &mdash; `
+    + `${esc(programme || '-')} &mdash; `
+    + `${esc(plannedDate || '-')} `
+    + `<span class="text-slate-400">${esc(plannedStart || '')}–${esc(plannedEnd || '')}</span> `
+    + `(${duration}s)`
+    + (theme ? ` <span class="text-xs text-indigo-500 ml-1">[${esc(theme)}]</span>` : '');
 
   let html = '<table class="res-table text-xs"><thead><tr>'
     + '<th>Theme</th><th>Aired Date</th><th>Aired Time</th>'
