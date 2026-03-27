@@ -525,6 +525,7 @@ def run_scope(account_id, channel, month, mode='smart'):
                 'Air_Time':   mon_row.get('Advt_time', ''),
                 'Duration':   mon_row.get('Dur', ''),
                 'Source':     mon_row.get('_source', ''),
+                'Programme':  mon_row.get('Program', ''),
                 '_lmrb_row_id': mon_row.get('_lmrb_db_id'),
             })
     extra_df = pd.DataFrame(extra_rows) if extra_rows else pd.DataFrame()

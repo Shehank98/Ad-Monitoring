@@ -113,7 +113,8 @@
 <div class="space-y-3" id="campaign-list">
   {% for row in campaign_rows %}
   {% with idx=forloop.counter %}
-  <div class="camp-row" id="camp-{{ idx }}" data-media-type="{{ row.media_type }}">
+  <div class="camp-row" id="camp-{{ idx }}" data-media-type="{{ row.media_type }}"
+       data-account-id="{{ row.account_id }}" data-channel="{{ row.channel }}" data-month="{{ row.month }}">
 
     <!-- ── Main summary row (clickable to expand) ── -->
     <div class="px-5 py-4 flex flex-wrap items-center gap-x-5 gap-y-2 cursor-pointer select-none"
@@ -388,6 +389,37 @@ function buildTable(rows, showStatus) {
   return html;
 }
 
+// ── Build LMRB-style table for Extra Aired rows ─────────────────────────────
+function buildExtraTable(rows, notAiredRows, idx) {
+  if (!rows || !rows.length) {
+    return '<p class="text-xs text-slate-400 py-6 text-center">No extra aired rows.</p>';
+  }
+  const hasNotAired = notAiredRows && notAiredRows.length > 0;
+  let html = '<table class="res-table"><thead><tr>'
+    + '<th>Theme</th><th>Aired Date</th><th>Aired Time</th>'
+    + '<th>Dur</th><th>Programme</th><th>Source</th>';
+  if (hasNotAired) html += '<th>Action</th>';
+  html += '</tr></thead><tbody>';
+
+  for (const r of rows) {
+    html += `<tr id="extra-row-${r.id}">`;
+    html += `<td class="font-medium">${esc(r.theme || r.brand)}</td>`;
+    html += `<td>${esc(r.aired_date) || '-'}</td>`;
+    html += `<td class="font-mono text-xs">${esc(r.air_time) || '-'}</td>`;
+    html += `<td>${r.duration ? r.duration + 's' : '-'}</td>`;
+    html += `<td>${esc(r.programme) || '-'}</td>`;
+    html += `<td class="text-slate-400">${esc(r.source) || '-'}</td>`;
+    if (hasNotAired) {
+      html += `<td><button class="text-xs px-2 py-1 rounded bg-indigo-500 text-white hover:bg-indigo-600"
+        onclick="openLinkModal(${idx}, ${r.id}, '${esc(r.theme || r.brand)}', '${esc(r.aired_date)}', '${esc(r.air_time)}', ${r.duration || 0})">
+        <i class="fa-solid fa-link mr-1"></i>Link to Not Aired</button></td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
 function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -439,9 +471,10 @@ function renderResults(idx, data) {
   document.getElementById('tc-nomap-' + idx).textContent   = data.summary.no_mapping;
 
   // Tab panels — "All" includes pending rows (planned but LMRB not yet available)
+  // Extra Aired is excluded from "All" — it's LMRB-only, not schedule-based
   const allRows = [
     ...data.matched, ...data.prog_mismatch, ...data.late_telecast,
-    ...data.not_aired, ...data.no_mapping, ...data.extra,
+    ...data.not_aired, ...data.no_mapping,
     ...(data.pending_rows || []),
   ].sort((a, b) => (a.planned_date || '').localeCompare(b.planned_date || '') || (a.brand || '').localeCompare(b.brand || ''));
   document.getElementById('vtab-all-' + idx).innerHTML     = buildTable(allRows,           true);
@@ -449,8 +482,12 @@ function renderResults(idx, data) {
   document.getElementById('vtab-mis-' + idx).innerHTML     = buildTable(data.prog_mismatch,false);
   document.getElementById('vtab-late-' + idx).innerHTML    = buildTable(data.late_telecast, false);
   document.getElementById('vtab-notaired-'+idx).innerHTML  = buildTable(data.not_aired,    false);
-  document.getElementById('vtab-extra-' + idx).innerHTML   = buildTable(data.extra,        false);
+  document.getElementById('vtab-extra-' + idx).innerHTML   = buildExtraTable(data.extra, data.not_aired, idx);
   document.getElementById('vtab-nomap-' + idx).innerHTML   = buildTable(data.no_mapping,   false);
+
+  // Store data for manual linking
+  window._verifyData = window._verifyData || {};
+  window._verifyData[idx] = data;
 
   tabsEl.classList.remove('hidden');
 }
@@ -572,5 +609,97 @@ function filterMedia(type) {
     el.style.display = (type === 'all' || mt === type) ? '' : 'none';
   });
 }
+
+// ── Manual Link: Extra Aired → Not Aired ─────────────────────────────────────
+let _linkModalIdx = null;
+let _linkExtraId = null;
+
+function openLinkModal(idx, extraId, theme, airedDate, airTime, duration) {
+  _linkModalIdx = idx;
+  _linkExtraId = extraId;
+  const data = window._verifyData[idx];
+  if (!data || !data.not_aired || !data.not_aired.length) {
+    alert('No "Not Aired" rows available to link.');
+    return;
+  }
+  // Filter not-aired rows to same duration if possible
+  let candidates = data.not_aired.filter(r => r.duration === duration);
+  if (!candidates.length) candidates = data.not_aired;
+
+  const modal = document.getElementById('link-modal');
+  const body  = document.getElementById('link-modal-body');
+  document.getElementById('link-extra-info').innerHTML =
+    `<span class="font-semibold">${esc(theme)}</span> &mdash; ${esc(airedDate)} ${esc(airTime)} (${duration}s)`;
+
+  let html = '<table class="res-table text-xs"><thead><tr>'
+    + '<th>Brand</th><th>Dur</th><th>Programme</th>'
+    + '<th>Planned Date</th><th>Start</th><th>End</th><th></th>'
+    + '</tr></thead><tbody>';
+  for (const r of candidates) {
+    html += `<tr>`;
+    html += `<td class="font-medium">${esc(r.brand)}</td>`;
+    html += `<td>${r.duration ? r.duration + 's' : '-'}</td>`;
+    html += `<td>${esc(r.programme) || '-'}</td>`;
+    html += `<td>${esc(r.planned_date) || '-'}</td>`;
+    html += `<td>${esc(r.planned_start) || '-'}</td>`;
+    html += `<td>${esc(r.planned_end) || '-'}</td>`;
+    html += `<td><button class="px-2 py-1 rounded bg-emerald-500 text-white hover:bg-emerald-600 text-xs"
+      onclick="confirmLink(${r.id})"><i class="fa-solid fa-check mr-1"></i>Match</button></td>`;
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  body.innerHTML = html;
+  modal.classList.remove('hidden');
+}
+
+function closeLinkModal() {
+  document.getElementById('link-modal').classList.add('hidden');
+}
+
+function confirmLink(notAiredId) {
+  const fd = new FormData();
+  fd.append('extra_id', _linkExtraId);
+  fd.append('not_aired_id', notAiredId);
+  fd.append('csrfmiddlewaretoken', CSRF);
+
+  fetch('/verify/link-extra/', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) { alert(data.error || 'Failed'); return; }
+      closeLinkModal();
+      // Reload results for this row
+      const idx = _linkModalIdx;
+      delete _loaded[idx];
+      const detail = document.getElementById('detail-' + idx);
+      document.getElementById('results-loading-' + idx).innerHTML =
+        '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Refreshing…';
+      document.getElementById('results-loading-' + idx).classList.remove('hidden');
+      document.getElementById('results-tabs-' + idx).classList.add('hidden');
+      document.getElementById('kpi-bar-' + idx).classList.add('hidden');
+      // Re-fetch
+      const el = detail.closest('.camp-row');
+      const accountId = el.dataset.accountId;
+      const channel = el.dataset.channel;
+      const month = el.dataset.month;
+      _loaded[idx] = true;
+      fetchResults(idx, accountId, channel, month);
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
 </script>
+
+<!-- Link Modal -->
+<div id="link-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+  <div class="bg-white rounded-xl shadow-2xl max-w-3xl w-full mx-4 max-h-[80vh] overflow-auto">
+    <div class="flex items-center justify-between px-5 py-3 border-b">
+      <h3 class="font-bold text-slate-800"><i class="fa-solid fa-link mr-2 text-indigo-500"></i>Link Extra Aired to Not Aired</h3>
+      <button onclick="closeLinkModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+    </div>
+    <div class="px-5 py-3 bg-indigo-50 text-sm">
+      <span class="text-slate-500">Extra aired row:</span> <span id="link-extra-info"></span>
+    </div>
+    <div class="px-5 py-3 text-sm text-slate-500">Select a Not Aired row to match with:</div>
+    <div id="link-modal-body" class="px-5 pb-5 overflow-auto"></div>
+  </div>
+</div>
 {% endblock %}

@@ -186,7 +186,7 @@
       </div>
       <div class="text-5xl font-black my-2 leading-none">{{ stats.compliance }}%</div>
       <div class="text-xs opacity-70">
-        {{ stats.matched }} of {{ stats.total }} spots matched
+        {{ stats.aired }} of {{ stats.total }} spots aired
         {% if stats.unverified %}
           <span class="block opacity-80 text-[10px] mt-0.5">
             {{ stats.unverified }} spot{{ stats.unverified|pluralize }} pending LMRB data
@@ -859,7 +859,7 @@
             <tr>
               <th>Channel</th>
               <th class="text-right">Total</th>
-              <th class="text-right">Matched</th>
+              <th class="text-right">Aired</th>
               <th class="text-right">Compliance</th>
               <th class="text-right">Not Aired</th>
               <th class="text-right">Prog Mismatch</th>
@@ -871,7 +871,7 @@
             <tr>
               <td class="font-semibold text-slate-800">{{ row.channel }}</td>
               <td class="text-right font-bold">{{ row.total }}</td>
-              <td class="text-right text-emerald-700 font-semibold">{{ row.matched }}</td>
+              <td class="text-right text-emerald-700 font-semibold">{{ row.aired }}</td>
               <td class="text-right">
                 <span class="px-2 py-0.5 rounded-full text-xs font-bold
                   {% if row.compliance >= 90 %}bg-emerald-100 text-emerald-700

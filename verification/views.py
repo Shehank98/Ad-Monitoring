@@ -404,6 +404,7 @@ def load_results(request):
 
     def _row(mr):
         return {
+            'id':       mr.id,
             'brand':    mr.brand or mr.theme,
             'theme':    mr.theme,
             'duration': mr.duration,
@@ -415,6 +416,8 @@ def load_results(request):
             'air_time':      mr.air_time       or '',
             'source':        mr.source         or '',
             'status':        STATUS_LABELS.get(mr.status, mr.status),
+            'schedule_row_id': mr.schedule_row_id,
+            'lmrb_row_id':    mr.lmrb_row_id,
         }
 
     all_rows       = [_row(r) for r in qs]
@@ -424,6 +427,8 @@ def load_results(request):
     not_aired      = [r for r in all_rows if r['status'] == 'Not Aired']
     extra          = [r for r in all_rows if r['status'] == 'Extra Aired']
     no_mapping     = [r for r in all_rows if r['status'] == 'No Brand Mapping']
+    # Schedule-based rows only (exclude Extra Aired which are LMRB-only)
+    schedule_rows  = [r for r in all_rows if r['status'] != 'Extra Aired']
     last_run = qs.order_by('-run_at').values_list('run_at', flat=True).first()
 
     # Pending rows: COMMERCIAL BENEFITS schedule rows that have no MatchResult yet
@@ -454,8 +459,8 @@ def load_results(request):
 
     return JsonResponse({
         'ok':            True,
-        'has_results':   bool(all_rows) or bool(pending_rows),
-        'total':         len(all_rows),
+        'has_results':   bool(schedule_rows) or bool(pending_rows),
+        'total':         len(schedule_rows),
         'matched':       matched,
         'prog_mismatch': prog_mismatch,
         'late_telecast': late_telecast,
@@ -464,7 +469,7 @@ def load_results(request):
         'no_mapping':    no_mapping,
         'pending_rows':  pending_rows,
         'summary': {
-            'total':         len(all_rows),
+            'total':         len(schedule_rows),
             'planned':       planned,
             'pending':       pending,
             'matched':       len(matched),
@@ -476,6 +481,68 @@ def load_results(request):
         },
         'last_run': last_run.strftime('%d %b %Y %H:%M') if last_run else None,
     })
+
+
+@login_required
+def link_extra_to_not_aired(request):
+    """POST — manually link an Extra Aired LMRB row to a Not Aired schedule row.
+
+    Both MatchResult records are updated: the Not Aired becomes Matched, the
+    Extra Aired is deleted. The underlying ScheduleRow and LMRBRow are locked.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    extra_id    = request.POST.get('extra_id')
+    not_aired_id = request.POST.get('not_aired_id')
+    if not extra_id or not not_aired_id:
+        return JsonResponse({'ok': False, 'error': 'Missing parameters'})
+
+    try:
+        extra_mr    = MatchResult.objects.get(pk=extra_id, status='extra_aired')
+        not_aired_mr = MatchResult.objects.get(pk=not_aired_id, status__in=['not_aired', 'no_mapping'])
+    except MatchResult.DoesNotExist:
+        return JsonResponse({'ok': False, 'error': 'Row not found or already matched'})
+
+    if not _account_access(request.user, extra_mr.account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied'})
+
+    from django.utils import timezone
+    now = timezone.now()
+
+    # Lock the LMRB row
+    lmrb_row = extra_mr.lmrb_row
+    if lmrb_row:
+        lmrb_row.is_matched = True
+        lmrb_row.is_manual_matched = True
+        lmrb_row.matched_at = now
+        if not_aired_mr.schedule_row:
+            lmrb_row.matched_schedule = not_aired_mr.schedule_row
+        lmrb_row.save()
+
+    # Lock the schedule row
+    schedule_row = not_aired_mr.schedule_row
+    if schedule_row:
+        schedule_row.is_matched = True
+        schedule_row.is_manual_matched = True
+        schedule_row.matched_at = now
+        if lmrb_row:
+            schedule_row.matched_lmrb = lmrb_row
+        schedule_row.save()
+
+    # Update the Not Aired MatchResult → Matched
+    not_aired_mr.status = 'matched'
+    not_aired_mr.theme = extra_mr.theme
+    not_aired_mr.aired_date = extra_mr.aired_date
+    not_aired_mr.air_time = extra_mr.air_time
+    not_aired_mr.source = extra_mr.source
+    not_aired_mr.lmrb_row = lmrb_row
+    not_aired_mr.save()
+
+    # Delete the Extra Aired MatchResult
+    extra_mr.delete()
+
+    return JsonResponse({'ok': True})
 
 
 # ── AJAX helpers ───────────────────────────────────────────────────────────────

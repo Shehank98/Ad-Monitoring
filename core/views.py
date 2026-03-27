@@ -2207,6 +2207,11 @@ def monitoring_dashboard(request):
 
                     if planned == 0 and aired == 0 and lmrb_count == 0:
                         continue
+                    # When a brand has multiple theme mappings (e.g. Sin/Tam
+                    # language variants), hide mappings with zero LMRB evidence
+                    # on this channel — they belong to a different channel.
+                    if len(mappings) > 1 and aired == 0 and raw_lmrb_count == 0:
+                        continue
                     rows.append({
                         'product': product,
                         'brand': brand,
