@@ -1742,6 +1742,7 @@ def monitoring_dashboard(request):
     sponsorship_chart_json = '[]'
     lmrb_matched_rows   = []
     lmrb_unmatched_rows = []
+    extra_aired_rows    = []
 
     if account_id:
         try:
@@ -2380,6 +2381,38 @@ def monitoring_dashboard(request):
             lmrb_qs.filter(is_matched=False).order_by('date', 'advt_time')
         )
 
+        # ── Extra Aired rows ─────────────────────────────────────────────────
+        # LMRB rows in the schedule period that are NOT matched, NOT
+        # sponsorship-matched, NOT manual-matched, AND whose advt_theme
+        # matches a BrandMapping for this account (i.e. they belong to our
+        # brands — the advertiser got more airings than planned).
+        _bm_themes_exact = set()
+        _bm_themes_prefix = []
+        for _bm in BrandMapping.objects.filter(account_id=account_id):
+            _t = _bm.theme.strip()
+            if not _t:
+                continue
+            if _t.endswith('*'):
+                _bm_themes_prefix.append(_t[:-1].lower())
+            else:
+                _bm_themes_exact.add(_t.lower())
+
+        def _theme_has_mapping(theme_val):
+            tl = theme_val.lower().strip()
+            if tl in _bm_themes_exact:
+                return True
+            for pfx in _bm_themes_prefix:
+                if tl.startswith(pfx):
+                    return True
+            return False
+
+        extra_aired_rows = []
+        for lr in lmrb_unmatched_rows:
+            if lr.is_sponsorship_matched or lr.is_manual_matched:
+                continue
+            if lr.advt_theme and _theme_has_mapping(lr.advt_theme):
+                extra_aired_rows.append(lr)
+
         # ── Sponsorship Keyword-Type Breakdown ────────────────────────────────
         # For each keyword in lmrb_sponsorship_keywords, count LMRB rows that
         # contain that keyword (case-insensitive) grouped by PT / Non-PT, and
@@ -2611,6 +2644,7 @@ def monitoring_dashboard(request):
         'sch_pt_spon':               sch_pt_spon if selected_account and channel and month else {},
         'lmrb_matched_rows':         lmrb_matched_rows,
         'lmrb_unmatched_rows':       lmrb_unmatched_rows,
+        'extra_aired_rows':          extra_aired_rows,
         'theme_analysis':            theme_analysis,
         'theme_analysis_json':       theme_analysis_json,
         'spon_kw_breakdown':         spon_kw_breakdown if selected_account and channel and month else [],

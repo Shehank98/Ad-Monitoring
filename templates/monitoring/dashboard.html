@@ -702,6 +702,10 @@
       <i class="fa-solid fa-database mr-1 text-teal-500"></i> LMRB Matched
       <span class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 text-[10px] font-bold">{{ lmrb_matched_rows|length }}</span>
     </button>
+    <button class="tab-btn" onclick="showTab('extra_aired',this)">
+      <i class="fa-solid fa-circle-plus mr-1 text-purple-500"></i> Extra Aired
+      <span class="ml-1 px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-bold">{{ extra_aired_rows|length }}</span>
+    </button>
     <button class="tab-btn" onclick="showTab('lmrb_unmatched',this)">
       <i class="fa-solid fa-database mr-1 text-rose-500"></i> LMRB Unmatched
       <span class="ml-1 px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 text-[10px] font-bold">{{ lmrb_unmatched_rows|length }}</span>
@@ -1160,6 +1164,51 @@
             </tr>
             {% empty %}
             <tr><td colspan="21" class="text-center text-slate-400 py-10">No matched LMRB data.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Extra Aired Tab ──────────────────────────────────── -->
+    <div id="tab-extra_aired" class="tab-pane">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="px-2 py-1 rounded-lg bg-purple-100 text-purple-700 text-xs font-bold">
+          <i class="fa-solid fa-circle-plus mr-1"></i> {{ extra_aired_rows|length }} Extra Aired
+        </span>
+        <span class="text-xs text-slate-400">LMRB rows for mapped brands that were NOT in the schedule — more airings than planned</span>
+      </div>
+      <div class="tab-table-wrap">
+        <table class="data-table lmrb-table w-full">
+          <thead>
+            <tr>
+              <th>Advt Theme</th><th>Date</th><th>Advt Time</th>
+              <th class="text-right">Duration</th><th>Program</th><th>Prog Time</th>
+              <th>Advertiser</th><th>Product</th>
+              <th class="text-right">Ad Pos</th><th class="text-right">Brk No</th>
+              <th class="text-right">Pos in Brk</th><th>Day</th>
+              <th class="text-right">Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for lr in extra_aired_rows %}
+            <tr>
+              <td class="font-medium text-slate-800">{{ lr.advt_theme }}</td>
+              <td>{{ lr.date|date:"d M Y" }}</td>
+              <td>{{ lr.advt_time }}</td>
+              <td class="text-right font-semibold">{{ lr.duration|default:"-" }}</td>
+              <td>{{ lr.program|default:"-" }}</td>
+              <td>{{ lr.prog_time|default:"-" }}</td>
+              <td>{{ lr.advertiser|default:"-" }}</td>
+              <td>{{ lr.product|default:"-" }}</td>
+              <td class="text-right">{{ lr.ad_pos|default:"-" }}</td>
+              <td class="text-right">{{ lr.brk_no|default:"-" }}</td>
+              <td class="text-right">{{ lr.pos_in_brk|default:"-" }}</td>
+              <td>{{ lr.day|default:lr.date|date:"D" }}</td>
+              <td class="text-right">{{ lr.cost|default:"-" }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="13" class="text-center text-slate-400 py-10">No extra aired rows — all matched LMRB rows were accounted for in the schedule.</td></tr>
             {% endfor %}
           </tbody>
         </table>
