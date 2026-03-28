@@ -404,27 +404,63 @@ def schedule_list(request):
     month      = request.GET.get('month', '').strip()
     media_type = request.GET.get('media_type', '').strip()   # 'tv' | 'radio' | 'press' | ''
     q_search   = request.GET.get('q', '').strip()
+
+    # Apply account + media_type first so months_list reflects the current scope
     if account_id:
         qs = qs.filter(account_id=account_id)
+    if media_type:
+        qs = qs.filter(media_type=media_type)
+
+    # Build months list (before channel/month/q filters) for the month picker
+    raw_months = (
+        qs.values('month')
+        .annotate(count=Count('id'), channel_count=Count('channel', distinct=True))
+        .order_by()
+    )
+    def _month_key(m):
+        try:
+            return datetime.strptime(m['month'], '%B %Y')
+        except Exception:
+            return datetime.min
+    sorted_months = sorted(raw_months, key=_month_key, reverse=True)  # newest first
+
+    # Group months by year for the card grid
+    from collections import defaultdict as _dd
+    months_by_year = {}
+    for m in sorted_months:
+        try:
+            year = datetime.strptime(m['month'], '%B %Y').year
+        except Exception:
+            year = 0
+        months_by_year.setdefault(year, []).append(m)
+    months_by_year_list = sorted(months_by_year.items(), reverse=True)  # newest year first
+
+    # Apply remaining filters
     if channel:
         qs = qs.filter(channel__icontains=channel)
     if month:
         qs = qs.filter(month__icontains=month)
-    if media_type:
-        qs = qs.filter(media_type=media_type)
     if q_search:
         qs = qs.filter(original_filename__icontains=q_search)
+
+    # Group filtered schedules by channel for the accordion view
+    channel_groups = {}
+    for s in qs.order_by('channel', 'schedule_number', '-version'):
+        channel_groups.setdefault(s.channel, []).append(s)
+    channel_groups_list = sorted(channel_groups.items())  # alphabetical by channel name
 
     today    = date_cls.today()
     accounts = _account_qs(user)
     channels = Channel.objects.all()
     return render(request, 'schedules/list.html', {
-        'schedules':  qs,
-        'accounts':   accounts,
-        'channels':   channels,
-        'filters':    {'account': account_id, 'channel': channel, 'month': month,
-                       'media_type': media_type, 'q': q_search},
-        'today':      today,
+        'schedules':           qs,
+        'channel_groups_list': channel_groups_list,
+        'months_by_year_list': months_by_year_list,
+        'accounts':            accounts,
+        'channels':            channels,
+        'filters':             {'account': account_id, 'channel': channel, 'month': month,
+                                'media_type': media_type, 'q': q_search},
+        'today':               today,
     })
 
 
