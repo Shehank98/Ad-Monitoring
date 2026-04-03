@@ -7,87 +7,138 @@
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
   <!-- ── Channel List ───────────────────────────────────────────── -->
-  <div class="lg:col-span-2">
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+  <div class="lg:col-span-2 space-y-5">
 
-      <!-- Header -->
+    {# Split into TV and Radio #}
+    {% with tv_channels=channels|dictsort:"name" radio_channels=channels|dictsort:"name" %}
+
+    <!-- TV Channels -->
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+            <i class="fa-solid fa-tv text-blue-600 text-sm"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-slate-800 text-sm">TV Channels</h3>
+            <p class="text-xs text-slate-400">
+              {% with count=0 %}
+                {% for ch in channels %}{% if "Radio" not in ch.name %}{% with count=count|add:1 %}{% endwith %}{% endif %}{% endfor %}
+              {% endwith %}
+              Channels starting with "Tv" or "TV"
+            </p>
+          </div>
+        </div>
+        <span class="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-semibold ring-1 ring-blue-200">
+          <i class="fa-solid fa-tv mr-1 text-[10px]"></i>
+          {% for ch in channels %}{% if "Radio" not in ch.name %}{% with x=forloop.counter %}{% endwith %}{% endif %}{% endfor %}
+          TV
+        </span>
+      </div>
+      <div class="divide-y divide-slate-50">
+        {% for ch in channels %}
+        {% if "Radio" not in ch.name %}
+        <div class="px-6 py-3 flex items-center justify-between hover:bg-slate-50/60 transition-colors">
+          <div class="flex items-center gap-3">
+            <div class="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+              <i class="fa-solid fa-tv text-blue-500 text-[10px]"></i>
+            </div>
+            <span class="text-sm font-semibold text-slate-800">{{ ch.name }}</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-slate-400">{{ ch.created_at|date:"d M Y" }}</span>
+            <form method="post" class="inline" id="delete-ch-{{ ch.id }}">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="delete"/>
+              <input type="hidden" name="channel_id" value="{{ ch.id }}"/>
+              <button type="button"
+                      onclick="confirmDelete('{{ ch.name|escapejs }}', '{{ ch.id }}')"
+                      class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200
+                             text-xs font-semibold text-slate-400 hover:border-red-300 hover:text-red-600
+                             hover:bg-red-50 transition-all">
+                <i class="fa-solid fa-trash text-[10px]"></i>
+              </button>
+            </form>
+          </div>
+        </div>
+        {% endif %}
+        {% empty %}
+        <div class="px-6 py-10 text-center text-slate-400 text-sm">No TV channels yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Radio Channels -->
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
-            <i class="fa-solid fa-tv text-purple-600 text-sm"></i>
+            <i class="fa-solid fa-radio text-purple-600 text-sm"></i>
           </div>
           <div>
-            <h3 class="font-bold text-slate-800 text-sm">All Channels</h3>
-            <p class="text-xs text-slate-400">{{ channels.count }} channel{{ channels.count|pluralize }} configured</p>
+            <h3 class="font-bold text-slate-800 text-sm">Radio Channels</h3>
+            <p class="text-xs text-slate-400">Channels starting with "Radio"</p>
           </div>
         </div>
-        <span class="badge bg-slate-100 text-slate-600 text-xs">{{ channels.count }} total</span>
+        <span class="px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 text-xs font-semibold ring-1 ring-purple-200">
+          <i class="fa-solid fa-radio mr-1 text-[10px]"></i>Radio
+        </span>
       </div>
-
-      <!-- Table -->
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="bg-slate-50 border-b border-slate-100">
-              <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Channel</th>
-              <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Added</th>
-              <th class="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100">
-            {% for ch in channels %}
-            <tr class="hover:bg-slate-50/70 transition-colors">
-              <td class="px-6 py-4">
-                <div class="flex items-center gap-3">
-                  <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
-                              bg-gradient-to-br from-purple-500 to-purple-700 text-white text-xs font-bold">
-                    <i class="fa-solid fa-tv text-[10px]"></i>
-                  </div>
-                  <span class="font-semibold text-slate-800">{{ ch.name }}</span>
-                </div>
-              </td>
-              <td class="px-6 py-4 text-xs text-slate-400">
-                <i class="fa-regular fa-calendar mr-1"></i>{{ ch.created_at|date:"d M Y" }}
-              </td>
-              <td class="px-6 py-4 text-right">
-                <form method="post" class="inline" id="delete-ch-{{ ch.id }}">
-                  {% csrf_token %}
-                  <input type="hidden" name="action" value="delete"/>
-                  <input type="hidden" name="channel_id" value="{{ ch.id }}"/>
-                  <button type="button"
-                          onclick="confirmDelete('{{ ch.name|escapejs }}', '{{ ch.id }}')"
-                          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200
-                                 text-xs font-semibold text-slate-500 hover:border-red-300 hover:text-red-600
-                                 hover:bg-red-50 transition-all duration-150">
-                    <i class="fa-solid fa-trash"></i> Delete
-                  </button>
-                </form>
-              </td>
-            </tr>
-            {% empty %}
-            <tr>
-              <td colspan="3" class="px-6 py-16 text-center">
-                <div class="flex flex-col items-center gap-3">
-                  <div class="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
-                    <i class="fa-solid fa-tv text-slate-400 text-2xl"></i>
-                  </div>
-                  <p class="text-slate-500 font-medium">No channels yet</p>
-                  <p class="text-xs text-slate-400">Add your first channel using the form on the right.</p>
-                </div>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="divide-y divide-slate-50">
+        {% for ch in channels %}
+        {% if "Radio" in ch.name %}
+        <div class="px-6 py-3 flex items-center justify-between hover:bg-slate-50/60 transition-colors">
+          <div class="flex items-center gap-3">
+            <div class="w-7 h-7 rounded-lg bg-purple-50 flex items-center justify-center flex-shrink-0">
+              <i class="fa-solid fa-radio text-purple-500 text-[10px]"></i>
+            </div>
+            <span class="text-sm font-semibold text-slate-800">{{ ch.name }}</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-slate-400">{{ ch.created_at|date:"d M Y" }}</span>
+            <form method="post" class="inline" id="delete-ch-{{ ch.id }}">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="delete"/>
+              <input type="hidden" name="channel_id" value="{{ ch.id }}"/>
+              <button type="button"
+                      onclick="confirmDelete('{{ ch.name|escapejs }}', '{{ ch.id }}')"
+                      class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200
+                             text-xs font-semibold text-slate-400 hover:border-red-300 hover:text-red-600
+                             hover:bg-red-50 transition-all">
+                <i class="fa-solid fa-trash text-[10px]"></i>
+              </button>
+            </form>
+          </div>
+        </div>
+        {% endif %}
+        {% endfor %}
       </div>
     </div>
+
+    {% endwith %}
   </div>
 
   <!-- ── Add Channel Form ──────────────────────────────────────── -->
   <div class="h-fit space-y-4">
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
 
-      <!-- Header -->
+    <!-- Stats -->
+    <div class="grid grid-cols-2 gap-3">
+      <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 text-center">
+        <p class="text-2xl font-bold text-blue-700">
+          {% with n=0 %}{% for ch in channels %}{% if "Radio" not in ch.name %}{{ forloop.counter }}{% endif %}{% endfor %}{% endwith %}
+        </p>
+        <p class="text-xs text-blue-500 font-semibold mt-0.5">TV Channels</p>
+      </div>
+      <div class="bg-purple-50 border border-purple-100 rounded-xl p-4 text-center">
+        <p class="text-2xl font-bold text-purple-700">
+          {% with n=0 %}{% for ch in channels %}{% if "Radio" in ch.name %}{{ forloop.counter }}{% endif %}{% endfor %}{% endwith %}
+        </p>
+        <p class="text-xs text-purple-500 font-semibold mt-0.5">Radio Channels</p>
+      </div>
+    </div>
+
+    <!-- Add form -->
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
         <div class="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
           <i class="fa-solid fa-plus text-emerald-600 text-sm"></i>
@@ -97,13 +148,12 @@
           <p class="text-xs text-slate-400">TV or radio channel name</p>
         </div>
       </div>
-
       <form method="post" class="px-6 py-5 space-y-4">
         {% csrf_token %}
         <input type="hidden" name="action" value="add"/>
         <div>
           <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-            <i class="fa-solid fa-tv mr-1 text-slate-400"></i> Channel Name
+            Channel Name
           </label>
           {{ form.name }}
           {% if form.name.errors %}
@@ -112,11 +162,14 @@
             </p>
           {% endif %}
         </div>
+        <div class="text-[11px] text-slate-400 space-y-0.5">
+          <p><span class="font-semibold text-blue-600">Tv - </span>Channel Name → appears under TV</p>
+          <p><span class="font-semibold text-purple-600">Radio - </span>Station Name → appears under Radio</p>
+        </div>
         <button type="submit"
                 class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5
                        bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold
-                       rounded-xl shadow-sm shadow-emerald-200 transition-all duration-150
-                       focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
+                       rounded-xl shadow-sm shadow-emerald-200 transition-all duration-150">
           <i class="fa-solid fa-plus"></i> Add Channel
         </button>
       </form>
@@ -125,7 +178,7 @@
     <!-- Info note -->
     <div class="p-4 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-700 flex gap-2">
       <i class="fa-solid fa-circle-info mt-0.5 flex-shrink-0"></i>
-      <p>Channels added here appear as a <strong>dropdown</strong> when uploading schedules and monitoring data.</p>
+      <p>Channels appear as a <strong>dropdown</strong> when uploading schedules and monitoring data. Name with <strong>Radio -</strong> prefix to group under Radio.</p>
     </div>
   </div>
 
