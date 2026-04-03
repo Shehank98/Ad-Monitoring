@@ -110,11 +110,41 @@
   </button>
 </div>
 
-<div class="space-y-3" id="campaign-list">
-  {% for row in campaign_rows %}
-  {% with idx=forloop.counter %}
-  <div class="camp-row" id="camp-{{ idx }}" data-media-type="{{ row.media_type }}"
-       data-account-id="{{ row.account_id }}" data-channel="{{ row.channel }}" data-month="{{ row.month }}">
+{% regroup campaign_rows by month as rows_by_month %}
+
+<div id="campaign-list">
+  {% for month_group in rows_by_month %}
+
+  <!-- ── Month section ── -->
+  <div class="month-section mb-6" data-month-group="{{ month_group.grouper }}">
+
+    <!-- Month header -->
+    <div class="flex items-center gap-3 mb-3 cursor-pointer select-none group"
+         onclick="toggleMonth('{{ month_group.grouper|escapejs }}')">
+      <div class="w-8 h-8 rounded-xl bg-og-red/10 flex items-center justify-center flex-shrink-0">
+        <i class="fa-solid fa-calendar-days text-og-red text-sm"></i>
+      </div>
+      <div class="flex-1 flex items-center gap-3">
+        <h2 class="text-sm font-bold text-slate-800">{{ month_group.grouper }}</h2>
+        <span class="text-xs text-slate-400 font-medium">{{ month_group.list|length }} campaign{{ month_group.list|length|pluralize }}</span>
+        <!-- Status dots summary -->
+        <div class="flex items-center gap-1.5 ml-1">
+          {% for row in month_group.list %}
+            <span class="w-2 h-2 rounded-full dot-{{ row.dot }}" title="{{ row.channel }}"></span>
+          {% endfor %}
+        </div>
+      </div>
+      <i class="fa-solid fa-chevron-down text-slate-300 group-hover:text-slate-500 text-xs transition-transform duration-200"
+         id="month-chev-{{ month_group.grouper|slugify }}"></i>
+      <div class="flex-1 h-px bg-slate-100 max-w-[100px]"></div>
+    </div>
+
+    <!-- Month campaigns -->
+    <div class="space-y-3 month-body" id="month-body-{{ month_group.grouper|slugify }}">
+      {% for row in month_group.list %}
+      {% with idx=row.idx %}
+      <div class="camp-row" id="camp-{{ idx }}" data-media-type="{{ row.media_type }}"
+           data-account-id="{{ row.account_id }}" data-channel="{{ row.channel }}" data-month="{{ row.month }}">
 
     <!-- ── Main summary row (clickable to expand) ── -->
     <div class="px-5 py-4 flex flex-wrap items-center gap-x-5 gap-y-2 cursor-pointer select-none"
@@ -330,10 +360,13 @@
       </div>
     </div>
 
-  </div>
-  {% endwith %}
+      </div>
+      {% endwith %}
+      {% endfor %}
+    </div><!-- /.month-body -->
+  </div><!-- /.month-section -->
   {% endfor %}
-</div>
+</div><!-- /#campaign-list -->
 
 {% endif %}
 {% endblock %}
@@ -623,15 +656,32 @@ function runVerify(e, idx, accountId, channel, month) {
     });
 }
 
+// ── Month section toggle ──────────────────────────────────────────────────────
+function toggleMonth(month) {
+  const slug = month.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const body = document.getElementById('month-body-' + slug);
+  const chev = document.getElementById('month-chev-' + slug);
+  if (!body) return;
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : '';
+  if (chev) chev.style.transform = isOpen ? 'rotate(-90deg)' : 'rotate(0deg)';
+}
+
 // ── TV / Radio / All filter ────────────────────────────────────────────────────
 let _activeFilter = 'all';
 function filterMedia(type) {
   _activeFilter = type;
   document.querySelectorAll('.media-flt-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('flt-' + type)?.classList.add('active');
+  // Show/hide individual camp-rows
   document.querySelectorAll('#campaign-list .camp-row').forEach(el => {
     const mt = el.dataset.mediaType || '';
     el.style.display = (type === 'all' || mt === type) ? '' : 'none';
+  });
+  // Hide month sections that have no visible rows
+  document.querySelectorAll('.month-section').forEach(section => {
+    const visible = [...section.querySelectorAll('.camp-row')].some(r => r.style.display !== 'none');
+    section.style.display = visible ? '' : 'none';
   });
 }
 

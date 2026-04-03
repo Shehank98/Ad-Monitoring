@@ -306,6 +306,7 @@ def _build_campaign_rows(user):
         period_over = bool(sch_end and sch_end < today)
 
         rows.append({
+            'idx':          len(rows) + 1,
             'account_id':   a_id,
             'account_name': c['account__name'],
             'channel':      channel,
