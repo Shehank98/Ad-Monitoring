@@ -965,10 +965,10 @@ class ChannelOfficer(models.Model):
     account        = models.ForeignKey('Account', on_delete=models.CASCADE,
                                        related_name='channel_officers')
     channel        = models.CharField(max_length=200)
-    user           = models.OneToOneField(
+    user           = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='channel_officer_profile',
+        related_name='channel_officer_profiles',
         null=True, blank=True,
         help_text='The system login account for this officer',
     )

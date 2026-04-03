@@ -3693,10 +3693,14 @@ def tc_upload(request):
     # channel_officer: restrict to their assigned accounts (via User.accounts M2M)
     officer_profile = None
     if user.role == 'channel_officer':
-        try:
-            officer_profile = ChannelOfficer.objects.select_related('account').get(user=user)
-        except ChannelOfficer.DoesNotExist:
-            pass
+        # Pick the profile matching the selected account+channel (or first)
+        sel_ch = request.GET.get('channel', request.POST.get('channel', '')).strip()
+        sel_ac = request.GET.get('account_id', request.POST.get('account_id', '')).strip()
+        profiles_qs = ChannelOfficer.objects.filter(user=user).select_related('account')
+        if sel_ch and sel_ac:
+            officer_profile = profiles_qs.filter(account_id=sel_ac, channel=sel_ch).first()
+        if officer_profile is None:
+            officer_profile = profiles_qs.first()
         # Use the accounts assigned to this user (multi-account support)
         user_acct_qs = user.accounts.all()
         if user_acct_qs.exists():
@@ -3859,15 +3863,13 @@ def tc_delete(request, pk):
     report = get_object_or_404(TransmissionReport, pk=pk)
     user   = request.user
 
-    # Channel officers can only delete TCs they uploaded for their own channel
+    # Channel officers can only delete TCs for their own account+channel combos
     if user.role == 'channel_officer':
-        try:
-            profile = ChannelOfficer.objects.get(user=user)
-            if (report.account_id not in user.accounts.values_list('id', flat=True)
-                    or report.channel != profile.channel):
-                messages.error(request, 'Access denied.')
-                return redirect('/dashboard/channel-officer/')
-        except ChannelOfficer.DoesNotExist:
+        allowed_channels = list(
+            ChannelOfficer.objects.filter(user=user).values_list('channel', flat=True)
+        )
+        if (report.account_id not in user.accounts.values_list('id', flat=True)
+                or report.channel not in allowed_channels):
             messages.error(request, 'Access denied.')
             return redirect('/dashboard/channel-officer/')
     elif not _account_access(user, report.account_id):
@@ -7055,23 +7057,23 @@ def _notify_reconciliation_done_whatsapp(account_id, channel, month, result):
 def channel_officer_dashboard(request):
     """
     Landing page for channel officers after login.
-    Supports multiple accounts per officer (via User.accounts M2M).
-    Shows schedules and uploaded TCs filtered by chosen account.
+    Supports multiple accounts AND channels per officer (via multiple ChannelOfficer records).
     """
     user = request.user
-    try:
-        profile = ChannelOfficer.objects.select_related('account').get(user=user)
-    except ChannelOfficer.DoesNotExist:
-        profile = None
 
-    # All accounts this officer is assigned to (via User.accounts M2M).
-    # If none are set yet (legacy creation flow), auto-assign from ChannelOfficer.account.
+    # All profiles for this officer (each = one account+channel combo)
+    profiles = list(
+        ChannelOfficer.objects.filter(user=user).select_related('account').order_by('account__name', 'channel')
+    )
+
+    # Sync User.accounts from profiles for legacy compatibility
     user_accounts = user.accounts.all().order_by('name')
-    if not user_accounts.exists() and profile and profile.account_id:
-        user.accounts.add(profile.account)
+    if not user_accounts.exists() and profiles:
+        for p in profiles:
+            user.accounts.add(p.account)
         user_accounts = user.accounts.all().order_by('name')
 
-    # Account filter from GET; default to first account
+    # Resolve selected account
     filter_account_id = request.GET.get('account_id', '').strip()
     selected_account = None
     if filter_account_id:
@@ -7079,42 +7081,56 @@ def channel_officer_dashboard(request):
     if selected_account is None and user_accounts.exists():
         selected_account = user_accounts.first()
 
+    # Channels available for the selected account
+    account_channels = []
+    if selected_account:
+        account_channels = [p.channel for p in profiles if p.account_id == selected_account.id]
+
+    # Resolve selected channel
+    filter_channel = request.GET.get('channel', '').strip()
+    selected_channel = filter_channel if filter_channel in account_channels else (account_channels[0] if account_channels else '')
+
+    # Active profile for selected account+channel
+    profile = next((p for p in profiles if p.account_id == (selected_account.id if selected_account else None) and p.channel == selected_channel), None)
+    if profile is None and profiles:
+        profile = profiles[0]
+
     schedules  = []
     tc_reports = []
-    channel = profile.channel if profile else ''
-    summary = {}
+    summary    = {}
 
-    if selected_account and channel:
+    if selected_account and selected_channel:
+        from django.db.models import Sum as _Sum
         schedules = (
             Schedule.objects
-            .filter(account=selected_account, channel=channel)
+            .filter(account=selected_account, channel=selected_channel)
             .order_by('-start_date', '-uploaded_at')
         )
         tc_reports = (
             TransmissionReport.objects
-            .filter(account=selected_account, channel=channel)
+            .filter(account=selected_account, channel=selected_channel)
             .order_by('-uploaded_at')
         )
-        # Summary stats for the header cards
-        from django.db.models import Sum as _Sum, Max as _Max
-        total_spots    = schedules.aggregate(t=_Sum('row_count'))['t'] or 0
+        total_spots     = schedules.aggregate(t=_Sum('row_count'))['t'] or 0
         latest_schedule = schedules.first()
-        tc_count = tc_reports.count()
         summary = {
             'schedule_count': schedules.count(),
             'total_spots':    total_spots,
-            'tc_count':       tc_count,
-            'latest_month':   latest_schedule.month if latest_schedule else '',
+            'tc_count':       tc_reports.count(),
+            'latest_month':   latest_schedule.month    if latest_schedule else '',
             'latest_end':     latest_schedule.end_date if latest_schedule else None,
         }
 
     return render(request, 'channel_officers/dashboard.html', {
-        'profile':          profile,
-        'user_accounts':    user_accounts,
-        'selected_account': selected_account,
-        'schedules':        schedules,
-        'tc_reports':       tc_reports,
-        'summary':          summary,
+        'profile':           profile,
+        'profiles':          profiles,
+        'user_accounts':     user_accounts,
+        'selected_account':  selected_account,
+        'account_channels':  account_channels,
+        'selected_channel':  selected_channel,
+        'schedules':         schedules,
+        'tc_reports':        tc_reports,
+        'summary':           summary,
     })
 
 
@@ -7126,12 +7142,9 @@ def tc_report_download(request, pk):
 
     # Channel officers may only download TCs for their own channel/accounts
     if user.role == 'channel_officer':
-        try:
-            profile = ChannelOfficer.objects.get(user=user)
-            allowed_accounts = list(user.accounts.values_list('id', flat=True)) or [profile.account_id]
-            if report.account_id not in allowed_accounts or report.channel != profile.channel:
-                return HttpResponse('Access denied', status=403)
-        except ChannelOfficer.DoesNotExist:
+        allowed_accounts = list(user.accounts.values_list('id', flat=True))
+        allowed_channels = list(ChannelOfficer.objects.filter(user=user).values_list('channel', flat=True))
+        if not allowed_channels or report.account_id not in allowed_accounts or report.channel not in allowed_channels:
             return HttpResponse('Access denied', status=403)
     elif not _account_access(user, report.account_id):
         return HttpResponse('Access denied', status=403)
