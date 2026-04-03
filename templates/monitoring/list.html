@@ -5,33 +5,38 @@
 
 {% block content %}
 
-<!-- ── Coverage Summary ──────────────────────────────────────── -->
+<!-- ── Coverage Summary (grouped by account) ─────────────────── -->
 {% if coverage %}
 <div class="mb-6">
   <div class="flex items-center gap-2 mb-3">
     <i class="fa-solid fa-chart-line text-slate-400 text-sm"></i>
     <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">Data Coverage</h3>
-    <span class="text-xs text-slate-400">- how far each dataset currently spans</span>
+    <span class="text-xs text-slate-400">— latest date range per account</span>
   </div>
-  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-    {% for row in coverage %}
-    <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex items-start gap-3">
-      <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0
-        {% if row.data_type == 'maponline' %}bg-blue-100{% else %}bg-purple-100{% endif %}">
-        <i class="fa-solid {% if row.data_type == 'maponline' %}fa-map text-blue-600{% else %}fa-chart-line text-purple-600{% endif %} text-sm"></i>
+
+  {# Group coverage by account #}
+  {% regroup coverage by account__name as coverage_by_account %}
+  <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+    {% for account_group in coverage_by_account %}
+    <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
+      <div class="flex items-center gap-2 mb-3">
+        <div class="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-building text-slate-500 text-[11px]"></i>
+        </div>
+        <p class="text-xs font-bold text-slate-800">{{ account_group.grouper|default:"—" }}</p>
+        <span class="ml-auto text-[10px] font-semibold text-slate-400">{{ account_group.list|length }} channel{{ account_group.list|length|pluralize }}</span>
       </div>
-      <div class="min-w-0">
-        <p class="text-xs font-bold text-slate-800 truncate">
-          {{ row.account__name|default:"-" }} · {{ row.channel }}
-        </p>
-        <p class="text-[10px] font-semibold {% if row.data_type == 'maponline' %}text-blue-600{% else %}text-purple-600{% endif %} mt-0.5">
-          {% if row.data_type == 'maponline' %}MapOnline{% else %}LMRB{% endif %}
-        </p>
-        <p class="text-xs text-slate-500 mt-1.5 flex items-center gap-1">
-          <i class="fa-solid fa-calendar-range text-slate-300 text-[10px]"></i>
-          {{ row.from_date|date:"d M Y" }} → <strong class="text-slate-700">{{ row.to_date|date:"d M Y" }}</strong>
-        </p>
-        <p class="text-[10px] text-slate-400 mt-0.5">{{ row.uploads }} upload{{ row.uploads|pluralize }}</p>
+      <div class="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+        {% for row in account_group.list %}
+        <div class="flex items-center gap-2 text-[11px]">
+          <span class="w-2 h-2 rounded-full flex-shrink-0
+            {% if row.data_type == 'maponline' %}bg-blue-400{% else %}bg-purple-400{% endif %}"></span>
+          <span class="text-slate-600 truncate flex-1">{{ row.channel }}</span>
+          <span class="text-slate-400 whitespace-nowrap">
+            {{ row.from_date|date:"d M" }} → <strong class="text-slate-600">{{ row.to_date|date:"d M Y" }}</strong>
+          </span>
+        </div>
+        {% endfor %}
       </div>
     </div>
     {% endfor %}
@@ -78,130 +83,135 @@
   </div>
 </form>
 
-<!-- ── Data table (one row per upload batch) ──────────────────── -->
+<!-- ── Upload batches ──────────────────────────────────────────── -->
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
   <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
     <p class="text-xs font-semibold text-slate-500">
       <i class="fa-solid fa-database mr-1.5 text-slate-300"></i>
       {{ batch_summaries|length }} upload batch{{ batch_summaries|length|pluralize:"es" }}
     </p>
+    {% if request.user.role in "operations,super_admin,admin" %}
     <a href="/dashboard/monitoring/upload/" class="text-xs font-semibold text-og-red hover:underline">
       <i class="fa-solid fa-plus mr-1"></i>Upload New
     </a>
+    {% endif %}
   </div>
-  <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <thead>
-        <tr class="bg-slate-50 border-b border-slate-100">
-          <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Account</th>
-          <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Type</th>
-          <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Channels</th>
-          <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Date Range</th>
-          <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Rows</th>
-          <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Uploaded By</th>
-          <th class="px-5 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Date</th>
-          <th class="px-5 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-slate-100">
 
-        {% for batch in batch_summaries %}
-        <tr class="hover:bg-slate-50/70 transition-colors">
+  <div class="divide-y divide-slate-100">
+    {% for batch in batch_summaries %}
+    <div class="px-5 py-4 hover:bg-slate-50/60 transition-colors">
+      <div class="flex flex-wrap items-start gap-4">
 
-          <td class="px-5 py-3">
-            <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-100 text-slate-700 text-xs font-semibold">
-              <i class="fa-solid fa-building text-slate-400 text-[9px]"></i>
-              {{ batch.account.name|default:"-" }}
-            </span>
-          </td>
-
-          <td class="px-5 py-3">
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold
-              {% if batch.data_type == 'maponline' %}bg-blue-50 text-blue-700 ring-1 ring-blue-200
-              {% else %}bg-purple-50 text-purple-700 ring-1 ring-purple-200{% endif %}">
-              <i class="fa-solid {% if batch.data_type == 'maponline' %}fa-map{% else %}fa-chart-line{% endif %} text-[9px]"></i>
-              {% if batch.data_type == 'maponline' %}MapOnline{% else %}LMRB{% endif %}
-            </span>
-          </td>
-
-          <td class="px-5 py-3">
-            <div class="flex flex-wrap gap-1">
-              {% for ch in batch.channels %}
-              <span class="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md font-medium">{{ ch }}</span>
-              {% empty %}
-              <span class="text-xs text-slate-400">-</span>
-              {% endfor %}
+        <!-- Left: account + type + date -->
+        <div class="flex items-start gap-3 flex-1 min-w-[200px]">
+          <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0
+            {% if batch.data_type == 'maponline' %}bg-blue-50{% else %}bg-purple-50{% endif %}">
+            <i class="fa-solid {% if batch.data_type == 'maponline' %}fa-map text-blue-500{% else %}fa-chart-line text-purple-500{% endif %} text-sm"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-sm font-bold text-slate-800">{{ batch.account.name|default:"—" }}</span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold
+                {% if batch.data_type == 'maponline' %}bg-blue-50 text-blue-700 ring-1 ring-blue-200
+                {% else %}bg-purple-50 text-purple-700 ring-1 ring-purple-200{% endif %}">
+                {% if batch.data_type == 'maponline' %}MapOnline{% else %}LMRB{% endif %}
+              </span>
             </div>
-          </td>
-
-          <td class="px-5 py-3">
-            <span class="text-xs text-slate-500 whitespace-nowrap">
+            <p class="text-xs text-slate-500 mt-0.5">
               {% if batch.date_from and batch.date_to %}
+                <i class="fa-solid fa-calendar-days text-slate-300 mr-1"></i>
                 {{ batch.date_from|date:"d M" }} → <strong class="text-slate-700">{{ batch.date_to|date:"d M Y" }}</strong>
               {% else %}
-                <span class="text-slate-400">-</span>
+                <span class="text-slate-400">No date range</span>
               {% endif %}
-            </span>
-          </td>
+            </p>
+            <p class="text-[11px] text-slate-400 mt-0.5">
+              <i class="fa-solid fa-user text-slate-300 mr-1"></i>{{ batch.uploaded_by.name|default:"—" }}
+              ·
+              {% if batch.uploaded_at.date == today %}
+                <span class="text-emerald-600 font-semibold">Today</span>
+              {% else %}
+                {{ batch.uploaded_at|date:"d M Y" }}
+              {% endif %}
+            </p>
+          </div>
+        </div>
 
-          <td class="px-5 py-3"><span class="font-bold text-slate-700 text-sm">{{ batch.total_rows|default:"0" }}</span><span class="block text-[10px] text-slate-400">rows</span></td>
-
-          <td class="px-5 py-3 text-xs text-slate-500">{{ batch.uploaded_by.name|default:"-" }}</td>
-
-          <td class="px-5 py-3 text-xs text-slate-400 whitespace-nowrap">
-            {% if batch.uploaded_at.date == today %}
-              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-semibold ring-1 ring-emerald-200">
-                <span class="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></span> Today
-              </span>
-            {% else %}
-              {{ batch.uploaded_at|date:"d M Y" }}
+        <!-- Middle: channels -->
+        <div class="flex-1 min-w-[180px]">
+          <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+            {{ batch.channels|length }} Channel{{ batch.channels|length|pluralize }}
+          </p>
+          <div class="flex flex-wrap gap-1">
+            {% for ch in batch.channels|slice:":6" %}
+              <span class="text-[11px] px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md font-medium">{{ ch }}</span>
+            {% endfor %}
+            {% if batch.channels|length > 6 %}
+              <button onclick="toggleChannels(this)"
+                data-channels="{{ batch.channels|join:'|' }}"
+                class="text-[11px] px-2 py-0.5 bg-og-red/10 text-og-red rounded-md font-semibold hover:bg-og-red/20 transition-colors">
+                +{{ batch.channels|length|add:"-6" }} more
+              </button>
             {% endif %}
-          </td>
+          </div>
+        </div>
 
-          <td class="px-5 py-3 text-right">
-            <div class="flex items-center justify-end gap-2">
+        <!-- Right: rows + actions -->
+        <div class="flex items-center gap-4 flex-shrink-0">
+          <div class="text-right">
+            <p class="text-lg font-bold text-slate-800">{{ batch.total_rows|default:"0" }}</p>
+            <p class="text-[10px] text-slate-400">rows</p>
+          </div>
+          <div class="flex items-center gap-2">
+            {% if batch.group|length == 1 %}
+            <a href="/dashboard/monitoring/{{ batch.first.id }}/download/"
+               class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200
+                      text-xs font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600
+                      hover:bg-blue-50 transition-all" title="Download">
+              <i class="fa-solid fa-download"></i>
+            </a>
+            {% endif %}
+            {% if request.user.role in "super_admin,admin" or batch.uploaded_at.date == today and batch.uploaded_by == request.user %}
+            <a href="/dashboard/monitoring/group/{{ batch.file_group_id }}/delete/"
+               onclick="return confirmBatchDelete({{ batch.total_rows }}, '{{ batch.date_from|date:'d M' }}–{{ batch.date_to|date:'d M Y' }}')"
+               class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200
+                      text-xs font-semibold text-slate-500 hover:border-red-300 hover:text-red-600
+                      hover:bg-red-50 transition-all" title="Delete batch">
+              <i class="fa-solid fa-trash"></i>
+            </a>
+            {% endif %}
+          </div>
+        </div>
 
-              {% if batch.group|length == 1 %}
-              <a href="/dashboard/monitoring/{{ batch.first.id }}/download/"
-                 class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200
-                        text-xs font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600
-                        hover:bg-blue-50 transition-all" title="Download">
-                <i class="fa-solid fa-download"></i>
-              </a>
-              {% endif %}
+      </div>
+    </div>
+    {% empty %}
+    <div class="px-5 py-16 text-center">
+      <div class="flex flex-col items-center gap-3">
+        <div class="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
+          <i class="fa-solid fa-database text-slate-400 text-2xl"></i>
+        </div>
+        <p class="text-slate-500 font-medium">No monitoring data found</p>
+        {% if request.user.role in "operations,super_admin,admin" %}
+          <a href="/dashboard/monitoring/upload/" class="btn-primary text-xs">
+            <i class="fa-solid fa-cloud-arrow-up"></i> Upload the first dataset
+          </a>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
 
-              {% if request.user.role in "super_admin,admin" or batch.uploaded_at.date == today and batch.uploaded_by == request.user %}
-              <a href="/dashboard/monitoring/group/{{ batch.file_group_id }}/delete/"
-                 onclick="return confirmBatchDelete({{ batch.total_rows }}, '{{ batch.date_from|date:'d M' }}–{{ batch.date_to|date:'d M Y' }}')"
-                 class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200
-                        text-xs font-semibold text-slate-500 hover:border-red-300 hover:text-red-600
-                        hover:bg-red-50 transition-all" title="Delete this upload batch">
-                <i class="fa-solid fa-trash"></i>
-              </a>
-              {% endif %}
-
-            </div>
-          </td>
-        </tr>
-        {% empty %}
-        <tr>
-          <td colspan="8" class="px-5 py-16 text-center">
-            <div class="flex flex-col items-center gap-3">
-              <div class="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
-                <i class="fa-solid fa-database text-slate-400 text-2xl"></i>
-              </div>
-              <p class="text-slate-500 font-medium">No monitoring data found</p>
-              {% if request.user.role in "operations,super_admin,admin" %}
-                <a href="/dashboard/monitoring/upload/" class="btn-primary text-xs">
-                  <i class="fa-solid fa-cloud-arrow-up"></i> Upload the first dataset
-                </a>
-              {% endif %}
-            </div>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+<!-- Channel expand modal -->
+<div id="channel-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+  <div class="absolute inset-0 bg-black/30 backdrop-blur-sm" onclick="closeChannelModal()"></div>
+  <div class="relative bg-white rounded-2xl shadow-2xl max-w-sm w-full p-5">
+    <div class="flex items-center justify-between mb-3">
+      <p class="text-sm font-bold text-slate-800">All Channels</p>
+      <button onclick="closeChannelModal()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+    </div>
+    <div id="channel-modal-body" class="flex flex-wrap gap-1.5 max-h-72 overflow-y-auto"></div>
   </div>
 </div>
 
@@ -214,7 +224,18 @@
     );
   }
 
-  console.log('[monitoring list] page loaded - batches rendered:', {{ batch_summaries|length }});
+  function toggleChannels(btn) {
+    const channels = btn.dataset.channels.split('|');
+    const body = document.getElementById('channel-modal-body');
+    body.innerHTML = channels.map(ch =>
+      `<span class="text-xs px-2 py-1 bg-slate-100 text-slate-700 rounded-md font-medium">${ch}</span>`
+    ).join('');
+    document.getElementById('channel-modal').classList.remove('hidden');
+  }
+
+  function closeChannelModal() {
+    document.getElementById('channel-modal').classList.add('hidden');
+  }
 </script>
 {% endblock %}
 
