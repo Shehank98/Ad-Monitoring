@@ -790,6 +790,63 @@ SETTING_DEFAULTS = [
         ),
         'category': 'whatsapp',
     },
+    # ── WhatsApp Message Template Names ───────────────────────────────────────
+    {
+        'key': 'whatsapp_tmpl_officer_welcome',
+        'value': 'officer_welcome',
+        'label': 'Template: Officer Welcome',
+        'description': (
+            'Meta-approved template name for the welcome message sent to new channel officers. '
+            'Must match exactly the name approved in Meta WhatsApp Manager. '
+            'Variables (in order): {{1}}=Name, {{2}}=Account, {{3}}=Channel, '
+            '{{4}}=Email, {{5}}=Password, {{6}}=Login URL.'
+        ),
+        'category': 'whatsapp',
+    },
+    {
+        'key': 'whatsapp_tmpl_user_welcome',
+        'value': 'user_welcome',
+        'label': 'Template: Staff User Welcome',
+        'description': (
+            'Meta-approved template name for the welcome message sent to new staff users. '
+            'Variables (in order): {{1}}=Name, {{2}}=Role, {{3}}=Email, '
+            '{{4}}=Password, {{5}}=Login URL.'
+        ),
+        'category': 'whatsapp',
+    },
+    {
+        'key': 'whatsapp_tmpl_missed_spots',
+        'value': 'missed_spots_alert',
+        'label': 'Template: Missed Spots Alert',
+        'description': (
+            'Meta-approved template name for the missed spots alert sent to channel officers. '
+            'Variables (in order): {{1}}=Officer Name, {{2}}=Account, {{3}}=Channel, '
+            '{{4}}=Month, {{5}}=Missed Count, {{6}}=Schedule Number.'
+        ),
+        'category': 'whatsapp',
+    },
+    {
+        'key': 'whatsapp_tmpl_tc_reminder',
+        'value': 'tc_upload_reminder',
+        'label': 'Template: TC Upload Reminder',
+        'description': (
+            'Meta-approved template name for the TC upload reminder sent to channel officers. '
+            'Variables (in order): {{1}}=Account, {{2}}=Channel, {{3}}=Month, '
+            '{{4}}=Schedule End Date, {{5}}=Upload URL.'
+        ),
+        'category': 'whatsapp',
+    },
+    {
+        'key': 'whatsapp_tmpl_reconcile_done',
+        'value': 'reconciliation_done',
+        'label': 'Template: Reconciliation Done',
+        'description': (
+            'Meta-approved template name for the reconciliation-complete notification sent to operations users. '
+            'Variables (in order): {{1}}=Account, {{2}}=Channel, {{3}}=Month, '
+            '{{4}}=TC Matched Count, {{5}}=LMRB Confirmed Count, {{6}}=Summary URL.'
+        ),
+        'category': 'whatsapp',
+    },
 ]
 
 
