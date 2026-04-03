@@ -321,18 +321,30 @@ def notify_new_user_created(whatsapp: str, name: str, email: str,
                              login_url: str) -> bool:
     """Send login credentials to a newly created staff user via WhatsApp.
 
-    Template: user_welcome
-    Variables: {{1}}=name, {{2}}=role, {{3}}=email, {{4}}=password, {{5}}=login_url
+    Step 1 — Approved template (no password):
+      Template: user_welcome
+      Variables: {{1}}=name, {{2}}=role, {{3}}=email
+
+    Step 2 — Plain text follow-up with credentials.
     """
     from core.models import get_setting
     tmpl = get_setting('whatsapp_tmpl_user_welcome', 'user_welcome')
-    return send_template(whatsapp, tmpl, [
+    ok = send_template(whatsapp, tmpl, [
         name,
         role_label,
         email,
-        password,
-        login_url,
     ])
+    if ok and (password or login_url):
+        lines = ['*Your login details:*']
+        if email:
+            lines.append(f'Email: {email}')
+        if password:
+            lines.append(f'Temporary password: `{password}`')
+        if login_url:
+            lines.append(f'\nLogin here: {login_url}')
+        lines.append('\n_Please change your password on first login._')
+        send_text(whatsapp, '\n'.join(lines))
+    return ok
 
 
 def notify_new_officer_created(whatsapp: str, name: str, account_name: str,
@@ -340,17 +352,29 @@ def notify_new_officer_created(whatsapp: str, name: str, account_name: str,
                                 login_url: str) -> bool:
     """Send welcome + login instructions to a newly created channel officer via WhatsApp.
 
-    Template: officer_welcome
-    Variables: {{1}}=name, {{2}}=account, {{3}}=channel,
-               {{4}}=email, {{5}}=password, {{6}}=login_url
+    Step 1 — Approved template (opens the conversation, no password included):
+      Template: officer_welcome
+      Variables: {{1}}=name, {{2}}=account, {{3}}=channel, {{4}}=email
+
+    Step 2 — Plain text follow-up with credentials (works because template opened window):
     """
     from core.models import get_setting
     tmpl = get_setting('whatsapp_tmpl_officer_welcome', 'officer_welcome')
-    return send_template(whatsapp, tmpl, [
+    ok = send_template(whatsapp, tmpl, [
         name,
         account_name,
         channel,
         email or '-',
-        password or '-',
-        login_url,
     ])
+    # Follow-up with credentials as plain text (conversation is now open)
+    if ok and (password or login_url):
+        lines = ['*Your login details:*']
+        if email:
+            lines.append(f'Email: {email}')
+        if password:
+            lines.append(f'Temporary password: `{password}`')
+        if login_url:
+            lines.append(f'\nLogin here: {login_url}')
+        lines.append('\n_Please change your password on first login._')
+        send_text(whatsapp, '\n'.join(lines))
+    return ok

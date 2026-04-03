@@ -798,8 +798,8 @@ SETTING_DEFAULTS = [
         'description': (
             'Meta-approved template name for the welcome message sent to new channel officers. '
             'Must match exactly the name approved in Meta WhatsApp Manager. '
-            'Variables (in order): {{1}}=Name, {{2}}=Account, {{3}}=Channel, '
-            '{{4}}=Email, {{5}}=Password, {{6}}=Login URL.'
+            'Variables (in order): {{1}}=Name, {{2}}=Account, {{3}}=Channel, {{4}}=Email. '
+            'Password and login URL are sent as a plain text follow-up after the template opens the conversation.'
         ),
         'category': 'whatsapp',
     },
@@ -809,8 +809,8 @@ SETTING_DEFAULTS = [
         'label': 'Template: Staff User Welcome',
         'description': (
             'Meta-approved template name for the welcome message sent to new staff users. '
-            'Variables (in order): {{1}}=Name, {{2}}=Role, {{3}}=Email, '
-            '{{4}}=Password, {{5}}=Login URL.'
+            'Variables (in order): {{1}}=Name, {{2}}=Role, {{3}}=Email. '
+            'Password and login URL are sent as a plain text follow-up after the template opens the conversation.'
         ),
         'category': 'whatsapp',
     },
