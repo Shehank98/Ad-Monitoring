@@ -129,6 +129,37 @@
     </div>
     {% endfor %}
 
+    <!-- WhatsApp Template Tests -->
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-5">
+      <div class="flex items-center gap-2 mb-3">
+        <i class="fa-brands fa-whatsapp text-green-600"></i>
+        <span class="text-sm font-semibold text-slate-700">Test WhatsApp Templates</span>
+        <span class="text-xs text-slate-400 ml-1">— sends to the Test Number above</span>
+      </div>
+      <p class="text-xs text-slate-500 mb-4">
+        Templates must be approved in Meta before testing. If a test fails, check that the template
+        name in Settings matches exactly what is approved in the Meta Business console.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <a href="{% url 'whatsapp_test' %}"
+           class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-green-400 hover:text-green-700 hover:bg-green-50 text-xs font-semibold transition-colors">
+          <i class="fa-brands fa-whatsapp"></i> Plain Text (connectivity)
+        </a>
+        <a href="{% url 'whatsapp_test' %}?tmpl=officer_welcome"
+           class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-green-400 hover:text-green-700 hover:bg-green-50 text-xs font-semibold transition-colors">
+          <i class="fa-brands fa-whatsapp"></i> officer_welcome
+        </a>
+        <a href="{% url 'whatsapp_test' %}?tmpl=user_welcome"
+           class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-green-400 hover:text-green-700 hover:bg-green-50 text-xs font-semibold transition-colors">
+          <i class="fa-brands fa-whatsapp"></i> user_welcome
+        </a>
+        <a href="{% url 'whatsapp_test' %}?tmpl=missed_spots"
+           class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-green-400 hover:text-green-700 hover:bg-green-50 text-xs font-semibold transition-colors">
+          <i class="fa-brands fa-whatsapp"></i> missed_spots_alert
+        </a>
+      </div>
+    </div>
+
     <!-- Save button -->
     <div class="flex items-center justify-between bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-4">
       <div class="text-xs text-slate-400">
@@ -137,10 +168,6 @@
         Re-run reconciliation after changing the time tolerance.
       </div>
       <div class="flex items-center gap-3">
-        <a href="{% url 'whatsapp_test' %}"
-           class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors">
-          <i class="fa-brands fa-whatsapp"></i> Test WhatsApp
-        </a>
         <button type="submit" class="btn-primary">
           <i class="fa-solid fa-floppy-disk"></i>
           Save Settings

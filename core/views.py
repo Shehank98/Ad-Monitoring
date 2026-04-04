@@ -7344,11 +7344,13 @@ def whatsapp_test(request):
     """Send a test WhatsApp message and show the raw API response for debugging."""
     import requests as _req
     from core.models import get_setting, get_setting_int
+    from core import whatsapp as wa
 
     token    = get_setting('whatsapp_access_token', '')
     phone_id = get_setting('whatsapp_phone_number_id', '')
     to       = get_setting('whatsapp_test_number', '').strip().replace(' ', '')
     enabled  = get_setting_int('whatsapp_enabled', 0)
+    base_url = get_setting('whatsapp_app_base_url', 'https://ad-monitoring-production.up.railway.app')
 
     if not to:
         messages.error(request, 'No test WhatsApp number set in Settings.')
@@ -7363,36 +7365,85 @@ def whatsapp_test(request):
         messages.error(request, 'WhatsApp is disabled in Settings. Toggle Enabled to ON first.')
         return redirect('/dashboard/settings/')
 
-    # Strip leading + for Meta API (it accepts both but some accounts need it without)
-    to_clean = to.lstrip('+')
+    tmpl = request.GET.get('tmpl', '')
+    login_url = base_url.rstrip('/') + '/auth/login/'
 
-    url = f'https://graph.facebook.com/v19.0/{phone_id}/messages'
-    payload = {
-        'messaging_product': 'whatsapp',
-        'to': to_clean,
-        'type': 'text',
-        'text': {'body': 'Test from Ad-Monitor. WhatsApp integration is working!', 'preview_url': False},
-    }
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Content-Type': 'application/json',
-    }
-    try:
-        resp = _req.post(url, json=payload, headers=headers, timeout=10)
-        body = resp.json()
-        if resp.status_code == 200 and 'messages' in body:
-            msg_id = body['messages'][0].get('id', '?')
-            messages.success(request,
-                f'Message accepted by Meta. Message ID: {msg_id}. '
-                f'Sending to: {to_clean}. Check your WhatsApp.')
-        else:
-            err = body.get('error', {})
-            messages.error(request,
-                f'Meta API error {resp.status_code}: '
-                f'[{err.get("code","?")}] {err.get("message", resp.text)}. '
-                f'Recipient: {to_clean}')
-    except Exception as exc:
-        messages.error(request, f'Request failed: {exc}')
+    if tmpl == 'officer_welcome':
+        ok = wa.notify_new_officer_created(
+            whatsapp=to,
+            name='Test Officer',
+            account_name='Ogilvy Nova',
+            channel='Test TV',
+            email='officer@test.com',
+            password='TempPass123',
+            login_url=login_url,
+        )
+        label = 'officer_welcome'
+
+    elif tmpl == 'user_welcome':
+        ok = wa.notify_new_user_created(
+            whatsapp=to,
+            name='Test User',
+            email='user@test.com',
+            password='TempPass123',
+            role_label='Operations',
+            login_url=login_url,
+        )
+        label = 'user_welcome'
+
+    elif tmpl == 'missed_spots':
+        ok = wa.notify_missed_spots(
+            officer_whatsapp=to,
+            account_name='Ogilvy Nova',
+            channel='Test TV',
+            month='March 2025',
+            missed_count=5,
+            schedule_pk=1,
+            account_id=1,
+            officer_name='Test Officer',
+            schedule_number='101',
+        )
+        label = 'missed_spots_alert'
+
+    else:
+        # Plain text connectivity test
+        to_clean = to.lstrip('+')
+        url = f'https://graph.facebook.com/v19.0/{phone_id}/messages'
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': to_clean,
+            'type': 'text',
+            'text': {'body': 'Test from Ad-Monitor. WhatsApp integration is working!', 'preview_url': False},
+        }
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json',
+        }
+        try:
+            resp = _req.post(url, json=payload, headers=headers, timeout=10)
+            body = resp.json()
+            if resp.status_code == 200 and 'messages' in body:
+                msg_id = body['messages'][0].get('id', '?')
+                messages.success(request,
+                    f'Message accepted by Meta. Message ID: {msg_id}. '
+                    f'Sending to: {to_clean}. Check your WhatsApp.')
+            else:
+                err = body.get('error', {})
+                messages.error(request,
+                    f'Meta API error {resp.status_code}: '
+                    f'[{err.get("code","?")}] {err.get("message", resp.text)}. '
+                    f'Recipient: {to_clean}')
+        except Exception as exc:
+            messages.error(request, f'Request failed: {exc}')
+        return redirect('/dashboard/settings/')
+
+    if ok:
+        messages.success(request,
+            f'✓ Template "{label}" sent to {to}. Check your WhatsApp.')
+    else:
+        messages.error(request,
+            f'✗ Template "{label}" failed — check that the template is approved in Meta and '
+            f'that the test number ({to}) is added as a recipient in the Meta API Setup page.')
     return redirect('/dashboard/settings/')
 
 
