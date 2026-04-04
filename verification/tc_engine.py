@@ -179,6 +179,29 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
 
     # ── Reset mode ────────────────────────────────────────────────────────────
     if mode == 'reset':
+        # Before clearing TCRow flags, unlock any ScheduleRow/LMRBRow links
+        # that were set by a previous TC reconciliation run (TC-confirmed pairs).
+        # We identify them by TCRows that were both schedule-matched and LMRB-confirmed.
+        prev_confirmed = list(
+            TCRow.objects.filter(
+                account_id=account_id, channel=channel,
+                tc_report__month=month,
+                is_schedule_matched=True, is_lmrb_confirmed=True,
+                matched_schedule__isnull=False, matched_lmrb__isnull=False,
+            ).values_list('matched_schedule_id', 'matched_lmrb_id')
+        )
+        if prev_confirmed:
+            prev_sch_ids  = [x[0] for x in prev_confirmed if x[0]]
+            prev_lmrb_ids = [x[1] for x in prev_confirmed if x[1]]
+            if prev_sch_ids:
+                ScheduleRow.objects.filter(id__in=prev_sch_ids).update(
+                    is_matched=False, matched_lmrb=None, matched_at=None,
+                )
+            if prev_lmrb_ids:
+                LMRBRow.objects.filter(id__in=prev_lmrb_ids).update(
+                    is_matched=False, matched_schedule=None, matched_at=None,
+                )
+
         TCRow.objects.filter(account_id=account_id, channel=channel,
                              tc_report__month=month).update(
             is_schedule_matched=False, matched_schedule=None,
@@ -367,6 +390,91 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
 
     if tc_lmrb_updates:
         TCRow.objects.bulk_update(tc_lmrb_updates, ['is_lmrb_confirmed', 'matched_lmrb_id'])
+
+    # ── Lock TC-confirmed Schedule↔LMRB pairs ────────────────────────────────
+    # For every TCRow that is both schedule-matched AND LMRB-confirmed, write
+    # the TC-ground-truth LMRB link onto the ScheduleRow and LMRBRow.
+    #
+    # This corrects mismatches created by engine.py's four-pass greedy algorithm,
+    # which may have paired a ScheduleRow with a nearby-but-wrong LMRBRow while
+    # the TC file actually proves a different LMRB row aired for that slot.
+    #
+    # If engine.py had previously linked:
+    #   ScheduleRow → old_LMRBRow   (wrong)
+    #   LMRBRow     → old_ScheduleRow (wrong)
+    # those stale links are unlocked so engine.py can re-consume them on the
+    # next smart or reset run.
+    tc_confirmed = [r for r in tc_lmrb_updates
+                    if r.is_schedule_matched and r.matched_schedule_id]
+
+    if tc_confirmed:
+        confirmed_sch_ids  = [r.matched_schedule_id for r in tc_confirmed]
+        confirmed_lmrb_ids = [r.matched_lmrb_id     for r in tc_confirmed]
+
+        # Reload current DB state so we can detect stale engine.py links
+        sch_map  = {s.id: s for s in ScheduleRow.objects.filter(id__in=confirmed_sch_ids)}
+        lmrb_map = {l.id: l for l in LMRBRow.objects.filter(id__in=confirmed_lmrb_ids)}
+
+        now_ts = timezone.now()
+        sch_to_save  = []
+        lmrb_to_save = []
+        stale_lmrb_ids = set()  # old LMRB rows engine.py linked but TC disagrees with
+        stale_sch_ids  = set()  # old Schedule rows engine.py linked but TC disagrees with
+
+        for tcrow in tc_confirmed:
+            sr = sch_map.get(tcrow.matched_schedule_id)
+            lr = lmrb_map.get(tcrow.matched_lmrb_id)
+            if not sr or not lr:
+                continue
+
+            # If Schedule was previously matched to a DIFFERENT LMRB row, unlock the old one
+            if sr.matched_lmrb_id and sr.matched_lmrb_id != lr.id:
+                stale_lmrb_ids.add(sr.matched_lmrb_id)
+
+            # If LMRB was previously matched to a DIFFERENT Schedule row, unlock the old one
+            if lr.matched_schedule_id and lr.matched_schedule_id != sr.id:
+                stale_sch_ids.add(lr.matched_schedule_id)
+
+            # Write TC-confirmed link
+            sr.is_matched      = True
+            sr.matched_lmrb_id = lr.id
+            sr.matched_at      = now_ts
+            sch_to_save.append(sr)
+
+            lr.is_matched          = True
+            lr.matched_schedule_id = sr.id
+            lr.matched_at          = now_ts
+            lmrb_to_save.append(lr)
+
+        # Unlock stale engine.py links that TC has superseded
+        if stale_lmrb_ids:
+            LMRBRow.objects.filter(id__in=stale_lmrb_ids).update(
+                is_matched=False, matched_schedule=None, matched_at=None,
+            )
+        if stale_sch_ids:
+            ScheduleRow.objects.filter(id__in=stale_sch_ids).update(
+                is_matched=False, matched_lmrb=None, matched_at=None,
+            )
+
+        if sch_to_save:
+            ScheduleRow.objects.bulk_update(
+                sch_to_save, ['is_matched', 'matched_lmrb_id', 'matched_at'],
+            )
+        if lmrb_to_save:
+            LMRBRow.objects.bulk_update(
+                lmrb_to_save, ['is_matched', 'matched_schedule_id', 'matched_at'],
+            )
+
+        logger.info(
+            "TC-confirmed Schedule↔LMRB links written: %d pairs "
+            "(unlocked %d stale LMRB, %d stale Schedule rows)",
+            len(sch_to_save), len(stale_lmrb_ids), len(stale_sch_ids),
+        )
+        print(
+            f"[reconcile_tc] TC-confirmed pairs locked: {len(sch_to_save)} | "
+            f"stale LMRB unlocked: {len(stale_lmrb_ids)} | "
+            f"stale Schedule unlocked: {len(stale_sch_ids)}"
+        )
 
     return {
         'matched':        len(tc_matched),
