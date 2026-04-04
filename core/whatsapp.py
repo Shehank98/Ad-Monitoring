@@ -18,6 +18,7 @@ In production mode (whatsapp_test_number is blank), messages go to each officer'
 
 import requests
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -336,12 +337,14 @@ def notify_new_user_created(whatsapp: str, name: str, email: str,
         role_label,
         email,
     ])
+    # Wait briefly so the template is delivered before the follow-up text
     if ok and (password or login_url):
+        time.sleep(2)
         lines = ['*Your login details:*']
         if email:
             lines.append(f'Email: {email}')
         if password:
-            lines.append(f'Temporary password: `{password}`')
+            lines.append(f'Temporary password: {password}')
         if login_url:
             lines.append(f'\nLogin here: {login_url}')
         lines.append('\n_Please change your password on first login._')
@@ -368,13 +371,14 @@ def notify_new_officer_created(whatsapp: str, name: str, account_name: str,
         channel,
         email or '-',
     ])
-    # Follow-up with credentials as plain text (conversation is now open)
+    # Wait briefly so the template is delivered before the follow-up text
     if ok and (password or login_url):
+        time.sleep(2)
         lines = ['*Your login details:*']
         if email:
             lines.append(f'Email: {email}')
         if password:
-            lines.append(f'Temporary password: `{password}`')
+            lines.append(f'Temporary password: {password}')
         if login_url:
             lines.append(f'\nLogin here: {login_url}')
         lines.append('\n_Please change your password on first login._')
