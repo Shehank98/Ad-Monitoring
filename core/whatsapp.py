@@ -339,7 +339,7 @@ def notify_new_user_created(whatsapp: str, name: str, email: str,
     ])
     # Wait briefly so the template is delivered before the follow-up text
     if ok and (password or login_url):
-        time.sleep(2)
+        time.sleep(7)
         lines = ['*Your login details:*']
         if email:
             lines.append(f'Email: {email}')
@@ -373,7 +373,7 @@ def notify_new_officer_created(whatsapp: str, name: str, account_name: str,
     ])
     # Wait briefly so the template is delivered before the follow-up text
     if ok and (password or login_url):
-        time.sleep(2)
+        time.sleep(7)
         lines = ['*Your login details:*']
         if email:
             lines.append(f'Email: {email}')
