@@ -134,31 +134,44 @@
       <div class="flex items-center gap-2 mb-3">
         <i class="fa-brands fa-whatsapp text-green-600"></i>
         <span class="text-sm font-semibold text-slate-700">Test WhatsApp Templates</span>
-        <span class="text-xs text-slate-400 ml-1">— sends to the Test Number above</span>
       </div>
-      <p class="text-xs text-slate-500 mb-4">
-        Templates must be approved in Meta before testing. If a test fails, check that the template
-        name in Settings matches exactly what is approved in the Meta Business console.
+      <p class="text-xs text-slate-500 mb-3">
+        Enter the number to send to, then click a template to test it.
+        Templates must be approved in Meta. In <strong>Development mode</strong> the number must also
+        be added as a test recipient on developers.facebook.com → WhatsApp → API Setup.
       </p>
+      <div class="flex gap-2 items-center mb-3">
+        <input type="text" id="waTestTo" placeholder="+94771234567"
+               class="input-field w-48 text-sm font-mono"
+               value="">
+      </div>
       <div class="flex flex-wrap gap-2">
-        <a href="{% url 'whatsapp_test' %}"
+        <button type="button" onclick="waTest('')"
            class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-green-400 hover:text-green-700 hover:bg-green-50 text-xs font-semibold transition-colors">
-          <i class="fa-brands fa-whatsapp"></i> Plain Text (connectivity)
-        </a>
-        <a href="{% url 'whatsapp_test' %}?tmpl=officer_welcome"
+          <i class="fa-brands fa-whatsapp"></i> Plain Text
+        </button>
+        <button type="button" onclick="waTest('officer_welcome')"
            class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-green-400 hover:text-green-700 hover:bg-green-50 text-xs font-semibold transition-colors">
           <i class="fa-brands fa-whatsapp"></i> officer_welcome
-        </a>
-        <a href="{% url 'whatsapp_test' %}?tmpl=user_welcome"
+        </button>
+        <button type="button" onclick="waTest('user_welcome')"
            class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-green-400 hover:text-green-700 hover:bg-green-50 text-xs font-semibold transition-colors">
           <i class="fa-brands fa-whatsapp"></i> user_welcome
-        </a>
-        <a href="{% url 'whatsapp_test' %}?tmpl=missed_spots"
+        </button>
+        <button type="button" onclick="waTest('missed_spots')"
            class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-green-400 hover:text-green-700 hover:bg-green-50 text-xs font-semibold transition-colors">
           <i class="fa-brands fa-whatsapp"></i> missed_spots_alert
-        </a>
+        </button>
       </div>
     </div>
+    <script>
+    function waTest(tmpl) {
+      const to = document.getElementById('waTestTo').value.trim();
+      if (!to) { alert('Enter a WhatsApp number first (e.g. +94771234567)'); return; }
+      const url = '{% url "whatsapp_test" %}?to=' + encodeURIComponent(to) + (tmpl ? '&tmpl=' + tmpl : '');
+      window.location = url;
+    }
+    </script>
 
     <!-- Save button -->
     <div class="flex items-center justify-between bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-4">

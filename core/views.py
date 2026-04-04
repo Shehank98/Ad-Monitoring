@@ -7292,7 +7292,7 @@ def channel_officer_create(request):
                     login_url = f'{base_url}/auth/login/' if base_url else '/auth/login/'
                     first_aid, first_ch = assignments[0]
                     first_acc = account_objs.get(first_aid)
-                    notify_new_officer_created(
+                    wa_ok = notify_new_officer_created(
                         whatsapp=whatsapp,
                         name=name,
                         account_name=str(first_acc) if first_acc else '',
@@ -7301,8 +7301,15 @@ def channel_officer_create(request):
                         password=temp_password or '',
                         login_url=login_url,
                     )
+                    if not wa_ok:
+                        messages.warning(request,
+                            f'Officer created but WhatsApp failed to send to {whatsapp}. '
+                            f'If your Meta app is in Development mode, you must add {whatsapp} '
+                            f'as a test recipient on developers.facebook.com → WhatsApp → API Setup.')
                 except Exception as _e:
                     logger.warning('[WhatsApp] officer welcome failed (non-fatal): %s', _e)
+                    messages.warning(request,
+                        f'Officer created but WhatsApp notification failed: {_e}')
 
             return redirect('/dashboard/channel-officers/')
 
@@ -7389,12 +7396,13 @@ def whatsapp_test(request):
 
     token    = get_setting('whatsapp_access_token', '')
     phone_id = get_setting('whatsapp_phone_number_id', '')
-    to       = get_setting('whatsapp_test_number', '').strip().replace(' ', '')
+    # Accept ?to= param from test UI; fall back to saved test_number setting
+    to = (request.GET.get('to', '') or get_setting('whatsapp_test_number', '')).strip().replace(' ', '')
     enabled  = get_setting_int('whatsapp_enabled', 0)
     base_url = get_setting('whatsapp_app_base_url', 'https://ad-monitoring-production.up.railway.app')
 
     if not to:
-        messages.error(request, 'No test WhatsApp number set in Settings.')
+        messages.error(request, 'Enter a WhatsApp number in the test field first.')
         return redirect('/dashboard/settings/')
     if not token:
         messages.error(request, 'No Access Token set in Settings.')
