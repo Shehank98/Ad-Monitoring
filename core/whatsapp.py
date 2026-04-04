@@ -44,13 +44,16 @@ def _resolve_to(cfg, real_number: str) -> str:
     return real_number
 
 
-def send_template(to_number: str, template_name: str, params: list) -> bool:
+def send_template(to_number: str, template_name: str, params: list,
+                  button_url_param: str = '') -> bool:
     """Send a Meta-approved WhatsApp template message.
 
     Unlike send_text(), templates work for business-initiated conversations —
     no 24-hour window required. The recipient does NOT need to message first.
 
-    params: list of strings matching the template's {{1}}, {{2}}, ... variables.
+    params: list of strings matching the template's {{1}}, {{2}}, ... body variables.
+    button_url_param: if the template has a dynamic Visit Website button,
+                      pass the URL suffix here (appended to the base URL defined in Meta).
     """
     cfg = _get_config()
     if not cfg['enabled']:
@@ -73,6 +76,13 @@ def send_template(to_number: str, template_name: str, params: list) -> bool:
         components.append({
             'type': 'body',
             'parameters': [{'type': 'text', 'text': str(p)} for p in params],
+        })
+    if button_url_param:
+        components.append({
+            'type': 'button',
+            'sub_type': 'url',
+            'index': '0',
+            'parameters': [{'type': 'text', 'text': button_url_param}],
         })
     payload = {
         'messaging_product': 'whatsapp',
@@ -266,17 +276,13 @@ def notify_tc_upload_reminder(officer_whatsapp: str, account_name: str,
     """Remind a channel marketing officer to upload the TC after schedule ends.
 
     Template: tc_upload_reminder
-    Variables: {{1}}=account, {{2}}=channel, {{3}}=month,
-               {{4}}=end_date, {{5}}=upload_url
+    Body variables: {{1}}=account, {{2}}=channel, {{3}}=month, {{4}}=end_date
+    Button (Visit Website, dynamic): URL suffix = ?account_id=...&channel=...&month=...
     """
     from core.models import get_setting
-    cfg = _get_config()
-    base_url = cfg['base_url'].rstrip('/')
-
     from urllib.parse import urlencode
     qs = urlencode({'account_id': account_id, 'channel': channel,
                     'month': month, 'schedule_pk': schedule_pk})
-    upload_url = f'{base_url}/dashboard/tc/upload/?{qs}' if base_url else '-'
     end_str = end_date.strftime('%-d %B %Y') if end_date else month
 
     tmpl = get_setting('whatsapp_tmpl_tc_reminder', 'tc_upload_reminder')
@@ -285,8 +291,7 @@ def notify_tc_upload_reminder(officer_whatsapp: str, account_name: str,
         channel,
         month,
         end_str,
-        upload_url,
-    ])
+    ], button_url_param=f'?{qs}')
 
 
 def notify_reconciliation_done(ops_whatsapp: str, account_name: str, channel: str,
