@@ -5,16 +5,26 @@ Workflow
 --------
 1. TC file is uploaded → TCRow records created in DB.
 2. reconcile_tc(account_id, channel, month) is called:
-   a. TC-Schedule matching:
-      - For each ScheduleRow look up tc_theme via BrandMapping
-      - Find unmatched TCRows with matching tc_theme + duration + channel
-      - LATE-AIRED RULE: TCRow.date must be >= ScheduleRow.date
-      - One-to-one (greedy, closest date first)
-      - Unmatched TCRows → is_extra = True
-   b. TC-LMRB cross-check:
-      - For each matched (and extra) TCRow find an LMRBRow with same
-        channel + date + duration AND |time_diff| <= 5 seconds
-      - Sets is_lmrb_confirmed and matched_lmrb
+
+   Step 1 — TC ↔ LMRB (ground-truth confirmation, runs FIRST):
+      - For each TCRow find an LMRBRow with same channel + date + duration
+        AND |aired_time − advt_time| ≤ tolerance (default 5 s)
+      - Theme validation: tc_theme → BrandMapping → expected LMRB theme
+      - Sets is_lmrb_confirmed + matched_lmrb; one-to-one greedy
+
+   Step 2 — TC-confirmed LMRB → Schedule (primary path):
+      - For TCRows confirmed in Step 1, find the best ScheduleRow:
+          * Reverse-look up brand via tc_theme → BrandMapping
+          * Prefer rows where LMRB advt_time falls in [start, end+10min]
+          * Fallback: earliest ScheduleRow on or before TCRow.date
+      - LATE-AIRED RULE: TCRow.date >= ScheduleRow.date
+      - Sets is_schedule_matched + matched_schedule; one-to-one greedy
+
+   Step 3 — Fallback: TC ↔ Schedule (for TCRows with no LMRB match):
+      - Traditional tc_theme-based matching against remaining ScheduleRows
+      - Same late-aired rule; one-to-one greedy
+
+   Step 4 — Unmatched TCRows → is_extra = True
 
 Public API
 ----------
@@ -127,6 +137,35 @@ def _tc_themes_for_brand(brand: str, duration, tc_theme_map: dict) -> list[str]:
     return themes
 
 
+def _build_reverse_tc_theme_map(account_id):
+    """
+    Returns {norm_tc_theme: [(norm_brand, duration_or_None), ...]}
+    Reverse of _build_tc_theme_map: lets us look up brand from a TCRow's tc_theme.
+    Handles pipe-separated tc_theme values.
+    """
+    mapping = {}
+    for bm in BrandMapping.objects.filter(account_id=account_id).exclude(tc_theme=''):
+        norm_brand = _normalize(bm.brand)
+        dur        = int(bm.duration) if bm.duration is not None else None
+        for raw_theme in bm.tc_theme.split('|'):
+            norm_tc_theme = _normalize(raw_theme)
+            if norm_tc_theme:
+                mapping.setdefault(norm_tc_theme, []).append((norm_brand, dur))
+    return mapping
+
+
+def _brands_for_tc_theme(tc_theme: str, duration, reverse_tc_map: dict) -> list[str]:
+    """Return list of normalised brand names for a tc_theme + optional duration."""
+    nt = _normalize(tc_theme)
+    candidates = reverse_tc_map.get(nt, [])
+    dur = int(duration) if duration is not None else None
+    brands = []
+    for norm_brand, map_dur in candidates:
+        if map_dur is None or map_dur == dur:
+            brands.append(norm_brand)
+    return brands
+
+
 # ── Main reconciliation ───────────────────────────────────────────────────────
 
 @transaction.atomic
@@ -179,29 +218,6 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
 
     # ── Reset mode ────────────────────────────────────────────────────────────
     if mode == 'reset':
-        # Before clearing TCRow flags, unlock any ScheduleRow/LMRBRow links
-        # that were set by a previous TC reconciliation run (TC-confirmed pairs).
-        # We identify them by TCRows that were both schedule-matched and LMRB-confirmed.
-        prev_confirmed = list(
-            TCRow.objects.filter(
-                account_id=account_id, channel=channel,
-                tc_report__month=month,
-                is_schedule_matched=True, is_lmrb_confirmed=True,
-                matched_schedule__isnull=False, matched_lmrb__isnull=False,
-            ).values_list('matched_schedule_id', 'matched_lmrb_id')
-        )
-        if prev_confirmed:
-            prev_sch_ids  = [x[0] for x in prev_confirmed if x[0]]
-            prev_lmrb_ids = [x[1] for x in prev_confirmed if x[1]]
-            if prev_sch_ids:
-                ScheduleRow.objects.filter(id__in=prev_sch_ids).update(
-                    is_matched=False, matched_lmrb=None, matched_at=None,
-                )
-            if prev_lmrb_ids:
-                LMRBRow.objects.filter(id__in=prev_lmrb_ids).update(
-                    is_matched=False, matched_schedule=None, matched_at=None,
-                )
-
         TCRow.objects.filter(account_id=account_id, channel=channel,
                              tc_report__month=month).update(
             is_schedule_matched=False, matched_schedule=None,
@@ -209,9 +225,10 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
             is_extra=False,
         )
 
-    # ── Build brand→tc_theme map and brand→lmrb_theme map ────────────────────
-    tc_theme_map   = _build_tc_theme_map(account_id)
-    lmrb_theme_map = _build_lmrb_theme_map(account_id)
+    # ── Build theme maps ──────────────────────────────────────────────────────
+    tc_theme_map         = _build_tc_theme_map(account_id)
+    reverse_tc_theme_map = _build_reverse_tc_theme_map(account_id)
+    lmrb_theme_map       = _build_lmrb_theme_map(account_id)
 
     # ── Load ScheduleRows for scope ───────────────────────────────────────────
     sch_qs = ScheduleRow.objects.filter(
@@ -229,92 +246,22 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
             Q(schedule_id__in=makeup_sch_ids)
         )
     sch_qs = sch_qs.order_by('date', 'start_time')
+    all_sch_rows = list(sch_qs)
 
-    # ── Load unmatched TCRows for scope ───────────────────────────────────────
-    # channel__iexact: handles case differences between the TC upload form and
-    # the Schedule record (e.g. "Sirasa TV" vs "SIRASA TV").
+    # ── Load TCRows for scope ─────────────────────────────────────────────────
+    # channel__iexact: handles case differences between TC upload form and Schedule.
     tc_qs = TCRow.objects.filter(
         account_id=account_id, channel__iexact=channel,
         tc_report__month=month,
     )
     if mode == 'smart':
         tc_qs = tc_qs.filter(is_schedule_matched=False, is_extra=False)
+    all_tc_rows = list(tc_qs)
 
-    # Build a mutable list of available TCRows indexed by (norm_theme, duration)
-    # Each entry: (TCRow, date, aired_time_secs)
-    available: dict[tuple, list] = {}
-    for tcrow in tc_qs:
-        key = (_normalize(tcrow.tc_theme), int(tcrow.duration) if tcrow.duration else None)
-        available.setdefault(key, []).append(tcrow)
-    # Sort each bucket by date ascending (prefer earliest available for greedy match)
-    for key in available:
-        available[key].sort(key=lambda r: r.date)
-
-    # ── TC-Schedule matching ───────────────────────────────────────────────────
-    sch_updates  = []
-    tc_matched   = []
-
-    for sr in sch_qs:
-        dur = int(sr.duration) if sr.duration is not None else None
-        tc_themes = _tc_themes_for_brand(sr.brand, dur, tc_theme_map)
-        if not tc_themes:
-            continue
-
-        matched_row = None
-        for tc_theme in tc_themes:
-            key = (tc_theme, dur)
-            candidates = available.get(key, [])
-            # Late-aired rule: TCRow.date >= ScheduleRow.date
-            valid = [r for r in candidates if r.date >= sr.date]
-            if valid:
-                matched_row = valid[0]  # Closest (earliest valid) date
-                break
-
-        if matched_row:
-            available_key = (_normalize(matched_row.tc_theme), dur)
-            available[available_key].remove(matched_row)
-            matched_row.is_schedule_matched = True
-            matched_row.matched_schedule    = sr
-            tc_matched.append(matched_row)
-
-    # All remaining unmatched TCRows → EXTRA
-    tc_extra = []
-    for rows in available.values():
-        for r in rows:
-            if not r.is_schedule_matched:
-                r.is_extra = True
-                tc_extra.append(r)
-
-    # Bulk save TC rows
-    if tc_matched or tc_extra:
-        TCRow.objects.bulk_update(
-            tc_matched + tc_extra,
-            ['is_schedule_matched', 'matched_schedule_id', 'is_extra'],
-        )
-
-    # Map tcrow_id → (brand, duration) for schedule-matched rows.
-    # Built before the reload so the in-memory matched_schedule objects are available.
-    # Used in the TC-LMRB cross-check to validate LMRB theme against BrandMapping.
-    tc_brand_dur_map: dict = {}
-    for tr in tc_matched:
-        sr_obj = getattr(tr, 'matched_schedule', None)
-        if sr_obj is not None:
-            tc_brand_dur_map[tr.id] = (sr_obj.brand, sr_obj.duration)
-
-    # ── TC-LMRB cross-check ───────────────────────────────────────────────────
-    # For every matched + extra TCRow, look for an LMRBRow within ±5 sec
-    all_tc = list(tc_qs.filter(is_schedule_matched=True)) + list(tc_qs.filter(is_extra=True))
-    # Reload freshly after bulk_update
-    tc_ids = [r.id for r in (tc_matched + tc_extra)]
-    if tc_ids:
-        all_tc = list(TCRow.objects.filter(id__in=tc_ids))
-
-    # Build LMRBRow index: {(norm_channel, date, duration): [(lmrb_id, time_secs, lr), ...]}
-    # Use the schedule date range so only LMRB data from the same period is used.
-    # This prevents LMRB rows from other months contaminating the cross-check.
-    # IMPORTANT: channel key is normalised (_normalize) so case differences between
-    # the TC file and the LMRB upload (e.g. "Sirasa TV" vs "SIRASA TV") never break
-    # the dict lookup.
+    # ── Build LMRB index ──────────────────────────────────────────────────────
+    # {(norm_channel, date, duration): [(lmrb_id, time_secs, lr_obj), ...]}
+    # Restricted to the schedule date range so data from other months is excluded.
+    # Channel key is normalised so "Sirasa TV" and "SIRASA TV" both match.
     lmrb_index: dict = {}
     lmrb_loaded = 0
     if sch_start and sch_end:
@@ -325,44 +272,43 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
             k = (_normalize(lr.channel), lr.date, int(lr.duration) if lr.duration else None)
             lmrb_index.setdefault(k, []).append((lr.id, _time_to_secs(lr.advt_time), lr))
             lmrb_loaded += 1
-    logger.debug("TC-LMRB cross-check: loaded %d LMRB rows into index (date %s–%s)",
+    logger.debug("TC-LMRB: loaded %d LMRB rows into index (date %s–%s)",
                  lmrb_loaded, sch_start, sch_end)
-    print(f"[reconcile_tc] TC-LMRB cross-check: "
-          f"{lmrb_loaded} LMRB rows loaded (account={account_id}, channel='{channel}', "
-          f"date={sch_start}→{sch_end})  "
-          f"TC rows to check: {len(all_tc)}")
+    print(f"[reconcile_tc] LMRB index: {lmrb_loaded} rows loaded "
+          f"(account={account_id}, channel='{channel}', date={sch_start}→{sch_end}), "
+          f"TC rows to process: {len(all_tc_rows)}")
 
-    lmrb_updates = []
-    tc_lmrb_updates = []
-    used_lmrb_ids = set()
-
-    # Time tolerance is configurable by super_admin via /dashboard/settings/
+    # Time tolerance is configurable via /dashboard/settings/
     time_tolerance = get_setting_int('tc_lmrb_time_tolerance', 5)
     print(f"[reconcile_tc] TC-LMRB time tolerance: ±{time_tolerance}s")
 
-    for tcrow in all_tc:
+    # ── STEP 1: TC ↔ LMRB (ground-truth confirmation, runs FIRST) ────────────
+    # For each TCRow find the best matching LMRBRow by time proximity.
+    # Theme validation: tc_theme → reverse map → brand → expected LMRB themes.
+    # This ensures we don't accidentally link unrelated spots that happen to
+    # share the same broadcast slot time.
+    used_lmrb_ids: set = set()
+    tc_lmrb_pairs: dict = {}    # tcrow.id → lr_obj
+    tc_lmrb_updates: list = []  # TCRows with is_lmrb_confirmed set
+
+    for tcrow in all_tc_rows:
         tc_secs = _time_to_secs(tcrow.aired_time)
         if tc_secs is None:
             continue
         dur = int(tcrow.duration) if tcrow.duration else None
-        # Normalise channel so it matches the normalised index key
         key = (_normalize(tcrow.channel), tcrow.date, dur)
         candidates = lmrb_index.get(key, [])
 
-        # Theme validation for schedule-matched TCRows:
-        # Only accept LMRB candidates whose advt_theme is in the BrandMapping.theme
-        # set for the matched schedule row's brand.  This prevents mismatches such
-        # as "Com Break" being linked to a Mobitel sponsorship slot purely by time.
-        # Extra TCRows (no schedule match) skip this validation.
-        brand_dur = tc_brand_dur_map.get(tcrow.id)
+        # Build expected LMRB themes via tc_theme → brand → lmrb_theme chain.
+        # TCRows whose tc_theme has no BrandMapping entry skip theme validation
+        # (they may still confirm by time alone).
+        brands = _brands_for_tc_theme(tcrow.tc_theme, dur, reverse_tc_theme_map)
         expected_lmrb_themes: list = []
-        if brand_dur:
-            expected_lmrb_themes = _lmrb_themes_for_brand(
-                brand_dur[0], brand_dur[1], lmrb_theme_map
-            )
+        for brand in brands:
+            expected_lmrb_themes.extend(_lmrb_themes_for_brand(brand, dur, lmrb_theme_map))
 
         best = None
-        best_diff = time_tolerance + 1  # anything > tolerance means no match
+        best_diff = time_tolerance + 1
         for lmrb_id, lmrb_secs, lr_obj in candidates:
             if lmrb_id in used_lmrb_ids:
                 continue
@@ -384,98 +330,161 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
         if best:
             lmrb_id, lr_obj = best
             used_lmrb_ids.add(lmrb_id)
+            tc_lmrb_pairs[tcrow.id] = lr_obj
             tcrow.is_lmrb_confirmed = True
             tcrow.matched_lmrb_id  = lmrb_id
             tc_lmrb_updates.append(tcrow)
 
+    confirmed_tc   = [r for r in all_tc_rows if r.id in tc_lmrb_pairs]
+    unconfirmed_tc = [r for r in all_tc_rows if r.id not in tc_lmrb_pairs]
+    logger.debug("Step 1 complete: %d TC-LMRB confirmed, %d unconfirmed",
+                 len(confirmed_tc), len(unconfirmed_tc))
+
+    # ── STEP 2: TC-confirmed LMRB → Schedule (primary Schedule matching) ──────
+    # For each TC row confirmed against LMRB, find the best ScheduleRow.
+    # Using the LMRB advt_time (which is more reliable than TC aired_time for
+    # window matching) we can pick the correct planned slot when multiple
+    # ScheduleRows exist for the same brand/duration on the same day.
+    #
+    # Priority:
+    #   1. ScheduleRow whose time window [start, end+10min] contains lmrb_advt_time
+    #   2. Earliest ScheduleRow on or before TCRow.date (late-aired fallback)
+    #
+    # Both steps share the same sch_pool so a row consumed here is unavailable
+    # in Step 3.
+
+    # Build Schedule pool: {(norm_brand, duration) → [sr, ...]} sorted by date
+    sch_pool: dict = {}
+    for sr in all_sch_rows:
+        dur = int(sr.duration) if sr.duration is not None else None
+        key = (_normalize(sr.brand), dur)
+        sch_pool.setdefault(key, []).append(sr)
+    for key in sch_pool:
+        sch_pool[key].sort(key=lambda r: r.date)
+
+    tc_matched_via_lmrb: list = []
+    # Sort by date so earlier TC-confirmed spots get priority in the pool
+    for tcrow in sorted(confirmed_tc, key=lambda r: r.date):
+        lr_obj = tc_lmrb_pairs[tcrow.id]
+        dur    = int(tcrow.duration) if tcrow.duration is not None else None
+        lmrb_secs = _time_to_secs(lr_obj.advt_time)
+
+        brands = _brands_for_tc_theme(tcrow.tc_theme, dur, reverse_tc_theme_map)
+        if not brands:
+            continue  # No BrandMapping → cannot identify Schedule row
+
+        matched_sr  = None
+        matched_key = None
+
+        for brand in brands:
+            pool_key   = (brand, dur)
+            candidates = sch_pool.get(pool_key, [])
+            # Late-aired rule: TCRow.date >= ScheduleRow.date
+            valid = [s for s in candidates if tcrow.date >= s.date]
+            if not valid:
+                continue
+
+            # Prefer the ScheduleRow whose planned time window contains the LMRB time
+            if lmrb_secs is not None:
+                for s in valid:
+                    start_s = _time_to_secs(s.start_time)
+                    end_s   = _time_to_secs(s.end_time)
+                    # Treat 00:00:00 end as midnight when start is in the evening
+                    if end_s == 0 and start_s and start_s > 43200:
+                        end_s = 86400
+                    if start_s is not None and end_s is not None:
+                        if start_s <= lmrb_secs <= end_s + 600:
+                            matched_sr  = s
+                            matched_key = pool_key
+                            break
+
+            # Fallback: earliest valid date
+            if matched_sr is None:
+                matched_sr  = valid[0]
+                matched_key = pool_key
+            break
+
+        if matched_sr and matched_key:
+            sch_pool[matched_key].remove(matched_sr)
+            tcrow.is_schedule_matched = True
+            tcrow.matched_schedule    = matched_sr
+            tc_matched_via_lmrb.append(tcrow)
+
+    logger.debug("Step 2 complete: %d TC-confirmed rows matched to Schedule",
+                 len(tc_matched_via_lmrb))
+
+    # ── STEP 3: Fallback TC ↔ Schedule (for TCRows with no LMRB match) ────────
+    # TCRows that did not find an LMRB confirmation use the traditional
+    # tc_theme-based greedy matching against the remaining (unconsumed) ScheduleRows.
+    available_unconfirmed: dict = {}
+    for tcrow in unconfirmed_tc:
+        key = (_normalize(tcrow.tc_theme), int(tcrow.duration) if tcrow.duration else None)
+        available_unconfirmed.setdefault(key, []).append(tcrow)
+    for key in available_unconfirmed:
+        available_unconfirmed[key].sort(key=lambda r: r.date)
+
+    tc_matched_fallback: list = []
+    for sr in all_sch_rows:
+        dur      = int(sr.duration) if sr.duration is not None else None
+        pool_key = (_normalize(sr.brand), dur)
+        # Skip rows already consumed in Step 2
+        if sr not in sch_pool.get(pool_key, []):
+            continue
+
+        tc_themes = _tc_themes_for_brand(sr.brand, dur, tc_theme_map)
+        if not tc_themes:
+            continue
+
+        matched_row = None
+        for tc_theme in tc_themes:
+            key        = (tc_theme, dur)
+            candidates = available_unconfirmed.get(key, [])
+            # Late-aired rule: TCRow.date >= ScheduleRow.date
+            valid = [r for r in candidates if r.date >= sr.date]
+            if valid:
+                matched_row = valid[0]
+                break
+
+        if matched_row:
+            avail_key = (_normalize(matched_row.tc_theme), dur)
+            available_unconfirmed[avail_key].remove(matched_row)
+            sch_pool[pool_key].remove(sr)
+            matched_row.is_schedule_matched = True
+            matched_row.matched_schedule    = sr
+            tc_matched_fallback.append(matched_row)
+
+    logger.debug("Step 3 complete: %d unconfirmed TC rows matched to Schedule via tc_theme",
+                 len(tc_matched_fallback))
+
+    # ── STEP 4: Remaining TCRows → EXTRA ─────────────────────────────────────
+    tc_extra: list = []
+    for rows in available_unconfirmed.values():
+        for r in rows:
+            if not r.is_schedule_matched:
+                r.is_extra = True
+                tc_extra.append(r)
+    # Confirmed TCRows that found no Schedule match also become EXTRA
+    for tcrow in confirmed_tc:
+        if not tcrow.is_schedule_matched:
+            tcrow.is_extra = True
+            tc_extra.append(tcrow)
+
+    tc_matched = tc_matched_via_lmrb + tc_matched_fallback
+
+    # ── Bulk save all modified TCRows ─────────────────────────────────────────
+    if tc_matched or tc_extra:
+        TCRow.objects.bulk_update(
+            tc_matched + tc_extra,
+            ['is_schedule_matched', 'matched_schedule_id', 'is_extra'],
+        )
     if tc_lmrb_updates:
         TCRow.objects.bulk_update(tc_lmrb_updates, ['is_lmrb_confirmed', 'matched_lmrb_id'])
 
-    # ── Lock TC-confirmed Schedule↔LMRB pairs ────────────────────────────────
-    # For every TCRow that is both schedule-matched AND LMRB-confirmed, write
-    # the TC-ground-truth LMRB link onto the ScheduleRow and LMRBRow.
-    #
-    # This corrects mismatches created by engine.py's four-pass greedy algorithm,
-    # which may have paired a ScheduleRow with a nearby-but-wrong LMRBRow while
-    # the TC file actually proves a different LMRB row aired for that slot.
-    #
-    # If engine.py had previously linked:
-    #   ScheduleRow → old_LMRBRow   (wrong)
-    #   LMRBRow     → old_ScheduleRow (wrong)
-    # those stale links are unlocked so engine.py can re-consume them on the
-    # next smart or reset run.
-    tc_confirmed = [r for r in tc_lmrb_updates
-                    if r.is_schedule_matched and r.matched_schedule_id]
-
-    if tc_confirmed:
-        confirmed_sch_ids  = [r.matched_schedule_id for r in tc_confirmed]
-        confirmed_lmrb_ids = [r.matched_lmrb_id     for r in tc_confirmed]
-
-        # Reload current DB state so we can detect stale engine.py links
-        sch_map  = {s.id: s for s in ScheduleRow.objects.filter(id__in=confirmed_sch_ids)}
-        lmrb_map = {l.id: l for l in LMRBRow.objects.filter(id__in=confirmed_lmrb_ids)}
-
-        now_ts = timezone.now()
-        sch_to_save  = []
-        lmrb_to_save = []
-        stale_lmrb_ids = set()  # old LMRB rows engine.py linked but TC disagrees with
-        stale_sch_ids  = set()  # old Schedule rows engine.py linked but TC disagrees with
-
-        for tcrow in tc_confirmed:
-            sr = sch_map.get(tcrow.matched_schedule_id)
-            lr = lmrb_map.get(tcrow.matched_lmrb_id)
-            if not sr or not lr:
-                continue
-
-            # If Schedule was previously matched to a DIFFERENT LMRB row, unlock the old one
-            if sr.matched_lmrb_id and sr.matched_lmrb_id != lr.id:
-                stale_lmrb_ids.add(sr.matched_lmrb_id)
-
-            # If LMRB was previously matched to a DIFFERENT Schedule row, unlock the old one
-            if lr.matched_schedule_id and lr.matched_schedule_id != sr.id:
-                stale_sch_ids.add(lr.matched_schedule_id)
-
-            # Write TC-confirmed link
-            sr.is_matched      = True
-            sr.matched_lmrb_id = lr.id
-            sr.matched_at      = now_ts
-            sch_to_save.append(sr)
-
-            lr.is_matched          = True
-            lr.matched_schedule_id = sr.id
-            lr.matched_at          = now_ts
-            lmrb_to_save.append(lr)
-
-        # Unlock stale engine.py links that TC has superseded
-        if stale_lmrb_ids:
-            LMRBRow.objects.filter(id__in=stale_lmrb_ids).update(
-                is_matched=False, matched_schedule=None, matched_at=None,
-            )
-        if stale_sch_ids:
-            ScheduleRow.objects.filter(id__in=stale_sch_ids).update(
-                is_matched=False, matched_lmrb=None, matched_at=None,
-            )
-
-        if sch_to_save:
-            ScheduleRow.objects.bulk_update(
-                sch_to_save, ['is_matched', 'matched_lmrb_id', 'matched_at'],
-            )
-        if lmrb_to_save:
-            LMRBRow.objects.bulk_update(
-                lmrb_to_save, ['is_matched', 'matched_schedule_id', 'matched_at'],
-            )
-
-        logger.info(
-            "TC-confirmed Schedule↔LMRB links written: %d pairs "
-            "(unlocked %d stale LMRB, %d stale Schedule rows)",
-            len(sch_to_save), len(stale_lmrb_ids), len(stale_sch_ids),
-        )
-        print(
-            f"[reconcile_tc] TC-confirmed pairs locked: {len(sch_to_save)} | "
-            f"stale LMRB unlocked: {len(stale_lmrb_ids)} | "
-            f"stale Schedule unlocked: {len(stale_sch_ids)}"
-        )
-
+    print(
+        f"[reconcile_tc] Done — matched: {len(tc_matched)} "
+        f"(via LMRB: {len(tc_matched_via_lmrb)}, fallback: {len(tc_matched_fallback)}), "
+        f"extra: {len(tc_extra)}, lmrb_confirmed: {len(tc_lmrb_updates)}"
+    )
     return {
         'matched':        len(tc_matched),
         'extra':          len(tc_extra),
