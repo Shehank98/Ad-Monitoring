@@ -300,15 +300,13 @@ def notify_reconciliation_done(ops_whatsapp: str, account_name: str, channel: st
     """Notify an operations person that TC reconciliation completed.
 
     Template: reconciliation_done
-    Variables: {{1}}=account, {{2}}=channel, {{3}}=month,
-               {{4}}=matched, {{5}}=lmrb_confirmed, {{6}}=summary_url
+    Body variables: {{1}}=account, {{2}}=channel, {{3}}=month,
+                    {{4}}=matched, {{5}}=lmrb_confirmed
+    Button (Visit Website, dynamic): URL suffix = ?account_id=...&channel=...&month=...
     """
     from core.models import get_setting
-    cfg = _get_config()
-    base_url = cfg['base_url'].rstrip('/')
     from urllib.parse import urlencode
     qs = urlencode({'account_id': account_id, 'channel': channel, 'month': month})
-    summary_url = f'{base_url}/dashboard/summary/?{qs}' if base_url else '-'
 
     tmpl = get_setting('whatsapp_tmpl_reconcile_done', 'reconciliation_done')
     return send_template(ops_whatsapp, tmpl, [
@@ -317,8 +315,7 @@ def notify_reconciliation_done(ops_whatsapp: str, account_name: str, channel: st
         month,
         str(matched),
         str(lmrb_confirmed),
-        summary_url,
-    ])
+    ], button_url_param=f'?{qs}')
 
 
 def notify_new_user_created(whatsapp: str, name: str, email: str,
