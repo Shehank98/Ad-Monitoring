@@ -44,34 +44,47 @@
     <p class="text-xs text-slate-400 mt-1">Include country code. This number receives missed-spot alerts and TC reminders.</p>
   </div>
 
+  {% if not edit %}
+  <!-- Multi account/channel assignments -->
+  <div>
+    <label class="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Account &amp; Channel Assignments</label>
+    <p class="text-xs text-slate-400 mb-3">Add one row per account/channel this officer manages.</p>
+    <div id="assignmentRows" class="space-y-2">
+      <!-- Rows injected by JS on load -->
+    </div>
+    <button type="button" onclick="addAssignmentRow()"
+            class="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:border-og-red hover:text-og-red text-xs font-semibold transition-colors">
+      <i class="fa-solid fa-plus"></i> Add Another Account / Channel
+    </button>
+  </div>
+  {% else %}
+  <!-- Edit: single assignment (one row) -->
   <div>
     <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Account</label>
     <select name="account_id" class="select-field" required>
       <option value="">Select account…</option>
       {% for acc in accounts %}
         <option value="{{ acc.id }}"
-          {% if officer.account_id == acc.id %}selected
-          {% elif fd.account_id == acc.id|stringformat:"s" %}selected{% endif %}>
+          {% if officer.account_id == acc.id %}selected{% endif %}>
           {{ acc.name }}
         </option>
       {% endfor %}
     </select>
   </div>
-
   <div>
     <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel</label>
     <select name="channel" class="select-field" required>
       <option value="">Select channel…</option>
       {% for ch in channels %}
         <option value="{{ ch.name }}"
-          {% if officer.channel == ch.name %}selected
-          {% elif fd.channel == ch.name %}selected{% endif %}>
+          {% if officer.channel == ch.name %}selected{% endif %}>
           {{ ch.name }}
         </option>
       {% endfor %}
     </select>
-    <p class="text-xs text-slate-400 mt-1">Must match the channel name used in schedules exactly.</p>
+    <p class="text-xs text-slate-400 mt-1">To add more accounts, use "Add Officer" and select the same email — it will be reused.</p>
   </div>
+  {% endif %}
 
   {% if not edit %}
   <!-- Login section (create only) -->
@@ -134,6 +147,54 @@ function toggleLoginFields() {
   const fields = document.getElementById('loginFields');
   fields.classList.toggle('hidden', !check.checked);
 }
+
+// Account/Channel assignment rows (create mode only)
+const ACCOUNTS = [
+  {% for acc in accounts %}{"id":"{{ acc.id }}","name":"{{ acc.name|escapejs }}"},{% endfor %}
+];
+const CHANNELS = [
+  {% for ch in channels %}{"name":"{{ ch.name|escapejs }}"},{% endfor %}
+];
+const PREFILL_ACCOUNTS = {{ fd.account_ids_json|default:"[]"|safe }};
+const PREFILL_CHANNELS = {{ fd.channels_list_json|default:"[]"|safe }};
+
+function buildAccountOptions(selected) {
+  return '<option value="">Account…</option>' +
+    ACCOUNTS.map(a => `<option value="${a.id}"${a.id===selected?' selected':''}>${a.name}</option>`).join('');
+}
+function buildChannelOptions(selected) {
+  return '<option value="">Channel…</option>' +
+    CHANNELS.map(c => `<option value="${c.name}"${c.name===selected?' selected':''}>${c.name}</option>`).join('');
+}
+
+function addAssignmentRow(prefillAccount, prefillChannel) {
+  const container = document.getElementById('assignmentRows');
+  if (!container) return;
+  const row = document.createElement('div');
+  row.className = 'flex gap-2 items-center';
+  row.innerHTML = `
+    <select name="account_id[]" class="select-field flex-1" required>
+      ${buildAccountOptions(prefillAccount||'')}
+    </select>
+    <select name="channel[]" class="select-field flex-1" required>
+      ${buildChannelOptions(prefillChannel||'')}
+    </select>
+    <button type="button" onclick="this.closest('div').remove()"
+            class="px-2 py-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors text-sm">
+      <i class="fa-solid fa-xmark"></i>
+    </button>`;
+  container.appendChild(row);
+}
+
+// Init rows on load (create form only)
+document.addEventListener('DOMContentLoaded', function() {
+  if (!document.getElementById('assignmentRows')) return;
+  if (PREFILL_ACCOUNTS.length > 0) {
+    PREFILL_ACCOUNTS.forEach((aid, i) => addAssignmentRow(aid, PREFILL_CHANNELS[i]||''));
+  } else {
+    addAssignmentRow(); // start with one empty row
+  }
+});
 </script>
 
 {% endblock %}

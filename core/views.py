@@ -7191,74 +7191,112 @@ def channel_officer_create(request):
     if request.method == 'POST':
         name            = request.POST.get('name', '').strip()
         whatsapp        = request.POST.get('whatsapp_number', '').strip()
-        account_id      = request.POST.get('account_id', '').strip()
-        channel         = request.POST.get('channel', '').strip()
+        account_ids     = request.POST.getlist('account_id[]')
+        channels_list   = request.POST.getlist('channel[]')
         create_login    = request.POST.get('create_login') == '1'
         email           = request.POST.get('email', '').strip().lower()
+
+        # Pair up account_ids and channels, skip blank rows
+        assignments = [
+            (aid.strip(), ch.strip())
+            for aid, ch in zip(account_ids, channels_list)
+            if aid.strip() and ch.strip()
+        ]
 
         errors = []
         if not name:
             errors.append('Name is required.')
-        if not account_id:
-            errors.append('Account is required.')
-        if not channel:
-            errors.append('Channel is required.')
+        if not assignments:
+            errors.append('At least one Account / Channel assignment is required.')
 
-        account_obj = Account.objects.filter(id=account_id).first()
-        if not account_obj:
-            errors.append('Invalid account.')
-
-        if ChannelOfficer.objects.filter(account_id=account_id, channel=channel, name=name).exists():
-            errors.append('An officer with this name already exists for this account/channel.')
+        # Validate each assignment
+        account_objs = {}
+        for aid, ch in assignments:
+            acc = Account.objects.filter(id=aid).first()
+            if not acc:
+                errors.append(f'Invalid account ID: {aid}')
+            else:
+                account_objs[aid] = acc
 
         login_user = None
         temp_password = None
+        existing_user = None
         if create_login:
             if not email:
                 errors.append('Email is required when creating a login.')
-            elif User.objects.filter(email=email).exists():
-                errors.append(f'A user with email {email} already exists.')
             else:
-                chars = _string.ascii_letters + _string.digits + '!@#'
-                temp_password = ''.join(_secrets.choice(chars) for _ in range(12))
+                existing_user = User.objects.filter(email=email).first()
+                if existing_user:
+                    # Allow reuse only if orphaned (no remaining officer profiles)
+                    if ChannelOfficer.objects.filter(user=existing_user).exists():
+                        errors.append(
+                            f'{email} is already linked to another active officer. '
+                            f'Edit that officer instead.'
+                        )
+                    # else: orphaned user — we'll reuse/reactivate below
+                else:
+                    chars = _string.ascii_letters + _string.digits + '!@#'
+                    temp_password = ''.join(_secrets.choice(chars) for _ in range(12))
 
         if not errors:
             if create_login:
-                login_user = User.objects.create_user(
-                    email=email,
-                    name=name,
-                    password=temp_password,
-                    role='channel_officer',
-                    created_by=request.user,
-                    must_change_password=True,
-                )
-                login_user.whatsapp_number = whatsapp
-                login_user.save()
+                if existing_user:
+                    # Reactivate orphaned user with fresh password
+                    chars = _string.ascii_letters + _string.digits + '!@#'
+                    temp_password = ''.join(_secrets.choice(chars) for _ in range(12))
+                    existing_user.name = name
+                    existing_user.whatsapp_number = whatsapp
+                    existing_user.role = 'channel_officer'
+                    existing_user.is_active = True
+                    existing_user.must_change_password = True
+                    existing_user.set_password(temp_password)
+                    existing_user.save()
+                    login_user = existing_user
+                else:
+                    login_user = User.objects.create_user(
+                        email=email,
+                        name=name,
+                        password=temp_password,
+                        role='channel_officer',
+                        created_by=request.user,
+                        must_change_password=True,
+                    )
+                    login_user.whatsapp_number = whatsapp
+                    login_user.save()
 
-            officer = ChannelOfficer.objects.create(
-                account=account_obj,
-                channel=channel,
-                name=name,
-                whatsapp_number=whatsapp,
-                user=login_user,
+            # Create one ChannelOfficer per assignment
+            for aid, ch in assignments:
+                acc = account_objs.get(aid)
+                if acc:
+                    ChannelOfficer.objects.create(
+                        account=acc,
+                        channel=ch,
+                        name=name,
+                        whatsapp_number=whatsapp,
+                        user=login_user,
+                    )
+
+            assignment_labels = ', '.join(
+                f'{account_objs[aid].name}/{ch}' for aid, ch in assignments if aid in account_objs
             )
-
-            msg = f'Officer "{name}" created for {account_obj} / {channel}.'
+            msg = f'Officer "{name}" created for {assignment_labels}.'
             if temp_password:
                 msg += f' Login: {email} / Temp password: <code class="font-mono font-bold">{temp_password}</code>'
             messages.success(request, msg)
 
-            # Send WhatsApp welcome + credentials if number provided
+            # Send WhatsApp welcome — use first assignment for account/channel display
             if whatsapp:
                 try:
                     from core.whatsapp import notify_new_officer_created
                     base_url = get_setting('whatsapp_app_base_url', '').rstrip('/')
                     login_url = f'{base_url}/auth/login/' if base_url else '/auth/login/'
+                    first_aid, first_ch = assignments[0]
+                    first_acc = account_objs.get(first_aid)
                     notify_new_officer_created(
                         whatsapp=whatsapp,
                         name=name,
-                        account_name=str(account_obj),
-                        channel=channel,
+                        account_name=str(first_acc) if first_acc else '',
+                        channel=first_ch,
                         email=email if create_login else '',
                         password=temp_password or '',
                         login_url=login_url,
@@ -7268,23 +7306,24 @@ def channel_officer_create(request):
 
             return redirect('/dashboard/channel-officers/')
 
+        import json as _json
         return render(request, 'channel_officers/form.html', {
             'accounts': accounts,
             'channels': channels,
             'errors':   errors,
             'fd': {
-                'name':             request.POST.get('name', ''),
-                'whatsapp_number':  request.POST.get('whatsapp_number', ''),
-                'account_id':       request.POST.get('account_id', ''),
-                'channel':          request.POST.get('channel', ''),
-                'email':            request.POST.get('email', ''),
+                'name':              request.POST.get('name', ''),
+                'whatsapp_number':   request.POST.get('whatsapp_number', ''),
+                'email':             request.POST.get('email', ''),
+                'account_ids_json':  _json.dumps(account_ids),
+                'channels_list_json': _json.dumps(channels_list),
             },
         })
 
     return render(request, 'channel_officers/form.html', {
         'accounts': accounts,
         'channels': channels,
-        'fd': {'name': '', 'whatsapp_number': '', 'account_id': '', 'channel': '', 'email': ''},
+        'fd': {'name': '', 'whatsapp_number': '', 'email': '', 'account_ids_json': '[]', 'channels_list_json': '[]'},
     })
 
 
@@ -7301,11 +7340,13 @@ def channel_officer_edit(request, pk):
 
         if action == 'delete':
             name = officer.name
-            # Do NOT delete the linked user — just unlink
-            if officer.user:
-                officer.user.is_active = False
-                officer.user.save()
+            linked_user = officer.user
             officer.delete()
+            # Delete the linked User only if they have no other officer profiles
+            if linked_user:
+                remaining = ChannelOfficer.objects.filter(user=linked_user).count()
+                if remaining == 0:
+                    linked_user.delete()
             messages.success(request, f'Officer "{name}" removed.')
             return redirect('/dashboard/channel-officers/')
 
