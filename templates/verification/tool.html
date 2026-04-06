@@ -28,6 +28,10 @@
   /* ── LMRB amber ── */
   .lmrb-amber { color:#d97706; font-weight:600; }
 
+  /* ── Locked campaign row ── */
+  .camp-row.locked-row { border-color:#d1fae5; background:#f0fdf4; }
+  .camp-row.locked-row:hover { box-shadow:0 4px 12px rgba(16,185,129,.1); }
+
   /* ── Expanded detail ── */
   .camp-detail { display:none; border-top:1px solid #f1f5f9; }
   .camp-detail.open { display:block; }
@@ -143,7 +147,7 @@
     <div class="space-y-3 month-body" id="month-body-{{ month_group.grouper|slugify }}">
       {% for row in month_group.list %}
       {% with idx=row.idx %}
-      <div class="camp-row" id="camp-{{ idx }}" data-media-type="{{ row.media_type }}"
+      <div class="camp-row{% if row.is_locked %} locked-row{% endif %}" id="camp-{{ idx }}" data-media-type="{{ row.media_type }}"
            data-account-id="{{ row.account_id }}" data-channel="{{ row.channel }}" data-month="{{ row.month }}">
 
     <!-- ── Main summary row (clickable to expand) ── -->
@@ -207,16 +211,39 @@
       </div>
       {% endif %}
 
-      {% if row.period_over %}
-      <!-- Schedule period has ended → show Reconcile Now, disable Run -->
+      {% if row.is_locked %}
+      <!-- Locked by operations — finalised -->
+      <span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg flex-shrink-0"
+            title="This schedule has been locked by operations">
+        <i class="fa-solid fa-lock-open text-emerald-600 mr-0.5"></i> Locked
+      </span>
+      <a href="/dashboard/summary/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
+         class="btn-primary text-xs px-3 py-1.5 flex-shrink-0"
+         title="View reconciliation summary">
+        <i class="fa-solid fa-file-contract text-white"></i> View Summary
+      </a>
+      <button type="button"
+              class="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-400 hover:text-rose-600 hover:border-rose-200 flex-shrink-0 transition-colors"
+              onclick="toggleScheduleLock({{ idx }}, '{{ row.account_id }}', '{{ row.channel|escapejs }}', '{{ row.month|escapejs }}', false)"
+              title="Unlock this schedule to allow further changes">
+        <i class="fa-solid fa-unlock text-xs"></i>
+      </button>
+      {% elif row.period_over %}
+      <!-- Schedule period has ended → show Reconcile Now + Lock button -->
       <span class="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-lg flex-shrink-0">
-        <i class="fa-solid fa-lock text-slate-400 mr-0.5"></i> Period ended
+        <i class="fa-solid fa-calendar-xmark text-slate-400 mr-0.5"></i> Period ended
       </span>
       <a href="/dashboard/summary/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
          class="btn-primary text-xs px-3 py-1.5 flex-shrink-0"
          title="Schedule period is over — go to reconciliation summary">
         <i class="fa-solid fa-file-contract text-white"></i> Reconcile Now
       </a>
+      <button type="button"
+              class="text-xs px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 flex-shrink-0 transition-colors font-semibold"
+              onclick="toggleScheduleLock({{ idx }}, '{{ row.account_id }}', '{{ row.channel|escapejs }}', '{{ row.month|escapejs }}', true)"
+              title="Lock this schedule to mark it as finalised">
+        <i class="fa-solid fa-lock text-xs mr-0.5"></i> Lock
+      </button>
       {% else %}
       <!-- Run button -->
       <button type="button" id="run-btn-{{ idx }}"
@@ -224,6 +251,12 @@
               onclick="runVerify(event, {{ idx }}, '{{ row.account_id }}', '{{ row.channel|escapejs }}', '{{ row.month|escapejs }}')"
               title="Run verification for this campaign">
         <i class="fa-solid fa-play text-emerald-500"></i> Run
+      </button>
+      <button type="button"
+              class="text-xs px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 flex-shrink-0 transition-colors font-semibold"
+              onclick="toggleScheduleLock({{ idx }}, '{{ row.account_id }}', '{{ row.channel|escapejs }}', '{{ row.month|escapejs }}', true)"
+              title="Lock this schedule when all LMRB spots are confirmed">
+        <i class="fa-solid fa-lock text-xs mr-0.5"></i> Lock
       </button>
       {% endif %}
 
@@ -589,6 +622,41 @@ function switchVtab(idx, tab, btn) {
   const panel = document.getElementById(`vtab-${tab}-${idx}`);
   if (panel) panel.classList.add('active');
   if (btn) btn.classList.add('active');
+}
+
+// ── Lock / Unlock a schedule campaign ─────────────────────────────────────────
+function toggleScheduleLock(idx, accountId, channel, month, lock) {
+  const label  = lock ? 'lock' : 'unlock';
+  const confirm_msg = lock
+    ? 'Lock this schedule? This marks the period as finalised. You can unlock it later.'
+    : 'Unlock this schedule?';
+  if (!confirm(confirm_msg)) return;
+
+  const fd = new FormData();
+  fd.append('account_id', accountId);
+  fd.append('channel', channel);
+  fd.append('month', month);
+  fd.append('locked', lock ? '1' : '0');
+  fd.append('csrfmiddlewaretoken', getCsrfToken());
+
+  fetch('/dashboard/schedules/lock/', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        // Reload the page so the row state refreshes
+        window.location.reload();
+      } else {
+        alert('Error: ' + (data.error || 'Could not ' + label + ' schedule.'));
+      }
+    })
+    .catch(() => alert('Network error — could not ' + label + ' schedule.'));
+}
+
+function getCsrfToken() {
+  const el = document.querySelector('[name=csrfmiddlewaretoken]');
+  if (el) return el.value;
+  const m = document.cookie.match(/csrftoken=([^;]+)/);
+  return m ? m[1] : '';
 }
 
 // ── Run verification for one row ──────────────────────────────────────────────

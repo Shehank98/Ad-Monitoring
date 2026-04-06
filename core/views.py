@@ -813,10 +813,104 @@ def schedule_delete(request, pk):
     return redirect('/dashboard/schedules/')
 
 
+@login_required
+@role_required(['operations', 'super_admin', 'admin', 'team_head'])
+def schedule_lock(request):
+    """AJAX POST — toggle the locked state of all Schedule records for one
+    (account_id, channel, month) campaign scope.
+
+    Body params:
+        account_id  int
+        channel     str
+        month       str
+        locked      '1' to lock, '0' to unlock
+    Returns JSON {ok, locked, updated}.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'}, status=405)
+
+    account_id = request.POST.get('account_id', '').strip()
+    channel    = request.POST.get('channel', '').strip()
+    month      = request.POST.get('month', '').strip()
+    locked     = request.POST.get('locked', '1') == '1'
+
+    if not (account_id and channel and month):
+        return JsonResponse({'ok': False, 'error': 'Missing required params'}, status=400)
+
+    updated = Schedule.objects.filter(
+        account_id=account_id, channel=channel, month=month
+    ).update(is_locked=locked)
+
+    action = 'locked' if locked else 'unlocked'
+    print(f"[schedule_lock] {action} {updated} schedule(s) for "
+          f"account_id={account_id} channel={channel!r} month={month!r} by {request.user}")
+    return JsonResponse({'ok': True, 'locked': locked, 'updated': updated})
+
+
 # ── Monitoring data ───────────────────────────────────────────────────────────
+
+def _cleanup_duplicate_monitoring_batches():
+    """
+    Auto-remove duplicate MonitoringData header records.
+
+    When the same file (same account + original_filename) has been uploaded more
+    than once, only the most-recently-uploaded batch (file_group_id) is kept;
+    older batches are deleted.  LMRBRow data is NOT touched — the SHA-256
+    dedup_key already prevents actual row duplication, so the underlying data
+    is correct regardless of how many header records exist.
+
+    Returns the number of MonitoringData records deleted.
+    """
+    from django.db.models import Count, Max
+
+    # Find (account_id, original_filename) combos that have more than one distinct batch
+    dupes = (
+        MonitoringData.objects
+        .values('account_id', 'original_filename')
+        .annotate(batch_count=Count('file_group_id', distinct=True))
+        .filter(batch_count__gt=1)
+    )
+
+    total_deleted = 0
+    for d in dupes:
+        # Identify the most-recent batch for this (account, filename)
+        latest = (
+            MonitoringData.objects
+            .filter(account_id=d['account_id'], original_filename=d['original_filename'])
+            .aggregate(latest_upload=Max('uploaded_at'))
+        )['latest_upload']
+
+        # Fetch the file_group_id of the winning batch
+        keep_fgid = (
+            MonitoringData.objects
+            .filter(
+                account_id=d['account_id'],
+                original_filename=d['original_filename'],
+                uploaded_at=latest,
+            )
+            .values_list('file_group_id', flat=True)
+            .first()
+        )
+
+        deleted, _ = MonitoringData.objects.filter(
+            account_id=d['account_id'],
+            original_filename=d['original_filename'],
+        ).exclude(file_group_id=keep_fgid).delete()
+
+        if deleted:
+            print(f"[cleanup_monitoring] removed {deleted} duplicate MonitoringData record(s) "
+                  f"for account_id={d['account_id']} filename={d['original_filename']!r} "
+                  f"(kept batch {keep_fgid})")
+        total_deleted += deleted
+
+    return total_deleted
+
 
 @login_required
 def monitoring_list(request):
+    # Auto-clean duplicate MonitoringData batches (same file uploaded twice)
+    _cleanup_duplicate_monitoring_batches()
+
     user = request.user
     qs   = MonitoringData.objects.select_related('account', 'uploaded_by')
     if not _is_admin(user):

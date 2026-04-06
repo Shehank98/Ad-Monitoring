@@ -24,6 +24,7 @@ urlpatterns = [
     path('schedules/detect/',                   views.schedule_detect,   name='schedule_detect'),
     path('schedules/<int:pk>/download/',        views.schedule_download, name='schedule_download'),
     path('schedules/<int:pk>/delete/',          views.schedule_delete,   name='schedule_delete'),
+    path('schedules/lock/',                     views.schedule_lock,     name='schedule_lock'),
 
     # Brand mappings
     path('brand-mappings/',           views.brand_mapping_list,      name='brand_mapping_list'),

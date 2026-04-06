@@ -85,6 +85,10 @@ class Schedule(models.Model):
     version           = models.PositiveIntegerField(default=1)
     # Superseded by a later replacement upload with the same schedule_number
     is_superseded     = models.BooleanField(default=False)
+    # Locked by operations after confirming all LMRB spots are verified.
+    # Prevents the auto-verification engine from re-running and signals that
+    # this campaign period is finalised.
+    is_locked         = models.BooleanField(default=False)
     # Makeup / late-airing support
     # If set, the LMRB pool extends to this date when reconciling this schedule,
     # allowing Late Telecast matching to find spots aired after the schedule period.

@@ -305,6 +305,11 @@ def _build_campaign_rows(user):
         today = timezone.localdate()
         period_over = bool(sch_end and sch_end < today)
 
+        # is_locked: ALL schedules for this scope have been locked by operations,
+        # signalling that the period is finalised and no further changes are expected.
+        all_scheds = Schedule.objects.filter(account_id=a_id, channel=channel, month=month)
+        is_locked  = all_scheds.exists() and not all_scheds.filter(is_locked=False).exists()
+
         rows.append({
             'idx':          len(rows) + 1,
             'account_id':   a_id,
@@ -324,6 +329,7 @@ def _build_campaign_rows(user):
             'dot':          dot,
             'versions':     versions,
             'period_over':  period_over,
+            'is_locked':    is_locked,
         })
 
     return rows
