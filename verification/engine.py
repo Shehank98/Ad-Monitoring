@@ -423,6 +423,39 @@ def run_scope(account_id, channel, month, mode='smart'):
             'Please re-upload the schedule file so rows are parsed into the database.'
         )
 
+    # ── Smart mode: heal orphaned is_matched=True rows ────────────────────────
+    # If a previous run crashed between _lock_matched_rows and _persist_results,
+    # some ScheduleRows end up with is_matched=True but no MatchResult.  Smart
+    # mode's is_matched=False filter then skips them permanently → they show as
+    # "Pending" forever.  Detect and reset them here so this run picks them up.
+    if mode == 'smart':
+        scope_sch_ids_for_heal = list(
+            ScheduleRow.objects.filter(
+                account_id=account_id, channel=channel, month=month,
+                ad_type='COMMERCIAL BENEFITS', is_matched=True, is_manual_matched=False,
+            ).values_list('id', flat=True)
+        )
+        if scope_sch_ids_for_heal:
+            # Find which of those have no MatchResult
+            matched_ids_with_result = set(
+                MatchResult.objects.filter(
+                    account_id=account_id, channel=channel, month=month,
+                    schedule_row_id__in=scope_sch_ids_for_heal,
+                ).exclude(status='manual_match').values_list('schedule_row_id', flat=True)
+            )
+            orphaned_ids = [
+                sid for sid in scope_sch_ids_for_heal
+                if sid not in matched_ids_with_result
+            ]
+            if orphaned_ids:
+                # Also unlock the LMRB rows that were paired with these orphaned rows
+                LMRBRow.objects.filter(matched_schedule_id__in=orphaned_ids).update(
+                    is_matched=False, matched_schedule=None, matched_at=None,
+                )
+                ScheduleRow.objects.filter(id__in=orphaned_ids).update(
+                    is_matched=False, matched_lmrb=None, matched_at=None,
+                )
+
     # ── Build shared LMRB pool ─────────────────────────────────────────────────
     # Channel matching handles both 'TV - Sirasa TV' (schedule form) and
     # 'Sirasa TV' (LMRB after prefix stripping) via _lmrb_channel_q.
