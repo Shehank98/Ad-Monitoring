@@ -305,14 +305,32 @@
     /* ════════════════════════════════════════════════════════════════
        MOBILE  (≤768px)
     ════════════════════════════════════════════════════════════════ */
+
+    /* Mobile sidebar — slides in as full-height overlay from the left */
     @media (max-width: 768px) {
-      /* Hide sidebar entirely on mobile */
-      #app-sidebar { display: none !important; }
+      #app-sidebar {
+        position: fixed !important;
+        top: 0; left: 0; bottom: 0;
+        z-index: 998;
+        transform: translateX(-100%);
+        transition: transform .25s cubic-bezier(.4,0,.2,1);
+        width: 230px !important;
+        min-width: 230px !important;
+      }
+      body.mobile-nav-open #app-sidebar { transform: translateX(0); }
+
+      /* Dim backdrop behind the overlay sidebar */
+      #sidebar-backdrop {
+        display: none;
+        position: fixed; inset: 0; z-index: 997;
+        background: rgba(0,0,0,.45);
+      }
+      body.mobile-nav-open #sidebar-backdrop { display: block; }
 
       /* Prevent content from being hidden behind bottom tab bar */
       main .flex-1.overflow-y-auto { padding-bottom: 4.5rem; }
 
-      /* Smaller table fonts on mobile - vertical scroll only */
+      /* Smaller table fonts on mobile */
       .data-table  { font-size: 11px; }
       .data-table th { padding: .5rem .6rem; }
       .data-table td { padding: .5rem .6rem; }
@@ -544,6 +562,9 @@
 
   </aside>
 
+  <!-- Mobile sidebar backdrop (tap to close) -->
+  <div id="sidebar-backdrop" onclick="closeMobileNav()"></div>
+
   <!-- ════════ MAIN ════════════════════════════════════════════════ -->
   <main class="flex-1 flex flex-col overflow-hidden">
 
@@ -566,7 +587,7 @@
           {% else %}bg-gradient-to-br from-orange-400 to-orange-600{% endif %}">
           {{ request.user.initials }}
         </div>
-        <span class="text-xs font-medium text-slate-600">{{ request.user.name }}</span>
+        <span class="text-xs font-medium text-slate-600 hidden sm:block">{{ request.user.name }}</span>
       </div>
       <span class="topbar-accent"></span>
     </header>
@@ -592,7 +613,7 @@
     {% endif %}
 
     <!-- Page body -->
-    <div class="flex-1 overflow-y-auto px-6 py-5">
+    <div class="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-5">
       {% block content %}{% endblock %}
     </div>
   </main>
@@ -630,20 +651,37 @@
 
 {% block extra_js %}{% endblock %}
 <script>
-  // ── Sidebar collapse ──────────────────────────────────────────────
+  // ── Sidebar collapse / mobile overlay ────────────────────────────
   (function(){
     const KEY = 'sidebar_collapsed';
     function apply(collapsed){
       document.body.classList.toggle('sidebar-collapsed', collapsed);
     }
-    // Restore from localStorage
+    // Restore desktop collapsed state from localStorage
     apply(localStorage.getItem(KEY) === '1');
 
     window.toggleSidebar = function(){
-      const collapsed = !document.body.classList.contains('sidebar-collapsed');
-      apply(collapsed);
-      localStorage.setItem(KEY, collapsed ? '1' : '0');
+      if (window.innerWidth <= 768) {
+        // Mobile: slide-in overlay
+        document.body.classList.toggle('mobile-nav-open');
+      } else {
+        // Desktop: collapse/expand
+        const collapsed = !document.body.classList.contains('sidebar-collapsed');
+        apply(collapsed);
+        localStorage.setItem(KEY, collapsed ? '1' : '0');
+      }
     };
+
+    window.closeMobileNav = function(){
+      document.body.classList.remove('mobile-nav-open');
+    };
+
+    // Close mobile nav when a nav link is tapped
+    document.querySelectorAll('#app-sidebar a').forEach(function(el){
+      el.addEventListener('click', function(){
+        if (window.innerWidth <= 768) closeMobileNav();
+      });
+    });
   })();
 </script>
 {% block extra_scripts %}{% endblock %}

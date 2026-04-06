@@ -6,7 +6,7 @@
 {% block content %}
 
 <!-- ── Media type tabs ────────────────────────────────────────── -->
-<div class="flex flex-wrap gap-2 mb-4">
+<div class="flex flex-wrap gap-2 mb-4 items-center">
   <a href="?{% if filters.account %}account={{ filters.account }}&{% endif %}{% if filters.month %}month={{ filters.month }}{% endif %}"
      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all {% if not filters.media_type %}bg-slate-700 text-white border-slate-700{% else %}bg-white text-slate-600 border-slate-200 hover:border-slate-400{% endif %}">
     <i class="fa-solid fa-layer-group"></i> All
@@ -24,8 +24,8 @@
     <i class="fa-solid fa-newspaper"></i> Press
   </a>
 
-  <!-- Account filter (inline, right-aligned) -->
-  <form method="get" class="ml-auto flex items-center gap-2">
+  <!-- Account filter -->
+  <form method="get" class="flex items-center gap-2 w-full sm:w-auto sm:ml-auto mt-1 sm:mt-0">
     <input type="hidden" name="media_type" value="{{ filters.media_type }}">
     {% if filters.month %}<input type="hidden" name="month" value="{{ filters.month }}">{% endif %}
     <select name="account" onchange="this.form.submit()" class="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-og-red/30">

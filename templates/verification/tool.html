@@ -151,7 +151,7 @@
            data-account-id="{{ row.account_id }}" data-channel="{{ row.channel }}" data-month="{{ row.month }}">
 
     <!-- ── Main summary row (clickable to expand) ── -->
-    <div class="px-5 py-4 flex flex-wrap items-center gap-x-5 gap-y-2 cursor-pointer select-none"
+    <div class="px-4 sm:px-5 py-3 sm:py-4 flex flex-wrap items-center gap-x-4 gap-y-2 cursor-pointer select-none"
          onclick="toggleDetail({{ idx }}, '{{ row.account_id }}', '{{ row.channel|escapejs }}', '{{ row.month|escapejs }}')">
 
       <!-- Status dot -->
@@ -165,19 +165,19 @@
         <p class="text-xs text-slate-400">{{ row.account_name }} &middot; {{ row.month }}</p>
       </div>
 
-      <!-- KPIs -->
-      <div class="flex items-center gap-3 text-center">
+      <!-- KPIs — always visible, compact on mobile -->
+      <div class="flex items-center gap-2 sm:gap-3 text-center flex-shrink-0">
         <div>
-          <p class="text-[10px] text-slate-400 uppercase font-semibold tracking-wide">Planned</p>
-          <p class="text-sm font-bold text-slate-800" id="kpi-planned-{{ idx }}">{{ row.planned }}</p>
+          <p class="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wide">Plan</p>
+          <p class="text-xs sm:text-sm font-bold text-slate-800" id="kpi-planned-{{ idx }}">{{ row.planned }}</p>
         </div>
         <div>
-          <p class="text-[10px] text-slate-400 uppercase font-semibold tracking-wide">Aired</p>
-          <p class="text-sm font-bold text-emerald-600" id="kpi-aired-{{ idx }}">{{ row.aired }}</p>
+          <p class="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wide">Aired</p>
+          <p class="text-xs sm:text-sm font-bold text-emerald-600" id="kpi-aired-{{ idx }}">{{ row.aired }}</p>
         </div>
         <div>
-          <p class="text-[10px] text-slate-400 uppercase font-semibold tracking-wide">Missed</p>
-          <p class="text-sm font-bold {% if row.missed > 0 %}text-red-500{% else %}text-slate-400{% endif %}"
+          <p class="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wide">Missed</p>
+          <p class="text-xs sm:text-sm font-bold {% if row.missed > 0 %}text-red-500{% else %}text-slate-400{% endif %}"
              id="kpi-missed-{{ idx }}">{{ row.missed }}</p>
         </div>
       </div>
