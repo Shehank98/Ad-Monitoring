@@ -77,7 +77,11 @@ STATICFILES_DIRS = [BASE_DIR / 'static']
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# Allow MEDIA_ROOT to be overridden via env var so a Railway Volume
+# (or any persistent mount) can be used instead of the ephemeral container
+# filesystem.  Set MEDIA_ROOT=/volumes/media in Railway Variables and mount
+# a Volume at /volumes/media to make uploaded files survive redeploys.
+MEDIA_ROOT = env('MEDIA_ROOT', default=str(BASE_DIR / 'media'))
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

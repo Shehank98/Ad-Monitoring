@@ -38,30 +38,59 @@ def _account_access(user, account_id):
 # ── Export helpers ─────────────────────────────────────────────────────────────
 
 def _qs_to_df(qs):
-    """Convert a MatchResult queryset to a DataFrame with human-readable columns."""
+    """Convert a MatchResult queryset to a DataFrame with human-readable columns.
+
+    For matched rows (Matched / Programme Mismatch / Late Telecast) all LMRB
+    columns are included.  For Programme Mismatch the 'Aired Programme' column
+    shows the actual programme from the LMRB row so planners can compare it
+    against the planned programme.
+    """
     STATUS_LABELS = dict(MatchResult.STATUS_CHOICES)
     rows = []
-    for mr in qs:
-        rows.append({
-            'Channel':       mr.channel,
-            'Month':         mr.month,
-            'Brand':         mr.brand,
-            'Theme':         mr.theme,
-            'Duration (s)':  mr.duration,
-            'Programme':     mr.programme,
-            'Planned Date':  mr.scheduled_date,
-            'Planned Start': mr.planned_start,
-            'Planned End':   mr.planned_end,
-            'Aired Date':    mr.aired_date,
-            'Aired Time':    mr.air_time,
-            'Source':        mr.source,
-            'Status':        STATUS_LABELS.get(mr.status, mr.status),
-        })
+    for mr in qs.select_related('lmrb_row'):
+        lmrb = mr.lmrb_row
+        status = STATUS_LABELS.get(mr.status, mr.status)
+        row = {
+            'Channel':          mr.channel,
+            'Month':            mr.month,
+            'Brand':            mr.brand,
+            'Theme':            mr.theme,
+            'Duration (s)':     mr.duration,
+            'Planned Programme': mr.programme,
+            'Planned Date':     mr.scheduled_date,
+            'Planned Start':    mr.planned_start,
+            'Planned End':      mr.planned_end,
+            'Aired Date':       mr.aired_date,
+            'Aired Time':       mr.air_time,
+            'Aired Programme':  lmrb.program if lmrb else '',
+            'Source':           mr.source,
+            'Status':           status,
+            # Full LMRB columns (blank when no LMRB match)
+            'LMRB Product Group': lmrb.product_group if lmrb else '',
+            'LMRB Advertiser':    lmrb.advertiser    if lmrb else '',
+            'LMRB Product':       lmrb.product       if lmrb else '',
+            'LMRB Advt Theme':    lmrb.advt_theme    if lmrb else '',
+            'LMRB Ads':           lmrb.ads            if lmrb else '',
+            'LMRB Prog Time':     lmrb.prog_time      if lmrb else '',
+            'LMRB Ad Pos':        lmrb.ad_pos         if lmrb else '',
+            'LMRB Tot Ads':       lmrb.tot_ads        if lmrb else '',
+            'LMRB Brk No':        lmrb.brk_no         if lmrb else '',
+            'LMRB Pos in Brk':    lmrb.pos_in_brk     if lmrb else '',
+            'LMRB Ads in Brk':    lmrb.ads_in_brk     if lmrb else '',
+            'LMRB Lng':           lmrb.lng             if lmrb else '',
+            'LMRB Cost':          lmrb.cost            if lmrb else '',
+            'LMRB Day':           lmrb.day             if lmrb else '',
+        }
+        rows.append(row)
     if not rows:
         return pd.DataFrame(columns=[
-            'Channel', 'Month', 'Brand', 'Theme', 'Duration (s)', 'Programme',
-            'Planned Date', 'Planned Start', 'Planned End',
-            'Aired Date', 'Aired Time', 'Source', 'Status',
+            'Channel', 'Month', 'Brand', 'Theme', 'Duration (s)',
+            'Planned Programme', 'Planned Date', 'Planned Start', 'Planned End',
+            'Aired Date', 'Aired Time', 'Aired Programme', 'Source', 'Status',
+            'LMRB Product Group', 'LMRB Advertiser', 'LMRB Product', 'LMRB Advt Theme',
+            'LMRB Ads', 'LMRB Prog Time', 'LMRB Ad Pos', 'LMRB Tot Ads',
+            'LMRB Brk No', 'LMRB Pos in Brk', 'LMRB Ads in Brk',
+            'LMRB Lng', 'LMRB Cost', 'LMRB Day',
         ])
     return pd.DataFrame(rows)
 
@@ -299,11 +328,21 @@ def _build_campaign_rows(user):
                     'start_date', 'end_date', 'original_filename', 'is_superseded')
         )
 
-        # period_over: schedule end date has passed → stop auto-verification,
-        # show "Reconcile Now" button linking to the summary sheet instead.
+        # period_over: informational only — schedule end date has passed.
+        # We do NOT use this to block the Run button; LMRB data arrives days
+        # after the schedule ends (late telecasts can air a week later), so
+        # the engine must keep running until the user manually locks.
         from django.utils import timezone
+        from datetime import timedelta
         today = timezone.localdate()
         period_over = bool(sch_end and sch_end < today)
+
+        # lmrb_covers_schedule: LMRB data has caught up to the schedule end date
+        # plus a 7-day buffer (to allow late telecasts to surface).
+        # Only when this is True do we show the "Reconcile Now" button.
+        lmrb_covers_schedule = bool(
+            lmrb_end and sch_end and lmrb_end >= (sch_end + timedelta(days=7))
+        )
 
         # is_locked: ALL schedules for this scope have been locked by operations,
         # signalling that the period is finalised and no further changes are expected.
@@ -311,25 +350,26 @@ def _build_campaign_rows(user):
         is_locked  = all_scheds.exists() and not all_scheds.filter(is_locked=False).exists()
 
         rows.append({
-            'idx':          len(rows) + 1,
-            'account_id':   a_id,
-            'account_name': c['account__name'],
-            'channel':      channel,
-            'month':        month,
-            'media_type':   c.get('media_type', '') or '',
-            'planned':      planned,
-            'aired':        n_aired,
-            'missed':       n_missed,
-            'sch_start':    sch_start,
-            'sch_end':      sch_end,
-            'lmrb_start':   lmrb_start,
-            'lmrb_end':     lmrb_end,
-            'lmrb_amber':   lmrb_amber,
-            'last_run':     last_run,
-            'dot':          dot,
-            'versions':     versions,
-            'period_over':  period_over,
-            'is_locked':    is_locked,
+            'idx':                  len(rows) + 1,
+            'account_id':           a_id,
+            'account_name':         c['account__name'],
+            'channel':              channel,
+            'month':                month,
+            'media_type':           c.get('media_type', '') or '',
+            'planned':              planned,
+            'aired':                n_aired,
+            'missed':               n_missed,
+            'sch_start':            sch_start,
+            'sch_end':              sch_end,
+            'lmrb_start':           lmrb_start,
+            'lmrb_end':             lmrb_end,
+            'lmrb_amber':           lmrb_amber,
+            'last_run':             last_run,
+            'dot':                  dot,
+            'versions':             versions,
+            'period_over':          period_over,
+            'lmrb_covers_schedule': lmrb_covers_schedule,
+            'is_locked':            is_locked,
         })
 
     return rows

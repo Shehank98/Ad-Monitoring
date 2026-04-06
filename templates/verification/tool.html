@@ -212,10 +212,10 @@
       {% endif %}
 
       {% if row.is_locked %}
-      <!-- Locked by operations — finalised -->
+      <!-- ── LOCKED — finalised by operations ── -->
       <span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg flex-shrink-0"
             title="This schedule has been locked by operations">
-        <i class="fa-solid fa-lock-open text-emerald-600 mr-0.5"></i> Locked
+        <i class="fa-solid fa-lock text-emerald-600 mr-0.5"></i> Locked
       </span>
       <a href="/dashboard/summary/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
          class="btn-primary text-xs px-3 py-1.5 flex-shrink-0"
@@ -228,34 +228,38 @@
               title="Unlock this schedule to allow further changes">
         <i class="fa-solid fa-unlock text-xs"></i>
       </button>
-      {% elif row.period_over %}
-      <!-- Schedule period has ended → show Reconcile Now + Lock button -->
-      <span class="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-lg flex-shrink-0">
-        <i class="fa-solid fa-calendar-xmark text-slate-400 mr-0.5"></i> Period ended
-      </span>
-      <a href="/dashboard/summary/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
-         class="btn-primary text-xs px-3 py-1.5 flex-shrink-0"
-         title="Schedule period is over — go to reconciliation summary">
-        <i class="fa-solid fa-file-contract text-white"></i> Reconcile Now
-      </a>
-      <button type="button"
-              class="text-xs px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 flex-shrink-0 transition-colors font-semibold"
-              onclick="toggleScheduleLock({{ idx }}, '{{ row.account_id }}', '{{ row.channel|escapejs }}', '{{ row.month|escapejs }}', true)"
-              title="Lock this schedule to mark it as finalised">
-        <i class="fa-solid fa-lock text-xs mr-0.5"></i> Lock
-      </button>
       {% else %}
-      <!-- Run button -->
+      <!-- ── ACTIVE — Run button always available until manually locked ── -->
+
+      {% if row.period_over %}
+      <!-- Informational badge only — does not block anything -->
+      <span class="text-[10px] text-slate-400 bg-slate-100 px-2 py-1 rounded-lg flex-shrink-0 hidden sm:inline-flex items-center gap-1">
+        <i class="fa-solid fa-calendar-xmark text-slate-400"></i> Period ended
+      </span>
+      {% endif %}
+
+      <!-- Run button — always shown while not locked -->
       <button type="button" id="run-btn-{{ idx }}"
               class="btn-secondary text-xs px-3 py-1.5 flex-shrink-0"
               onclick="runVerify(event, {{ idx }}, '{{ row.account_id }}', '{{ row.channel|escapejs }}', '{{ row.month|escapejs }}')"
               title="Run verification for this campaign">
         <i class="fa-solid fa-play text-emerald-500"></i> Run
       </button>
+
+      {% if row.lmrb_covers_schedule %}
+      <!-- LMRB data covers schedule end + 7 days → safe to reconcile -->
+      <a href="/dashboard/summary/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
+         class="btn-primary text-xs px-3 py-1.5 flex-shrink-0"
+         title="LMRB data covers the full schedule period — go to reconciliation summary">
+        <i class="fa-solid fa-file-contract text-white"></i> Reconcile Now
+      </a>
+      {% endif %}
+
+      <!-- Lock button — always available so user can finalise whenever ready -->
       <button type="button"
               class="text-xs px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 flex-shrink-0 transition-colors font-semibold"
               onclick="toggleScheduleLock({{ idx }}, '{{ row.account_id }}', '{{ row.channel|escapejs }}', '{{ row.month|escapejs }}', true)"
-              title="Lock this schedule when all LMRB spots are confirmed">
+              title="Lock this schedule to mark it as finalised — hides Run button">
         <i class="fa-solid fa-lock text-xs mr-0.5"></i> Lock
       </button>
       {% endif %}
