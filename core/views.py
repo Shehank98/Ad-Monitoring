@@ -943,6 +943,20 @@ def monitoring_upload(request):
                     if not Channel.objects.filter(name__iexact=ch).exists():
                         Channel.objects.create(name=ch)
 
+            # ── Remove any existing MonitoringData records for the same file ──
+            # LMRBRow dedup (SHA-256 key) prevents actual row duplication, but
+            # without this check the header records accumulate and the list page
+            # shows the same upload multiple times.
+            existing_qs = MonitoringData.objects.filter(
+                account=account,
+                original_filename=excel_file.name,
+            )
+            existing_count = existing_qs.count()
+            if existing_count:
+                print(f"[monitoring_upload] deleting {existing_count} existing MonitoringData record(s) "
+                      f"for account={account} filename={excel_file.name!r}")
+                existing_qs.delete()
+
             group_id   = str(uuid.uuid4())
             saved_path = None
             excel_file.seek(0)
