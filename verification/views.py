@@ -201,6 +201,18 @@ def _build_excel_response(qs, filename_base, account_id=None, channel=None, mont
             return pd.DataFrame()
         return full_df[full_df['Status'] == status_label].copy()
 
+    # Build Matched LMRB sheet — LMRBRow records for all rows that have a match
+    # (Matched + Programme Mismatch + Late Telecast), in canonical column order.
+    matched_lmrb_ids = list(
+        qs.filter(
+            status__in=['matched', 'programme_mismatch', 'late_telecast'],
+            lmrb_row__isnull=False,
+        ).values_list('lmrb_row_id', flat=True)
+    )
+    matched_lmrb_df = _lmrb_qs_to_df(
+        LMRBRow.objects.filter(id__in=matched_lmrb_ids)
+    ) if matched_lmrb_ids else pd.DataFrame(columns=_LMRB_COLS)
+
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         full_df.to_excel(writer, sheet_name='Full Report', index=False)
@@ -210,6 +222,7 @@ def _build_excel_response(qs, filename_base, account_id=None, channel=None, mont
         _sheet('Late Telecast').to_excel(writer, sheet_name='Late Telecast', index=False)
         _summary_df(full_df, 'Channel').to_excel(writer, sheet_name='Channel Summary', index=False)
         _summary_df(full_df, 'Brand').to_excel(writer, sheet_name='Brand Summary', index=False)
+        matched_lmrb_df.to_excel(writer, sheet_name='Matched LMRB', index=False)
         if account_id:
             _build_unmatched_lmrb_df(account_id, channel, month).to_excel(
                 writer, sheet_name='Unmatched LMRB Report', index=False,
