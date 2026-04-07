@@ -23,7 +23,7 @@ import pandas as pd
 
 # ── Patterns ───────────────────────────────────────────────────────────────────
 
-DATE_RE     = re.compile(r'\b(\d{2}[-/]\d{2}[-/]\d{4})\b')
+DATE_RE     = re.compile(r'\b(\d{1,2}[-/]\d{1,2}[-/]\d{4})\b')
 TIME_RE     = re.compile(r'\b(\d{2}:\d{2}:\d{2}(?::\d{2})?)\b')
 
 SKIP_RE = re.compile(
