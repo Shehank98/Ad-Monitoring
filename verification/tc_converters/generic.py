@@ -52,18 +52,40 @@ def _should_skip(text: str) -> bool:
     return bool(SKIP_RE.search(text) or MONEY_RE.search(text) or DOTS_RE.search(text))
 
 
-def _parse_date(raw: str):
+def _detect_date_fmt(date_strings) -> str:
+    """
+    Infer DD/MM/YYYY vs MM/DD/YYYY from a collection of raw date strings.
+
+    Logic: if any second part > 12 it cannot be a month → format is MM/DD/YYYY.
+           if any first part > 12 it cannot be a day-as-month → format is DD/MM/YYYY.
+           Otherwise default to DD/MM/YYYY.
+    """
+    for ds in date_strings:
+        parts = re.split(r'[-/]', ds)
+        if len(parts) != 3:
+            continue
+        try:
+            p1, p2 = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        if p2 > 12:
+            return '%m/%d/%Y'   # second part can't be month → month is first
+        if p1 > 12:
+            return '%d/%m/%Y'   # first part can't be month → day is first
+    return '%d/%m/%Y'           # all ambiguous – fall back to DD/MM/YYYY
+
+
+def _parse_date(raw: str, fmt: str = '%d/%m/%Y'):
     parts = re.split(r'[-/]', raw)
     if len(parts) != 3:
         return None
-    d, m, y = parts
-    try:
-        return datetime(int(y), int(m), int(d)).date()
-    except ValueError:
+    alt = '%m/%d/%Y' if fmt == '%d/%m/%Y' else '%d/%m/%Y'
+    for f in (fmt, alt):
         try:
-            return datetime(int(y), int(d), int(m)).date()
+            return datetime.strptime(raw, f).date()
         except ValueError:
-            return None
+            pass
+    return None
 
 
 def _parse_time(t: str) -> str:
@@ -136,6 +158,14 @@ def parse_pdf(pdf_path: str) -> pd.DataFrame:
         elif records and len(text.strip()) > 2:
             records[-1]['all_words'].extend(line)
 
+    # ── Step 3b: detect date format (DD/MM/YYYY vs MM/DD/YYYY) from all dates ───
+    all_date_strs = []
+    for rec in records:
+        m = DATE_RE.search(' '.join(w['text'] for w in rec['main_line']))
+        if m:
+            all_date_strs.append(m.group(1))
+    date_fmt = _detect_date_fmt(all_date_strs)
+
     # ── Step 4: parse each record ───────────────────────────────────────────────
     parsed = []
 
@@ -147,7 +177,7 @@ def parse_pdf(pdf_path: str) -> pd.DataFrame:
         if not date_m:
             continue
         raw_date = date_m.group(1)
-        date_val = _parse_date(raw_date)
+        date_val = _parse_date(raw_date, date_fmt)
         if date_val is None:
             continue
 

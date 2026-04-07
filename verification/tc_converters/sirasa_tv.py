@@ -64,8 +64,8 @@ def _parse_timecode(tc: str) -> str:
 
 
 def _parse_date(raw: str):
-    """Convert DD/MM/YYYY → datetime.date, or None on failure."""
-    for fmt in ('%d/%m/%Y', '%m/%d/%Y'):
+    """Convert M/D/YYYY (Sirasa TV uses month-first format) → datetime.date, or None."""
+    for fmt in ('%m/%d/%Y', '%d/%m/%Y'):
         try:
             return datetime.strptime(raw, fmt).date()
         except ValueError:
