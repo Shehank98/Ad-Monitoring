@@ -5862,7 +5862,116 @@ def admin_export(request):
         for col_i in range(1, len(AR_HEADERS) + 1):
             ws_report.cell(row_i, col_i).font = norm_font
 
-    # ── 5. Brand Mappings sheet ───────────────────────────────────────────────
+    # ── 5. Matched Spots sheet ───────────────────────────────────────────────
+    # Source 1: Auto-matched ScheduleRows (is_matched=True, not manual)
+    sr_matched_qs = (
+        ScheduleRow.objects
+        .select_related('schedule', 'matched_lmrb')
+        .filter(account_id=account_id, is_matched=True, is_manual_matched=False)
+    )
+    if channel:         sr_matched_qs = sr_matched_qs.filter(channel__iexact=channel)
+    if month:           sr_matched_qs = sr_matched_qs.filter(month=month)
+    if schedule_number: sr_matched_qs = sr_matched_qs.filter(schedule__schedule_number__iexact=schedule_number)
+    if brand:           sr_matched_qs = sr_matched_qs.filter(brand__icontains=brand)
+    if _from_d:         sr_matched_qs = sr_matched_qs.filter(date__gte=_from_d)
+    if _to_d:           sr_matched_qs = sr_matched_qs.filter(date__lte=_to_d)
+
+    # Source 2: Manual matches with both schedule_row and lmrb_row
+    mm_matched_qs = (
+        ManualMatch.objects
+        .select_related('schedule_row', 'schedule_row__schedule', 'lmrb_row')
+        .filter(
+            account_id=account_id,
+            match_mode__in=['schedule_lmrb', '3way'],
+            schedule_row__isnull=False,
+            lmrb_row__isnull=False,
+        )
+    )
+    if channel:         mm_matched_qs = mm_matched_qs.filter(channel__iexact=channel)
+    if month:           mm_matched_qs = mm_matched_qs.filter(month=month)
+    if schedule_number: mm_matched_qs = mm_matched_qs.filter(schedule_row__schedule__schedule_number__iexact=schedule_number)
+    if brand:           mm_matched_qs = mm_matched_qs.filter(schedule_row__brand__icontains=brand)
+    if _from_d:         mm_matched_qs = mm_matched_qs.filter(schedule_row__date__gte=_from_d)
+    if _to_d:           mm_matched_qs = mm_matched_qs.filter(schedule_row__date__lte=_to_d)
+
+    # Status map for auto-matched rows
+    mr_status_map = {
+        mr.schedule_row_id: mr.status
+        for mr in MatchResult.objects.filter(
+            account_id=account_id,
+            status__in=['matched', 'programme_mismatch', 'late_telecast'],
+            schedule_row__isnull=False,
+        ).only('schedule_row_id', 'status')
+    }
+
+    # Build flat rows: (sr, lr, match_type, match_status)
+    matched_spot_rows = []
+    for sr in sr_matched_qs:
+        lr = sr.matched_lmrb
+        status = mr_status_map.get(sr.id, 'matched')
+        matched_spot_rows.append((sr, lr, 'Auto', status))
+    for mm in mm_matched_qs:
+        matched_spot_rows.append((mm.schedule_row, mm.lmrb_row, 'Manual', 'manual_match'))
+    matched_spot_rows.sort(key=lambda t: (
+        t[0].month or '',
+        str(t[0].date) if t[0].date else '',
+        t[0].brand or '',
+    ))
+
+    ws_ms = wb.create_sheet('Matched Spots')
+    MS_HEADERS = [
+        'Schedule No', 'Channel', 'Month', 'Brand',
+        'Planned Programme', 'Planned Date', 'Planned Start', 'Planned End',
+        'Duration (s)', 'Ad Type', 'Match Type', 'Match Status',
+        'LMRB Theme', 'LMRB Date', 'LMRB Time', 'LMRB Duration (s)',
+        'LMRB Programme', 'LMRB Prog Time', 'LMRB Advertiser', 'LMRB Product',
+        'LMRB Brk No', 'LMRB Pos in Brk', 'LMRB Ads in Brk',
+        'LMRB Ad Pos', 'LMRB Tot Ads', 'LMRB Language', 'LMRB Source',
+        'LMRB Cost', 'LMRB Day',
+    ]
+    _meta_row(ws_ms, len(MS_HEADERS), 'Matched Spots', len(matched_spot_rows))
+    _hdr_row(ws_ms, MS_HEADERS)
+    STATUS_LABEL_MS = {
+        'matched': 'Matched',
+        'programme_mismatch': 'Programme Mismatch',
+        'late_telecast': 'Late Telecast',
+        'manual_match': 'Manual Match',
+    }
+    for row_i, (sr, lr, match_type, match_status) in enumerate(matched_spot_rows, start=3):
+        sched_no = sr.schedule.schedule_number if sr.schedule_id else ''
+        ws_ms.cell(row_i,  1, sched_no)
+        ws_ms.cell(row_i,  2, sr.channel or '')
+        ws_ms.cell(row_i,  3, sr.month or '')
+        ws_ms.cell(row_i,  4, sr.brand or '')
+        ws_ms.cell(row_i,  5, sr.programme or '')
+        ws_ms.cell(row_i,  6, str(sr.date) if sr.date else '')
+        ws_ms.cell(row_i,  7, sr.start_time or '')
+        ws_ms.cell(row_i,  8, sr.end_time or '')
+        ws_ms.cell(row_i,  9, sr.duration if sr.duration is not None else '')
+        ws_ms.cell(row_i, 10, sr.ad_type or '')
+        ws_ms.cell(row_i, 11, match_type)
+        ws_ms.cell(row_i, 12, STATUS_LABEL_MS.get(match_status, match_status))
+        if lr:
+            ws_ms.cell(row_i, 13, lr.advt_theme or '')
+            ws_ms.cell(row_i, 14, str(lr.date) if lr.date else '')
+            ws_ms.cell(row_i, 15, lr.advt_time or '')
+            ws_ms.cell(row_i, 16, lr.duration if lr.duration is not None else '')
+            ws_ms.cell(row_i, 17, lr.program or '')
+            ws_ms.cell(row_i, 18, lr.prog_time or '')
+            ws_ms.cell(row_i, 19, lr.advertiser or '')
+            ws_ms.cell(row_i, 20, lr.product or '')
+            ws_ms.cell(row_i, 21, lr.brk_no or '')
+            ws_ms.cell(row_i, 22, lr.pos_in_brk or '')
+            ws_ms.cell(row_i, 23, lr.ads_in_brk or '')
+            ws_ms.cell(row_i, 24, lr.ad_pos or '')
+            ws_ms.cell(row_i, 25, lr.tot_ads or '')
+            ws_ms.cell(row_i, 26, lr.lng or '')
+            ws_ms.cell(row_i, 27, lr.source or '')
+            ws_ms.cell(row_i, 28, float(lr.cost) if lr.cost is not None else '')
+            ws_ms.cell(row_i, 29, lr.day or '')
+    _norm_rows(ws_ms, len(matched_spot_rows), len(MS_HEADERS))
+
+    # ── 7. Brand Mappings sheet ───────────────────────────────────────────────
     bm_qs = BrandMapping.objects.filter(account_id=account_id)
     if brand: bm_qs = bm_qs.filter(brand__icontains=brand)
     bm_qs = bm_qs.order_by('brand', 'theme')
@@ -5879,7 +5988,7 @@ def admin_export(request):
         ws_bm.cell(row_i, 4, bm.duration if bm.duration is not None else '')
     _norm_rows(ws_bm, len(bm_rows), len(BM_HEADERS))
 
-    # ── 6. Manual Matches sheet ───────────────────────────────────────────────
+    # ── 8. Manual Matches sheet ───────────────────────────────────────────────
     mm_qs = ManualMatch.objects.select_related(
         'schedule_row', 'tc_row', 'lmrb_row', 'matched_by'
     ).filter(account_id=account_id)
@@ -5916,7 +6025,7 @@ def admin_export(request):
         ws_mm.cell(row_i, 15, str(mm.matched_at) if mm.matched_at else '')
     _norm_rows(ws_mm, len(mm_rows), len(MM_HEADERS))
 
-    # ── 7. Sponsorship Assignments sheet ─────────────────────────────────────
+    # ── 9. Sponsorship Assignments sheet ─────────────────────────────────────
     sp_qs = SponsorshipLmrbAssignment.objects.select_related(
         'schedule_row', 'lmrb_row', 'matched_by'
     ).filter(account_id=account_id)
