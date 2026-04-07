@@ -1094,10 +1094,16 @@ def monitoring_upload(request):
                 v.strip() for v in request.POST.getlist('selected_advertisers')
                 if v.strip()
             ]
+            selected_products = [
+                v.strip() for v in request.POST.getlist('selected_products')
+                if v.strip()
+            ]
             print(f"[monitoring_upload] parsing LMRB rows (append mode) …")
             print(f"[monitoring_upload] advertiser filter: {selected_advertisers or 'ALL'}")
+            print(f"[monitoring_upload] product filter: {selected_products or 'ALL'}")
             _parse_lmrb_rows(df, data_type, account, batch_id=uuid.UUID(group_id),
-                             advertiser_filter=selected_advertisers or None)
+                             advertiser_filter=selected_advertisers or None,
+                             product_filter=selected_products or None)
 
             ch_names = ', '.join(m['channel'] for m in channel_metas)
             print(f"[monitoring_upload] DONE - {len(channel_metas)} channel(s): {ch_names}")
@@ -1129,7 +1135,7 @@ def monitoring_upload(request):
     return render(request, 'monitoring/upload.html', {'form': form})
 
 
-def _parse_lmrb_rows(df, data_type, account, batch_id=None, advertiser_filter=None):
+def _parse_lmrb_rows(df, data_type, account, batch_id=None, advertiser_filter=None, product_filter=None):
     """
     Parse monitoring DataFrame and append into the LMRBRow master table.
 
@@ -1222,6 +1228,12 @@ def _parse_lmrb_rows(df, data_type, account, batch_id=None, advertiser_filter=No
         {a.lower() for a in advertiser_filter} if advertiser_filter else None
     )
 
+    # ── Product filter: same pattern as advertiser filter ─────────────────────
+    prod_col_name = _find_col(df, 'Product', 'product', 'PRODUCT')
+    _prod_filter_set = (
+        {p.lower() for p in product_filter} if product_filter else None
+    )
+
     # ── Build rows dict keyed by dedup_key ────────────────────────────────────
     rows_by_key = {}
 
@@ -1238,7 +1250,11 @@ def _parse_lmrb_rows(df, data_type, account, batch_id=None, advertiser_filter=No
         # Skip rows whose advertiser is not in the selected filter
         if _adv_filter_set and advertiser.lower() not in _adv_filter_set:
             continue
-        product    = _safe_str(r.get('Product', ''))
+        product = _safe_str(r.get(prod_col_name, '') if prod_col_name else r.get('Product', ''))
+
+        # Skip rows whose product is not in the selected filter
+        if _prod_filter_set and product.lower() not in _prod_filter_set:
+            continue
 
         if not (theme and advt_time and date_val and channel):
             continue  # skip rows with missing key fields
@@ -1315,11 +1331,24 @@ def monitoring_detect(request):
                 if v and v.lower() not in ('nan', 'none', '')
             )
 
+        # Detect unique products so the uploader can also filter by product
+        prod_col = _find_col(df, 'Product', 'product', 'PRODUCT', 'Advt_Theme')
+        # For MapOnline the relevant column is Product; for MediaWatch it may not exist
+        # Use the plain Product column only (not Theme) to avoid confusing themes with products
+        prod_col = _find_col(df, 'Product', 'product', 'PRODUCT')
+        products = []
+        if prod_col:
+            products = sorted(
+                v for v in df[prod_col].dropna().astype(str).str.strip().unique()
+                if v and v.lower() not in ('nan', 'none', '')
+            )
+
         return JsonResponse({
             'ok': True,
             'channels': metas,
             'total_rows': len(df),
             'advertisers': advertisers,
+            'products': products,
         })
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)})
