@@ -200,6 +200,17 @@
             <p class="field-hint">As it appears in TC files. You can add multiple.</p>
           </div>
 
+          <!-- MapOnline Theme(s) -->
+          <div>
+            <label class="field-label">
+              <i class="fa-solid fa-map mr-1 text-slate-400"></i> MapOnline Theme(s)
+              <span class="text-slate-400 font-normal normal-case ml-1">optional · for preliminary check</span>
+            </label>
+            <input type="text" name="maponline_theme" placeholder="e.g. Brand Tag (30)(Sin)|Brand Tag (30)(Eng)"
+                   class="input-field">
+            <p class="field-hint">Theme as it appears in MapOnline files (Theme column). Separate multiple with <code class="bg-slate-100 px-1 rounded">|</code>. Leave blank to skip this brand in MapOnline matching.</p>
+          </div>
+
           <!-- Duration -->
           <div>
             <label class="field-label"><i class="fa-solid fa-clock mr-1 text-slate-400"></i> Duration (seconds) <span class="text-slate-400 font-normal normal-case ml-1">optional</span></label>
@@ -428,6 +439,7 @@
                 <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Brand</th>
                 <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">LMRB Theme</th>
                 <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">TC Theme(s)</th>
+                <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">MapOnline Theme</th>
                 <th class="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider w-16">Dur</th>
                 <th class="px-3 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider w-20">Action</th>
               </tr>
@@ -497,6 +509,24 @@
                     <button onclick="openEditTcModal({{ m.id }}, '{{ m.tc_theme|escapejs }}')"
                             class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors border border-transparent hover:border-amber-200"
                             title="Edit TC themes">
+                      <i class="fa-solid fa-pencil"></i>
+                    </button>
+                  </div>
+                </td>
+                <td class="px-3 py-2.5" id="maponline-cell-{{ m.id }}">
+                  <div class="flex flex-wrap items-center gap-1">
+                    {% if m.maponline_theme %}
+                    {% for t in m.maponline_themes_list %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-[11px] font-semibold ring-1 ring-blue-200 max-w-[150px]" title="{{ t }}">
+                      <span class="truncate">{{ t }}</span>
+                    </span>
+                    {% endfor %}
+                    {% else %}
+                    <span class="text-[10px] text-slate-300">—</span>
+                    {% endif %}
+                    <button onclick="openEditMaponlineModal({{ m.id }}, '{{ m.maponline_theme|escapejs }}')"
+                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors border border-transparent hover:border-blue-200"
+                            title="Edit MapOnline theme">
                       <i class="fa-solid fa-pencil"></i>
                     </button>
                   </div>
@@ -625,6 +655,39 @@
           <i class="fa-solid fa-check"></i> Save
         </button>
         <button type="button" onclick="closeEditTcModal()" class="btn-secondary flex-1 justify-center">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Edit MapOnline Theme modal ─────────────────────────────────────────── -->
+<div id="editMaponlineModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl border border-slate-100 p-6 w-full max-w-md mx-4">
+    <div class="flex items-center gap-3 mb-4">
+      <span class="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
+        <i class="fa-solid fa-map text-blue-600 text-sm"></i>
+      </span>
+      <div>
+        <h3 class="font-bold text-slate-800 text-sm">Edit MapOnline Theme(s)</h3>
+        <p class="text-[11px] text-slate-400">Theme names as they appear in MapOnline files</p>
+      </div>
+    </div>
+    <form method="post" id="editMaponlineForm">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="edit_maponline_theme">
+      <input type="hidden" name="mapping_id" id="editMaponlineMappingId">
+      <div class="mb-3">
+        <label class="text-[11px] font-semibold text-slate-600 block mb-1">MapOnline Theme(s) — separate multiple with <code class="bg-slate-100 px-1 rounded">|</code></label>
+        <input type="text" name="maponline_theme" id="editMaponlineThemeInput"
+               placeholder="e.g. Brand Tag (30)(Sin)|Brand Tag (30)(Eng)"
+               class="input-field">
+        <p class="text-[10px] text-slate-400 mt-1">Leave blank to skip this brand in MapOnline preliminary matching.</p>
+      </div>
+      <div class="flex gap-2">
+        <button type="submit" class="btn-primary flex-1 justify-center">
+          <i class="fa-solid fa-check"></i> Save
+        </button>
+        <button type="button" onclick="closeEditMaponlineModal()" class="btn-secondary flex-1 justify-center">Cancel</button>
       </div>
     </form>
   </div>
@@ -1228,6 +1291,22 @@ function closeEditTcModal() {
 
 document.getElementById('editTcModal').addEventListener('click', function(e) {
   if (e.target === this) closeEditTcModal();
+});
+
+// ── Edit MapOnline theme modal ─────────────────────────────────────────────────
+function openEditMaponlineModal(mappingId, currentValue) {
+  document.getElementById('editMaponlineMappingId').value = mappingId;
+  document.getElementById('editMaponlineThemeInput').value = currentValue || '';
+  document.getElementById('editMaponlineModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('editMaponlineThemeInput').focus(), 100);
+}
+
+function closeEditMaponlineModal() {
+  document.getElementById('editMaponlineModal').classList.add('hidden');
+}
+
+document.getElementById('editMaponlineModal').addEventListener('click', function(e) {
+  if (e.target === this) closeEditMaponlineModal();
 });
 
 // ── Quick-add variant: pre-fill brand + LMRB theme chip + TC themes + scroll ─

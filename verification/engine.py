@@ -459,7 +459,12 @@ def run_scope(account_id, channel, month, mode='smart'):
     # ── Build shared LMRB pool ─────────────────────────────────────────────────
     # Channel matching handles both 'TV - Sirasa TV' (schedule form) and
     # 'Sirasa TV' (LMRB after prefix stripping) via _lmrb_channel_q.
-    lmrb_qs = LMRBRow.objects.filter(_lmrb_channel_q(channel), account_id=account_id)
+    # Only MediaWatch rows are used here; MapOnline rows are matched independently
+    # by run_maponline_scope() so neither pool steals rows from the other.
+    lmrb_qs = LMRBRow.objects.filter(
+        _lmrb_channel_q(channel), account_id=account_id,
+        source='mediawatch',
+    )
     # Always exclude manually matched LMRB rows - permanently locked once a
     # ManualMatch record exists.  This filter applies in both smart and reset modes.
     lmrb_qs = lmrb_qs.filter(is_manual_matched=False)
@@ -579,9 +584,12 @@ def run_scope(account_id, channel, month, mode='smart'):
                 return True
         return False
 
-    # Build wider LMRB pool: from schedule start to latest available LMRB date
+    # Build wider LMRB pool: from schedule start to latest available LMRB date.
+    # Restrict to mediawatch only — MapOnline rows are handled by the separate
+    # MapOnline engine and must not appear here as extra aired.
     _extra_lmrb_qs = LMRBRow.objects.filter(
         _lmrb_channel_q(channel), account_id=account_id,
+        source='mediawatch',
         is_manual_matched=False, is_sponsorship_matched=False,
     )
     if mode == 'smart':
@@ -719,4 +727,217 @@ def auto_run_all_for_account(account_id):
                     'ok': False, 'error': str(exc),
                 })
 
+    return results
+
+
+# ── MapOnline preliminary matching ─────────────────────────────────────────────
+
+def _build_maponline_brand_theme_map(account_id):
+    """Build brand→theme map using BrandMapping.maponline_theme (not .theme).
+    Brands with a blank maponline_theme are skipped entirely."""
+    brand_theme_map = {}
+    for bm in BrandMapping.objects.filter(account_id=account_id):
+        if not bm.maponline_theme:
+            continue
+        norm_brand  = normalize(bm.brand)
+        mapping_dur = int(bm.duration) if bm.duration is not None else None
+        for theme in bm.maponline_themes_list:
+            brand_theme_map.setdefault(norm_brand, []).append((normalize(theme), mapping_dur))
+    return brand_theme_map
+
+
+def run_maponline_scope(account_id, channel, month, mode='smart'):
+    """
+    Preliminary matching: match ScheduleRows against MapOnline LMRBRows only.
+
+    Uses separate lock fields (is_maponline_matched / is_maponline_schedule_matched)
+    so this run never interferes with the authoritative LMRB (MediaWatch) engine.
+
+    mode='smart':  Only process rows not yet MapOnline-matched.
+    mode='reset':  Clear all MapOnline match fields for the scope, then re-run.
+
+    Returns dict: {'matched': int, 'not_matched': int}
+    """
+    active_schedules = _active_schedules_for_scope(account_id, channel, month)
+    makeup_schedules = _makeup_schedules_for_scope(active_schedules)
+
+    # Date range
+    date_start = None
+    date_end   = None
+    if active_schedules:
+        s_dates = [s.start_date for s in active_schedules if s.start_date]
+        e_dates = [s.end_date   for s in active_schedules if s.end_date]
+        date_start = min(s_dates) if s_dates else None
+        date_end   = max(e_dates) if e_dates else None
+
+    if not date_start or not date_end:
+        row_dates = ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+        ).aggregate(min=Min('date'), max=Max('date'))
+        date_start = date_start or row_dates['min']
+        date_end   = date_end   or row_dates['max']
+
+    # Cap at latest MapOnline date available
+    max_maponline_date = LMRBRow.objects.filter(
+        _lmrb_channel_q(channel), account_id=account_id, source='maponline',
+    ).aggregate(d=Max('date'))['d']
+    if max_maponline_date:
+        date_end = min(date_end, max_maponline_date) if date_end else max_maponline_date
+    max_verify_ts = pd.Timestamp(date_end) if date_end else None
+
+    # All scope ScheduleRow IDs (for reset)
+    scope_sch_ids = list(
+        ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+            ad_type='COMMERCIAL BENEFITS',
+        ).values_list('id', flat=True)
+    )
+    if makeup_schedules:
+        scope_sch_ids += list(
+            ScheduleRow.objects.filter(
+                schedule__in=makeup_schedules, ad_type='COMMERCIAL BENEFITS',
+            ).values_list('id', flat=True)
+        )
+
+    if mode == 'reset':
+        # Clear MapOnline lock on previously matched LMRBRows
+        LMRBRow.objects.filter(
+            maponline_schedule_matches__id__in=scope_sch_ids,
+        ).update(is_maponline_schedule_matched=False)
+        # Clear MapOnline match fields on ScheduleRows
+        ScheduleRow.objects.filter(id__in=scope_sch_ids).update(
+            is_maponline_matched=False,
+            matched_maponline_lmrb=None,
+            maponline_matched_at=None,
+        )
+
+    if not scope_sch_ids:
+        return {'matched': 0, 'not_matched': 0}
+
+    # Build MapOnline LMRB pool (source='maponline' rows only)
+    lmrb_qs = LMRBRow.objects.filter(
+        _lmrb_channel_q(channel), account_id=account_id,
+        source='maponline',
+        is_manual_matched=False,
+        is_maponline_schedule_matched=False,
+    )
+    if date_start:
+        lmrb_qs = lmrb_qs.filter(date__gte=date_start)
+    if date_end:
+        lmrb_qs = lmrb_qs.filter(date__lte=date_end)
+
+    mon_pool = _build_mon_pool(lmrb_qs)
+    brand_theme_map = _build_maponline_brand_theme_map(account_id)
+
+    if mon_pool.empty or not brand_theme_map:
+        return {'matched': 0, 'not_matched': len(scope_sch_ids)}
+
+    all_matched_dfs = []
+    global_consumed_idx: set = set()
+
+    schedules_to_run = active_schedules if active_schedules else [None]
+    schedules_to_run = schedules_to_run + makeup_schedules
+
+    for sched in schedules_to_run:
+        if sched is not None:
+            sch_qs = ScheduleRow.objects.filter(
+                schedule=sched, ad_type='COMMERCIAL BENEFITS',
+            )
+        else:
+            sch_qs = ScheduleRow.objects.filter(
+                account_id=account_id, channel=channel, month=month,
+                ad_type='COMMERCIAL BENEFITS',
+            )
+
+        sch_qs = sch_qs.filter(is_manual_matched=False)
+        if mode == 'smart':
+            sch_qs = sch_qs.filter(is_maponline_matched=False)
+
+        sch_df = _build_sch_df(sch_qs)
+        if sch_df.empty:
+            continue
+
+        m_df, _pm, _l, _na, _extra, consumed = match_ads(
+            sch_df, mon_pool, brand_theme_map,
+            pre_matched_idx=global_consumed_idx,
+            max_verify_date=max_verify_ts,
+        )
+        global_consumed_idx = consumed
+        if not m_df.empty:
+            all_matched_dfs.append(m_df)
+
+    # Collect matched pairs and lock with MapOnline-specific fields
+    now = timezone.now()
+    sch_updates  = []
+    lmrb_updates = []
+    matched_count = 0
+
+    for df in all_matched_dfs:
+        if df is None or df.empty:
+            continue
+        for _, row in df.iterrows():
+            sch_id  = row.get('_sch_row_id')
+            lmrb_id = row.get('_lmrb_row_id')
+            if sch_id and lmrb_id:
+                sch_updates.append(ScheduleRow(
+                    id=sch_id,
+                    is_maponline_matched=True,
+                    matched_maponline_lmrb_id=lmrb_id,
+                    maponline_matched_at=now,
+                ))
+                lmrb_updates.append(LMRBRow(
+                    id=lmrb_id,
+                    is_maponline_schedule_matched=True,
+                ))
+                matched_count += 1
+
+    if sch_updates:
+        ScheduleRow.objects.bulk_update(
+            sch_updates,
+            ['is_maponline_matched', 'matched_maponline_lmrb_id', 'maponline_matched_at'],
+        )
+    if lmrb_updates:
+        LMRBRow.objects.bulk_update(lmrb_updates, ['is_maponline_schedule_matched'])
+
+    not_matched = len(scope_sch_ids) - matched_count
+    return {'matched': matched_count, 'not_matched': not_matched}
+
+
+def auto_run_maponline_for_account(account_id):
+    """
+    Trigger smart MapOnline preliminary matching for every (channel × month) scope
+    that has both ScheduleRow records AND MapOnline LMRBRow records.
+
+    Per-scope errors are caught and logged.
+    Returns list of {'channel', 'month', 'ok', ...} dicts.
+    """
+    sch_channels = list(
+        ScheduleRow.objects.filter(account_id=account_id)
+        .values_list('channel', flat=True).distinct()
+    )
+    maponline_channels_lower = {
+        c.lower(): c
+        for c in LMRBRow.objects.filter(account_id=account_id, source='maponline')
+                                 .values_list('channel', flat=True).distinct()
+    }
+    overlap = [ch for ch in sch_channels if ch.lower() in maponline_channels_lower]
+
+    results = []
+    for channel in sorted(set(overlap)):
+        months = list(
+            ScheduleRow.objects.filter(account_id=account_id, channel=channel)
+            .values_list('month', flat=True).distinct()
+        )
+        for month in months:
+            try:
+                result = run_maponline_scope(account_id, channel, month, mode='smart')
+                results.append({'channel': channel, 'month': month, 'ok': True, **result})
+            except Exception as exc:
+                logger.warning(
+                    'auto_run_maponline_for_account: %s/%s failed: %s', channel, month, exc,
+                )
+                results.append({
+                    'channel': channel, 'month': month,
+                    'ok': False, 'error': str(exc),
+                })
     return results

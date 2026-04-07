@@ -964,18 +964,25 @@ def monitoring_list(request):
         date_from = min(s for s, e in all_dates) if all_dates else None
         date_to   = max(e for s, e in all_dates) if all_dates else None
         ch_list   = sorted(set(d.channel for d in grp if d.channel))
+        # For MapOnline batches, show how many rows have been matched to a ScheduleRow
+        maponline_matched = None
+        if first.data_type == 'maponline':
+            maponline_matched = LMRBRow.objects.filter(
+                batch_id=fgid, is_maponline_schedule_matched=True,
+            ).count()
         batch_summaries.append({
-            'file_group_id': fgid,
-            'first':         first,
-            'data_type':     first.data_type,
-            'account':       first.account,
-            'channels':      ch_list,
-            'date_from':     date_from,
-            'date_to':       date_to,
-            'total_rows':    total_rows,
-            'uploaded_by':   first.uploaded_by,
-            'uploaded_at':   first.uploaded_at,
-            'group':         grp,         # still available for per-channel download
+            'file_group_id':    fgid,
+            'first':            first,
+            'data_type':        first.data_type,
+            'account':          first.account,
+            'channels':         ch_list,
+            'date_from':        date_from,
+            'date_to':          date_to,
+            'total_rows':       total_rows,
+            'uploaded_by':      first.uploaded_by,
+            'uploaded_at':      first.uploaded_at,
+            'group':            grp,         # still available for per-channel download
+            'maponline_matched': maponline_matched,
         })
 
     today    = date_cls.today()
@@ -1098,11 +1105,16 @@ def monitoring_upload(request):
                 f'{"MapOnline" if data_type == "maponline" else "MediaWatch (LMRB)"} - '
                 f'{account} - {len(channel_metas)} channel(s): {ch_names}. Uploaded successfully.')
 
-            # Auto-run verification
+            # Auto-run verification: MapOnline → preliminary engine; MediaWatch → final engine
             try:
-                from verification.engine import auto_run_all_for_account
-                print(f"[monitoring_upload] auto-running verification for account {account.id}")
-                auto_run_all_for_account(account.id)
+                if data_type == 'maponline':
+                    from verification.engine import auto_run_maponline_for_account
+                    print(f"[monitoring_upload] auto-running MapOnline preliminary matching for account {account.id}")
+                    auto_run_maponline_for_account(account.id)
+                else:
+                    from verification.engine import auto_run_all_for_account
+                    print(f"[monitoring_upload] auto-running LMRB verification for account {account.id}")
+                    auto_run_all_for_account(account.id)
             except Exception as e:
                 print(f"[monitoring_upload] auto-verification error (non-fatal): {e}")
 
@@ -1169,6 +1181,18 @@ def _parse_lmrb_rows(df, data_type, account, batch_id=None, advertiser_filter=No
         if tm_col and tm_col != 'Advt_time': rename[tm_col] = 'Advt_time'
         pg_col = _find_col(df, 'Programme', 'Prg Name', 'Program')
         if pg_col and pg_col != 'Programme': rename[pg_col] = 'Programme'
+        # Extended columns: MapOnline uses spaced/different names that the row-
+        # extraction code doesn't expect, so rename them to the internal names.
+        brk_col = _find_col(df, 'BrkNo', 'Brk No', 'Brk_No')
+        if brk_col and brk_col != 'BrkNo': rename[brk_col] = 'BrkNo'
+        adp_col = _find_col(df, 'AdPos', 'Ad Pos', 'Ad_Pos')
+        if adp_col and adp_col != 'AdPos': rename[adp_col] = 'AdPos'
+        tot_col = _find_col(df, 'TotAds', 'Tot Ads', 'Tot_Ads')
+        if tot_col and tot_col != 'TotAds': rename[tot_col] = 'TotAds'
+        pt_col = _find_col(df, 'Prog_time', 'Prg Start', 'Prog Start', 'PrgStart')
+        if pt_col and pt_col != 'Prog_time': rename[pt_col] = 'Prog_time'
+        lng_col = _find_col(df, 'Lng', 'Language')
+        if lng_col and lng_col != 'Lng': rename[lng_col] = 'Lng'
         if rename:
             df.rename(columns=rename, inplace=True)
         if _find_col(df, 'Date') is not None:
@@ -1460,13 +1484,14 @@ def brand_mapping_list(request):
     if request.method == 'POST':
         action = request.POST.get('action')
         if action == 'add':
-            acc_id   = request.POST.get('account_id', '').strip()
-            brand    = request.POST.get('brand', '').strip()
-            themes_raw = request.POST.get('theme', '').strip()
-            tc_theme = request.POST.get('tc_theme', '').strip()
-            product  = request.POST.get('product', '').strip()
-            dur_raw  = request.POST.get('duration', '').strip()
-            duration = int(dur_raw) if dur_raw.isdigit() else None
+            acc_id          = request.POST.get('account_id', '').strip()
+            brand           = request.POST.get('brand', '').strip()
+            themes_raw      = request.POST.get('theme', '').strip()
+            tc_theme        = request.POST.get('tc_theme', '').strip()
+            maponline_theme = request.POST.get('maponline_theme', '').strip()
+            product         = request.POST.get('product', '').strip()
+            dur_raw         = request.POST.get('duration', '').strip()
+            duration        = int(dur_raw) if dur_raw.isdigit() else None
 
             # Support multiple LMRB themes (pipe-separated)
             theme_list = [t.strip() for t in themes_raw.split('|') if t.strip()]
@@ -1490,7 +1515,8 @@ def brand_mapping_list(request):
                         else:
                             BrandMapping.objects.create(
                                 account=account, brand=brand, theme=theme,
-                                tc_theme=tc_theme, duration=duration, product=product)
+                                tc_theme=tc_theme, maponline_theme=maponline_theme,
+                                duration=duration, product=product)
                             created += 1
                     dur_str = f' ({duration}s)' if duration else ''
                     if created:
@@ -1529,6 +1555,18 @@ def brand_mapping_list(request):
                 mapping.tc_theme = tc_theme
                 mapping.save(update_fields=['tc_theme'])
                 messages.success(request, f'TC Theme updated for {mapping.brand}.')
+            return redirect(f'/dashboard/brand-mappings/?account={account_id or mapping.account_id}')
+
+        elif action == 'edit_maponline_theme':
+            mapping_id      = request.POST.get('mapping_id')
+            maponline_theme = request.POST.get('maponline_theme', '').strip()
+            mapping         = get_object_or_404(BrandMapping, id=mapping_id)
+            if not _is_admin(user) and mapping.account not in account_qs:
+                messages.error(request, 'No access to that mapping.')
+            else:
+                mapping.maponline_theme = maponline_theme
+                mapping.save(update_fields=['maponline_theme'])
+                messages.success(request, f'MapOnline Theme updated for {mapping.brand}.')
             return redirect(f'/dashboard/brand-mappings/?account={account_id or mapping.account_id}')
 
         elif action == 'delete':
@@ -1887,6 +1925,8 @@ def monitoring_dashboard(request):
     lmrb_matched_rows   = []
     lmrb_unmatched_rows = []
     extra_aired_rows    = []
+    maponline_summary   = []
+    has_maponline_data  = False
 
     if account_id:
         try:
@@ -2523,12 +2563,37 @@ def monitoring_dashboard(request):
 
         # ── Matched LMRB rows (for LMRB Matched tab) ─────────────────────────
         lmrb_matched_rows = list(
-            lmrb_qs.filter(is_matched=True).order_by('date', 'advt_time')
+            lmrb_qs.filter(is_matched=True, source='mediawatch').order_by('date', 'advt_time')
         )
         # ── Unmatched LMRB rows (for LMRB Unmatched tab) ─────────────────────
         lmrb_unmatched_rows = list(
-            lmrb_qs.filter(is_matched=False).order_by('date', 'advt_time')
+            lmrb_qs.filter(is_matched=False, source='mediawatch').order_by('date', 'advt_time')
         )
+
+        # ── MapOnline preliminary summary (for MapOnline Preliminary tab) ─────
+        # ScheduleRows matched against MapOnline data, grouped by brand/duration.
+        _maponline_sch_rows = list(
+            _sr_base.filter(ad_type='COMMERCIAL BENEFITS')
+            .select_related('matched_maponline_lmrb')
+            .order_by('date', 'brand')
+        )
+        _maponline_brand_map = {}
+        for _sr in _maponline_sch_rows:
+            key = (_sr.brand, _sr.duration)
+            entry = _maponline_brand_map.setdefault(key, {
+                'brand': _sr.brand, 'duration': _sr.duration,
+                'planned': 0, 'maponline_aired': 0,
+            })
+            entry['planned'] += 1
+            if _sr.is_maponline_matched:
+                entry['maponline_aired'] += 1
+        maponline_summary = []
+        for entry in sorted(_maponline_brand_map.values(), key=lambda x: x['brand']):
+            entry['maponline_missed'] = max(0, entry['planned'] - entry['maponline_aired'])
+            maponline_summary.append(entry)
+        has_maponline_data = LMRBRow.objects.filter(
+            account_id=account_id, channel__iexact=channel, source='maponline',
+        ).exists()
 
         # ── Extra Aired rows ─────────────────────────────────────────────────
         # LMRB rows in the schedule period that are NOT matched, NOT
@@ -2794,6 +2859,8 @@ def monitoring_dashboard(request):
         'lmrb_matched_rows':         lmrb_matched_rows,
         'lmrb_unmatched_rows':       lmrb_unmatched_rows,
         'extra_aired_rows':          extra_aired_rows,
+        'maponline_summary':         maponline_summary if selected_account and channel and month else [],
+        'has_maponline_data':        has_maponline_data if selected_account and channel and month else False,
         'theme_analysis':            theme_analysis,
         'theme_analysis_json':       theme_analysis_json,
         'spon_kw_breakdown':         spon_kw_breakdown if selected_account and channel and month else [],

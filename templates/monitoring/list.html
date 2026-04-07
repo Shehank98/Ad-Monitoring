@@ -163,6 +163,12 @@
           <div class="text-right">
             <p class="text-lg font-bold text-slate-800">{{ batch.total_rows|default:"0" }}</p>
             <p class="text-[10px] text-slate-400">rows</p>
+            {% if batch.data_type == 'maponline' and batch.maponline_matched is not None %}
+            <p class="text-[10px] mt-0.5">
+              <span class="text-emerald-600 font-semibold">{{ batch.maponline_matched }}</span>
+              <span class="text-slate-400"> matched</span>
+            </p>
+            {% endif %}
           </div>
           <div class="flex items-center gap-2">
             {% if batch.group|length == 1 %}

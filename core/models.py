@@ -183,6 +183,15 @@ class ScheduleRow(models.Model):
     )
     matched_at   = models.DateTimeField(null=True, blank=True)
 
+    # MapOnline preliminary match — independent of the LMRB final match above.
+    # Set by run_maponline_scope(); does NOT block LMRB matching.
+    is_maponline_matched   = models.BooleanField(default=False, db_index=True)
+    matched_maponline_lmrb = models.ForeignKey(
+        'LMRBRow', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='maponline_schedule_matches',
+    )
+    maponline_matched_at   = models.DateTimeField(null=True, blank=True)
+
     # Manual reconciliation lock — set when a ManualMatch record is created for
     # this row.  Prevents the engine from counting it as Not Aired and stops it
     # from being re-processed in future auto runs.
@@ -254,6 +263,10 @@ class LMRBRow(models.Model):
     # Sponsorship reconciliation lock (set after Step 1 auto or Step 2 manual)
     is_sponsorship_matched = models.BooleanField(default=False, db_index=True)
 
+    # MapOnline preliminary matching lock — set when this row is consumed by the
+    # MapOnline engine.  Separate from is_matched (which is LMRB/MediaWatch only).
+    is_maponline_schedule_matched = models.BooleanField(default=False, db_index=True)
+
     # Manual reconciliation lock — permanently locked once a ManualMatch is created
     is_manual_matched = models.BooleanField(default=False, db_index=True)
 
@@ -299,6 +312,14 @@ class BrandMapping(models.Model):
             'Separate multiple TC theme names with a pipe character: Theme A|Theme B|Theme C'
         ),
     )
+    maponline_theme = models.TextField(
+        blank=True, default='',
+        help_text=(
+            'Theme name(s) as they appear in MapOnline files (Theme column). '
+            'Separate multiple values with a pipe: Theme A|Theme B. '
+            'Leave blank to skip this brand in MapOnline preliminary matching.'
+        ),
+    )
     duration  = models.PositiveIntegerField(
         null=True, blank=True,
         help_text='Duration in seconds (optional — leave blank to match any duration)',
@@ -317,6 +338,13 @@ class BrandMapping(models.Model):
         if not self.tc_theme:
             return []
         return [t.strip() for t in self.tc_theme.split('|') if t.strip()]
+
+    @property
+    def maponline_themes_list(self):
+        """Return maponline_theme split by pipe as a list, stripping blanks."""
+        if not self.maponline_theme:
+            return []
+        return [t.strip() for t in self.maponline_theme.split('|') if t.strip()]
 
 
 class TransmissionReport(models.Model):
