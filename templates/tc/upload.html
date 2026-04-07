@@ -431,26 +431,46 @@ async function parsePdfClientSide(file) {
   extractedRows.forEach(line => {
     const textLine = line.map(i => i.text).join(' ');
     if (PDF_SKIP_RE.test(textLine) || /Rs\s*:/i.test(textLine) || /\.{4,}/.test(textLine) || /^\s*[\d,]+\.\d{2}\s*$/.test(textLine)) return;
-    if (/\b(\d{2}[-/]\d{2}[-/]\d{4})\b/.test(textLine)) {
+    if (/\b(\d{1,2}[-/]\d{1,2}[-/]\d{4})\b/.test(textLine)) {
       records.push({ mainLine: line, allItems: [...line] });
     } else if (records.length > 0 && textLine.length > 2) {
       records[records.length-1].allItems.push(...line);
     }
   });
 
+  // ── Detect date format (DD/MM/YYYY vs MM/DD/YYYY) from unambiguous dates ──
+  const DATE_RE_JS = /\b(\d{1,2}[-/]\d{1,2}[-/]\d{4})\b/;
+  const TIME_RE_JS = /\b\d{2}:\d{2}:\d{2}(?::\d{2})?\b/g;
+  function detectDateFmt(recs) {
+    for (const rec of recs) {
+      const m = rec.mainLine.map(i => i.text).join(' ').match(DATE_RE_JS);
+      if (!m) continue;
+      const parts = m[1].split(/[-/]/);
+      const p1 = parseInt(parts[0], 10), p2 = parseInt(parts[1], 10);
+      if (p2 > 12) return 'mdy';   // second part can't be a month
+      if (p1 > 12) return 'dmy';   // first part can't be a month
+    }
+    return 'dmy';   // default DD/MM/YYYY
+  }
+  function toIsoDate(rawDate, fmt) {
+    const p = rawDate.split(/[-/]/);
+    return fmt === 'mdy'
+      ? `${p[2]}-${p[0].padStart(2,'0')}-${p[1].padStart(2,'0')}`  // MM/DD/YYYY
+      : `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; // DD/MM/YYYY
+  }
+  const dateFmt = detectDateFmt(records);
+
   const parsedData = [];
   records.forEach(record => {
     const mainText = record.mainLine.map(i => i.text).join(' ');
     const allText  = record.allItems.map(i => i.text).join(' ');
-    const dateMatch = mainText.match(/\b(\d{2}[-/]\d{2}[-/]\d{4})\b/);
+    const dateMatch = mainText.match(DATE_RE_JS);
     const allTimes = [...allText.matchAll(/\b(\d{2}:\d{2}:\d{2}(?::\d{2})?)\b/g)].map(m => m[1]);
 
     if (!dateMatch || !allTimes.length) return;
 
     const rawDate = dateMatch[1];
-    const parts = rawDate.split(/[-/]/);
-    // Always DD/MM/YYYY → ISO YYYY-MM-DD (unambiguous for server)
-    const isoDate = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+    const isoDate = toIsoDate(rawDate, dateFmt);
 
     const durationTime = allTimes.find(t => t.startsWith('00:00:'));
     const advtTime     = allTimes.find(t => !t.startsWith('00:00:')) || allTimes[0];
@@ -467,7 +487,9 @@ async function parsePdfClientSide(file) {
         if (lw && ['5','10','15','20','25','30','45','60'].includes(lw[1])) duration = lw[1];
       }
       if (!duration) {
-        const dm = allText.match(/\b(10|15|20|25|30|45|60)\b/);
+        // Strip time patterns first to avoid matching the hour (e.g. "10" in "10:25:38:20")
+        const textNoTimes = allText.replace(TIME_RE_JS, ' ');
+        const dm = textNoTimes.match(/\b(10|15|20|25|30|45|60)\b/);
         if (dm) duration = dm[1];
       }
     }
