@@ -21,13 +21,13 @@ import pandas as pd
 
 # ── Patterns ──────────────────────────────────────────────────────────────────
 
-# Data line: DD/MM/YYYY  <programme>  HH:MM:SS:FF  <caption>  <dur>
+# Data line: DD/MM/YYYY  <programme>  HH:MM:SS[:FF]  <caption>  <dur>
 DATA_LINE = re.compile(
-    r'^(\d{2}/\d{2}/\d{4})'        # group 1: date
-    r'\s+(.+?)'                     # group 2: programme name
-    r'\s+(\d{2}:\d{2}:\d{2}:\d{2})'# group 3: timecode HH:MM:SS:FF
-    r'\s+(.+?)'                     # group 4: caption / copy title (Advt_theme)
-    r'\s+(\d+)\s*$'                 # group 5: duration in seconds
+    r'^(\d{2}/\d{2}/\d{4})'              # group 1: date
+    r'\s+(.+?)'                           # group 2: programme name
+    r'\s+(\d{2}:\d{2}:\d{2}(?::\d{2})?)'# group 3: timecode HH:MM:SS[:FF]
+    r'\s+(.+?)'                           # group 4: caption / copy title (Advt_theme)
+    r'\s+(\d+)\s*$'                       # group 5: duration in seconds
 )
 
 META_PATTERNS = {

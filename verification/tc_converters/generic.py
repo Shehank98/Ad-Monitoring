@@ -176,7 +176,11 @@ def parse_pdf(pdf_path: str) -> pd.DataFrame:
                 if lw and lw.group(1) in DUR_VALUES:
                     duration = int(lw.group(1))
             if duration is None:
-                m = re.search(r'\b(10|15|20|25|30|45|60)\b', all_text)
+                # Remove all time-like patterns (HH:MM:SS[:FF]) before searching
+                # for a standalone duration number, to avoid matching the hour
+                # part of a time string (e.g. "10" in "10:25:38:20").
+                text_no_times = TIME_RE.sub(' ', all_text)
+                m = re.search(r'\b(10|15|20|25|30|45|60)\b', text_no_times)
                 if m:
                     duration = int(m.group(1))
 
