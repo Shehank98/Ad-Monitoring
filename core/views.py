@@ -4161,16 +4161,15 @@ def tc_reconcile(request):
 @login_required
 def tc_three_way(request):
     """
-    Three-way evidence view for each planned ad in a scope:
-      PLAN  - what was scheduled  (ScheduleRow)
-      LMRB  - what 3rd-party monitoring observed  (matched LMRBRow)
-      TC    - what the channel's own certificate says  (matched TCRow)
+    TC-centric comparison view: for every TCRow in the scope, show the TC spot
+    alongside its LMRB confirmation (if any).  Schedule is used only for the
+    'Planned' count shown in the stat cards — individual schedule rows are NOT
+    displayed here.
 
-    Matching priority applied by the engines (already in DB):
-      1. Theme  (via BrandMapping)
-      2. Duration
-      3. Date   (LMRB within schedule date range; TC late-aired rule: date >= schedule date)
-      4. Advt_Time / Aired_Time (±5 sec tolerance for TC-LMRB cross-check)
+    Status codes:
+      confirmed  - TCRow.is_lmrb_confirmed=True (TC spot verified by LMRB)
+      tc_only    - TCRow exists but LMRB didn't confirm it
+      extra      - TCRow.is_extra=True (no matching schedule row)
     """
     user       = request.user
     account_qs = _account_qs(user)
@@ -4215,198 +4214,78 @@ def tc_three_way(request):
         if not schedule_id and len(schedules_in_scope) == 1:
             schedule_id = str(schedules_in_scope[0].id)
 
-        from core.models import ManualMatch
         from verification.tc_engine import _time_to_secs as _tts3w
 
         def _pt(t):
             """Parse HH:MM:SS → seconds, or None."""
             return _tts3w(str(t)) if t else None
 
+        # Build reverse map: normalized tc_theme → brand name (from BrandMapping)
+        from core.models import BrandMapping
+        tc_theme_to_brand = {}
+        for bm in BrandMapping.objects.filter(account_id=account_id).exclude(tc_theme=''):
+            for raw_theme in bm.tc_theme.split('|'):
+                norm = raw_theme.lower().strip()
+                if norm:
+                    tc_theme_to_brand[norm] = bm.brand
+
+        # Planned count from schedule (used for stat cards only)
         sch_filter = dict(account_id=account_id, channel=channel, month=month)
         if schedule_id:
             sch_filter['schedule_id'] = schedule_id
-        sch_qs = (
-            ScheduleRow.objects
-            .filter(**sch_filter)
-            .select_related('matched_lmrb')
-            .prefetch_related('tc_matches', 'tc_matches__matched_lmrb')
-            .order_by('date', 'start_time', 'brand')
+        planned_count = ScheduleRow.objects.filter(**sch_filter).count()
+
+        # Query all TC rows for this scope, ordered by date + time
+        tc_qs = (
+            TCRow.objects
+            .filter(account_id=account_id, channel=channel, tc_report__month=month)
+            .select_related('matched_lmrb', 'matched_schedule')
+            .order_by('date', 'aired_time')
         )
 
-        # Build manual match lookup: {schedule_row_id: ManualMatch}
-        mm_lookup = {
-            mm.schedule_row_id: mm
-            for mm in ManualMatch.objects.filter(
-                account_id=account_id, channel=channel, month=month,
-                schedule_row__isnull=False,
-            ).select_related('tc_row', 'lmrb_row')
-        }
+        for tc in tc_qs:
+            lmrb = tc.matched_lmrb  # None if not LMRB-confirmed
 
-        # Pre-load LMRB rows for nearest-match search on tc_only rows.
-        # (is_lmrb_confirmed lives on TCRow, not LMRBRow - no such filter here.)
-        scope_lmrb_pool = list(
-            LMRBRow.objects.filter(
-                account_id=account_id,
-                channel=channel,
-            ).values('advt_time', 'duration', 'date')
-        )
-
-        for sr in sch_qs:
-            lmrb = sr.matched_lmrb
-            tc   = sr.tc_matches.filter(is_schedule_matched=True).first()
-
-            # Check for manual match (3way) which also sets is_schedule_matched
-            mm = mm_lookup.get(sr.id)
-            is_manual = mm is not None
-
-            # If engine didn't find a TC match but there's a manual 3way link, use that
-            if not tc and mm and mm.tc_row:
-                tc = mm.tc_row
-
-            # Determine row status for colour-coding
-            if tc and tc.is_lmrb_confirmed:
-                status = 'aired'          # confirmed by both TC and LMRB
-            elif tc and not tc.is_lmrb_confirmed:
-                status = 'tc_only'        # TC says aired but LMRB doesn't confirm
-            elif lmrb or (mm and mm.lmrb_row):
-                status = 'lmrb_only'      # LMRB found a match but no TC record
-            elif is_manual:
-                status = 'manual'         # manually matched, no TC/LMRB confirmation
+            # Resolve brand: prefer matched schedule, fall back to BrandMapping reverse lookup
+            if tc.matched_schedule_id and tc.matched_schedule:
+                brand = tc.matched_schedule.brand
             else:
-                status = 'not_aired'      # neither source confirms it
+                brand = tc_theme_to_brand.get(tc.tc_theme.lower().strip(), '')
 
-            # Use manual LMRB if engine didn't lock one
-            if not lmrb and mm and mm.lmrb_row:
-                lmrb = mm.lmrb_row
-
-            # ── Display LMRB: prefer the LMRB that TC was confirmed against ──────
-            # When TC is confirmed, tc.matched_lmrb is the LMRB row within ±tolerance
-            # seconds of the TC aired time - i.e. the SAME physical broadcast.
-            # Using sr.matched_lmrb (Schedule↔LMRB engine result) can show a
-            # different LMRB from a completely different time slot, which confuses
-            # users into thinking the pair is wrong.  When TC is not confirmed we
-            # fall back to sr.matched_lmrb so something useful is still shown.
-            display_lmrb = lmrb
-            if tc and tc.is_lmrb_confirmed and tc.matched_lmrb_id:
-                display_lmrb = tc.matched_lmrb
-
-            # ── Timing deltas ───────────────────────────────────────────
-            plan_start_s  = _pt(sr.start_time)
-            plan_end_s    = _pt(sr.end_time)
-            lmrb_time_s   = _pt(display_lmrb.advt_time if display_lmrb else None)
-            tc_time_s     = _pt(tc.aired_time if tc else None)
-
-            # LMRB time delta relative to plan window (0 = within, positive = seconds outside)
-            lmrb_delta = None
-            if lmrb_time_s is not None and plan_start_s is not None and plan_end_s is not None:
-                if plan_start_s <= lmrb_time_s <= plan_end_s:
-                    lmrb_delta = 0
-                elif lmrb_time_s > plan_end_s:
-                    lmrb_delta = lmrb_time_s - plan_end_s
-                else:
-                    lmrb_delta = plan_start_s - lmrb_time_s
+            # Status
+            if tc.is_lmrb_confirmed:
+                status = 'confirmed'
+            elif tc.is_extra:
+                status = 'extra'
+            else:
+                status = 'tc_only'
 
             # TC↔LMRB time gap (seconds)
+            tc_time_s   = _pt(tc.aired_time)
+            lmrb_time_s = _pt(lmrb.advt_time if lmrb else None)
             tc_lmrb_delta = None
             if tc_time_s is not None and lmrb_time_s is not None:
                 tc_lmrb_delta = abs(tc_time_s - lmrb_time_s)
 
-            # ── Nearest unconfirmed LMRB for tc_only rows ───────────────
-            near_lmrb_time  = ''
-            near_lmrb_delta = None
-            tc_date_val     = tc.date if tc else None
-            if status == 'tc_only' and tc_time_s is not None:
-                best_d, best_t = None, ''
-                for lr in scope_lmrb_pool:
-                    if lr['duration'] != sr.duration:
-                        continue
-                    if lr['date'] != tc_date_val:
-                        continue
-                    lt_s = _pt(str(lr['advt_time']))
-                    if lt_s is None:
-                        continue
-                    d = abs(tc_time_s - lt_s)
-                    if best_d is None or d < best_d:
-                        best_d, best_t = d, str(lr['advt_time'])
-                near_lmrb_time  = best_t
-                near_lmrb_delta = best_d
-
-            # ── Confidence score (0-100) ─────────────────────────────────
-            lmrb_date_val = display_lmrb.date if display_lmrb else None
-            if status == 'aired':
-                score = 100
-                if lmrb_date_val != sr.date:
-                    score -= 10
-                if lmrb_delta is not None and lmrb_delta > 0:
-                    score -= min(20, lmrb_delta // 30)
-                if tc_lmrb_delta is not None and tc_lmrb_delta > 0:
-                    score -= min(10, tc_lmrb_delta)
-                score = max(60, score)
-            elif status == 'tc_only':
-                score = 55
-                if tc_date_val == sr.date:
-                    score += 10
-                if near_lmrb_delta is not None:
-                    if near_lmrb_delta <= 30:
-                        score += 15
-                    elif near_lmrb_delta <= 120:
-                        score += 7
-                score = min(79, score)
-            elif status == 'lmrb_only':
-                score = 50
-                if lmrb_date_val == sr.date:
-                    score += 15
-                if lmrb_delta == 0:
-                    score += 15
-                score = min(74, score)
-            elif status == 'manual':
-                score = 70
-            else:
-                score = 0
-
-            if score >= 85:
-                conf_label = 'excellent'
-            elif score >= 65:
-                conf_label = 'good'
-            elif score >= 40:
-                conf_label = 'partial'
-            elif score > 0:
-                conf_label = 'low'
-            else:
-                conf_label = 'none'
-
             rows.append({
-                'brand':          sr.brand,
-                'ad_type':        sr.ad_type,
-                'duration':       sr.duration,
-                # Plan (Schedule)
-                'plan_date':      sr.date,
-                'plan_programme': sr.programme,
-                'plan_start':     sr.start_time,
-                'plan_end':       sr.end_time,
-                # LMRB (3rd-party monitoring) - uses TC-confirmed LMRB when available
-                'lmrb_date':      display_lmrb.date       if display_lmrb else None,
-                'lmrb_programme': display_lmrb.program    if display_lmrb else '',
-                'lmrb_time':      display_lmrb.advt_time  if display_lmrb else '',
-                'lmrb_theme':     display_lmrb.advt_theme if display_lmrb else '',
+                'brand':    brand,
+                'duration': tc.duration,
                 # TC (channel certificate)
-                'tc_date':        tc_date_val,
-                'tc_programme':   tc.programme     if tc else '',
-                'tc_time':        tc.aired_time    if tc else '',
-                'tc_theme':       tc.tc_theme      if tc else '',
-                # Status flags
-                'has_lmrb':            display_lmrb is not None,
-                'has_tc':              tc is not None,
-                'tc_lmrb_confirmed':   tc.is_lmrb_confirmed if tc else False,
-                'is_manual':           is_manual,
-                'status':              status,
-                # Match quality / confidence
-                'confidence_pct':   score,
-                'confidence_label': conf_label,
-                'lmrb_delta_secs':  lmrb_delta,
+                'tc_date':      tc.date,
+                'tc_time':      tc.aired_time,
+                'tc_theme':     tc.tc_theme,
+                'tc_programme': tc.programme,
+                'is_extra':     tc.is_extra,
+                'is_schedule_matched': tc.is_schedule_matched,
+                # LMRB (3rd-party monitoring — the row that confirmed TC)
+                'has_lmrb':     lmrb is not None,
+                'lmrb_date':    lmrb.date       if lmrb else None,
+                'lmrb_time':    lmrb.advt_time  if lmrb else '',
+                'lmrb_theme':   lmrb.advt_theme if lmrb else '',
+                'lmrb_programme': lmrb.program  if lmrb else '',
+                # Status
+                'status':           status,
                 'tc_lmrb_delta_secs': tc_lmrb_delta,
-                'near_lmrb_time':   near_lmrb_time,
-                'near_lmrb_delta':  near_lmrb_delta,
             })
 
     return render(request, 'tc/detail.html', {
@@ -4420,11 +4299,151 @@ def tc_three_way(request):
         'channel':            channel,
         'month':              month,
         'rows':               rows,
-        'total':              len(rows),
-        'n_aired':            sum(1 for r in rows if r['status'] == 'aired'),
+        'planned_count':      planned_count if (selected_account and channel and month) else 0,
+        'n_confirmed':        sum(1 for r in rows if r['status'] == 'confirmed'),
         'n_tc_only':          sum(1 for r in rows if r['status'] == 'tc_only'),
-        'n_lmrb_only':        sum(1 for r in rows if r['status'] == 'lmrb_only'),
-        'n_not_aired':        sum(1 for r in rows if r['status'] == 'not_aired'),
+        'n_extra':            sum(1 for r in rows if r['status'] == 'extra'),
+    })
+
+
+@login_required
+def lmrb_tc_section(request):
+    """
+    LMRB vs TC verification view — 'LMRB cut of TC data'.
+
+    Shows every TCRow that is LMRB-confirmed for the scope, side-by-side with
+    its matched LMRBRow.  Grouped by brand (resolved via BrandMapping.tc_theme).
+    This is purely a verification/audit view — no reconciliation is triggered.
+    """
+    user       = request.user
+    account_qs = _account_qs(user)
+
+    account_id  = request.GET.get('account_id', '')
+    channel     = request.GET.get('channel', '')
+    month       = request.GET.get('month', '')
+    schedule_id = request.GET.get('schedule_id', '').strip()
+
+    selected_account   = None
+    channels           = []
+    months             = []
+    schedules_in_scope = []
+    groups             = []   # [{brand, rows, count}]
+
+    if account_id:
+        try:
+            selected_account = account_qs.get(pk=account_id)
+        except Account.DoesNotExist:
+            pass
+
+    if selected_account:
+        channels = sorted(set(
+            ScheduleRow.objects.filter(account_id=account_id)
+            .values_list('channel', flat=True)
+        ))
+        if channel:
+            months = sorted(set(
+                ScheduleRow.objects.filter(account_id=account_id, channel=channel)
+                .values_list('month', flat=True)
+            ))
+
+    total_confirmed   = 0
+    total_sched_match = 0
+    total_extra       = 0
+
+    if selected_account and channel and month:
+        if not _account_access(user, account_id):
+            messages.error(request, 'Access denied.')
+            return redirect('/dashboard/tc/lmrb-tc/')
+
+        schedules_in_scope = list(
+            Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+            .order_by('schedule_number')
+        )
+        if not schedule_id and len(schedules_in_scope) == 1:
+            schedule_id = str(schedules_in_scope[0].id)
+
+        from verification.tc_engine import _time_to_secs as _tts_lmrbtc
+
+        def _pt(t):
+            return _tts_lmrbtc(str(t)) if t else None
+
+        # Build reverse map: normalized tc_theme → brand (from BrandMapping)
+        from core.models import BrandMapping
+        tc_theme_to_brand = {}
+        for bm in BrandMapping.objects.filter(account_id=account_id).exclude(tc_theme=''):
+            for raw_theme in bm.tc_theme.split('|'):
+                norm = raw_theme.lower().strip()
+                if norm:
+                    tc_theme_to_brand[norm] = bm.brand
+
+        # All LMRB-confirmed TC rows for the scope
+        tc_qs = (
+            TCRow.objects
+            .filter(
+                account_id=account_id,
+                channel=channel,
+                tc_report__month=month,
+                is_lmrb_confirmed=True,
+            )
+            .select_related('matched_lmrb', 'matched_schedule')
+            .order_by('date', 'aired_time')
+        )
+
+        # Group by brand
+        brand_map = {}   # brand_name → list of row dicts
+        for tc in tc_qs:
+            lmrb = tc.matched_lmrb
+
+            if tc.matched_schedule_id and tc.matched_schedule:
+                brand = tc.matched_schedule.brand
+            else:
+                brand = tc_theme_to_brand.get(tc.tc_theme.lower().strip(), tc.tc_theme)
+
+            tc_time_s   = _pt(tc.aired_time)
+            lmrb_time_s = _pt(lmrb.advt_time if lmrb else None)
+            gap = abs(tc_time_s - lmrb_time_s) if (tc_time_s is not None and lmrb_time_s is not None) else None
+
+            row = {
+                'tc_date':      tc.date,
+                'tc_time':      tc.aired_time,
+                'tc_theme':     tc.tc_theme,
+                'tc_programme': tc.programme,
+                'duration':     tc.duration,
+                'is_schedule_matched': tc.is_schedule_matched,
+                'is_extra':     tc.is_extra,
+                'lmrb_date':    lmrb.date       if lmrb else None,
+                'lmrb_time':    lmrb.advt_time  if lmrb else '',
+                'lmrb_theme':   lmrb.advt_theme if lmrb else '',
+                'lmrb_programme': lmrb.program  if lmrb else '',
+                'gap_secs':     gap,
+            }
+            brand_map.setdefault(brand, []).append(row)
+
+            total_confirmed += 1
+            if tc.is_schedule_matched:
+                total_sched_match += 1
+            if tc.is_extra:
+                total_extra += 1
+
+        groups = [
+            {'brand': b, 'rows': r, 'count': len(r)}
+            for b, r in sorted(brand_map.items())
+        ]
+
+    return render(request, 'tc/lmrb_tc.html', {
+        'accounts':           account_qs,
+        'selected_account':   selected_account,
+        'account_id':         account_id,
+        'channels':           channels,
+        'months':             months,
+        'schedules_in_scope': schedules_in_scope,
+        'schedule_id':        schedule_id,
+        'channel':            channel,
+        'month':              month,
+        'groups':             groups,
+        'total_confirmed':    total_confirmed,
+        'total_sched_match':  total_sched_match,
+        'total_extra':        total_extra,
     })
 
 

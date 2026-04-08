@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
-{% block title %}Plan vs LMRB vs TC{% endblock %}
-{% block page_title %}Three-Way Comparison{% endblock %}
-{% block page_subtitle %}Plan (Schedule) · LMRB (3rd-party monitoring) · TC (channel certificate) - side by side for every planned ad{% endblock %}
+{% block title %}TC vs LMRB{% endblock %}
+{% block page_title %}TC vs LMRB{% endblock %}
+{% block page_subtitle %}TC (channel certificate) · LMRB (3rd-party monitoring) — every TC spot alongside its LMRB confirmation{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -17,15 +17,13 @@
   .cmp-table tbody tr.data-row.row-selected { outline: 2px solid #3b82f6; outline-offset: -1px; }
 
   /* ── Column group headers ──────────────────────────────────── */
-  .th-plan  { background: #1d4ed8 !important; }
   .th-lmrb  { background: #065f46 !important; }
   .th-tc    { background: #7c3aed !important; }
 
   /* ── Status row colours ────────────────────────────────────── */
-  .row-aired     { background: #f0fdf4; }
+  .row-confirmed { background: #f0fdf4; }
   .row-tc-only   { background: #fefce8; }
-  .row-lmrb-only { background: #eff6ff; }
-  .row-not-aired { background: #fff1f2; }
+  .row-extra     { background: #f5f3ff; }
 
   /* ── Badges ────────────────────────────────────────────────── */
   .badge { display:inline-flex; align-items:center; gap:.25rem;
@@ -47,27 +45,8 @@
   .delta-near   { background: #fef9c3; color: #92400e; }
   .delta-far    { background: #fee2e2; color: #991b1b; }
 
-  /* ── Confidence bar ────────────────────────────────────────── */
-  .conf-track {
-    height: 4px; border-radius: 9999px; background: #e2e8f0;
-    margin-top: .3rem; width: 80px;
-  }
-  .conf-fill {
-    height: 100%; border-radius: 9999px;
-    transition: width .3s ease;
-  }
-  .conf-excellent .conf-fill { background: #16a34a; }
-  .conf-good      .conf-fill { background: #65a30d; }
-  .conf-partial   .conf-fill { background: #d97706; }
-  .conf-low       .conf-fill { background: #dc2626; }
-  .conf-none      .conf-fill { background: #94a3b8; }
-  .conf-label-txt { font-size: .6rem; color: #64748b; text-transform: uppercase; letter-spacing: .04em; }
-
   /* ── Stat cards ────────────────────────────────────────────── */
   .stat-card { border-radius:1rem; padding:.75rem 1.25rem; min-width:130px; }
-  .stat-card.clickable { cursor: pointer; transition: transform .15s, box-shadow .15s; }
-  .stat-card.clickable:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.1); }
-  .stat-card.clickable.active { outline: 2px solid #3b82f6; }
 
   /* ── Divider between column groups ────────────────────────── */
   .group-sep { border-left: 2px solid #e2e8f0 !important; }
@@ -117,41 +96,6 @@
   }
   .detail-row-val { font-size: .75rem; color: #1e293b; line-height: 1.5; }
   .detail-row-val .lbl { color: #94a3b8; font-size: .65rem; }
-
-  /* ── Near-LMRB highlight card ──────────────────────────────── */
-  .near-lmrb-card {
-    border-color: #fbbf24 !important;
-    background: #fffbeb !important;
-  }
-  .near-lmrb-card .detail-card-title { color: #92400e; }
-
-  /* ── Confidence breakdown section ──────────────────────────── */
-  .conf-breakdown {
-    display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
-  }
-  .conf-big-bar {
-    flex: 0 0 120px; height: 8px; border-radius: 9999px; background: #e2e8f0; overflow: hidden;
-  }
-  .conf-big-fill { height: 100%; border-radius: 9999px; transition: width .4s ease; }
-  .conf-pct-txt { font-size: .9rem; font-weight: 800; }
-  .conf-excellent .conf-pct-txt { color: #16a34a; }
-  .conf-good      .conf-pct-txt { color: #65a30d; }
-  .conf-partial   .conf-pct-txt { color: #d97706; }
-  .conf-low       .conf-pct-txt { color: #dc2626; }
-  .conf-none      .conf-pct-txt { color: #94a3b8; }
-  .conf-excellent .conf-big-fill { background: #16a34a; }
-  .conf-good      .conf-big-fill { background: #65a30d; }
-  .conf-partial   .conf-big-fill { background: #d97706; }
-  .conf-low       .conf-big-fill { background: #dc2626; }
-  .conf-none      .conf-big-fill { background: #94a3b8; }
-
-  /* ── Close-match highlight (LMRB found but not close enough) ─ */
-  .close-match-hint {
-    display: inline-flex; align-items: center; gap: .3rem;
-    font-size: .68rem; padding: .18rem .5rem;
-    border-radius: 6px; border: 1px dashed #f59e0b;
-    background: #fffbeb; color: #92400e; font-weight: 600;
-  }
 </style>
 {% endblock %}
 
@@ -194,7 +138,7 @@
         <option value="">All schedules</option>
         {% for sched in schedules_in_scope %}
           <option value="{{ sched.id }}" {% if sched.id|stringformat:"s" == schedule_id %}selected{% endif %}>
-            #{{ sched.schedule_number }} (v{{ sched.version }}, {{ sched.row_count }} rows)
+            #{{ sched.schedule_number }} ({{ sched.row_count }} rows)
           </option>
         {% endfor %}
       </select>
@@ -208,9 +152,9 @@
          class="btn-secondary text-xs">
         <i class="fa-solid fa-table-list"></i> Summary
       </a>
-      <a href="/dashboard/monitor/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
+      <a href="/dashboard/tc/lmrb-tc/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
          class="btn-secondary text-xs">
-        <i class="fa-solid fa-chart-bar"></i> Dashboard
+        <i class="fa-solid fa-link text-green-600"></i> LMRB vs TC
       </a>
     </div>
     {% endif %}
@@ -222,42 +166,39 @@
 <!-- ── Stat cards ─────────────────────────────────────────────── -->
 <div class="flex flex-wrap gap-3 mb-5">
   <div class="stat-card bg-white border border-slate-100 shadow-sm">
-    <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5">Total Planned</div>
-    <div class="text-2xl font-extrabold text-slate-800">{{ total }}</div>
+    <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5">Planned (Schedule)</div>
+    <div class="text-2xl font-extrabold text-slate-800">{{ planned_count }}</div>
+  </div>
+  <div class="stat-card bg-white border border-slate-100 shadow-sm">
+    <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5">Total TC Spots</div>
+    <div class="text-2xl font-extrabold text-slate-800">{{ rows|length }}</div>
   </div>
   <div class="stat-card bg-green-50 border border-green-100">
     <div class="text-xs font-bold text-green-600 uppercase tracking-wider mb-0.5">
-      <i class="fa-solid fa-circle-check mr-1"></i>Aired (TC + LMRB)
+      <i class="fa-solid fa-circle-check mr-1"></i>TC + LMRB Confirmed
     </div>
-    <div class="text-2xl font-extrabold text-green-700">{{ n_aired }}</div>
+    <div class="text-2xl font-extrabold text-green-700">{{ n_confirmed }}</div>
   </div>
   <div class="stat-card bg-yellow-50 border border-yellow-100">
     <div class="text-xs font-bold text-yellow-600 uppercase tracking-wider mb-0.5">
-      <i class="fa-solid fa-file-certificate mr-1"></i>TC Only (no LMRB confirm)
+      <i class="fa-solid fa-triangle-exclamation mr-1"></i>TC Only (no LMRB)
     </div>
     <div class="text-2xl font-extrabold text-yellow-700">{{ n_tc_only }}</div>
   </div>
-  <div class="stat-card bg-blue-50 border border-blue-100">
-    <div class="text-xs font-bold text-blue-600 uppercase tracking-wider mb-0.5">
-      <i class="fa-solid fa-eye mr-1"></i>LMRB Only (no TC match)
+  <div class="stat-card bg-purple-50 border border-purple-100">
+    <div class="text-xs font-bold text-purple-600 uppercase tracking-wider mb-0.5">
+      <i class="fa-solid fa-plus mr-1"></i>Extra TC (unscheduled)
     </div>
-    <div class="text-2xl font-extrabold text-blue-700">{{ n_lmrb_only }}</div>
-  </div>
-  <div class="stat-card bg-red-50 border border-red-100">
-    <div class="text-xs font-bold text-red-500 uppercase tracking-wider mb-0.5">
-      <i class="fa-solid fa-circle-xmark mr-1"></i>Not Aired
-    </div>
-    <div class="text-2xl font-extrabold text-red-600">{{ n_not_aired }}</div>
+    <div class="text-2xl font-extrabold text-purple-700">{{ n_extra }}</div>
   </div>
 </div>
 
-<!-- ── Colour legend + hint ───────────────────────────────────── -->
+<!-- ── Colour legend ───────────────────────────────────────────── -->
 <div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
-  <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Aired - confirmed by both TC &amp; LMRB</span>
-  <span class="badge badge-amber"><i class="fa-solid fa-file-certificate"></i> TC only - TC says aired, LMRB not confirmed</span>
-  <span class="badge badge-blue"><i class="fa-solid fa-eye"></i> LMRB only - LMRB found a match, no TC record</span>
-  <span class="badge badge-red"><i class="fa-solid fa-circle-xmark"></i> Not aired - neither source confirms</span>
-  <span class="text-slate-400 ml-2"><i class="fa-solid fa-hand-pointer mr-1"></i>Click any row to see match confidence details</span>
+  <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Confirmed — TC &amp; LMRB both recorded this spot</span>
+  <span class="badge badge-amber"><i class="fa-solid fa-triangle-exclamation"></i> TC Only — TC says aired, LMRB did not confirm</span>
+  <span class="badge badge-purple"><i class="fa-solid fa-plus"></i> Extra — TC spot with no matching schedule row</span>
+  <span class="text-slate-400 ml-2"><i class="fa-solid fa-hand-pointer mr-1"></i>Click any row for details</span>
 </div>
 
 <!-- ── Main table ─────────────────────────────────────────────── -->
@@ -266,41 +207,32 @@
     <thead>
       <!-- Group headers -->
       <tr>
-        <th colspan="5" class="text-center">Ad Details</th>
-        <th colspan="4" class="text-center th-plan">
-          <i class="fa-solid fa-calendar-days mr-1"></i>PLAN (Schedule)
+        <th colspan="4" class="text-center">Ad Details</th>
+        <th colspan="4" class="text-center th-tc">
+          <i class="fa-solid fa-file-certificate mr-1"></i>TC (Channel Certificate)
         </th>
         <th colspan="4" class="text-center th-lmrb group-sep">
           <i class="fa-solid fa-eye mr-1"></i>LMRB (3rd-Party Monitoring)
         </th>
-        <th colspan="4" class="text-center th-tc group-sep">
-          <i class="fa-solid fa-file-certificate mr-1"></i>TC (Channel Certificate)
-        </th>
-        <th class="text-center">Status &amp; Confidence</th>
+        <th class="text-center">Status</th>
       </tr>
       <!-- Column headers -->
       <tr>
         <!-- Ad details -->
-        <th></th><!-- expand toggle -->
+        <th class="col-sticky"></th><!-- expand toggle -->
         <th>#</th>
         <th>Brand</th>
-        <th>Type</th>
         <th>Dur (s)</th>
-        <!-- Plan -->
-        <th class="th-plan">Date</th>
-        <th class="th-plan">Programme</th>
-        <th class="th-plan">Start</th>
-        <th class="th-plan">End</th>
-        <!-- LMRB -->
-        <th class="th-lmrb group-sep">Date</th>
-        <th class="th-lmrb">Programme</th>
-        <th class="th-lmrb">Time</th>
-        <th class="th-lmrb">Theme</th>
         <!-- TC -->
-        <th class="th-tc group-sep">Date</th>
-        <th class="th-tc">Programme</th>
+        <th class="th-tc">Date</th>
         <th class="th-tc">Time</th>
         <th class="th-tc">Theme</th>
+        <th class="th-tc">Programme</th>
+        <!-- LMRB -->
+        <th class="th-lmrb group-sep">Date</th>
+        <th class="th-lmrb">Time</th>
+        <th class="th-lmrb">Theme</th>
+        <th class="th-lmrb">Programme</th>
         <!-- Status -->
         <th>Result</th>
       </tr>
@@ -308,7 +240,7 @@
     <tbody>
       {% for r in rows %}
       <!-- ── Data row ──────────────────────────────────────────── -->
-      <tr class="data-row {% if r.status == 'aired' %}row-aired{% elif r.status == 'tc_only' %}row-tc-only{% elif r.status == 'lmrb_only' %}row-lmrb-only{% else %}row-not-aired{% endif %}"
+      <tr class="data-row {% if r.status == 'confirmed' %}row-confirmed{% elif r.status == 'tc_only' %}row-tc-only{% elif r.status == 'extra' %}row-extra{% endif %}"
           id="row-{{ forloop.counter }}"
           onclick="toggleDetail({{ forloop.counter }})">
 
@@ -321,217 +253,106 @@
 
         <!-- Ad details -->
         <td class="text-slate-400 font-mono">{{ forloop.counter }}</td>
-        <td class="font-semibold text-slate-800">{{ r.brand }}</td>
-        <td>
-          {% if r.ad_type == 'COMMERCIAL BENEFITS' %}
-            <span class="badge badge-blue">COM</span>
-          {% elif r.ad_type == 'SPONSORSHIP' %}
-            <span class="badge badge-grey">SPON</span>
-          {% else %}
-            <span class="text-slate-400">{{ r.ad_type }}</span>
-          {% endif %}
+        <td class="font-semibold text-slate-800">
+          {{ r.brand }}
+          {% if r.is_extra %}<span class="badge badge-purple ml-1">extra</span>{% endif %}
         </td>
         <td class="font-mono text-slate-600">{{ r.duration }}</td>
 
-        <!-- Plan -->
-        <td class="font-mono">{{ r.plan_date|date:"d M Y" }}</td>
-        <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.plan_programme }}">{{ r.plan_programme|default:"-" }}</td>
-        <td class="font-mono text-blue-700">{{ r.plan_start }}</td>
-        <td class="font-mono text-blue-700">{{ r.plan_end }}</td>
+        <!-- TC columns -->
+        <td class="font-mono">{{ r.tc_date|date:"d M Y" }}</td>
+        <td class="font-mono text-purple-700">{{ r.tc_time }}</td>
+        <td class="text-slate-600 max-w-[140px] truncate" title="{{ r.tc_theme }}">{{ r.tc_theme|default:"-" }}</td>
+        <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.tc_programme }}">{{ r.tc_programme|default:"-" }}</td>
 
-        <!-- LMRB -->
+        <!-- LMRB columns -->
         {% if r.has_lmrb %}
-          <td class="font-mono group-sep {% if r.lmrb_date == r.plan_date %}text-green-700{% else %}text-amber-600{% endif %}">
+          <td class="font-mono group-sep {% if r.lmrb_date == r.tc_date %}text-green-700{% else %}text-amber-600{% endif %}">
             {{ r.lmrb_date|date:"d M Y" }}
-            {% if r.lmrb_date != r.plan_date %}<span class="delta-pill delta-near" title="Date differs from plan">≠date</span>{% endif %}
+            {% if r.lmrb_date != r.tc_date %}<span class="delta-pill delta-near" title="LMRB date differs from TC date">≠date</span>{% endif %}
           </td>
-          <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.lmrb_programme }}">{{ r.lmrb_programme|default:"-" }}</td>
-          <td class="font-mono">
-            <span class="{% if r.lmrb_delta_secs == 0 %}text-green-700{% elif r.lmrb_delta_secs is not None %}text-amber-700{% else %}text-slate-600{% endif %}">
-              {{ r.lmrb_time }}
-            </span>
-            {% if r.lmrb_delta_secs == 0 %}
-              <span class="delta-pill delta-ok" title="Within planned window">✓</span>
-            {% elif r.lmrb_delta_secs is not None %}
-              {% if r.lmrb_delta_secs <= 300 %}
-                <span class="delta-pill delta-near" title="Outside planned window">+{{ r.lmrb_delta_secs }}s</span>
+          <td class="font-mono text-green-700">
+            {{ r.lmrb_time }}
+            {% if r.tc_lmrb_delta_secs is not None %}
+              {% if r.tc_lmrb_delta_secs <= 5 %}
+                <span class="delta-pill delta-ok" title="Gap: {{ r.tc_lmrb_delta_secs }}s">±{{ r.tc_lmrb_delta_secs }}s</span>
+              {% elif r.tc_lmrb_delta_secs <= 30 %}
+                <span class="delta-pill delta-near" title="Gap: {{ r.tc_lmrb_delta_secs }}s">±{{ r.tc_lmrb_delta_secs }}s</span>
               {% else %}
-                <span class="delta-pill delta-far" title="Well outside planned window">+{{ r.lmrb_delta_secs }}s</span>
+                <span class="delta-pill delta-far" title="Gap: {{ r.tc_lmrb_delta_secs }}s">±{{ r.tc_lmrb_delta_secs }}s</span>
               {% endif %}
             {% endif %}
           </td>
-          <td class="text-slate-600 max-w-[120px] truncate" title="{{ r.lmrb_theme }}">{{ r.lmrb_theme }}</td>
+          <td class="text-slate-600 max-w-[140px] truncate" title="{{ r.lmrb_theme }}">{{ r.lmrb_theme }}</td>
+          <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.lmrb_programme }}">{{ r.lmrb_programme|default:"-" }}</td>
         {% else %}
-          <td class="group-sep text-red-400 italic text-center" colspan="4">- not found -</td>
+          <td class="group-sep text-slate-300 italic text-center" colspan="4">— no LMRB match —</td>
         {% endif %}
 
-        <!-- TC -->
-        {% if r.has_tc %}
-          <td class="font-mono group-sep {% if r.tc_date == r.plan_date %}text-green-700{% else %}text-amber-600{% endif %}">
-            {{ r.tc_date|date:"d M Y" }}
-            {% if r.tc_date != r.plan_date %}<span class="delta-pill delta-near" title="Date differs from plan">≠date</span>{% endif %}
-          </td>
-          <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.tc_programme }}">{{ r.tc_programme|default:"-" }}</td>
-          <td class="font-mono">
-            {% if r.tc_lmrb_confirmed %}
-              <span class="text-green-700">{{ r.tc_time }}</span>
-              {% if r.tc_lmrb_delta_secs is not None %}
-                <span class="delta-pill delta-ok" title="TC confirmed by LMRB within {{ r.tc_lmrb_delta_secs }}s">±{{ r.tc_lmrb_delta_secs }}s</span>
-              {% endif %}
-            {% else %}
-              <span class="text-amber-700">{{ r.tc_time }}</span>
-              {% if r.near_lmrb_time %}
-                <span class="delta-pill delta-far" title="Nearest LMRB was {{ r.near_lmrb_delta }}s away from this TC time">~{{ r.near_lmrb_delta }}s</span>
-              {% endif %}
-            {% endif %}
-          </td>
-          <td class="text-slate-600 max-w-[120px] truncate" title="{{ r.tc_theme }}">{{ r.tc_theme }}</td>
-        {% else %}
-          <td class="group-sep text-red-400 italic text-center" colspan="4">- not found -</td>
-        {% endif %}
-
-        <!-- Status + mini confidence bar -->
+        <!-- Status -->
         <td style="min-width:110px;">
-          {% if r.status == 'aired' %}
-            <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Aired</span>
+          {% if r.status == 'confirmed' %}
+            <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Confirmed</span>
           {% elif r.status == 'tc_only' %}
             <span class="badge badge-amber"><i class="fa-solid fa-triangle-exclamation"></i> TC Only</span>
-          {% elif r.status == 'lmrb_only' %}
-            <span class="badge badge-blue"><i class="fa-solid fa-eye"></i> LMRB Only</span>
-          {% elif r.status == 'manual' %}
-            <span class="badge badge-purple"><i class="fa-solid fa-hand"></i> Manual</span>
-          {% else %}
-            <span class="badge badge-red"><i class="fa-solid fa-circle-xmark"></i> Not Aired</span>
-          {% endif %}
-          <!-- Mini confidence bar -->
-          {% if r.status != 'not_aired' %}
-          <div class="conf-track conf-{{ r.confidence_label }}" title="{{ r.confidence_pct }}% confidence - {{ r.confidence_label }}">
-            <div class="conf-fill" style="width: {{ r.confidence_pct }}%;"></div>
-          </div>
-          <div class="conf-label-txt">{{ r.confidence_pct }}%</div>
+          {% elif r.status == 'extra' %}
+            <span class="badge badge-purple"><i class="fa-solid fa-plus"></i> Extra</span>
           {% endif %}
         </td>
       </tr>
 
       <!-- ── Detail expansion row ──────────────────────────────── -->
       <tr class="detail-row" id="detail-{{ forloop.counter }}">
-        <td colspan="18" class="p-0">
+        <td colspan="13" class="p-0">
           <div class="detail-panel">
             <div class="detail-grid">
 
-              <!-- Confidence breakdown card -->
-              <div class="detail-card conf-{{ r.confidence_label }}">
-                <div class="detail-card-title"><i class="fa-solid fa-gauge-high mr-1"></i>Match Confidence</div>
-                <div class="conf-breakdown">
-                  <div class="conf-big-bar">
-                    <div class="conf-big-fill" style="width: {{ r.confidence_pct }}%;"></div>
-                  </div>
-                  <span class="conf-pct-txt">{{ r.confidence_pct }}%</span>
-                  <span class="badge {% if r.confidence_label == 'excellent' %}badge-green{% elif r.confidence_label == 'good' %}badge-green{% elif r.confidence_label == 'partial' %}badge-amber{% elif r.confidence_label == 'low' %}badge-red{% else %}badge-grey{% endif %}" style="font-size:.65rem;">
-                    {{ r.confidence_label|capfirst }}
-                  </span>
-                </div>
-                <div class="detail-row-val mt-2 text-xs text-slate-500">
-                  {% if r.status == 'aired' %}
-                    TC confirmed by LMRB
-                    {% if r.tc_lmrb_delta_secs is not None %} - gap: {{ r.tc_lmrb_delta_secs }}s{% endif %}
-                  {% elif r.status == 'tc_only' %}
-                    TC matched schedule but LMRB did not confirm
-                  {% elif r.status == 'lmrb_only' %}
-                    LMRB matched schedule but no TC record found
-                  {% elif r.status == 'manual' %}
-                    Manually linked by operations
-                  {% else %}
-                    No evidence from either source
-                  {% endif %}
-                </div>
-              </div>
-
-              <!-- Plan details card -->
+              <!-- TC details card -->
               <div class="detail-card">
-                <div class="detail-card-title" style="color:#1d4ed8;"><i class="fa-solid fa-calendar-days mr-1"></i>Plan (Schedule)</div>
+                <div class="detail-card-title" style="color:#7c3aed;"><i class="fa-solid fa-file-certificate mr-1"></i>TC (Channel Certificate)</div>
                 <div class="detail-row-val">
-                  <div><span class="lbl">Date</span> {{ r.plan_date|date:"d M Y" }}</div>
-                  <div><span class="lbl">Window</span> {{ r.plan_start }} – {{ r.plan_end }}</div>
-                  <div><span class="lbl">Programme</span> {{ r.plan_programme|default:"-" }}</div>
+                  <div><span class="lbl">Date</span> {{ r.tc_date|date:"d M Y" }}</div>
+                  <div><span class="lbl">Time</span> {{ r.tc_time }}</div>
+                  <div><span class="lbl">Theme</span> {{ r.tc_theme|default:"-" }}</div>
+                  <div><span class="lbl">Programme</span> {{ r.tc_programme|default:"-" }}</div>
                   <div><span class="lbl">Duration</span> {{ r.duration }}s</div>
+                  <div><span class="lbl">Type</span>
+                    {% if r.is_extra %}<span class="badge badge-purple">Extra (unscheduled)</span>
+                    {% elif r.is_schedule_matched %}<span class="badge badge-green">Schedule matched</span>
+                    {% else %}<span class="badge badge-grey">Unmatched</span>{% endif %}
+                  </div>
                 </div>
               </div>
 
               <!-- LMRB details card -->
               {% if r.has_lmrb %}
               <div class="detail-card">
-                <div class="detail-card-title" style="color:#065f46;"><i class="fa-solid fa-eye mr-1"></i>LMRB (3rd-Party)</div>
+                <div class="detail-card-title" style="color:#065f46;"><i class="fa-solid fa-eye mr-1"></i>LMRB (3rd-Party Monitoring)</div>
                 <div class="detail-row-val">
                   <div><span class="lbl">Date</span>
                     {{ r.lmrb_date|date:"d M Y" }}
-                    {% if r.lmrb_date == r.plan_date %}<span class="delta-pill delta-ok ml-1">✓ same</span>{% else %}<span class="delta-pill delta-near ml-1">≠ plan</span>{% endif %}
+                    {% if r.lmrb_date == r.tc_date %}<span class="delta-pill delta-ok ml-1">✓ same</span>{% else %}<span class="delta-pill delta-near ml-1">≠ TC date</span>{% endif %}
                   </div>
                   <div><span class="lbl">Time</span> {{ r.lmrb_time }}
-                    {% if r.lmrb_delta_secs == 0 %}<span class="delta-pill delta-ok ml-1">✓ in window</span>
-                    {% elif r.lmrb_delta_secs is not None %}<span class="delta-pill {% if r.lmrb_delta_secs <= 300 %}delta-near{% else %}delta-far{% endif %} ml-1">+{{ r.lmrb_delta_secs }}s outside</span>{% endif %}
+                    {% if r.tc_lmrb_delta_secs is not None %}
+                      {% if r.tc_lmrb_delta_secs <= 5 %}
+                        <span class="delta-pill delta-ok ml-1">±{{ r.tc_lmrb_delta_secs }}s — within tolerance</span>
+                      {% elif r.tc_lmrb_delta_secs <= 30 %}
+                        <span class="delta-pill delta-near ml-1">±{{ r.tc_lmrb_delta_secs }}s</span>
+                      {% else %}
+                        <span class="delta-pill delta-far ml-1">±{{ r.tc_lmrb_delta_secs }}s</span>
+                      {% endif %}
+                    {% endif %}
                   </div>
                   <div><span class="lbl">Theme</span> {{ r.lmrb_theme|default:"-" }}</div>
                   <div><span class="lbl">Programme</span> {{ r.lmrb_programme|default:"-" }}</div>
                 </div>
               </div>
-              {% endif %}
-
-              <!-- TC details card -->
-              {% if r.has_tc %}
-              <div class="detail-card">
-                <div class="detail-card-title" style="color:#7c3aed;"><i class="fa-solid fa-file-certificate mr-1"></i>TC (Channel Cert)</div>
-                <div class="detail-row-val">
-                  <div><span class="lbl">Date</span>
-                    {{ r.tc_date|date:"d M Y" }}
-                    {% if r.tc_date == r.plan_date %}<span class="delta-pill delta-ok ml-1">✓ same</span>{% else %}<span class="delta-pill delta-near ml-1">≠ plan</span>{% endif %}
-                  </div>
-                  <div><span class="lbl">Time</span> {{ r.tc_time }}
-                    {% if r.tc_lmrb_confirmed %}<span class="delta-pill delta-ok ml-1">✓ LMRB confirmed</span>
-                    {% else %}<span class="delta-pill delta-far ml-1">✗ LMRB not confirmed</span>{% endif %}
-                  </div>
-                  {% if r.tc_lmrb_delta_secs is not None %}
-                  <div><span class="lbl">TC↔LMRB gap</span> {{ r.tc_lmrb_delta_secs }}s</div>
-                  {% endif %}
-                  <div><span class="lbl">Theme</span> {{ r.tc_theme|default:"-" }}</div>
-                  <div><span class="lbl">Programme</span> {{ r.tc_programme|default:"-" }}</div>
-                </div>
-              </div>
-              {% endif %}
-
-              <!-- Nearest LMRB card (tc_only rows with a close but unconfirmed LMRB) -->
-              {% if r.status == 'tc_only' and r.near_lmrb_time %}
-              <div class="detail-card near-lmrb-card">
-                <div class="detail-card-title"><i class="fa-solid fa-crosshairs mr-1"></i>Closest Unconfirmed LMRB</div>
-                <div class="detail-row-val">
-                  <div><span class="lbl">LMRB time</span> <strong>{{ r.near_lmrb_time }}</strong></div>
-                  <div><span class="lbl">Distance from TC</span>
-                    {% if r.near_lmrb_delta <= 5 %}
-                      <span class="delta-pill delta-ok">{{ r.near_lmrb_delta }}s - within tolerance</span>
-                    {% elif r.near_lmrb_delta <= 30 %}
-                      <span class="delta-pill delta-near">{{ r.near_lmrb_delta }}s - very close</span>
-                    {% elif r.near_lmrb_delta <= 120 %}
-                      <span class="delta-pill delta-near">{{ r.near_lmrb_delta }}s - close</span>
-                    {% else %}
-                      <span class="delta-pill delta-far">{{ r.near_lmrb_delta }}s - far</span>
-                    {% endif %}
-                  </div>
-                  <div class="text-slate-500 text-xs mt-1">
-                    {% if r.near_lmrb_delta <= 5 %}
-                      This LMRB row is within the ±5s tolerance - re-running reconciliation may confirm it.
-                    {% elif r.near_lmrb_delta <= 60 %}
-                      An LMRB row is nearby. Consider increasing the TC–LMRB time tolerance in Settings if this is a systematic offset.
-                    {% else %}
-                      LMRB and TC times differ significantly. Check if TC timestamp is recorded differently.
-                    {% endif %}
-                  </div>
-                </div>
-              </div>
-              {% elif r.status == 'tc_only' and not r.near_lmrb_time %}
+              {% else %}
               <div class="detail-card" style="border-color:#fca5a5; background:#fff1f2;">
-                <div class="detail-card-title" style="color:#991b1b;"><i class="fa-solid fa-triangle-exclamation mr-1"></i>No Nearby LMRB Found</div>
+                <div class="detail-card-title" style="color:#991b1b;"><i class="fa-solid fa-triangle-exclamation mr-1"></i>No LMRB Confirmation</div>
                 <div class="detail-row-val text-slate-500 text-xs">
-                  No unconfirmed LMRB row with matching duration was found on the same date. The TC record may be an extra spot not captured by 3rd-party monitoring.
+                  No LMRB row was found within the time tolerance for this TC spot. The channel recorded this broadcast but 3rd-party monitoring did not capture it.
                 </div>
               </div>
               {% endif %}
@@ -548,8 +369,8 @@
 {% elif selected_account and channel and month %}
   <div class="bg-amber-50 border border-amber-200 rounded-2xl px-6 py-8 text-center">
     <i class="fa-solid fa-triangle-exclamation text-amber-400 text-3xl mb-3"></i>
-    <p class="font-semibold text-amber-800">No schedule rows found for this scope.</p>
-    <p class="text-sm text-amber-600 mt-1">Upload a schedule and run the matching engine first.</p>
+    <p class="font-semibold text-amber-800">No TC rows found for this scope.</p>
+    <p class="text-sm text-amber-600 mt-1">Upload a TC file and run reconciliation first.</p>
   </div>
 
 {% elif selected_account and channel %}
@@ -567,11 +388,11 @@
 {% block extra_scripts %}
 <script>
 function toggleDetail(n) {
-  const detailRow  = document.getElementById('detail-' + n);
-  const btn        = document.getElementById('btn-' + n);
-  const chevron    = document.getElementById('chevron-' + n);
-  const dataRow    = document.getElementById('row-' + n);
-  const isOpen     = detailRow.classList.contains('visible');
+  const detailRow = document.getElementById('detail-' + n);
+  const btn       = document.getElementById('btn-' + n);
+  const chevron   = document.getElementById('chevron-' + n);
+  const dataRow   = document.getElementById('row-' + n);
+  const isOpen    = detailRow.classList.contains('visible');
 
   if (isOpen) {
     detailRow.classList.remove('visible');

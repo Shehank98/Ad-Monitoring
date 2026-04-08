@@ -1,0 +1,252 @@
+{% extends 'base.html' %}
+{% block title %}LMRB vs TC{% endblock %}
+{% block page_title %}LMRB vs TC{% endblock %}
+{% block page_subtitle %}LMRB cut of TC data — every TC-confirmed LMRB spot, grouped by brand{% endblock %}
+
+{% block extra_head %}
+<style>
+  .lmrb-table { width: 100%; border-collapse: collapse; font-size: .76rem; }
+  .lmrb-table th {
+    background: #0f2340; color: #fff; font-weight: 700; font-size: .68rem;
+    text-transform: uppercase; letter-spacing: .05em;
+    padding: .4rem .55rem; white-space: nowrap;
+  }
+  .lmrb-table td { padding: .35rem .55rem; white-space: nowrap; border-bottom: 1px solid #f1f5f9; }
+
+  .th-tc   { background: #7c3aed !important; }
+  .th-lmrb { background: #065f46 !important; }
+  .group-sep { border-left: 2px solid #e2e8f0 !important; }
+
+  .brand-header td {
+    background: #f8fafc;
+    font-weight: 700;
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: #475569;
+    padding: .5rem .75rem;
+    border-bottom: 1px solid #e2e8f0;
+    border-top: 2px solid #e2e8f0;
+  }
+
+  .row-scheduled { background: #f0fdf4; }
+  .row-extra     { background: #f5f3ff; }
+
+  .badge { display:inline-flex; align-items:center; gap:.25rem;
+           padding:.15rem .45rem; border-radius:9999px; font-size:.65rem; font-weight:700; }
+  .badge-green  { background:#dcfce7; color:#166534; }
+  .badge-purple { background:#f3e8ff; color:#6b21a8; }
+  .badge-grey   { background:#f1f5f9; color:#64748b; }
+  .badge-amber  { background:#fef9c3; color:#92400e; }
+
+  .delta-pill {
+    display: inline-block; font-size: .6rem; font-weight: 700;
+    padding: .08rem .3rem; border-radius: 4px; margin-left: .2rem;
+    vertical-align: middle;
+  }
+  .delta-ok   { background: #dcfce7; color: #166534; }
+  .delta-near { background: #fef9c3; color: #92400e; }
+  .delta-far  { background: #fee2e2; color: #991b1b; }
+
+  .stat-card { border-radius:1rem; padding:.75rem 1.25rem; min-width:130px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── Filter bar ─────────────────────────────────────────────── -->
+<div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-4 mb-5">
+  <form method="get" class="flex flex-wrap gap-3 items-end">
+    <div class="flex-1 min-w-[160px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Account</label>
+      <select name="account_id" class="select-field" onchange="this.form.submit()">
+        <option value="">Select account…</option>
+        {% for acc in accounts %}
+          <option value="{{ acc.id }}" {% if acc.id|stringformat:"s" == account_id %}selected{% endif %}>{{ acc.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex-1 min-w-[130px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel</label>
+      <select name="channel" class="select-field" onchange="this.form.submit()" {% if not channels %}disabled{% endif %}>
+        <option value="">Select channel…</option>
+        {% for ch in channels %}
+          <option value="{{ ch }}" {% if ch == channel %}selected{% endif %}>{{ ch }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex-1 min-w-[130px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Month</label>
+      <select name="month" class="select-field" onchange="this.form.submit()" {% if not months %}disabled{% endif %}>
+        <option value="">Select month…</option>
+        {% for mo in months %}
+          <option value="{{ mo }}" {% if mo == month %}selected{% endif %}>{{ mo }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% if schedules_in_scope|length > 1 %}
+    <div class="flex-1 min-w-[160px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Schedule #</label>
+      <select name="schedule_id" class="select-field" onchange="this.form.submit()">
+        <option value="">All schedules</option>
+        {% for sched in schedules_in_scope %}
+          <option value="{{ sched.id }}" {% if sched.id|stringformat:"s" == schedule_id %}selected{% endif %}>
+            #{{ sched.schedule_number }} ({{ sched.row_count }} rows)
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    {% elif schedules_in_scope %}
+    <input type="hidden" name="schedule_id" value="{{ schedules_in_scope.0.id }}">
+    {% endif %}
+    {% if account_id and channel and month %}
+    <div class="flex gap-2 items-end">
+      <a href="/dashboard/summary/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
+         class="btn-secondary text-xs">
+        <i class="fa-solid fa-table-list"></i> Summary
+      </a>
+      <a href="/dashboard/tc/detail/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
+         class="btn-secondary text-xs">
+        <i class="fa-solid fa-table-columns text-violet-600"></i> TC vs LMRB Detail
+      </a>
+    </div>
+    {% endif %}
+  </form>
+</div>
+
+{% if groups %}
+
+<!-- ── Stat cards ─────────────────────────────────────────────── -->
+<div class="flex flex-wrap gap-3 mb-5">
+  <div class="stat-card bg-green-50 border border-green-100">
+    <div class="text-xs font-bold text-green-600 uppercase tracking-wider mb-0.5">
+      <i class="fa-solid fa-circle-check mr-1"></i>Total TC+LMRB Confirmed
+    </div>
+    <div class="text-2xl font-extrabold text-green-700">{{ total_confirmed }}</div>
+  </div>
+  <div class="stat-card bg-white border border-slate-100 shadow-sm">
+    <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5">Schedule-Matched TC</div>
+    <div class="text-2xl font-extrabold text-slate-800">{{ total_sched_match }}</div>
+  </div>
+  <div class="stat-card bg-purple-50 border border-purple-100">
+    <div class="text-xs font-bold text-purple-600 uppercase tracking-wider mb-0.5">Extra TC (unscheduled)</div>
+    <div class="text-2xl font-extrabold text-purple-700">{{ total_extra }}</div>
+  </div>
+  <div class="stat-card bg-white border border-slate-100 shadow-sm">
+    <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5">Brands</div>
+    <div class="text-2xl font-extrabold text-slate-800">{{ groups|length }}</div>
+  </div>
+</div>
+
+<!-- ── Legend ─────────────────────────────────────────────────── -->
+<div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
+  <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Schedule matched — TC spot linked to a planned ad</span>
+  <span class="badge badge-purple"><i class="fa-solid fa-plus"></i> Extra — TC spot with no matching schedule row</span>
+  <span class="text-slate-400 ml-2">Only TC rows where LMRB confirmed within the time tolerance are shown here.</span>
+</div>
+
+<!-- ── Table per brand group ──────────────────────────────────── -->
+<div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+  <table class="lmrb-table">
+    <thead>
+      <tr>
+        <th colspan="3" class="text-center">Info</th>
+        <th colspan="4" class="text-center th-tc">
+          <i class="fa-solid fa-file-certificate mr-1"></i>TC (Channel Certificate)
+        </th>
+        <th colspan="4" class="text-center th-lmrb group-sep">
+          <i class="fa-solid fa-eye mr-1"></i>LMRB (3rd-Party Monitoring)
+        </th>
+        <th class="text-center">TC↔LMRB Gap</th>
+      </tr>
+      <tr>
+        <th>#</th>
+        <th>Brand</th>
+        <th>Dur (s)</th>
+        <th class="th-tc">Date</th>
+        <th class="th-tc">Time</th>
+        <th class="th-tc">Theme</th>
+        <th class="th-tc">Programme</th>
+        <th class="th-lmrb group-sep">Date</th>
+        <th class="th-lmrb">Time</th>
+        <th class="th-lmrb">Theme</th>
+        <th class="th-lmrb">Programme</th>
+        <th>Gap (s)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for group in groups %}
+
+      <!-- Brand header row -->
+      <tr class="brand-header">
+        <td colspan="12">
+          <i class="fa-solid fa-tag mr-1 text-slate-400"></i>
+          {{ group.brand }}
+          <span class="ml-2 font-normal text-slate-400">({{ group.count }} confirmed spot{{ group.count|pluralize }})</span>
+        </td>
+      </tr>
+
+      {% for r in group.rows %}
+      <tr class="{% if r.is_schedule_matched %}row-scheduled{% elif r.is_extra %}row-extra{% endif %}">
+        <td class="text-slate-400 font-mono">{{ forloop.counter }}</td>
+        <td class="font-semibold text-slate-700">
+          {{ group.brand }}
+          {% if r.is_extra %}<span class="badge badge-purple ml-1">extra</span>{% endif %}
+        </td>
+        <td class="font-mono text-slate-600">{{ r.duration }}</td>
+
+        <!-- TC -->
+        <td class="font-mono">{{ r.tc_date|date:"d M Y" }}</td>
+        <td class="font-mono text-purple-700">{{ r.tc_time }}</td>
+        <td class="text-slate-600 max-w-[140px] truncate" title="{{ r.tc_theme }}">{{ r.tc_theme|default:"-" }}</td>
+        <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.tc_programme }}">{{ r.tc_programme|default:"-" }}</td>
+
+        <!-- LMRB -->
+        <td class="font-mono group-sep {% if r.lmrb_date == r.tc_date %}text-green-700{% else %}text-amber-600{% endif %}">
+          {{ r.lmrb_date|date:"d M Y" }}
+          {% if r.lmrb_date != r.tc_date %}<span class="delta-pill delta-near">≠date</span>{% endif %}
+        </td>
+        <td class="font-mono text-green-700">{{ r.lmrb_time }}</td>
+        <td class="text-slate-600 max-w-[140px] truncate" title="{{ r.lmrb_theme }}">{{ r.lmrb_theme|default:"-" }}</td>
+        <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.lmrb_programme }}">{{ r.lmrb_programme|default:"-" }}</td>
+
+        <!-- Gap -->
+        <td class="font-mono">
+          {% if r.gap_secs is not None %}
+            {% if r.gap_secs <= 5 %}
+              <span class="delta-pill delta-ok">{{ r.gap_secs }}s</span>
+            {% elif r.gap_secs <= 30 %}
+              <span class="delta-pill delta-near">{{ r.gap_secs }}s</span>
+            {% else %}
+              <span class="delta-pill delta-far">{{ r.gap_secs }}s</span>
+            {% endif %}
+          {% else %}
+            <span class="text-slate-300">—</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% elif selected_account and channel and month %}
+  <div class="bg-amber-50 border border-amber-200 rounded-2xl px-6 py-8 text-center">
+    <i class="fa-solid fa-triangle-exclamation text-amber-400 text-3xl mb-3"></i>
+    <p class="font-semibold text-amber-800">No TC+LMRB confirmed rows found for this scope.</p>
+    <p class="text-sm text-amber-600 mt-1">Upload TC and LMRB data, then run TC reconciliation.</p>
+  </div>
+
+{% elif selected_account and channel %}
+  <div class="text-slate-400 text-sm text-center py-12">Select a month to view the data.</div>
+
+{% elif selected_account %}
+  <div class="text-slate-400 text-sm text-center py-12">Select a channel to continue.</div>
+
+{% else %}
+  <div class="text-slate-400 text-sm text-center py-12">Select an account to get started.</div>
+{% endif %}
+
+{% endblock %}

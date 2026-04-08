@@ -143,7 +143,12 @@
 
   <a href="/dashboard/tc/detail/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
      class="btn-secondary text-xs">
-    <i class="fa-solid fa-table-columns text-violet-600"></i> Plan vs LMRB vs TC
+    <i class="fa-solid fa-table-columns text-violet-600"></i> TC vs LMRB
+  </a>
+
+  <a href="/dashboard/tc/lmrb-tc/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
+     class="btn-secondary text-xs">
+    <i class="fa-solid fa-link text-green-600"></i> LMRB vs TC
   </a>
 
   <!-- Sponsorship reconciliation controls - always visible -->

@@ -499,10 +499,10 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
     Build structured summary data for the Summary Sheet report.
 
     Column definitions:
-    - Aired       : TC rows that are schedule-matched AND LMRB-confirmed (TC ∩ LMRB)
-    - 3rd Party   : Total LMRB row count for this brand/theme (independent 3rd-party count)
-    - Extra       : max(0, LMRB_count - Planned)  - LMRB found more than planned
-    - Missed      : max(0, Planned - LMRB_count)  - LMRB found fewer than planned
+    - Aired       : TC rows that are schedule-matched AND LMRB-confirmed (TC ∩ LMRB, schedule-matched only)
+    - 3rd Party   : ALL TC rows that are LMRB-confirmed for this brand (includes extra TC spots, so 3rd_party >= aired)
+    - Extra       : max(0, 3rd_Party - Planned)   - TC+LMRB confirmed found more than planned
+    - Missed      : max(0, Planned - 3rd_Party)   - TC+LMRB confirmed found fewer than planned
 
     Returns:
     {
@@ -638,15 +638,27 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
 
         aired = tc_aired + manual_aired
 
-        # 3rd Party = total LMRB row count for this brand/theme/duration in scope.
-        # This is the raw independent-monitoring count, regardless of TC confirmation.
-        # If LMRB observed 60 spots and only 50 were planned, 3rd Party = 60.
-        lmrb_themes = _lmrb_themes_for_brand(brand, dur, lmrb_theme_map)
-        third_party = _lmrb_row_count(lmrb_themes, dur_int, exclude_spon=True)
+        # 3rd Party = ALL TC rows that are LMRB-confirmed for this brand/duration.
+        # This includes schedule-matched AND extra TC spots, so 3rd_party >= aired.
+        # Using TC-confirmed rows (not raw LMRB) ensures both Aired and 3rd Party
+        # derive from the same ground truth (TC data verified by LMRB).
+        third_party_q = TCRow.objects.filter(
+            account_id=account_id, channel=channel,
+            tc_report__month=month,
+            is_lmrb_confirmed=True,
+        )
+        if tc_themes:
+            tq = Q()
+            for t in tc_themes:
+                tq |= Q(tc_theme__iexact=t)
+            third_party_q = third_party_q.filter(tq)
+        if dur_int is not None:
+            third_party_q = third_party_q.filter(duration=dur_int)
+        third_party = third_party_q.count()
 
-        # Missed = Planned − 3rd Party (LMRB found fewer than planned)
+        # Missed = Planned − 3rd Party (TC+LMRB confirmed fewer than planned)
         missed = max(0, planned - third_party)
-        # Extra = 3rd Party − Planned (LMRB found more than planned)
+        # Extra = 3rd Party − Planned (TC+LMRB confirmed more than planned)
         extra  = max(0, third_party - planned)
 
         commercial_rows.append({
