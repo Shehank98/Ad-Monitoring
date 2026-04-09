@@ -56,7 +56,10 @@ urlpatterns = [
     path('tc/<int:pk>/delete/',                 views.tc_delete,      name='tc_delete'),
     path('tc/reconcile/',                       views.tc_reconcile,   name='tc_reconcile'),
     path('tc/detail/',                          views.tc_three_way,      name='tc_three_way'),
-    path('tc/lmrb-tc/',                         views.lmrb_tc_section,   name='lmrb_tc_section'),
+    path('tc/lmrb-tc/',                         views.lmrb_tc_section,    name='lmrb_tc_section'),
+    path('tc/lmrb-candidates/',                 views.tc_lmrb_candidates, name='tc_lmrb_candidates'),
+    path('tc/lmrb-link/',                       views.tc_lmrb_link,       name='tc_lmrb_link'),
+    path('tc/lmrb-unlink/<int:pk>/',            views.tc_lmrb_unlink,     name='tc_lmrb_unlink'),
     path('tc/pdf-convert/',                     views.tc_pdf_convert,    name='tc_pdf_convert'),
 
     # Summary Sheet Report

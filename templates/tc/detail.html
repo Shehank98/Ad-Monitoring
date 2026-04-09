@@ -96,6 +96,36 @@
   }
   .detail-row-val { font-size: .75rem; color: #1e293b; line-height: 1.5; }
   .detail-row-val .lbl { color: #94a3b8; font-size: .65rem; }
+
+  /* ── LMRB Find-Match panel ─────────────────────────────────── */
+  .find-lmrb-btn {
+    background: #d97706; color: #fff; border: none;
+    padding: .25rem .65rem; border-radius: .4rem; cursor: pointer;
+    font-size: .72rem; font-weight: 600;
+    display: inline-flex; align-items: center; gap: .3rem;
+  }
+  .find-lmrb-btn:hover { background: #b45309; }
+  .find-lmrb-btn:disabled { opacity: .6; cursor: not-allowed; }
+  .unlink-btn {
+    background: #dc2626; color: #fff; border: none;
+    padding: .2rem .55rem; border-radius: .35rem; cursor: pointer;
+    font-size: .68rem; font-weight: 600;
+    display: inline-flex; align-items: center; gap: .25rem;
+  }
+  .unlink-btn:hover { background: #b91c1c; }
+  .unlink-btn:disabled { opacity: .6; cursor: not-allowed; }
+  .link-btn {
+    background: #059669; color: #fff; border: none;
+    padding: .2rem .5rem; border-radius: .35rem; cursor: pointer;
+    font-size: .68rem; font-weight: 600;
+    display: inline-flex; align-items: center; gap: .25rem;
+  }
+  .link-btn:hover { background: #047857; }
+  .link-btn:disabled { opacity: .6; cursor: not-allowed; }
+  .cand-table { width: 100%; border-collapse: collapse; margin-top: .4rem; font-size: .72rem; }
+  .cand-table th { background: #f1f5f9; padding: .25rem .4rem; text-align: left; font-weight: 700; font-size: .65rem; white-space: nowrap; }
+  .cand-table td { padding: .25rem .4rem; border-bottom: 1px solid #f1f5f9; }
+  .cand-table tbody tr:hover { background: #f8fafc; }
 </style>
 {% endblock %}
 
@@ -267,11 +297,11 @@
 
         <!-- LMRB columns -->
         {% if r.has_lmrb %}
-          <td class="font-mono group-sep {% if r.lmrb_date == r.tc_date %}text-green-700{% else %}text-amber-600{% endif %}">
+          <td id="lmrb-d1-{{ r.tc_row_id }}" class="font-mono group-sep {% if r.lmrb_date == r.tc_date %}text-green-700{% else %}text-amber-600{% endif %}">
             {{ r.lmrb_date|date:"d M Y" }}
             {% if r.lmrb_date != r.tc_date %}<span class="delta-pill delta-near" title="LMRB date differs from TC date">≠date</span>{% endif %}
           </td>
-          <td class="font-mono text-green-700">
+          <td id="lmrb-d2-{{ r.tc_row_id }}" class="font-mono text-green-700">
             {{ r.lmrb_time }}
             {% if r.tc_lmrb_delta_secs is not None %}
               {% if r.tc_lmrb_delta_secs <= 5 %}
@@ -283,10 +313,10 @@
               {% endif %}
             {% endif %}
           </td>
-          <td class="text-slate-600 max-w-[140px] truncate" title="{{ r.lmrb_theme }}">{{ r.lmrb_theme }}</td>
-          <td class="text-slate-700 max-w-[160px] truncate" title="{{ r.lmrb_programme }}">{{ r.lmrb_programme|default:"-" }}</td>
+          <td id="lmrb-d3-{{ r.tc_row_id }}" class="text-slate-600 max-w-[140px] truncate" title="{{ r.lmrb_theme }}">{{ r.lmrb_theme }}</td>
+          <td id="lmrb-d4-{{ r.tc_row_id }}" class="text-slate-700 max-w-[160px] truncate" title="{{ r.lmrb_programme }}">{{ r.lmrb_programme|default:"-" }}</td>
         {% else %}
-          <td class="group-sep text-slate-300 italic text-center" colspan="4">— no LMRB match —</td>
+          <td id="lmrb-d1-{{ r.tc_row_id }}" class="group-sep text-slate-300 italic text-center" colspan="4" data-placeholder="1">— no LMRB match —</td>
         {% endif %}
 
         <!-- Status -->
@@ -326,7 +356,7 @@
 
               <!-- LMRB details card -->
               {% if r.has_lmrb %}
-              <div class="detail-card">
+              <div id="lmrb-detail-card-{{ r.tc_row_id }}" class="detail-card">
                 <div class="detail-card-title" style="color:#065f46;"><i class="fa-solid fa-eye mr-1"></i>LMRB (3rd-Party Monitoring)</div>
                 <div class="detail-row-val">
                   <div><span class="lbl">Date</span>
@@ -347,13 +377,25 @@
                   <div><span class="lbl">Theme</span> {{ r.lmrb_theme|default:"-" }}</div>
                   <div><span class="lbl">Programme</span> {{ r.lmrb_programme|default:"-" }}</div>
                 </div>
+                {% if r.manual_match_id %}
+                <div style="margin-top:.5rem; padding-top:.5rem; border-top:1px solid #bbf7d0;">
+                  <span class="badge badge-blue mr-2" style="font-size:.62rem;"><i class="fa-solid fa-link"></i> Manual link</span>
+                  <button class="unlink-btn" onclick="unlinkLmrb({{ r.manual_match_id }}, {{ r.tc_row_id }}, this)">
+                    <i class="fa-solid fa-link-slash"></i> Unlink
+                  </button>
+                </div>
+                {% endif %}
               </div>
               {% else %}
-              <div class="detail-card" style="border-color:#fca5a5; background:#fff1f2;">
+              <div id="lmrb-detail-card-{{ r.tc_row_id }}" class="detail-card" style="border-color:#fca5a5; background:#fff1f2;">
                 <div class="detail-card-title" style="color:#991b1b;"><i class="fa-solid fa-triangle-exclamation mr-1"></i>No LMRB Confirmation</div>
-                <div class="detail-row-val text-slate-500 text-xs">
-                  No LMRB row was found within the time tolerance for this TC spot. The channel recorded this broadcast but 3rd-party monitoring did not capture it.
+                <div class="detail-row-val text-slate-500 text-xs mb-2">
+                  No LMRB row found within the time tolerance. Click below to search for a nearby unmatched LMRB row.
                 </div>
+                <button class="find-lmrb-btn" onclick="toggleCandidates({{ r.tc_row_id }}, this)">
+                  <i class="fa-solid fa-magnifying-glass"></i> Find LMRB Match
+                </button>
+                <div id="cand-panel-{{ r.tc_row_id }}" style="display:none; margin-top:.6rem;"></div>
               </div>
               {% endif %}
 
@@ -393,7 +435,6 @@ function toggleDetail(n) {
   const chevron   = document.getElementById('chevron-' + n);
   const dataRow   = document.getElementById('row-' + n);
   const isOpen    = detailRow.classList.contains('visible');
-
   if (isOpen) {
     detailRow.classList.remove('visible');
     btn.classList.remove('open');
@@ -405,6 +446,223 @@ function toggleDetail(n) {
     chevron.className = 'fa-solid fa-chevron-down';
     dataRow.classList.add('row-selected');
   }
+}
+
+// ── LMRB Manual Linking ─────────────────────────────────────────────────────
+
+const _csrf = () => (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+
+function _esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function _gapPill(secs) {
+  if (secs === null || secs === undefined) return '';
+  const cls = secs <= 5 ? 'delta-ok' : secs <= 30 ? 'delta-near' : 'delta-far';
+  return `<span class="delta-pill ${cls}">±${secs}s</span>`;
+}
+
+async function toggleCandidates(tcRowId, btn) {
+  const panel = document.getElementById('cand-panel-' + tcRowId);
+  if (panel.style.display !== 'none') {
+    panel.style.display = 'none';
+    btn.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> Find LMRB Match';
+    return;
+  }
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading…';
+  try {
+    const resp = await fetch('/dashboard/tc/lmrb-candidates/?tc_row_id=' + tcRowId);
+    const data = await resp.json();
+    if (!data.ok) { alert(data.error || 'Error loading candidates.'); return; }
+    panel.innerHTML = _renderCandidates(tcRowId, data.candidates);
+    panel.style.display = 'block';
+    btn.innerHTML = '<i class="fa-solid fa-chevron-up"></i> Hide';
+  } catch (e) {
+    alert('Network error loading candidates.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function _renderCandidates(tcRowId, candidates) {
+  if (!candidates.length) {
+    return '<div style="font-size:.72rem;color:#64748b;padding:.4rem 0;">No unmatched LMRB rows found for this date/duration.</div>';
+  }
+  let html = '<table class="cand-table"><thead><tr>'
+    + '<th>Time</th><th>Theme</th><th style="text-align:center;">Dur (s)</th>'
+    + '<th style="text-align:center;">Gap</th><th></th>'
+    + '</tr></thead><tbody>';
+  for (const c of candidates) {
+    let gapHtml;
+    if (c.gap_secs === null || c.gap_secs === undefined) {
+      gapHtml = '<span style="color:#94a3b8;">—</span>';
+    } else if (c.gap_secs <= 30) {
+      gapHtml = `<span class="delta-pill delta-ok">±${c.gap_secs}s</span>`;
+    } else if (c.gap_secs <= 120) {
+      gapHtml = `<span class="delta-pill delta-near">±${c.gap_secs}s</span>`;
+    } else {
+      gapHtml = `<span class="delta-pill delta-far">±${c.gap_secs}s</span>`;
+    }
+    html += `<tr>
+      <td style="font-family:monospace;">${_esc(c.time)}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;" title="${_esc(c.theme)}">${_esc(c.theme)}</td>
+      <td style="text-align:center;">${c.duration}</td>
+      <td style="text-align:center;">${gapHtml}</td>
+      <td><button class="link-btn" onclick="linkLmrb(${tcRowId}, ${c.id}, this)">
+        <i class="fa-solid fa-link"></i> Link
+      </button></td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
+async function linkLmrb(tcRowId, lmrbRowId, btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+  try {
+    const resp = await fetch('/dashboard/tc/lmrb-link/', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': _csrf(), 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `tc_row_id=${tcRowId}&lmrb_row_id=${lmrbRowId}`,
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      alert(data.error || 'Error linking LMRB row.');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-link"></i> Link';
+      return;
+    }
+
+    // Update the detail card to show LMRB info + Unlink button
+    const card = document.getElementById('lmrb-detail-card-' + tcRowId);
+    card.style.borderColor = '#bbf7d0';
+    card.style.background = '#f0fdf4';
+    card.innerHTML = `
+      <div class="detail-card-title" style="color:#065f46;">
+        <i class="fa-solid fa-eye mr-1"></i>LMRB (3rd-Party Monitoring)
+      </div>
+      <div class="detail-row-val">
+        <div><span class="lbl">Date</span> ${_esc(data.lmrb_date)}</div>
+        <div><span class="lbl">Time</span> ${_esc(data.lmrb_time)} ${_gapPill(data.gap_secs)}</div>
+        <div><span class="lbl">Theme</span> ${_esc(data.lmrb_theme)}</div>
+      </div>
+      <div style="margin-top:.5rem; padding-top:.5rem; border-top:1px solid #bbf7d0;">
+        <span class="badge badge-blue mr-2" style="font-size:.62rem;"><i class="fa-solid fa-link"></i> Manual link</span>
+        <button class="unlink-btn" onclick="unlinkLmrb(${data.mm_id}, ${tcRowId}, this)">
+          <i class="fa-solid fa-link-slash"></i> Unlink
+        </button>
+      </div>
+    `;
+
+    // Update main table row's LMRB cells
+    _updateMainLmrb(tcRowId, data);
+  } catch (e) {
+    alert('Network error linking LMRB row.');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-link"></i> Link';
+  }
+}
+
+function _updateMainLmrb(tcRowId, data) {
+  const placeholder = document.getElementById('lmrb-d1-' + tcRowId);
+  if (!placeholder) return;
+  const tr = placeholder.parentElement;
+  const statusCell = placeholder.nextElementSibling;
+
+  placeholder.remove();
+
+  const td1 = document.createElement('td');
+  td1.id = 'lmrb-d1-' + tcRowId;
+  td1.className = 'font-mono group-sep text-green-700';
+  td1.textContent = data.lmrb_date;
+
+  const td2 = document.createElement('td');
+  td2.id = 'lmrb-d2-' + tcRowId;
+  td2.className = 'font-mono text-green-700';
+  td2.innerHTML = _esc(data.lmrb_time) + ' ' + _gapPill(data.gap_secs);
+
+  const td3 = document.createElement('td');
+  td3.id = 'lmrb-d3-' + tcRowId;
+  td3.className = 'text-slate-600 max-w-[140px] truncate';
+  td3.title = data.lmrb_theme;
+  td3.textContent = data.lmrb_theme;
+
+  const td4 = document.createElement('td');
+  td4.id = 'lmrb-d4-' + tcRowId;
+  td4.className = 'text-slate-700 max-w-[160px] truncate';
+  td4.textContent = '-';
+
+  tr.insertBefore(td1, statusCell);
+  tr.insertBefore(td2, statusCell);
+  tr.insertBefore(td3, statusCell);
+  tr.insertBefore(td4, statusCell);
+}
+
+async function unlinkLmrb(mmId, tcRowId, btn) {
+  if (!confirm('Remove this manual LMRB link?')) return;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+  try {
+    const resp = await fetch(`/dashboard/tc/lmrb-unlink/${mmId}/`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': _csrf() },
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      alert(data.error || 'Error unlinking.');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-link-slash"></i> Unlink';
+      return;
+    }
+
+    // Revert detail card back to "Find Match" state
+    const card = document.getElementById('lmrb-detail-card-' + tcRowId);
+    card.style.borderColor = '#fca5a5';
+    card.style.background = '#fff1f2';
+    card.innerHTML = `
+      <div class="detail-card-title" style="color:#991b1b;">
+        <i class="fa-solid fa-triangle-exclamation mr-1"></i>No LMRB Confirmation
+      </div>
+      <div class="detail-row-val text-slate-500 text-xs mb-2">
+        No LMRB row found within the time tolerance. Click below to search for a nearby unmatched LMRB row.
+      </div>
+      <button class="find-lmrb-btn" onclick="toggleCandidates(${tcRowId}, this)">
+        <i class="fa-solid fa-magnifying-glass"></i> Find LMRB Match
+      </button>
+      <div id="cand-panel-${tcRowId}" style="display:none; margin-top:.6rem;"></div>
+    `;
+
+    // Revert main table row LMRB cells to placeholder
+    _revertMainLmrb(tcRowId);
+  } catch (e) {
+    alert('Network error unlinking.');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-link-slash"></i> Unlink';
+  }
+}
+
+function _revertMainLmrb(tcRowId) {
+  const d1 = document.getElementById('lmrb-d1-' + tcRowId);
+  const d2 = document.getElementById('lmrb-d2-' + tcRowId);
+  const d3 = document.getElementById('lmrb-d3-' + tcRowId);
+  const d4 = document.getElementById('lmrb-d4-' + tcRowId);
+  if (!d1) return;
+  const tr = d1.parentElement;
+  // Status cell is the sibling after d4 (or d1 if others missing)
+  const statusCell = (d4 || d1).nextElementSibling;
+  [d1, d2, d3, d4].forEach(el => el && el.remove());
+
+  const placeholder = document.createElement('td');
+  placeholder.id = 'lmrb-d1-' + tcRowId;
+  placeholder.className = 'group-sep text-slate-300 italic text-center';
+  placeholder.setAttribute('colspan', '4');
+  placeholder.setAttribute('data-placeholder', '1');
+  placeholder.textContent = '— no LMRB match —';
+  tr.insertBefore(placeholder, statusCell);
 }
 </script>
 {% endblock %}

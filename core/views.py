@@ -4331,6 +4331,7 @@ def tc_three_way(request):
                 tc_lmrb_delta = abs(tc_time_s - lmrb_time_s)
 
             rows.append({
+                'tc_row_id': tc.id,
                 'brand':    brand,
                 'duration': tc.duration,
                 # TC (channel certificate)
@@ -4350,6 +4351,20 @@ def tc_three_way(request):
                 'status':           status,
                 'tc_lmrb_delta_secs': tc_lmrb_delta,
             })
+
+    # Build a map of tc_row_id → ManualMatch.id for tc_lmrb matches in this scope
+    # so the template can render the "Unlink" button on already-linked rows.
+    from core.models import ManualMatch as _MM
+    mm_by_tc = {}
+    if selected_account and channel and month:
+        for _mm in _MM.objects.filter(
+            account_id=account_id, channel=channel, month=month, match_mode='tc_lmrb'
+        ):
+            mm_by_tc[_mm.tc_row_id] = _mm.id
+
+    # Annotate each row with the ManualMatch id (None if not manually linked)
+    for r in rows:
+        r['manual_match_id'] = mm_by_tc.get(r['tc_row_id'])
 
     return render(request, 'tc/detail.html', {
         'accounts':           account_qs,
@@ -6685,13 +6700,17 @@ def manual_match_create(request):
         ScheduleRow.objects.filter(id=sr.id).update(is_manual_matched=True)
     LMRBRow.objects.filter(id=lr.id).update(is_manual_matched=True)
 
-    # For 3way and tc_lmrb modes: also lock the TCRow so it appears as matched
-    # in TC reconciliation views (is_schedule_matched=True on TCRow).
-    if tr and match_mode in ('3way', 'tc_lmrb'):
+    # For 3way: lock TCRow as schedule-matched.
+    # For tc_lmrb: lock TCRow as LMRB-confirmed (NOT schedule-matched — no schedule row exists).
+    if tr and match_mode == '3way':
         update_fields = {'is_schedule_matched': True}
         if sr:
             update_fields['matched_schedule_id'] = sr.id
         TCRow.objects.filter(id=tr.id).update(**update_fields)
+    elif tr and match_mode == 'tc_lmrb':
+        TCRow.objects.filter(id=tr.id).update(
+            is_lmrb_confirmed=True, matched_lmrb_id=lr.id,
+        )
 
     # Remove stale engine MatchResult for this schedule row
     if sr:
@@ -6757,13 +6776,144 @@ def manual_dematch(request, pk):
     LMRBRow.objects.filter(id=lr_id).update(is_manual_matched=False)
 
     # Unlock TCRow if it was locked by this manual match
-    if tc_row_id_to_unlock and tc_mode in ('3way', 'tc_lmrb'):
+    if tc_row_id_to_unlock and tc_mode == '3way':
         TCRow.objects.filter(id=tc_row_id_to_unlock).update(
             is_schedule_matched=False, matched_schedule=None,
+        )
+    elif tc_row_id_to_unlock and tc_mode == 'tc_lmrb':
+        TCRow.objects.filter(id=tc_row_id_to_unlock).update(
+            is_lmrb_confirmed=False, matched_lmrb=None,
         )
 
     messages.success(request, f'De-matched: {sr_desc}. All rows are now available again.')
     return redirect(redirect_url)
+
+
+# ── TC ↔ LMRB inline manual linking (used from TC detail page) ────────────────
+
+def _time_to_secs_local(t: str):
+    """'HH:MM:SS' → int seconds since midnight, or None on error."""
+    try:
+        h, m, s = str(t).split(':')[:3]
+        return int(h) * 3600 + int(m) * 60 + int(s)
+    except Exception:
+        return None
+
+
+@login_required
+def tc_lmrb_candidates(request):
+    """
+    GET (AJAX): Return unmatched LMRBRows for a given TCRow — same date,
+    channel and duration — sorted by time proximity to the TC aired_time.
+    Used by the inline "Find LMRB" panel on the TC detail page.
+    """
+    tc_row_id = request.GET.get('tc_row_id', '').strip()
+    if not tc_row_id:
+        return JsonResponse({'ok': False, 'error': 'tc_row_id required.'})
+    tr = get_object_or_404(TCRow, id=tc_row_id)
+    if not _account_access(request.user, tr.account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied.'})
+
+    qs = LMRBRow.objects.filter(
+        account_id=tr.account_id,
+        channel__iexact=tr.channel,
+        date=tr.date,
+        duration=tr.duration,
+        is_matched=False,
+        is_manual_matched=False,
+        is_sponsorship_matched=False,
+    ).order_by('advt_time')[:100]
+
+    tc_secs = _time_to_secs_local(tr.aired_time)
+    candidates = []
+    for lr in qs:
+        lmrb_secs = _time_to_secs_local(lr.advt_time)
+        gap = (abs(tc_secs - lmrb_secs)
+               if tc_secs is not None and lmrb_secs is not None else None)
+        candidates.append({
+            'id':        lr.id,
+            'date':      str(lr.date),
+            'time':      lr.advt_time,
+            'theme':     lr.advt_theme,
+            'duration':  lr.duration,
+            'programme': lr.program or '',
+            'gap_secs':  gap,
+        })
+    candidates.sort(key=lambda x: x['gap_secs'] if x['gap_secs'] is not None else 99999)
+    return JsonResponse({'ok': True, 'candidates': candidates})
+
+
+@login_required
+@require_POST
+def tc_lmrb_link(request):
+    """
+    POST (AJAX): Manually link a TCRow to an LMRBRow (tc_lmrb mode).
+    Sets is_lmrb_confirmed=True on the TC row and locks the LMRB row.
+    Returns JSON so the TC detail page can update without a full reload.
+    """
+    from core.models import ManualMatch
+    tc_row_id   = request.POST.get('tc_row_id', '').strip()
+    lmrb_row_id = request.POST.get('lmrb_row_id', '').strip()
+    if not tc_row_id or not lmrb_row_id:
+        return JsonResponse({'ok': False, 'error': 'tc_row_id and lmrb_row_id required.'})
+
+    tr = get_object_or_404(TCRow, id=tc_row_id)
+    lr = get_object_or_404(
+        LMRBRow, id=lmrb_row_id,
+        is_matched=False, is_manual_matched=False, is_sponsorship_matched=False,
+    )
+    if not _account_access(request.user, tr.account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied.'})
+    if ManualMatch.objects.filter(tc_row=tr).exists():
+        return JsonResponse({'ok': False, 'error': 'TC row is already manually matched.'})
+    if ManualMatch.objects.filter(lmrb_row=lr).exists():
+        return JsonResponse({'ok': False, 'error': 'LMRB row is already manually matched.'})
+
+    month = tr.tc_report.month
+    mm = ManualMatch.objects.create(
+        account_id=tr.account_id,
+        channel=tr.channel,
+        month=month,
+        match_mode='tc_lmrb',
+        tc_row=tr,
+        lmrb_row=lr,
+        matched_by=request.user,
+    )
+    TCRow.objects.filter(id=tr.id).update(is_lmrb_confirmed=True, matched_lmrb_id=lr.id)
+    LMRBRow.objects.filter(id=lr.id).update(is_manual_matched=True)
+
+    tc_secs   = _time_to_secs_local(tr.aired_time)
+    lmrb_secs = _time_to_secs_local(lr.advt_time)
+    gap = (abs(tc_secs - lmrb_secs)
+           if tc_secs is not None and lmrb_secs is not None else None)
+
+    return JsonResponse({
+        'ok':         True,
+        'mm_id':      mm.id,
+        'lmrb_date':  str(lr.date),
+        'lmrb_time':  lr.advt_time,
+        'lmrb_theme': lr.advt_theme,
+        'gap_secs':   gap,
+    })
+
+
+@login_required
+@require_POST
+def tc_lmrb_unlink(request, pk):
+    """
+    POST (AJAX): Remove a tc_lmrb ManualMatch and unlock both rows.
+    Returns JSON so the TC detail page can update without a full reload.
+    """
+    from core.models import ManualMatch
+    mm = get_object_or_404(ManualMatch, pk=pk, match_mode='tc_lmrb')
+    if not _account_access(request.user, mm.account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied.'})
+    tr_id = mm.tc_row_id
+    lr_id = mm.lmrb_row_id
+    mm.delete()
+    TCRow.objects.filter(id=tr_id).update(is_lmrb_confirmed=False, matched_lmrb=None)
+    LMRBRow.objects.filter(id=lr_id).update(is_manual_matched=False)
+    return JsonResponse({'ok': True})
 
 
 # ── Commercial Tags Pool ───────────────────────────────────────────────────────
