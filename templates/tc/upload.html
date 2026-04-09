@@ -100,11 +100,10 @@
       <!-- Linked Schedule -->
       <div>
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-          <i class="fa-solid fa-link mr-1 text-slate-400"></i> Link to Schedule
-          <span class="text-slate-400 font-normal normal-case ml-1">optional</span>
+          <i class="fa-solid fa-link mr-1 text-slate-400"></i> Link to Schedule <span class="text-red-400">*</span>
         </label>
-        <select name="schedule_id" id="selSchedule" class="select-field" onchange="scheduleSelected(this)">
-          <option value="">Not linked</option>
+        <select name="schedule_id" id="selSchedule" class="select-field" onchange="scheduleSelected(this)" required>
+          <option value="">Select schedule…</option>
           {% for sch in schedules %}
             <option value="{{ sch.id }}"
                     data-account="{{ sch.account_id }}"
@@ -297,10 +296,27 @@ function dateToMonthStr(dateStr) {
 // ── Schedule / account helpers ────────────────────────────────────────────────
 
 function scheduleSelected(sel) {
-  const opt = sel.options[sel.selectedIndex];
-  if (!opt.value) return;
-  if (opt.dataset.channel) document.getElementById('inpChannel').value = opt.dataset.channel;
-  if (opt.dataset.month)   document.getElementById('inpMonth').value   = opt.dataset.month;
+  const opt      = sel.options[sel.selectedIndex];
+  const chField  = document.getElementById('inpChannel');
+  const moField  = document.getElementById('inpMonth');
+  if (!opt.value) {
+    // Cleared — unlock manual editing
+    chField.readOnly = false;
+    chField.classList.remove('bg-slate-50');
+    moField.readOnly = false;
+    moField.classList.remove('bg-slate-50');
+    return;
+  }
+  if (opt.dataset.channel) {
+    chField.value    = opt.dataset.channel;
+    chField.readOnly = true;
+    chField.classList.add('bg-slate-50');
+  }
+  if (opt.dataset.month) {
+    moField.value    = opt.dataset.month;
+    moField.readOnly = true;
+    moField.classList.add('bg-slate-50');
+  }
 }
 
 function loadSchedules() {
@@ -559,53 +575,39 @@ async function parsePdfClientSide(file) {
 // ── Main preview trigger ──────────────────────────────────────────────────────
 
 async function runPreview() {
-  const accountId = document.getElementById('selAccount').value;
-  const channel   = document.getElementById('inpChannel').value.trim();
-  const month     = document.getElementById('inpMonth').value.trim();
-  const fileInput = document.getElementById('tcFile');
+  const accountId  = document.getElementById('selAccount').value;
+  const scheduleId = document.getElementById('selSchedule').value;
+  const channel    = document.getElementById('inpChannel').value.trim();
+  const month      = document.getElementById('inpMonth').value.trim();
+  const fileInput  = document.getElementById('tcFile');
 
-  if (!accountId) { alert('Please select an account first.'); return; }
-  if (!channel)   { alert('Please enter a channel name.'); return; }
-  if (!month)     { alert('Please enter a month (e.g. January 2025).'); return; }
+  if (!accountId)  { alert('Please select an account first.'); return; }
+  if (!scheduleId) { alert('Please link a schedule — this sets the correct channel for parsing.'); return; }
+  if (!channel)    { alert('Please enter a channel name.'); return; }
+  if (!month)      { alert('Please enter a month (e.g. January 2025).'); return; }
   if (!fileInput.files.length) { alert('Please choose a TC file.'); return; }
 
   const file  = fileInput.files[0];
   const isPdf = file.name.toLowerCase().endsWith('.pdf');
 
-  if (isPdf) {
-    // ── Client-side PDF parsing ──────────────────────────────────────────────
-    showLoading('Parsing PDF in browser… this may take a moment.');
-    try {
-      const rows = await parsePdfClientSide(file);
+  // Both PDF and Excel go through the server so the channel-specific
+  // parser (e.g. sirasa_tv.py) is selected via get_converter(channel).
+  pdfParsedRows = null;
+  showLoading(isPdf ? 'Parsing PDF on server using channel converter…' : 'Reading TC file…');
+  const fd = new FormData();
+  fd.append('tc_file', file);
+  fd.append('account_id', accountId);
+  fd.append('channel', channel);
+  fd.append('month', month);
+  fd.append('csrfmiddlewaretoken', csrfToken);
+  fetch('/dashboard/tc/preview/', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
       document.getElementById('btnPreview').disabled = false;
-      if (!rows || rows.length === 0) {
-        showError('No data rows could be extracted from the PDF. Check that it is a valid TC file.');
-        return;
-      }
-      pdfParsedRows = rows;
-      renderPreview(buildPreviewSummary(rows), 'pdf');
-    } catch(err) {
-      showError('Error reading PDF: ' + err.message);
-    }
-  } else {
-    // ── Server-side Excel preview ────────────────────────────────────────────
-    pdfParsedRows = null;
-    showLoading('Reading TC file…');
-    const fd = new FormData();
-    fd.append('tc_file', file);
-    fd.append('account_id', accountId);
-    fd.append('channel', channel);
-    fd.append('month', month);
-    fd.append('csrfmiddlewaretoken', csrfToken);
-    fetch('/dashboard/tc/preview/', { method: 'POST', body: fd })
-      .then(r => r.json())
-      .then(data => {
-        document.getElementById('btnPreview').disabled = false;
-        if (!data.ok) { showError(data.error || 'Unknown error.'); return; }
-        renderPreview(data, 'excel');
-      })
-      .catch(err => showError('Network error: ' + err.message));
-  }
+      if (!data.ok) { showError(data.error || 'Unknown error.'); return; }
+      renderPreview(data, isPdf ? 'pdf' : 'excel');
+    })
+    .catch(err => showError('Network error: ' + err.message));
 }
 
 // Build summary object from client-side parsed rows (same shape as server response)
