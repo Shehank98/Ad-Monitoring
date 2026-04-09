@@ -4330,6 +4330,9 @@ def tc_three_way(request):
             if tc_time_s is not None and lmrb_time_s is not None:
                 tc_lmrb_delta = abs(tc_time_s - lmrb_time_s)
 
+            # Schedule row details (for the detail panel)
+            sr = tc.matched_schedule if tc.matched_schedule_id else None
+
             rows.append({
                 'tc_row_id': tc.id,
                 'brand':    brand,
@@ -4341,6 +4344,11 @@ def tc_three_way(request):
                 'tc_programme': tc.programme,
                 'is_extra':     tc.is_extra,
                 'is_schedule_matched': tc.is_schedule_matched,
+                # Schedule (planned) — populated when is_schedule_matched=True
+                'sched_date':       sr.date       if sr else None,
+                'sched_start_time': sr.start_time if sr else '',
+                'sched_end_time':   sr.end_time   if sr else '',
+                'sched_brand':      sr.brand       if sr else '',
                 # LMRB (3rd-party monitoring — the row that confirmed TC)
                 'has_lmrb':     lmrb is not None,
                 'lmrb_date':    lmrb.date       if lmrb else None,
@@ -6814,15 +6822,22 @@ def tc_lmrb_candidates(request):
     if not _account_access(request.user, tr.account_id):
         return JsonResponse({'ok': False, 'error': 'Access denied.'})
 
+    # Exclude LMRB rows already claimed by another TCRow (auto or manual confirmation).
+    # We do NOT filter is_matched=False: a row already matched to a schedule row
+    # can still serve as a TC confirmation (same as the auto TC↔LMRB engine).
+    already_used = TCRow.objects.filter(
+        account_id=tr.account_id,
+        matched_lmrb__isnull=False,
+    ).values_list('matched_lmrb_id', flat=True)
+
     qs = LMRBRow.objects.filter(
         account_id=tr.account_id,
         channel__iexact=tr.channel,
         date=tr.date,
         duration=tr.duration,
-        is_matched=False,
         is_manual_matched=False,
         is_sponsorship_matched=False,
-    ).order_by('advt_time')[:100]
+    ).exclude(id__in=already_used).order_by('advt_time')[:100]
 
     tc_secs = _time_to_secs_local(tr.aired_time)
     candidates = []
@@ -6860,7 +6875,7 @@ def tc_lmrb_link(request):
     tr = get_object_or_404(TCRow, id=tc_row_id)
     lr = get_object_or_404(
         LMRBRow, id=lmrb_row_id,
-        is_matched=False, is_manual_matched=False, is_sponsorship_matched=False,
+        is_manual_matched=False, is_sponsorship_matched=False,
     )
     if not _account_access(request.user, tr.account_id):
         return JsonResponse({'ok': False, 'error': 'Access denied.'})

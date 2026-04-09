@@ -354,6 +354,23 @@
                 </div>
               </div>
 
+              <!-- Schedule (planned) card -->
+              {% if r.is_schedule_matched and r.sched_brand %}
+              <div class="detail-card" style="border-color:#bfdbfe; background:#eff6ff;">
+                <div class="detail-card-title" style="color:#1d4ed8;"><i class="fa-solid fa-calendar-check mr-1"></i>Schedule (Planned)</div>
+                <div class="detail-row-val">
+                  <div><span class="lbl">Brand</span> {{ r.sched_brand }}</div>
+                  <div><span class="lbl">Date</span> {{ r.sched_date|date:"d M Y" }}</div>
+                  <div><span class="lbl">Window</span> {{ r.sched_start_time }} – {{ r.sched_end_time }}</div>
+                </div>
+              </div>
+              {% elif r.is_extra %}
+              <div class="detail-card" style="border-color:#e9d5ff; background:#faf5ff;">
+                <div class="detail-card-title" style="color:#7c3aed;"><i class="fa-solid fa-calendar-xmark mr-1"></i>Schedule (Planned)</div>
+                <div class="detail-row-val text-slate-500 text-xs">No schedule row — this TC spot was not in the booking plan.</div>
+              </div>
+              {% endif %}
+
               <!-- LMRB details card -->
               {% if r.has_lmrb %}
               <div id="lmrb-detail-card-{{ r.tc_row_id }}" class="detail-card">
