@@ -24,7 +24,7 @@ from accounts.views import create_user, edit_user, user_list
 
 from .forms import AccountForm, ChannelForm, MonitoringUploadForm, ScheduleUploadForm
 from .models import (
-    Account, AuditLog, BrandMapping, Channel, ChannelOfficer,
+    Account, AuditLog, BrandMapping, Channel, ChannelOfficer, Client,
     LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow,
     SponsorshipLmrbAssignment, SummaryReportMeta, SystemSetting,
     TCRow, TransmissionReport,
@@ -94,13 +94,24 @@ def _is_admin(user):
 def _account_access(user, account_id):
     if _is_admin(user):
         return True
-    return user.accounts.filter(id=account_id).exists()
+    if user.accounts.filter(id=account_id).exists():
+        return True
+    # Client-level access: access to a Client grants access to all its Accounts
+    acc = Account.objects.filter(id=account_id).select_related('client').first()
+    if acc and acc.client_id and user.clients.filter(id=acc.client_id).exists():
+        return True
+    return False
 
 
 def _account_qs(user):
+    from django.db.models import Q
     if _is_admin(user):
         return Account.objects.all()
-    return user.accounts.all()
+    direct = user.accounts.values_list('id', flat=True)
+    via_client = Account.objects.filter(
+        client_id__in=user.clients.values_list('id', flat=True)
+    ).values_list('id', flat=True)
+    return Account.objects.filter(Q(id__in=direct) | Q(id__in=via_client))
 
 
 def _detect_schedule_meta(df):
@@ -343,17 +354,60 @@ def dashboard(request):
 @login_required
 @role_required(['super_admin', 'admin'])
 def account_list(request):
-    accounts = Account.objects.all()
-    form     = AccountForm()
+    from .forms import ClientForm
 
     if request.method == 'POST':
         action = request.POST.get('action')
-        if action == 'add':
+
+        # ── Client actions ────────────────────────────────────────
+        if action == 'add_client':
+            cf = ClientForm(request.POST)
+            if cf.is_valid():
+                cf.save()
+                messages.success(request, f'Client "{cf.cleaned_data["name"]}" added.')
+            else:
+                messages.error(request, 'Client name is required and must be unique.')
+            return redirect('/dashboard/accounts/')
+
+        elif action == 'edit_client':
+            pk   = request.POST.get('client_id')
+            name = request.POST.get('name', '').strip()
+            cl   = get_object_or_404(Client, id=pk)
+            if name and name != cl.name:
+                cl.name = name
+                cl.save(update_fields=['name'])
+                messages.success(request, f'Client renamed to "{name}".')
+            return redirect('/dashboard/accounts/')
+
+        elif action == 'delete_client':
+            pk = request.POST.get('client_id')
+            cl = get_object_or_404(Client, id=pk)
+            cl.delete()
+            messages.success(request, f'Client "{cl.name}" deleted (accounts unlinked).')
+            return redirect('/dashboard/accounts/')
+
+        # ── Account actions ───────────────────────────────────────
+        elif action == 'add':
             form = AccountForm(request.POST)
             if form.is_valid():
                 form.save()
                 messages.success(request, f'Account "{form.cleaned_data["name"]}" added.')
-                return redirect('/dashboard/accounts/')
+            else:
+                messages.error(request, 'Account name is required and must be unique.')
+            return redirect('/dashboard/accounts/')
+
+        elif action == 'edit_account':
+            pk        = request.POST.get('account_id')
+            name      = request.POST.get('name', '').strip()
+            client_id = request.POST.get('client_id') or None
+            acc       = get_object_or_404(Account, id=pk)
+            if name:
+                acc.name = name
+            acc.client_id = client_id
+            acc.save(update_fields=['name', 'client_id'])
+            messages.success(request, f'Account "{acc.name}" updated.')
+            return redirect('/dashboard/accounts/')
+
         elif action == 'delete':
             acc_id = request.POST.get('account_id')
             acc    = get_object_or_404(Account, id=acc_id)
@@ -361,7 +415,16 @@ def account_list(request):
             messages.success(request, f'Account "{acc.name}" deleted.')
             return redirect('/dashboard/accounts/')
 
-    return render(request, 'admin_panel/accounts.html', {'accounts': accounts, 'form': form})
+    clients  = Client.objects.prefetch_related('accounts').all()
+    ungrouped = Account.objects.filter(client__isnull=True).order_by('name')
+    form     = AccountForm()
+    client_form = ClientForm()
+    return render(request, 'admin_panel/accounts.html', {
+        'clients':    clients,
+        'ungrouped':  ungrouped,
+        'form':       form,
+        'client_form': client_form,
+    })
 
 
 # ── Channel management ────────────────────────────────────────────────────────

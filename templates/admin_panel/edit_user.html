@@ -168,13 +168,80 @@
   </div>
   {% endif %}
 
-  <!-- ── Assign Accounts ────────────────────────────────────────── -->
+  <!-- ── Change Role ───────────────────────────────────────────── -->
+  {% if allowed_roles %}
   <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
     <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">
-      <i class="fa-solid fa-building mr-1.5 text-slate-400"></i> Assigned Accounts
+      <i class="fa-solid fa-shield-halved mr-1.5 text-slate-400"></i> Change Role
     </h3>
-    <p class="text-xs text-slate-400 mb-4">Select which brand/client accounts this user can access.</p>
+    <p class="text-xs text-slate-400 mb-4">
+      Current role: <strong>{{ target_user.role_label }}</strong>.
+      Select a new role and save.
+    </p>
+    <form method="post" class="flex items-end gap-3">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="update_role"/>
+      <div class="flex-1">
+        <select name="new_role" class="input-field">
+          {% for r_val, r_label in allowed_roles %}
+            <option value="{{ r_val }}" {% if r_val == target_user.role %}selected{% endif %}>
+              {{ r_label }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit"
+              class="inline-flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700
+                     text-white text-sm font-semibold rounded-xl transition-all duration-150 whitespace-nowrap">
+        <i class="fa-solid fa-floppy-disk"></i> Save Role
+      </button>
+    </form>
+  </div>
+  {% endif %}
 
+  <!-- ── Assign Clients ─────────────────────────────────────────── -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+    <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">
+      <i class="fa-solid fa-layer-group mr-1.5 text-indigo-400"></i> Assigned Clients
+    </h3>
+    <p class="text-xs text-slate-400 mb-4">
+      Access to a client grants access to <strong>all accounts under that client</strong>.
+    </p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="update_clients"/>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 p-4 bg-slate-50 border border-slate-200 rounded-xl mb-4">
+        {% for cl in all_clients %}
+          <label class="flex items-center gap-2.5 p-2 rounded-lg hover:bg-white hover:shadow-sm cursor-pointer transition-all text-sm text-slate-700 group">
+            <input type="checkbox" name="clients" value="{{ cl.id }}"
+                   {% if cl.id in user_clients %}checked{% endif %}
+                   class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 flex-shrink-0"/>
+            <span class="group-hover:text-slate-900 transition-colors leading-tight">{{ cl.name }}</span>
+          </label>
+        {% empty %}
+          <p class="col-span-3 text-sm text-slate-400 py-2 text-center">
+            <i class="fa-solid fa-layer-group mr-1"></i> No clients configured yet.
+            <a href="/dashboard/accounts/" class="text-indigo-500 underline ml-1">Add clients</a>
+          </p>
+        {% endfor %}
+      </div>
+      <button type="submit"
+              class="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700
+                     text-white text-sm font-semibold rounded-xl shadow-sm shadow-indigo-200
+                     transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+        <i class="fa-solid fa-floppy-disk"></i> Save Clients
+      </button>
+    </form>
+  </div>
+
+  <!-- ── Assign Accounts (legacy / direct) ─────────────────────── -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+    <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">
+      <i class="fa-solid fa-building mr-1.5 text-slate-400"></i> Direct Account Access
+    </h3>
+    <p class="text-xs text-slate-400 mb-4">
+      Assign individual accounts directly (use Clients above for bulk access).
+    </p>
     <form method="post">
       {% csrf_token %}
       <input type="hidden" name="action" value="update_accounts"/>

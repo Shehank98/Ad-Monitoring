@@ -1,5 +1,5 @@
 from django import forms
-from .models import Account, Channel, MonitoringData
+from .models import Account, Channel, Client, MonitoringData
 
 
 class ScheduleUploadForm(forms.Form):
@@ -50,12 +50,28 @@ class MonitoringUploadForm(forms.Form):
             self.fields['account'].queryset = Account.objects.all()
 
 
+class ClientForm(forms.ModelForm):
+    class Meta:
+        model  = Client
+        fields = ['name']
+        widgets = {'name': forms.TextInput(attrs={
+            'class': 'input-field', 'placeholder': 'e.g. Nestlé / SLT-Mobitel'})}
+
+
 class AccountForm(forms.ModelForm):
     class Meta:
         model  = Account
-        fields = ['name']
-        widgets = {'name': forms.TextInput(attrs={
-            'class': 'input-field', 'placeholder': 'e.g. Maliban'})}
+        fields = ['name', 'client']
+        widgets = {
+            'name':   forms.TextInput(attrs={
+                'class': 'input-field', 'placeholder': 'e.g. Maliban'}),
+            'client': forms.Select(attrs={'class': 'select-field'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['client'].required = False
+        self.fields['client'].empty_label = 'No client (ungrouped)'
 
 
 class ChannelForm(forms.ModelForm):

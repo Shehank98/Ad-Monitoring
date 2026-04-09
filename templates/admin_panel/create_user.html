@@ -102,11 +102,32 @@
         </p>
       </div>
 
-      <!-- Accounts -->
+      <!-- Clients (primary access method) -->
       <div>
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-          <i class="fa-solid fa-building mr-1 text-slate-400"></i> Assign Accounts
-          <span class="ml-1.5 font-normal text-slate-400 normal-case tracking-normal">(for Team Heads &amp; Planners)</span>
+          <i class="fa-solid fa-layer-group mr-1 text-indigo-400"></i> Assign Clients
+          <span class="ml-1.5 font-normal text-slate-400 normal-case tracking-normal">(grants access to all accounts under each client)</span>
+        </label>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+          {% for choice in form.clients %}
+            <label class="flex items-center gap-2.5 p-2 rounded-lg hover:bg-white hover:shadow-sm cursor-pointer transition-all text-sm text-slate-700 group">
+              {{ choice.tag }}
+              <span class="group-hover:text-slate-900 transition-colors">{{ choice.choice_label }}</span>
+            </label>
+          {% empty %}
+            <p class="col-span-3 text-sm text-slate-400 py-2 text-center">
+              <i class="fa-solid fa-layer-group mr-1"></i> No clients configured yet.
+              <a href="/dashboard/accounts/" class="text-indigo-500 underline ml-1">Add clients</a>
+            </p>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Direct Accounts (optional / legacy) -->
+      <div>
+        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+          <i class="fa-solid fa-building mr-1 text-slate-400"></i> Direct Account Access
+          <span class="ml-1.5 font-normal text-slate-400 normal-case tracking-normal">(optional — for individual accounts not under a client)</span>
         </label>
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 p-4 bg-slate-50 border border-slate-200 rounded-xl">
           {% for choice in form.accounts %}

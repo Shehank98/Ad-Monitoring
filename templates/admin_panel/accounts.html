@@ -1,155 +1,275 @@
 {% extends 'base.html' %}
 {% block title %}Accounts{% endblock %}
 {% block page_title %}Account Management{% endblock %}
-{% block page_subtitle %}Manage brand/client accounts{% endblock %}
+{% block page_subtitle %}Manage clients and brand accounts{% endblock %}
+
+{% block extra_head %}
+<style>
+  .client-block { border: 1px solid #e2e8f0; border-radius: 1rem; overflow: hidden; margin-bottom: 1rem; }
+  .client-header { background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: .6rem 1rem; display: flex; align-items: center; gap: .6rem; }
+  .account-row { display: flex; align-items: center; gap: .5rem; padding: .45rem 1rem; border-bottom: 1px solid #f1f5f9; }
+  .account-row:last-child { border-bottom: none; }
+  .inline-edit-form { display: none; align-items: center; gap: .4rem; flex: 1; }
+  .inline-edit-form.open { display: flex; }
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-  <!-- ── Account List ────────────────────────────────────────────── -->
-  <div class="lg:col-span-2">
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+  <!-- ── Left: Client-grouped account list ────────────────────────── -->
+  <div class="lg:col-span-2 space-y-4">
 
-      <!-- Header -->
-      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-            <i class="fa-solid fa-building text-blue-600 text-sm"></i>
-          </div>
-          <div>
-            <h3 class="font-bold text-slate-800 text-sm">All Accounts</h3>
-            <p class="text-xs text-slate-400">{{ accounts.count }} account{{ accounts.count|pluralize }} configured</p>
-          </div>
+    <!-- Clients section -->
+    {% for cl in clients %}
+    <div class="client-block">
+      <!-- Client header -->
+      <div class="client-header">
+        <div class="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-layer-group text-indigo-600 text-xs"></i>
         </div>
-        <span class="badge bg-slate-100 text-slate-600 text-xs">{{ accounts.count }} total</span>
+        <span id="cl-name-{{ cl.id }}" class="font-bold text-slate-800 text-sm flex-1">{{ cl.name }}</span>
+        <span class="text-xs text-slate-400 mr-2">{{ cl.accounts.count }} account{{ cl.accounts.count|pluralize }}</span>
+
+        <!-- Edit client name inline -->
+        <button type="button" onclick="toggleClientEdit({{ cl.id }})"
+                class="text-xs text-slate-400 hover:text-blue-600 px-2 py-1 rounded transition-colors">
+          <i class="fa-solid fa-pencil"></i>
+        </button>
+
+        <!-- Delete client -->
+        <form method="post" class="inline" id="del-cl-{{ cl.id }}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="delete_client"/>
+          <input type="hidden" name="client_id" value="{{ cl.id }}"/>
+          <button type="button"
+                  onclick="confirmDeleteClient('{{ cl.name|escapejs }}', {{ cl.id }})"
+                  class="text-xs text-slate-400 hover:text-red-600 px-2 py-1 rounded transition-colors">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </form>
       </div>
 
-      <!-- Table -->
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="bg-slate-50 border-b border-slate-100">
-              <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Account</th>
-              <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Schedules</th>
-              <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Users</th>
-              <th class="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100">
-            {% for acc in accounts %}
-            <tr class="hover:bg-slate-50/70 transition-colors group">
+      <!-- Inline client rename form (hidden by default) -->
+      <div id="cl-edit-{{ cl.id }}" class="hidden px-4 py-2 bg-blue-50 border-b border-blue-100">
+        <form method="post" class="flex items-center gap-2">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="edit_client"/>
+          <input type="hidden" name="client_id" value="{{ cl.id }}"/>
+          <input type="text" name="name" value="{{ cl.name }}"
+                 class="input-field text-sm flex-1" placeholder="Client name"/>
+          <button type="submit"
+                  class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors">
+            Save
+          </button>
+          <button type="button" onclick="toggleClientEdit({{ cl.id }})"
+                  class="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 text-xs font-semibold rounded-lg hover:bg-slate-50 transition-colors">
+            Cancel
+          </button>
+        </form>
+      </div>
 
-              <!-- Account name -->
-              <td class="px-6 py-4">
-                <div class="flex items-center gap-3">
-                  <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
-                              bg-gradient-to-br from-blue-500 to-blue-700 text-white text-xs font-bold">
-                    {{ acc.name|first|upper }}
-                  </div>
-                  <span class="font-semibold text-slate-800">{{ acc.name }}</span>
-                </div>
-              </td>
+      <!-- Accounts under this client -->
+      {% for acc in cl.accounts.all %}
+      <div class="account-row group">
+        <div class="w-6 h-6 rounded-md bg-gradient-to-br from-blue-500 to-blue-700 text-white
+                    text-xs font-bold flex items-center justify-center flex-shrink-0">
+          {{ acc.name|first|upper }}
+        </div>
+        <span id="acc-name-{{ acc.id }}" class="font-medium text-slate-700 text-sm flex-1">{{ acc.name }}</span>
 
-              <!-- Schedules count -->
-              <td class="px-6 py-4">
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-50 text-purple-700
-                             text-xs font-semibold ring-1 ring-purple-200">
-                  <i class="fa-solid fa-calendar-days text-[10px]"></i> {{ acc.schedules.count }}
-                </span>
-              </td>
+        <!-- Edit account -->
+        <button type="button" onclick="toggleAccEdit({{ acc.id }})"
+                class="text-xs text-slate-300 group-hover:text-blue-500 px-2 py-1 rounded transition-colors">
+          <i class="fa-solid fa-pencil"></i>
+        </button>
 
-              <!-- Users count -->
-              <td class="px-6 py-4">
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700
-                             text-xs font-semibold ring-1 ring-emerald-200">
-                  <i class="fa-solid fa-users text-[10px]"></i> {{ acc.users.count }}
-                </span>
-              </td>
+        <!-- Delete account -->
+        <form method="post" class="inline" id="del-acc-{{ acc.id }}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="delete"/>
+          <input type="hidden" name="account_id" value="{{ acc.id }}"/>
+          <button type="button"
+                  onclick="confirmDeleteAccount('{{ acc.name|escapejs }}', {{ acc.id }})"
+                  class="text-xs text-slate-300 group-hover:text-red-500 px-2 py-1 rounded transition-colors">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </form>
+      </div>
 
-              <!-- Delete action -->
-              <td class="px-6 py-4 text-right">
-                <form method="post" class="inline" id="delete-form-{{ acc.id }}">
-                  {% csrf_token %}
-                  <input type="hidden" name="action" value="delete"/>
-                  <input type="hidden" name="account_id" value="{{ acc.id }}"/>
-                  <button type="button"
-                          onclick="confirmDelete('{{ acc.name|escapejs }}', '{{ acc.id }}')"
-                          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200
-                                 text-xs font-semibold text-slate-500 hover:border-red-300 hover:text-red-600
-                                 hover:bg-red-50 transition-all duration-150">
-                    <i class="fa-solid fa-trash"></i> Delete
-                  </button>
-                </form>
-              </td>
-            </tr>
-            {% empty %}
-            <tr>
-              <td colspan="4" class="px-6 py-16 text-center">
-                <div class="flex flex-col items-center gap-3">
-                  <div class="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
-                    <i class="fa-solid fa-building text-slate-400 text-2xl"></i>
-                  </div>
-                  <p class="text-slate-500 font-medium">No accounts yet</p>
-                  <p class="text-xs text-slate-400">Add your first account using the form on the right.</p>
-                </div>
-              </td>
-            </tr>
+      <!-- Inline account edit form -->
+      <div id="acc-edit-{{ acc.id }}" class="hidden px-4 py-2 bg-slate-50 border-b border-slate-100">
+        <form method="post" class="flex flex-wrap items-center gap-2">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="edit_account"/>
+          <input type="hidden" name="account_id" value="{{ acc.id }}"/>
+          <input type="text" name="name" value="{{ acc.name }}"
+                 class="input-field text-sm" placeholder="Account name" style="min-width:150px; flex:1"/>
+          <select name="client_id" class="select-field text-sm" style="min-width:140px">
+            <option value="">No client (ungrouped)</option>
+            {% for c in clients %}
+              <option value="{{ c.id }}" {% if c.id == acc.client_id %}selected{% endif %}>{{ c.name }}</option>
             {% endfor %}
-          </tbody>
-        </table>
+          </select>
+          <button type="submit"
+                  class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors">
+            Save
+          </button>
+          <button type="button" onclick="toggleAccEdit({{ acc.id }})"
+                  class="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 text-xs font-semibold rounded-lg hover:bg-slate-50 transition-colors">
+            Cancel
+          </button>
+        </form>
       </div>
+      {% empty %}
+      <div class="px-4 py-3 text-xs text-slate-400 italic">No accounts under this client yet.</div>
+      {% endfor %}
     </div>
+    {% endfor %}
+
+    <!-- Ungrouped accounts -->
+    {% if ungrouped %}
+    <div class="client-block">
+      <div class="client-header">
+        <div class="w-7 h-7 rounded-lg bg-slate-200 flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-circle-question text-slate-500 text-xs"></i>
+        </div>
+        <span class="font-bold text-slate-500 text-sm flex-1">Ungrouped Accounts</span>
+        <span class="text-xs text-slate-400">{{ ungrouped|length }} account{{ ungrouped|length|pluralize }}</span>
+      </div>
+      {% for acc in ungrouped %}
+      <div class="account-row group">
+        <div class="w-6 h-6 rounded-md bg-gradient-to-br from-slate-400 to-slate-600 text-white
+                    text-xs font-bold flex items-center justify-center flex-shrink-0">
+          {{ acc.name|first|upper }}
+        </div>
+        <span id="acc-name-{{ acc.id }}" class="font-medium text-slate-700 text-sm flex-1">{{ acc.name }}</span>
+        <button type="button" onclick="toggleAccEdit({{ acc.id }})"
+                class="text-xs text-slate-300 group-hover:text-blue-500 px-2 py-1 rounded transition-colors">
+          <i class="fa-solid fa-pencil"></i>
+        </button>
+        <form method="post" class="inline" id="del-acc-{{ acc.id }}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="delete"/>
+          <input type="hidden" name="account_id" value="{{ acc.id }}"/>
+          <button type="button"
+                  onclick="confirmDeleteAccount('{{ acc.name|escapejs }}', {{ acc.id }})"
+                  class="text-xs text-slate-300 group-hover:text-red-500 px-2 py-1 rounded transition-colors">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </form>
+      </div>
+      <div id="acc-edit-{{ acc.id }}" class="hidden px-4 py-2 bg-slate-50 border-b border-slate-100">
+        <form method="post" class="flex flex-wrap items-center gap-2">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="edit_account"/>
+          <input type="hidden" name="account_id" value="{{ acc.id }}"/>
+          <input type="text" name="name" value="{{ acc.name }}"
+                 class="input-field text-sm" placeholder="Account name" style="min-width:150px; flex:1"/>
+          <select name="client_id" class="select-field text-sm" style="min-width:140px">
+            <option value="">No client (ungrouped)</option>
+            {% for c in clients %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit"
+                  class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors">
+            Save
+          </button>
+          <button type="button" onclick="toggleAccEdit({{ acc.id }})"
+                  class="px-3 py-1.5 bg-white border border-slate-200 text-slate-600 text-xs font-semibold rounded-lg hover:bg-slate-50 transition-colors">
+            Cancel
+          </button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if not clients and not ungrouped %}
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-16 text-center text-slate-400">
+      <i class="fa-solid fa-building text-4xl mb-3"></i>
+      <p class="font-medium">No clients or accounts configured yet.</p>
+      <p class="text-sm mt-1">Use the forms on the right to add your first client or account.</p>
+    </div>
+    {% endif %}
+
   </div>
 
-  <!-- ── Add Account Form ──────────────────────────────────────── -->
-  <div class="h-fit">
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+  <!-- ── Right sidebar: Add forms ──────────────────────────────────── -->
+  <div class="space-y-5 h-fit">
 
-      <!-- Header -->
-      <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
+    <!-- Add Client -->
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
+        <div class="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center">
+          <i class="fa-solid fa-layer-group text-indigo-600 text-sm"></i>
+        </div>
+        <div>
+          <h3 class="font-bold text-slate-800 text-sm">Add New Client</h3>
+          <p class="text-xs text-slate-400">Groups multiple accounts together</p>
+        </div>
+      </div>
+      <form method="post" class="px-5 py-4 space-y-3">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_client"/>
+        <div>
+          <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Client Name</label>
+          {{ client_form.name }}
+        </div>
+        <button type="submit"
+                class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5
+                       bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold
+                       rounded-xl shadow-sm transition-all duration-150">
+          <i class="fa-solid fa-plus"></i> Add Client
+        </button>
+      </form>
+    </div>
+
+    <!-- Add Account -->
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
         <div class="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
-          <i class="fa-solid fa-plus text-emerald-600 text-sm"></i>
+          <i class="fa-solid fa-building text-emerald-600 text-sm"></i>
         </div>
         <div>
           <h3 class="font-bold text-slate-800 text-sm">Add New Account</h3>
-          <p class="text-xs text-slate-400">Create a brand or client account</p>
+          <p class="text-xs text-slate-400">Optionally assign to a client</p>
         </div>
       </div>
-
-      <form method="post" class="px-6 py-5 space-y-4">
+      <form method="post" class="px-5 py-4 space-y-3">
         {% csrf_token %}
         <input type="hidden" name="action" value="add"/>
         <div>
-          <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-            <i class="fa-solid fa-building mr-1 text-slate-400"></i> Account Name
-          </label>
+          <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Account Name</label>
           {{ form.name }}
           {% if form.name.errors %}
-            <p class="mt-1.5 text-xs text-red-500 flex items-center gap-1">
-              <i class="fa-solid fa-circle-exclamation"></i> {{ form.name.errors.0 }}
-            </p>
+            <p class="mt-1 text-xs text-red-500">{{ form.name.errors.0 }}</p>
           {% endif %}
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Client (optional)</label>
+          {{ form.client }}
         </div>
         <button type="submit"
                 class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5
                        bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold
-                       rounded-xl shadow-sm shadow-emerald-200 transition-all duration-150
-                       focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
+                       rounded-xl shadow-sm transition-all duration-150">
           <i class="fa-solid fa-plus"></i> Add Account
         </button>
       </form>
     </div>
 
     <!-- Info note -->
-    <div class="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700 flex gap-2">
+    <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700 flex gap-2">
       <i class="fa-solid fa-triangle-exclamation mt-0.5 flex-shrink-0"></i>
-      <p>Deleting an account will <strong>not</strong> delete its associated schedules - only the account record is removed.</p>
+      <p>Deleting a <strong>client</strong> unlinks its accounts (accounts remain). Deleting an <strong>account</strong> does not delete its schedules.</p>
     </div>
   </div>
 
 </div>
 
-<!-- ── Delete Confirmation Modal ─────────────────────────────── -->
+<!-- ── Delete confirmation modals ─────────────────────────────── -->
 <div id="delete-modal"
      class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
   <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
@@ -158,24 +278,22 @@
         <i class="fa-solid fa-trash text-red-600 text-lg"></i>
       </div>
       <div>
-        <h3 class="font-bold text-slate-800">Delete Account?</h3>
+        <h3 id="modal-title" class="font-bold text-slate-800">Delete?</h3>
         <p class="text-sm text-slate-500 mt-0.5">This action cannot be undone.</p>
       </div>
     </div>
     <p class="text-sm text-slate-600 bg-slate-50 rounded-xl px-4 py-3 mb-5">
-      You are about to delete <strong id="modal-account-name" class="text-slate-800"></strong>.
+      You are about to delete <strong id="modal-name" class="text-slate-800"></strong>.
     </p>
     <div class="flex gap-3">
       <button onclick="closeModal()"
               class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white
-                     border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl
-                     hover:bg-slate-50 transition-all">
+                     border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50">
         Cancel
       </button>
       <button id="modal-confirm-btn"
               class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600
-                     hover:bg-red-700 text-white text-sm font-semibold rounded-xl shadow-sm
-                     shadow-red-200 transition-all">
+                     hover:bg-red-700 text-white text-sm font-semibold rounded-xl shadow-sm shadow-red-200">
         <i class="fa-solid fa-trash"></i> Delete
       </button>
     </div>
@@ -184,28 +302,39 @@
 
 {% block extra_js %}
 <script>
-let targetFormId = null;
+let _targetFormId = null;
 
-function confirmDelete(name, id) {
-  document.getElementById('modal-account-name').textContent = name;
-  targetFormId = 'delete-form-' + id;
+function confirmDeleteClient(name, id) {
+  document.getElementById('modal-title').textContent = 'Delete Client?';
+  document.getElementById('modal-name').textContent = name;
+  _targetFormId = 'del-cl-' + id;
   document.getElementById('delete-modal').classList.remove('hidden');
 }
-
+function confirmDeleteAccount(name, id) {
+  document.getElementById('modal-title').textContent = 'Delete Account?';
+  document.getElementById('modal-name').textContent = name;
+  _targetFormId = 'del-acc-' + id;
+  document.getElementById('delete-modal').classList.remove('hidden');
+}
 function closeModal() {
   document.getElementById('delete-modal').classList.add('hidden');
-  targetFormId = null;
+  _targetFormId = null;
 }
-
 document.getElementById('modal-confirm-btn').addEventListener('click', function () {
-  if (targetFormId) {
-    document.getElementById(targetFormId).submit();
-  }
+  if (_targetFormId) document.getElementById(_targetFormId).submit();
 });
-
 document.getElementById('delete-modal').addEventListener('click', function (e) {
   if (e.target === this) closeModal();
 });
+
+function toggleClientEdit(id) {
+  const el = document.getElementById('cl-edit-' + id);
+  el.classList.toggle('hidden');
+}
+function toggleAccEdit(id) {
+  const el = document.getElementById('acc-edit-' + id);
+  el.classList.toggle('hidden');
+}
 </script>
 {% endblock %}
 {% endblock %}

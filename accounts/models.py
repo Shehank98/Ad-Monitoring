@@ -44,8 +44,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     role                 = models.CharField(max_length=20, choices=ROLES, default='planner')
     whatsapp_number      = models.CharField(max_length=20, blank=True, default='',
                                             help_text='Include country code, e.g. +94771234567')
-    # accounts assigned to this user (relevant for team_head, planner)
+    # accounts assigned to this user (legacy direct assignment — kept for backward compat)
     accounts             = models.ManyToManyField('core.Account', blank=True, related_name='users')
+    # client-level access: user gets access to ALL accounts under each assigned client
+    clients              = models.ManyToManyField('core.Client', blank=True, related_name='users')
     created_by           = models.ForeignKey('self', null=True, blank=True,
                                              on_delete=models.SET_NULL, related_name='created_users')
     is_active            = models.BooleanField(default=True)

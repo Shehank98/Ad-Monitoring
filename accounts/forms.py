@@ -33,6 +33,9 @@ class CreateUserForm(forms.Form):
     role             = forms.ChoiceField(choices=[], widget=forms.Select(attrs={'class': 'input-field'}))
     whatsapp_number  = forms.CharField(max_length=20, required=False, widget=forms.TextInput(attrs={
         'class': 'input-field font-mono', 'placeholder': '+94771234567'}))
+    clients          = forms.ModelMultipleChoiceField(
+        queryset=None, required=False,
+        widget=forms.CheckboxSelectMultiple())
     accounts         = forms.ModelMultipleChoiceField(
         queryset=None, required=False,
         widget=forms.CheckboxSelectMultiple())
@@ -41,11 +44,12 @@ class CreateUserForm(forms.Form):
         widget=forms.TextInput(attrs={
             'class': 'input-field font-mono', 'placeholder': 'Set a temporary password'}))
 
-    def __init__(self, *args, allowed_roles=None, account_qs=None, **kwargs):
-        from core.models import Account
+    def __init__(self, *args, allowed_roles=None, account_qs=None, client_qs=None, **kwargs):
+        from core.models import Account, Client
         super().__init__(*args, **kwargs)
         allowed = allowed_roles or []
         self.fields['role'].choices = [
             (r, label) for r, label in User.ROLES if r in allowed
         ]
+        self.fields['clients'].queryset  = client_qs  if client_qs  is not None else Client.objects.all()
         self.fields['accounts'].queryset = account_qs if account_qs is not None else Account.objects.all()

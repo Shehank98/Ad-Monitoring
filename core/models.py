@@ -48,8 +48,30 @@ class Channel(models.Model):
         super().save(*args, **kwargs)
 
 
+class Client(models.Model):
+    """A top-level client that groups one or more Accounts.
+
+    Examples: 'Nestlé' groups Milo, Maggi, Lactogrow, etc.
+    User access is assigned at Client level — access to a Client grants
+    access to all Accounts under it.
+    """
+    name       = models.CharField(max_length=200, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
 class Account(models.Model):
     """A brand/client account (e.g. Maliban, Dialog)."""
+    client     = models.ForeignKey(
+        Client, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='accounts',
+        help_text='Parent client that groups this account',
+    )
     name       = models.CharField(max_length=200, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

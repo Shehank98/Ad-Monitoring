@@ -8,7 +8,7 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 
-from core.models import Account, AuditLog
+from core.models import Account, AuditLog, Client
 from .decorators import role_required
 from .forms import ChangePasswordForm, CreateUserForm, LoginForm
 from .models import User
@@ -143,11 +143,17 @@ def user_list(request):
     elif me.role == 'admin':
         qs = qs.exclude(role='super_admin')
     elif me.role == 'team_head':
-        # Team head sees only planner/operations users assigned to their accounts
-        my_account_ids = me.accounts.values_list('id', flat=True)
+        # Team head sees planner/operations users assigned to their accounts or clients
+        from django.db.models import Q as _Q
+        direct_ids = set(me.accounts.values_list('id', flat=True))
+        via_client_ids = set(
+            Account.objects.filter(client_id__in=me.clients.values_list('id', flat=True))
+            .values_list('id', flat=True)
+        )
+        all_account_ids = direct_ids | via_client_ids
         qs = qs.filter(
             role__in=['planner', 'operations'],
-            accounts__in=my_account_ids,
+            accounts__in=all_account_ids,
         ).distinct()
 
     # C2: Activity stats — upload counts and inactivity flags
@@ -185,14 +191,17 @@ def create_user(request):
     me            = request.user
     allowed_roles = me.creatable_roles()
 
-    # team_head: restrict account choices to their own accounts
+    # team_head: restrict choices to their own accounts/clients
     if me.role == 'team_head':
         account_qs = me.accounts.all()
+        client_qs  = me.clients.all()
     else:
         account_qs = Account.objects.all()
+        client_qs  = Client.objects.all()
 
     if request.method == 'POST':
-        form = CreateUserForm(request.POST, allowed_roles=allowed_roles, account_qs=account_qs)
+        form = CreateUserForm(request.POST, allowed_roles=allowed_roles,
+                              account_qs=account_qs, client_qs=client_qs)
         if form.is_valid():
             email  = form.cleaned_data['email'].strip().lower()
             domain = settings.ALLOWED_EMAIL_DOMAIN
@@ -211,6 +220,8 @@ def create_user(request):
                     created_by=me,
                     must_change_password=True,
                 )
+                if form.cleaned_data.get('clients'):
+                    new_user.clients.set(form.cleaned_data['clients'])
                 if form.cleaned_data.get('accounts'):
                     new_user.accounts.set(form.cleaned_data['accounts'])
                 messages.success(request, f'User {new_user.name} created successfully.')
@@ -244,7 +255,7 @@ def create_user(request):
 
                 return redirect('/dashboard/users/')
     else:
-        form = CreateUserForm(allowed_roles=allowed_roles, account_qs=account_qs)
+        form = CreateUserForm(allowed_roles=allowed_roles, account_qs=account_qs, client_qs=client_qs)
 
     return render(request, 'admin_panel/create_user.html', {'form': form})
 
@@ -260,19 +271,26 @@ def edit_user(request, user_id):
         messages.error(request, 'You cannot modify super admin accounts.')
         return redirect('/dashboard/users/')
 
-    # team_head can only edit planner/operations in their own accounts
+    # team_head can only edit planner/operations in their own accounts/clients
     if me.role == 'team_head':
         if target_user.role not in ('planner', 'operations'):
             return render(request, '403.html', status=403)
         my_account_ids = set(me.accounts.values_list('id', flat=True))
+        via_client_ids = set(
+            Account.objects.filter(client_id__in=me.clients.values_list('id', flat=True))
+            .values_list('id', flat=True)
+        )
+        all_my_ids = my_account_ids | via_client_ids
         target_acct_ids = set(target_user.accounts.values_list('id', flat=True))
-        if not my_account_ids & target_acct_ids:
+        if not all_my_ids & target_acct_ids:
             return render(request, '403.html', status=403)
 
     if me.role == 'team_head':
         account_qs = me.accounts.all()
+        client_qs  = me.clients.all()
     else:
         account_qs = Account.objects.all()
+        client_qs  = Client.objects.all()
 
     if request.method == 'POST':
         action = request.POST.get('action')
@@ -306,6 +324,37 @@ def edit_user(request, user_id):
                 ip=_ip or None,
             )
 
+        elif action == 'update_role':
+            new_role = request.POST.get('new_role', '').strip()
+            allowed  = me.creatable_roles()
+            if new_role not in allowed:
+                messages.error(request, 'You cannot assign that role.')
+            elif target_user.role == 'super_admin' and me.role != 'super_admin':
+                messages.error(request, 'Cannot change a super admin\'s role.')
+            else:
+                old_role = target_user.role
+                target_user.role = new_role
+                target_user.save(update_fields=['role'])
+                messages.success(request, f'Role changed from {old_role} to {new_role}.')
+                AuditLog.objects.create(
+                    user=me, action='user_role_change',
+                    detail=f'Role of {target_user.name} changed: {old_role} → {new_role}.',
+                    ip=_ip or None,
+                )
+
+        elif action == 'update_clients':
+            client_ids = request.POST.getlist('clients')
+            if me.role == 'team_head':
+                my_cids = set(me.clients.values_list('id', flat=True))
+                client_ids = [c for c in client_ids if int(c) in my_cids]
+            target_user.clients.set(client_ids)
+            messages.success(request, f'Client access updated for {target_user.name}.')
+            AuditLog.objects.create(
+                user=me, action='user_clients',
+                detail=f'Clients updated for {target_user.name} ({target_user.email}).',
+                ip=_ip or None,
+            )
+
         elif action == 'update_accounts':
             ids = request.POST.getlist('accounts')
             # team_head can only assign their own accounts
@@ -332,4 +381,7 @@ def edit_user(request, user_id):
         'target_user':   target_user,
         'all_accounts':  account_qs,
         'user_accounts': list(target_user.accounts.values_list('id', flat=True)),
+        'all_clients':   client_qs,
+        'user_clients':  list(target_user.clients.values_list('id', flat=True)),
+        'allowed_roles': [(r, lbl) for r, lbl in User.ROLES if r in me.creatable_roles()],
     })
