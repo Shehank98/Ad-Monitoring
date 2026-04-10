@@ -141,7 +141,7 @@
         <option value="">All schedules</option>
         {% for sched in schedules_in_scope %}
           <option value="{{ sched.id }}" {% if sched.id|stringformat:"s" == schedule_id %}selected{% endif %}>
-            #{{ sched.schedule_number }} (v{{ sched.version }})
+            #{{ sched.schedule_number }} · {{ sched.original_filename|truncatechars:30 }}
           </option>
         {% endfor %}
       </select>

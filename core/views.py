@@ -506,24 +506,39 @@ def schedule_list(request):
     if q_search:
         qs = qs.filter(original_filename__icontains=q_search)
 
-    # Group filtered schedules by channel for the accordion view
-    channel_groups = {}
-    for s in qs.order_by('channel', 'schedule_number', '-version'):
-        channel_groups.setdefault(s.channel, []).append(s)
-    channel_groups_list = sorted(channel_groups.items())  # alphabetical by channel name
+    # Group filtered schedules for the accordion view.
+    # When an account filter is active → group by channel only (single-level).
+    # When showing all accounts → group by account → channel (two-level) so that
+    # e.g. Milo/Sirasa and Netsmot/Sirasa appear as separate accordion sections.
+    if account_id:
+        channel_groups = {}
+        for s in qs.order_by('channel', 'schedule_number', '-version'):
+            channel_groups.setdefault(s.channel, []).append(s)
+        channel_groups_list     = sorted(channel_groups.items())
+        account_channel_groups  = None
+    else:
+        channel_groups_list = None
+        acc_ch = {}
+        for s in qs.order_by('account__name', 'channel', 'schedule_number', '-version'):
+            acc_ch.setdefault(s.account.name, {}).setdefault(s.channel, []).append(s)
+        account_channel_groups = [
+            (acc_name, sorted(ch_dict.items()))
+            for acc_name, ch_dict in sorted(acc_ch.items())
+        ]
 
     today    = date_cls.today()
     accounts = _account_qs(user)
     channels = Channel.objects.all()
     return render(request, 'schedules/list.html', {
-        'schedules':           qs,
-        'channel_groups_list': channel_groups_list,
-        'months_by_year_list': months_by_year_list,
-        'accounts':            accounts,
-        'channels':            channels,
-        'filters':             {'account': account_id, 'channel': channel, 'month': month,
-                                'media_type': media_type, 'q': q_search},
-        'today':               today,
+        'schedules':              qs,
+        'channel_groups_list':    channel_groups_list,
+        'account_channel_groups': account_channel_groups,
+        'months_by_year_list':    months_by_year_list,
+        'accounts':               accounts,
+        'channels':               channels,
+        'filters':                {'account': account_id, 'channel': channel, 'month': month,
+                                   'media_type': media_type, 'q': q_search},
+        'today':                  today,
     })
 
 
@@ -3819,10 +3834,10 @@ def tc_list(request):
     if channel:
         reports = reports.filter(channel=channel)
 
-    channels = sorted(set(
-        TransmissionReport.objects.filter(account__in=account_qs)
-        .values_list('channel', flat=True)
-    ))
+    ch_qs = TransmissionReport.objects.filter(account__in=account_qs)
+    if account_id:
+        ch_qs = ch_qs.filter(account_id=account_id)
+    channels = sorted(set(ch_qs.values_list('channel', flat=True)))
 
     return render(request, 'tc/list.html', {
         'reports':    reports,
