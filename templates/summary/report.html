@@ -78,6 +78,21 @@
 </div>
 
 {% if not cards_by_month %}
+  {% if total_scopes > 0 %}
+  <!-- Schedules exist but cards failed to build (logged server-side) -->
+  <div class="flex flex-col items-center justify-center py-16 gap-4 bg-white rounded-2xl border border-amber-100 shadow-sm">
+    <div class="w-14 h-14 bg-amber-50 rounded-2xl flex items-center justify-center">
+      <i class="fa-solid fa-triangle-exclamation text-amber-400 text-2xl"></i>
+    </div>
+    <div class="text-center">
+      <p class="text-slate-600 font-semibold">Could not load summary cards</p>
+      <p class="text-slate-400 text-xs mt-1">{{ total_scopes }} scope{{ total_scopes|pluralize }} found but an error occurred building the grid. Please refresh the page or contact support.</p>
+    </div>
+    <a href="?account_id={{ account_id }}" class="btn-secondary text-xs">
+      <i class="fa-solid fa-rotate"></i> Retry
+    </a>
+  </div>
+  {% else %}
   <!-- No schedules for this account -->
   <div class="flex flex-col items-center justify-center py-16 gap-4 bg-white rounded-2xl border border-slate-100 shadow-sm">
     <div class="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center">
@@ -91,6 +106,7 @@
       <i class="fa-solid fa-file-arrow-up"></i> Upload Schedule
     </a>
   </div>
+  {% endif %}
 
 {% else %}
 

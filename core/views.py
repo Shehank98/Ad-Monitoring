@@ -4658,8 +4658,8 @@ def summary_report(request):
 
     if selected_account and not (channel and month):
         try:
-            from django.db.models import Count as _Cnt, Q as _Q2
             from datetime import datetime as _dt2
+            from collections import OrderedDict as _OD
 
             combos = list(
                 Schedule.objects
@@ -4670,16 +4670,19 @@ def summary_report(request):
             total_scopes = len(combos)
 
             if combos:
-                mr_map = {}
+                # Aggregate MatchResult counts in Python to avoid conditional
+                # SQL aggregation (COUNT FILTER) which needs SQLite 3.25+.
+                mr_map = {}  # (channel, month) -> {'n_matched': int, 'n_missed': int, 'total': int}
                 for row in (MatchResult.objects
-                    .filter(account_id=account_id)
-                    .values('channel', 'month')
-                    .annotate(
-                        n_matched=_Cnt('id', filter=_Q2(status='matched')),
-                        n_missed=_Cnt('id', filter=_Q2(status='not_aired')),
-                        total=_Cnt('id'),
-                    )):
-                    mr_map[(row['channel'], row['month'])] = row
+                        .filter(account_id=account_id)
+                        .values('channel', 'month', 'status')):
+                    key = (row['channel'], row['month'])
+                    entry = mr_map.setdefault(key, {'n_matched': 0, 'n_missed': 0, 'total': 0})
+                    entry['total'] += 1
+                    if row['status'] == 'matched':
+                        entry['n_matched'] += 1
+                    elif row['status'] == 'not_aired':
+                        entry['n_missed'] += 1
 
                 tc_scopes = set(
                     TransmissionReport.objects
@@ -4689,10 +4692,9 @@ def summary_report(request):
 
                 planned_map = {}
                 for row in (ScheduleRow.objects
-                    .filter(account_id=account_id,
-                            ad_type='COMMERCIAL BENEFITS')
-                    .values('channel', 'month')
-                    .annotate(n=_Cnt('id'))):
+                        .filter(account_id=account_id, ad_type='COMMERCIAL BENEFITS')
+                        .values('channel', 'month')
+                        .annotate(n=Count('id'))):
                     planned_map[(row['channel'], row['month'])] = row['n']
 
                 cards_raw = []
@@ -4727,7 +4729,6 @@ def summary_report(request):
                     except: return _dt2.min  # noqa: E722
 
                 cards_raw.sort(key=lambda c: (-_mk(c).timestamp(), c['channel']))
-                from collections import OrderedDict as _OD
                 _grp = _OD()
                 for card in cards_raw:
                     _grp.setdefault(card['month'], []).append(card)
