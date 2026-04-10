@@ -1,8 +1,4 @@
-{# Scope card — self-contained, derives all styles from card.status.
-   Requires: card (dict), account_id (from outer context)
-#}
-
-{# Compute style set from status #}
+{# Scope card: self-contained; derives all styles from card.status. Requires card (dict) and account_id from context. #}
 {% if card.status == 'all_clear' %}
   {% with stripe="border-l-emerald-500" badge_cls="bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" icon_cls="fa-circle-check" bar_cls="bg-emerald-500" %}
   {% include 'summary/_scope_card_inner.html' %}
