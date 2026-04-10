@@ -4608,49 +4608,58 @@ def summary_report(request):
             pass
 
     if selected_account:
-        channels = sorted(set(
-            ScheduleRow.objects.filter(account_id=account_id)
-            .values_list('channel', flat=True)
-        ))
-        if channel:
-            months = sorted(set(
-                ScheduleRow.objects.filter(account_id=account_id, channel=channel)
-                .values_list('month', flat=True)
+        try:
+            channels = sorted(set(
+                ScheduleRow.objects.filter(account_id=account_id)
+                .values_list('channel', flat=True)
             ))
+        except Exception:
+            logger.exception('channels query failed for account_id=%s', account_id)
+        if channel:
+            try:
+                months = sorted(set(
+                    ScheduleRow.objects.filter(account_id=account_id, channel=channel)
+                    .values_list('month', flat=True)
+                ))
+            except Exception:
+                logger.exception('months query failed for account_id=%s channel=%s', account_id, channel)
 
     if selected_account and channel and month:
         if not _account_access(user, account_id):
             messages.error(request, 'Access denied.')
             return redirect('/dashboard/summary/')
 
-        # Build schedule selector for this scope
-        schedules_in_scope = list(
-            Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
-            .order_by('schedule_number')
-        )
-        # Auto-select when only one schedule exists
-        if not schedule_id and len(schedules_in_scope) == 1:
-            schedule_id = str(schedules_in_scope[0].id)
-
         try:
+            # Build schedule selector for this scope
+            schedules_in_scope = list(
+                Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+                .order_by('schedule_number')
+            )
+            # Auto-select when only one schedule exists
+            if not schedule_id and len(schedules_in_scope) == 1:
+                schedule_id = str(schedules_in_scope[0].id)
+
             sid = int(schedule_id) if schedule_id else None
             summary_data = build_summary_data(account_id, channel, month, schedule_id=sid)
+
+            meta = SummaryReportMeta.objects.filter(
+                account_id=account_id, channel=channel, month=month
+            ).first()
+
+            if schedule_id:
+                try:
+                    schedule_obj = Schedule.objects.filter(id=int(schedule_id)).first()
+                except (ValueError, TypeError):
+                    schedule_obj = schedules_in_scope[0] if schedules_in_scope else None
+            else:
+                schedule_obj = schedules_in_scope[0] if schedules_in_scope else None
+
+            tc_report = TransmissionReport.objects.filter(
+                account_id=account_id, channel=channel, month=month
+            ).order_by('-uploaded_at').first()
         except Exception as e:
-            logger.exception('build_summary_data failed for %s/%s/%s', account_id, channel, month)
+            logger.exception('State C data build failed for %s/%s/%s', account_id, channel, month)
             messages.warning(request, f'Could not build summary: {e}')
-
-        meta = SummaryReportMeta.objects.filter(
-            account_id=account_id, channel=channel, month=month
-        ).first()
-
-        if schedule_id:
-            schedule_obj = Schedule.objects.filter(id=schedule_id).first()
-        else:
-            schedule_obj = schedules_in_scope[0] if schedules_in_scope else None
-
-        tc_report = TransmissionReport.objects.filter(
-            account_id=account_id, channel=channel, month=month
-        ).order_by('-uploaded_at').first()
 
     # ── Card-grid mode: account selected but no full scope yet ────────────────
     cards_by_month = []
