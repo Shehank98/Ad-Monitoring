@@ -267,7 +267,7 @@ def _status_dot(account_id, channel, month):
     return 'ok'
 
 
-def _build_campaign_rows(user):
+def _build_campaign_rows(user, account_id=None):
     """Build one row per (account, channel, month) campaign that has a schedule."""
     if _is_admin(user):
         accounts_qs = Account.objects.all()
@@ -277,9 +277,12 @@ def _build_campaign_rows(user):
     account_ids = list(accounts_qs.values_list('id', flat=True))
 
     # All distinct campaigns (account × channel × month) from Schedule
+    sch_qs = Schedule.objects.filter(account_id__in=account_ids)
+    if account_id:
+        sch_qs = sch_qs.filter(account_id=account_id)
+
     combos = (
-        Schedule.objects
-        .filter(account_id__in=account_ids)
+        sch_qs
         .values('account_id', 'account__name', 'channel', 'month', 'media_type')
         .annotate(
             sch_start=Min('start_date'),
@@ -394,8 +397,20 @@ def _build_campaign_rows(user):
 @ensure_csrf_cookie
 def tool(request):
     """Verify Ads - summary dashboard (FIX 24/25/26)."""
-    rows = _build_campaign_rows(request.user)
-    return render(request, 'verification/tool.html', {'campaign_rows': rows})
+    user = request.user
+    account_id = request.GET.get('account_id', '').strip()
+
+    if _is_admin(user):
+        accounts_qs = Account.objects.all()
+    else:
+        accounts_qs = user.accounts.all()
+
+    rows = _build_campaign_rows(user, account_id=account_id or None)
+    return render(request, 'verification/tool.html', {
+        'campaign_rows': rows,
+        'accounts':      accounts_qs,
+        'account_id':    account_id,
+    })
 
 
 # ── AJAX: run verification for a single campaign row ────────────────────────────
