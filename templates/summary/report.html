@@ -23,9 +23,7 @@
 
 {% block content %}
 
-{# ════════════════════════════════════════════════════════════════
-   STATE A — No account selected: centered account picker
-   ════════════════════════════════════════════════════════════════ #}
+{# STATE A — No account selected: centered account picker #}
 {% if not account_id %}
 
 <div class="flex flex-col items-center justify-center py-20 gap-6">
@@ -47,9 +45,7 @@
   </form>
 </div>
 
-{# ════════════════════════════════════════════════════════════════
-   STATE B — Account selected, no full scope: card grid
-   ════════════════════════════════════════════════════════════════ #}
+{# STATE B — Account selected, no full scope: card grid #}
 {% elif not channel or not month %}
 
 <!-- Account header bar -->
@@ -137,9 +133,7 @@
 
 {% endif %}
 
-{# ════════════════════════════════════════════════════════════════
-   STATE C — Full scope selected: detail view
-   ════════════════════════════════════════════════════════════════ #}
+{# STATE C — Full scope selected: detail view #}
 {% else %}
 
 <!-- Breadcrumb back link -->
