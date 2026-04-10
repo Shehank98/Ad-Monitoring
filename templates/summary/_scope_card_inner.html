@@ -1,0 +1,92 @@
+{# Inner card — receives stripe, badge_cls, icon_cls, bar_cls from parent via {% with %}.
+   Also receives card and account_id from outer context.
+#}
+<div class="group flex flex-col bg-white rounded-2xl border border-slate-200 border-l-4 {{ stripe }}
+            shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 overflow-hidden">
+
+  <!-- Clickable body -->
+  <a href="/dashboard/summary/?account_id={{ account_id }}&channel={{ card.channel }}&month={{ card.month }}"
+     class="flex-1 p-4 flex flex-col gap-3">
+
+    <!-- Channel + month -->
+    <div class="flex items-start gap-3">
+      <div class="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+        <i class="fa-solid fa-tower-broadcast text-slate-500 text-sm"></i>
+      </div>
+      <div class="min-w-0 flex-1">
+        <p class="font-bold text-slate-800 text-sm leading-tight truncate" title="{{ card.channel }}">{{ card.channel }}</p>
+        <p class="text-xs text-slate-400 mt-0.5">{{ card.month }}</p>
+      </div>
+    </div>
+
+    <!-- Status badge -->
+    <span class="inline-flex items-center gap-1.5 self-start px-2.5 py-0.5 rounded-full text-[11px] font-semibold {{ badge_cls }}">
+      <i class="fa-solid {{ icon_cls }} text-[9px]"></i>
+      {% if card.status == 'all_clear' %}All Clear
+      {% elif card.status == 'has_missed' %}{{ card.missed }} Missed
+      {% elif card.status == 'not_reconciled' %}Not Reconciled
+      {% else %}Needs TC
+      {% endif %}
+    </span>
+
+    <!-- Metrics -->
+    <div class="grid grid-cols-3 gap-1.5 text-center">
+      <div class="bg-slate-50 rounded-xl py-2">
+        <p class="text-lg font-bold text-slate-800 leading-none">{{ card.planned }}</p>
+        <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-1">Plan</p>
+      </div>
+      <div class="bg-emerald-50 rounded-xl py-2">
+        <p class="text-lg font-bold text-emerald-700 leading-none">{{ card.aired }}</p>
+        <p class="text-[10px] text-emerald-600 font-semibold uppercase tracking-wide mt-1">Aired</p>
+      </div>
+      <div class="{% if card.missed > 0 %}bg-amber-50{% else %}bg-slate-50{% endif %} rounded-xl py-2">
+        <p class="text-lg font-bold {% if card.missed > 0 %}text-amber-600{% else %}text-slate-300{% endif %} leading-none">{{ card.missed }}</p>
+        <p class="text-[10px] {% if card.missed > 0 %}text-amber-500{% else %}text-slate-300{% endif %} font-semibold uppercase tracking-wide mt-1">Missed</p>
+      </div>
+    </div>
+
+    <!-- Progress bar -->
+    {% if card.planned > 0 %}
+    <div>
+      <div class="flex justify-between items-center mb-1">
+        <span class="text-[10px] text-slate-400">Aired / Planned</span>
+        <span class="text-[10px] font-bold text-slate-600">{{ card.percent }}%</span>
+      </div>
+      <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+        <div class="{{ bar_cls }} h-full rounded-full transition-all" style="width:{{ card.percent }}%"></div>
+      </div>
+    </div>
+    {% endif %}
+
+  </a>
+
+  <!-- Footer actions -->
+  <div class="border-t border-slate-100 px-3 py-2.5 flex items-center gap-1.5 bg-slate-50/70">
+    <a href="/dashboard/summary/?account_id={{ account_id }}&channel={{ card.channel }}&month={{ card.month }}"
+       class="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg
+              text-xs font-bold bg-og-red text-white hover:bg-og-red/90 transition-all shadow-sm">
+      <i class="fa-solid fa-arrow-right text-[9px]"></i> Open
+    </a>
+    <a href="/dashboard/summary/excel/?account_id={{ account_id }}&channel={{ card.channel }}&month={{ card.month }}"
+       class="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200
+              text-slate-500 hover:border-emerald-300 hover:text-emerald-600 hover:bg-emerald-50 transition-all"
+       title="Excel">
+      <i class="fa-solid fa-file-excel"></i>
+    </a>
+    <a href="/dashboard/summary/pdf/?account_id={{ account_id }}&channel={{ card.channel }}&month={{ card.month }}"
+       class="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200
+              text-slate-500 hover:border-red-300 hover:text-red-600 hover:bg-red-50 transition-all"
+       title="PDF">
+      <i class="fa-solid fa-file-pdf"></i>
+    </a>
+    {% if not card.has_tc %}
+    <a href="/dashboard/tc/upload/"
+       class="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-amber-200
+              text-amber-500 hover:bg-amber-50 transition-all"
+       title="Upload TC">
+      <i class="fa-solid fa-cloud-arrow-up"></i>
+    </a>
+    {% endif %}
+  </div>
+
+</div>

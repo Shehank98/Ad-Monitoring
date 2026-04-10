@@ -1,0 +1,22 @@
+{# Scope card — self-contained, derives all styles from card.status.
+   Requires: card (dict), account_id (from outer context)
+#}
+
+{# Compute style set from status #}
+{% if card.status == 'all_clear' %}
+  {% with stripe="border-l-emerald-500" badge_cls="bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" icon_cls="fa-circle-check" bar_cls="bg-emerald-500" %}
+  {% include 'summary/_scope_card_inner.html' %}
+  {% endwith %}
+{% elif card.status == 'has_missed' %}
+  {% with stripe="border-l-amber-400" badge_cls="bg-amber-50 text-amber-700 ring-1 ring-amber-200" icon_cls="fa-triangle-exclamation" bar_cls="bg-amber-400" %}
+  {% include 'summary/_scope_card_inner.html' %}
+  {% endwith %}
+{% elif card.status == 'not_reconciled' %}
+  {% with stripe="border-l-blue-400" badge_cls="bg-blue-50 text-blue-700 ring-1 ring-blue-200" icon_cls="fa-rotate" bar_cls="bg-blue-400" %}
+  {% include 'summary/_scope_card_inner.html' %}
+  {% endwith %}
+{% else %}
+  {% with stripe="border-l-slate-300" badge_cls="bg-slate-100 text-slate-500 ring-1 ring-slate-200" icon_cls="fa-file-circle-xmark" bar_cls="bg-slate-300" %}
+  {% include 'summary/_scope_card_inner.html' %}
+  {% endwith %}
+{% endif %}
