@@ -4604,7 +4604,7 @@ def summary_report(request):
     if account_id:
         try:
             selected_account = account_qs.get(pk=account_id)
-        except Account.DoesNotExist:
+        except (Account.DoesNotExist, ValueError, TypeError):
             pass
 
     if selected_account:
@@ -4632,10 +4632,11 @@ def summary_report(request):
         if not schedule_id and len(schedules_in_scope) == 1:
             schedule_id = str(schedules_in_scope[0].id)
 
-        sid = int(schedule_id) if schedule_id else None
         try:
+            sid = int(schedule_id) if schedule_id else None
             summary_data = build_summary_data(account_id, channel, month, schedule_id=sid)
         except Exception as e:
+            logger.exception('build_summary_data failed for %s/%s/%s', account_id, channel, month)
             messages.warning(request, f'Could not build summary: {e}')
 
         meta = SummaryReportMeta.objects.filter(
@@ -4656,80 +4657,83 @@ def summary_report(request):
     total_scopes   = 0
 
     if selected_account and not (channel and month):
-        from django.db.models import Count as _Cnt, Q as _Q2
-        from datetime import datetime as _dt2
+        try:
+            from django.db.models import Count as _Cnt, Q as _Q2
+            from datetime import datetime as _dt2
 
-        combos = list(
-            Schedule.objects
-            .filter(account_id=account_id)
-            .values('channel', 'month')
-            .distinct()
-        )
-        total_scopes = len(combos)
-
-        if combos:
-            mr_map = {}
-            for row in (MatchResult.objects
+            combos = list(
+                Schedule.objects
                 .filter(account_id=account_id)
                 .values('channel', 'month')
-                .annotate(
-                    n_matched=_Cnt('id', filter=_Q2(status='matched')),
-                    n_missed=_Cnt('id', filter=_Q2(status='not_aired')),
-                    total=_Cnt('id'),
-                )):
-                mr_map[(row['channel'], row['month'])] = row
-
-            tc_scopes = set(
-                TransmissionReport.objects
-                .filter(account_id=account_id)
-                .values_list('channel', 'month')
+                .distinct()
             )
+            total_scopes = len(combos)
 
-            planned_map = {}
-            for row in (ScheduleRow.objects
-                .filter(schedule__account_id=account_id,
-                        ad_type='COMMERCIAL BENEFITS')
-                .values('channel', 'month')
-                .annotate(n=_Cnt('id'))):
-                planned_map[(row['channel'], row['month'])] = row['n']
+            if combos:
+                mr_map = {}
+                for row in (MatchResult.objects
+                    .filter(account_id=account_id)
+                    .values('channel', 'month')
+                    .annotate(
+                        n_matched=_Cnt('id', filter=_Q2(status='matched')),
+                        n_missed=_Cnt('id', filter=_Q2(status='not_aired')),
+                        total=_Cnt('id'),
+                    )):
+                    mr_map[(row['channel'], row['month'])] = row
 
-            cards_raw = []
-            for c in combos:
-                ch, mo   = c['channel'], c['month']
-                mr       = mr_map.get((ch, mo), {})
-                planned  = planned_map.get((ch, mo), 0)
-                aired    = mr.get('n_matched', 0)
-                missed   = mr.get('n_missed', 0)
-                has_tc         = (ch, mo) in tc_scopes
-                has_reconciled = mr.get('total', 0) > 0
-                pct = min(int(aired / planned * 100), 100) if planned else 0
+                tc_scopes = set(
+                    TransmissionReport.objects
+                    .filter(account_id=account_id)
+                    .values_list('channel', 'month')
+                )
 
-                if not has_tc:
-                    sc = 'needs_tc'
-                elif not has_reconciled:
-                    sc = 'not_reconciled'
-                elif missed == 0:
-                    sc = 'all_clear'
-                else:
-                    sc = 'has_missed'
+                planned_map = {}
+                for row in (ScheduleRow.objects
+                    .filter(account_id=account_id,
+                            ad_type='COMMERCIAL BENEFITS')
+                    .values('channel', 'month')
+                    .annotate(n=_Cnt('id'))):
+                    planned_map[(row['channel'], row['month'])] = row['n']
 
-                cards_raw.append({
-                    'channel': ch, 'month': mo,
-                    'planned': planned, 'aired': aired, 'missed': missed,
-                    'has_tc': has_tc, 'has_reconciled': has_reconciled,
-                    'status': sc, 'percent': pct,
-                })
+                cards_raw = []
+                for c in combos:
+                    ch, mo   = c['channel'] or '', c['month'] or ''
+                    mr       = mr_map.get((c['channel'], c['month']), {})
+                    planned  = planned_map.get((c['channel'], c['month']), 0)
+                    aired    = mr.get('n_matched', 0)
+                    missed   = mr.get('n_missed', 0)
+                    has_tc         = (c['channel'], c['month']) in tc_scopes
+                    has_reconciled = mr.get('total', 0) > 0
+                    pct = min(int(aired / planned * 100), 100) if planned else 0
 
-            def _mk(c):
-                try:    return _dt2.strptime(c['month'], '%B %Y')
-                except: return _dt2.min  # noqa: E722
+                    if not has_tc:
+                        sc = 'needs_tc'
+                    elif not has_reconciled:
+                        sc = 'not_reconciled'
+                    elif missed == 0:
+                        sc = 'all_clear'
+                    else:
+                        sc = 'has_missed'
 
-            cards_raw.sort(key=lambda c: (-_mk(c).timestamp(), c['channel']))
-            from collections import OrderedDict as _OD
-            _grp = _OD()
-            for card in cards_raw:
-                _grp.setdefault(card['month'], []).append(card)
-            cards_by_month = list(_grp.items())
+                    cards_raw.append({
+                        'channel': ch, 'month': mo,
+                        'planned': planned, 'aired': aired, 'missed': missed,
+                        'has_tc': has_tc, 'has_reconciled': has_reconciled,
+                        'status': sc, 'percent': pct,
+                    })
+
+                def _mk(c):
+                    try:    return _dt2.strptime(c['month'], '%B %Y')
+                    except: return _dt2.min  # noqa: E722
+
+                cards_raw.sort(key=lambda c: (-_mk(c).timestamp(), c['channel']))
+                from collections import OrderedDict as _OD
+                _grp = _OD()
+                for card in cards_raw:
+                    _grp.setdefault(card['month'], []).append(card)
+                cards_by_month = list(_grp.items())
+        except Exception:
+            logger.exception('Card-grid build failed for account_id=%s', account_id)
 
     return render(request, 'summary/report.html', {
         'accounts':           account_qs,
