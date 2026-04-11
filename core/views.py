@@ -4381,7 +4381,9 @@ def tc_three_way(request):
     mm_by_tc = {}
     if selected_account and channel and month:
         for _mm in _MM.objects.filter(
-            account_id=account_id, channel=channel, month=month, match_mode='tc_lmrb'
+            account_id=account_id, channel=channel, month=month,
+            match_mode__in=['tc_lmrb', '3way'],
+            tc_row__isnull=False,
         ):
             mm_by_tc[_mm.tc_row_id] = _mm.id
 
@@ -6025,7 +6027,7 @@ def admin_export(request):
         ws_sr.cell(row_i, 11, sr.ad_type or '')
         ws_sr.cell(row_i, 12, 'Yes' if sr.is_matched else 'No')
         ws_sr.cell(row_i, 13, 'Yes' if sr.is_manual_matched else 'No')
-        ws_sr.cell(row_i, 14, sr.matched_lmrb.advt_theme if sr.matched_lmrb_id else '')
+        ws_sr.cell(row_i, 14, sr.matched_lmrb.advt_theme if sr.matched_lmrb else '')
         ws_sr.cell(row_i, 15, str(sr.matched_at) if sr.matched_at else '')
     _norm_rows(ws_sr, len(sr_rows), len(SR_HEADERS))
 
@@ -6055,8 +6057,8 @@ def admin_export(request):
         ws_tc.cell(row_i,  6, tc.duration)
         ws_tc.cell(row_i,  7, tc.aired_time or '')
         ws_tc.cell(row_i,  8, 'Yes' if tc.is_schedule_matched else 'No')
-        ws_tc.cell(row_i,  9, tc.matched_schedule.brand if tc.matched_schedule_id else '')
-        ws_tc.cell(row_i, 10, str(tc.matched_schedule.date) if tc.matched_schedule_id and tc.matched_schedule.date else '')
+        ws_tc.cell(row_i,  9, tc.matched_schedule.brand if tc.matched_schedule else '')
+        ws_tc.cell(row_i, 10, str(tc.matched_schedule.date) if tc.matched_schedule and tc.matched_schedule.date else '')
         ws_tc.cell(row_i, 11, 'Yes' if tc.is_lmrb_confirmed else 'No')
         ws_tc.cell(row_i, 12, 'Yes' if tc.is_extra else 'No')
     _norm_rows(ws_tc, len(tc_rows), len(TC_HEADERS))
@@ -6246,17 +6248,17 @@ def admin_export(request):
         ws_mm.cell(row_i,  1, mm.channel or '')
         ws_mm.cell(row_i,  2, mm.month or '')
         ws_mm.cell(row_i,  3, mm.match_mode or '')
-        ws_mm.cell(row_i,  4, mm.schedule_row.brand if mm.schedule_row_id else '')
-        ws_mm.cell(row_i,  5, str(mm.schedule_row.date) if mm.schedule_row_id and mm.schedule_row.date else '')
-        ws_mm.cell(row_i,  6, mm.schedule_row.start_time if mm.schedule_row_id else '')
-        ws_mm.cell(row_i,  7, mm.tc_row.tc_theme if mm.tc_row_id else '')
-        ws_mm.cell(row_i,  8, str(mm.tc_row.date) if mm.tc_row_id and mm.tc_row.date else '')
-        ws_mm.cell(row_i,  9, mm.tc_row.aired_time if mm.tc_row_id else '')
-        ws_mm.cell(row_i, 10, mm.lmrb_row.advt_theme if mm.lmrb_row_id else '')
-        ws_mm.cell(row_i, 11, str(mm.lmrb_row.date) if mm.lmrb_row_id and mm.lmrb_row.date else '')
-        ws_mm.cell(row_i, 12, mm.lmrb_row.advt_time if mm.lmrb_row_id else '')
+        ws_mm.cell(row_i,  4, mm.schedule_row.brand if mm.schedule_row else '')
+        ws_mm.cell(row_i,  5, str(mm.schedule_row.date) if mm.schedule_row and mm.schedule_row.date else '')
+        ws_mm.cell(row_i,  6, mm.schedule_row.start_time if mm.schedule_row else '')
+        ws_mm.cell(row_i,  7, mm.tc_row.tc_theme if mm.tc_row else '')
+        ws_mm.cell(row_i,  8, str(mm.tc_row.date) if mm.tc_row and mm.tc_row.date else '')
+        ws_mm.cell(row_i,  9, mm.tc_row.aired_time if mm.tc_row else '')
+        ws_mm.cell(row_i, 10, mm.lmrb_row.advt_theme if mm.lmrb_row else '')
+        ws_mm.cell(row_i, 11, str(mm.lmrb_row.date) if mm.lmrb_row and mm.lmrb_row.date else '')
+        ws_mm.cell(row_i, 12, mm.lmrb_row.advt_time if mm.lmrb_row else '')
         ws_mm.cell(row_i, 13, mm.note or '')
-        ws_mm.cell(row_i, 14, mm.matched_by.name if mm.matched_by_id else '')
+        ws_mm.cell(row_i, 14, mm.matched_by.name if mm.matched_by else '')
         ws_mm.cell(row_i, 15, str(mm.matched_at) if mm.matched_at else '')
     _norm_rows(ws_mm, len(mm_rows), len(MM_HEADERS))
 

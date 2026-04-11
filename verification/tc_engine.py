@@ -218,8 +218,11 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
 
     # ── Reset mode ────────────────────────────────────────────────────────────
     if mode == 'reset':
-        TCRow.objects.filter(account_id=account_id, channel=channel,
-                             tc_report__month=month).update(
+        # Exclude TC rows pinned by a ManualMatch so manual links survive a reset.
+        TCRow.objects.filter(
+            account_id=account_id, channel=channel, tc_report__month=month,
+            manual_match__isnull=True,
+        ).update(
             is_schedule_matched=False, matched_schedule=None,
             is_lmrb_confirmed=False, matched_lmrb=None,
             is_extra=False,
@@ -255,7 +258,11 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
         tc_report__month=month,
     )
     if mode == 'smart':
-        tc_qs = tc_qs.filter(is_schedule_matched=False, is_extra=False)
+        # Also exclude TC rows already pinned by a ManualMatch.
+        tc_qs = tc_qs.filter(
+            is_schedule_matched=False, is_extra=False,
+            manual_match__isnull=True,
+        )
     all_tc_rows = list(tc_qs)
 
     # ── Build LMRB index ──────────────────────────────────────────────────────
@@ -268,6 +275,7 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
         for lr in LMRBRow.objects.filter(
             _lmrb_channel_q(channel), account_id=account_id,
             date__range=(sch_start, sch_end),
+            is_manual_matched=False,    # never reclaim manually locked LMRB rows
         ):
             k = (_normalize(lr.channel), lr.date, int(lr.duration) if lr.duration else None)
             lmrb_index.setdefault(k, []).append((lr.id, _time_to_secs(lr.advt_time), lr))
@@ -384,7 +392,7 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
             if not valid:
                 continue
 
-            # Prefer the ScheduleRow whose planned time window contains the LMRB time
+            # Pass 1: exact window match — LMRB time falls within [start, end+10min]
             if lmrb_secs is not None:
                 for s in valid:
                     start_s = _time_to_secs(s.start_time)
@@ -398,8 +406,26 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
                             matched_key = pool_key
                             break
 
-            # Fallback: earliest valid date
-            if matched_sr is None:
+            # Pass 2: proximity match — closest window centre within ±2 hours
+            # Only attempted when LMRB time is known but no exact window matched.
+            if matched_sr is None and lmrb_secs is not None:
+                best_diff = float('inf')
+                for s in valid:
+                    start_s = _time_to_secs(s.start_time)
+                    end_s   = _time_to_secs(s.end_time)
+                    if end_s == 0 and start_s and start_s > 43200:
+                        end_s = 86400
+                    if start_s is not None and end_s is not None:
+                        centre_s = (start_s + end_s) / 2
+                        diff = abs(lmrb_secs - centre_s)
+                        if diff < best_diff and diff <= 7200:
+                            best_diff  = diff
+                            matched_sr  = s
+                            matched_key = pool_key
+
+            # Pass 3: fallback to earliest valid date — only when no LMRB time
+            # is available (e.g. unconfirmed TC row that still reaches Step 2).
+            if matched_sr is None and lmrb_secs is None:
                 matched_sr  = valid[0]
                 matched_key = pool_key
             break
