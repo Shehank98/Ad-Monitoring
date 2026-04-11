@@ -4360,10 +4360,11 @@ def tc_three_way(request):
                 'is_extra':     tc.is_extra,
                 'is_schedule_matched': tc.is_schedule_matched,
                 # Schedule (planned) — populated when is_schedule_matched=True
-                'sched_date':       sr.date       if sr else None,
-                'sched_start_time': sr.start_time if sr else '',
-                'sched_end_time':   sr.end_time   if sr else '',
-                'sched_brand':      sr.brand       if sr else '',
+                'sched_date':       sr.date        if sr else None,
+                'sched_start_time': sr.start_time  if sr else '',
+                'sched_end_time':   sr.end_time    if sr else '',
+                'sched_brand':      sr.brand        if sr else '',
+                'sched_programme':  sr.programme   if sr else '',
                 # LMRB (3rd-party monitoring — the row that confirmed TC)
                 'has_lmrb':     lmrb is not None,
                 'lmrb_date':    lmrb.date       if lmrb else None,
@@ -4391,6 +4392,32 @@ def tc_three_way(request):
     for r in rows:
         r['manual_match_id'] = mm_by_tc.get(r['tc_row_id'])
 
+    # ── Missed ads: ScheduleRows with no matching TCRow ───────────────────────
+    # These are planned spots the channel never transmitted (no TCRow has
+    # matched_schedule pointing to them). Displayed in the "Not Aired" section.
+    missed_ads = []
+    if selected_account and channel and month:
+        missed_sch_qs = (
+            ScheduleRow.objects
+            .filter(
+                account_id=account_id, channel=channel, month=month,
+                ad_type='COMMERCIAL BENEFITS',
+                tc_matches__isnull=True,   # reverse relation: TCRow.matched_schedule
+            )
+            .order_by('date', 'programme', 'start_time')
+        )
+        if schedule_id:
+            missed_sch_qs = missed_sch_qs.filter(schedule_id=schedule_id)
+        for sr in missed_sch_qs:
+            missed_ads.append({
+                'brand':      sr.brand,
+                'programme':  sr.programme,
+                'date':       sr.date,
+                'start_time': sr.start_time,
+                'end_time':   sr.end_time,
+                'duration':   sr.duration,
+            })
+
     return render(request, 'tc/detail.html', {
         'accounts':           account_qs,
         'selected_account':   selected_account,
@@ -4402,6 +4429,7 @@ def tc_three_way(request):
         'channel':            channel,
         'month':              month,
         'rows':               rows,
+        'missed_ads':         missed_ads,
         'planned_count':      planned_count if (selected_account and channel and month) else 0,
         'n_confirmed':        sum(1 for r in rows if r['status'] == 'confirmed'),
         'n_tc_only':          sum(1 for r in rows if r['status'] == 'tc_only'),
@@ -5737,8 +5765,20 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month):
         ).values_list('matched_lmrb_id', flat=True)
     )
 
+    # Also include LMRB rows confirmed by TC reconciliation engine (TCRow.matched_lmrb_id).
+    # The TC engine does NOT set LMRBRow.is_matched=True, so comm_qs misses these rows
+    # when only TC reconciliation has been run (the common workflow).
+    tc_confirmed_ids = set(
+        TCRow.objects.filter(
+            account_id=account_id, channel__iexact=channel,
+            tc_report__month=month,
+            is_lmrb_confirmed=True,
+            matched_lmrb__isnull=False,
+        ).values_list('matched_lmrb_id', flat=True)
+    )
+
     # Combine, deduplicate by id, sort by date+time
-    all_ids = set(comm_qs.values_list('id', flat=True)) | spon_ids | tc_spon_lmrb_ids
+    all_ids = set(comm_qs.values_list('id', flat=True)) | spon_ids | tc_spon_lmrb_ids | tc_confirmed_ids
     combined = list(
         LMRBRow.objects.filter(id__in=all_ids).order_by('date', 'advt_time')
     )

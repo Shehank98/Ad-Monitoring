@@ -362,6 +362,7 @@
                   <div><span class="lbl">Brand</span> {{ r.sched_brand }}</div>
                   <div><span class="lbl">Date</span> {{ r.sched_date|date:"d M Y" }}</div>
                   <div><span class="lbl">Window</span> {{ r.sched_start_time }} – {{ r.sched_end_time }}</div>
+                  <div><span class="lbl">Programme</span> {{ r.sched_programme|default:"—" }}</div>
                 </div>
               </div>
               {% elif r.is_extra %}
@@ -424,6 +425,42 @@
     </tbody>
   </table>
 </div>
+
+{% if missed_ads %}
+<div class="mt-6 mb-2">
+  <div class="flex items-center gap-3 mb-3">
+    <span class="text-sm font-bold text-amber-700 uppercase tracking-wide">
+      <i class="fa-solid fa-calendar-xmark mr-1"></i>
+      Not Aired — {{ missed_ads|length }} planned spot{{ missed_ads|length|pluralize }} with no TC record
+    </span>
+    <div class="flex-1 h-px bg-amber-200"></div>
+  </div>
+  <div class="overflow-x-auto rounded-xl border border-amber-200">
+    <table class="w-full text-xs border-collapse">
+      <thead>
+        <tr class="bg-amber-50 text-amber-800 font-semibold">
+          <th class="px-3 py-2 text-left">Brand</th>
+          <th class="px-3 py-2 text-left">Programme</th>
+          <th class="px-3 py-2 text-left">Date</th>
+          <th class="px-3 py-2 text-left">Window</th>
+          <th class="px-3 py-2 text-center">Dur</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in missed_ads %}
+        <tr class="border-t border-amber-100 {% cycle 'bg-white' 'bg-amber-50/40' %}">
+          <td class="px-3 py-1.5 font-medium text-slate-700">{{ m.brand }}</td>
+          <td class="px-3 py-1.5 text-slate-600">{{ m.programme|default:"—" }}</td>
+          <td class="px-3 py-1.5 text-slate-600">{{ m.date|date:"d M Y" }}</td>
+          <td class="px-3 py-1.5 text-slate-500 whitespace-nowrap">{{ m.start_time }} – {{ m.end_time }}</td>
+          <td class="px-3 py-1.5 text-slate-500 text-center">{{ m.duration }}s</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
 
 {% elif selected_account and channel and month %}
   <div class="bg-amber-50 border border-amber-200 rounded-2xl px-6 py-8 text-center">
