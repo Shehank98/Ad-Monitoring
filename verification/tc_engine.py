@@ -511,6 +511,54 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
         f"(via LMRB: {len(tc_matched_via_lmrb)}, fallback: {len(tc_matched_fallback)}), "
         f"extra: {len(tc_extra)}, lmrb_confirmed: {len(tc_lmrb_updates)}"
     )
+
+    # ── Re-apply ManualMatch records for this scope ───────────────────────────
+    # Runs AFTER all engine steps so that manual links are always the final word,
+    # even if a reset run cleared the TCRow flags before this reconciliation.
+    # Handles two modes:
+    #   tc_lmrb : TCRow confirmed by LMRB only (no schedule match intended)
+    #   3way    : TCRow matched to both a ScheduleRow and an LMRBRow
+    from core.models import ManualMatch as _MM
+    mm_qs = _MM.objects.filter(
+        account_id=account_id, channel__iexact=channel, month=month,
+        tc_row__isnull=False,
+    ).select_related('tc_row')
+
+    tc_lmrb_reapply: list = []
+    tc_3way_reapply: list = []
+    for mm in mm_qs:
+        tr = mm.tc_row
+        if tr is None:
+            continue
+        if mm.match_mode == 'tc_lmrb':
+            tr.is_lmrb_confirmed  = True
+            tr.matched_lmrb_id    = mm.lmrb_row_id
+            tr.is_extra           = False
+            tr.is_schedule_matched = False
+            tc_lmrb_reapply.append(tr)
+        elif mm.match_mode == '3way':
+            tr.is_schedule_matched = True
+            tr.matched_schedule_id = mm.schedule_row_id
+            tr.is_lmrb_confirmed   = True
+            tr.matched_lmrb_id     = mm.lmrb_row_id
+            tr.is_extra            = False
+            tc_3way_reapply.append(tr)
+
+    if tc_lmrb_reapply:
+        TCRow.objects.bulk_update(
+            tc_lmrb_reapply,
+            ['is_lmrb_confirmed', 'matched_lmrb_id', 'is_extra', 'is_schedule_matched'],
+        )
+    if tc_3way_reapply:
+        TCRow.objects.bulk_update(
+            tc_3way_reapply,
+            ['is_schedule_matched', 'matched_schedule_id',
+             'is_lmrb_confirmed', 'matched_lmrb_id', 'is_extra'],
+        )
+    n_reapplied = len(tc_lmrb_reapply) + len(tc_3way_reapply)
+    if n_reapplied:
+        print(f"[reconcile_tc] Re-applied {n_reapplied} ManualMatch record(s) for scope.")
+
     return {
         'matched':        len(tc_matched),
         'extra':          len(tc_extra),
