@@ -525,10 +525,12 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
     Build structured summary data for the Summary Sheet report.
 
     Column definitions:
-    - Aired       : TC rows that are schedule-matched AND LMRB-confirmed (TC ∩ LMRB, schedule-matched only)
-    - 3rd Party   : ALL TC rows that are LMRB-confirmed for this brand (includes extra TC spots, so 3rd_party >= aired)
-    - Extra       : max(0, 3rd_Party - Planned)   - TC+LMRB confirmed found more than planned
-    - Missed      : max(0, Planned - 3rd_Party)   - TC+LMRB confirmed found fewer than planned
+    - Aired       : ALL TC rows that are LMRB-confirmed for this brand (is_lmrb_confirmed=True),
+                    regardless of whether they are also schedule-matched. This includes extra TC
+                    spots (no matching schedule row) that were independently confirmed by LMRB.
+    - 3rd Party   : Same as Aired — both reflect the TC+LMRB confirmed count.
+    - Extra       : max(0, Aired - Planned)   — more confirmed spots than planned
+    - Missed      : max(0, Planned - Aired)   — fewer confirmed spots than planned
 
     Returns:
     {
@@ -636,11 +638,10 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
             })
             continue
 
-        # Aired = (TC schedule-matched AND LMRB-confirmed) + manually reconciled
+        # Aired = ALL TC rows that are LMRB-confirmed (schedule-matched or extra)
         aired_q = TCRow.objects.filter(
             account_id=account_id, channel=channel,
             tc_report__month=month,
-            is_schedule_matched=True,
             is_lmrb_confirmed=True,
         )
         if tc_themes:
