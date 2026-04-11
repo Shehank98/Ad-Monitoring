@@ -4670,23 +4670,34 @@ def summary_report(request):
             from datetime import datetime as _dt2
             from collections import OrderedDict as _OD
 
-            combos = list(
+            # Fetch all Schedule objects, keep only latest version per
+            # (channel, month, schedule_number) — Rule 12.
+            all_schedules = list(
                 Schedule.objects
                 .filter(account_id=account_id)
-                .values('channel', 'month')
-                .distinct()
+                .order_by('channel', 'month', 'schedule_number', '-version')
             )
-            total_scopes = len(combos)
+            seen_keys: set = set()
+            schedules_deduped = []
+            for s in all_schedules:
+                key = (s.channel, s.month, s.schedule_number)
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    schedules_deduped.append(s)
 
-            if combos:
-                # Aggregate MatchResult counts in Python to avoid conditional
-                # SQL aggregation (COUNT FILTER) which needs SQLite 3.25+.
-                mr_map = {}  # (channel, month) -> {'n_matched': int, 'n_missed': int, 'total': int}
+            total_scopes = len(schedules_deduped)
+
+            if schedules_deduped:
+                # MatchResult counts per schedule PK (via schedule_row → schedule).
+                # schedule_row is nullable; skip rows where it's NULL.
+                mr_map = {}  # schedule_id -> {'n_matched': int, 'n_missed': int, 'total': int}
                 for row in (MatchResult.objects
-                        .filter(account_id=account_id)
-                        .values('channel', 'month', 'status')):
-                    key = (row['channel'], row['month'])
-                    entry = mr_map.setdefault(key, {'n_matched': 0, 'n_missed': 0, 'total': 0})
+                        .filter(account_id=account_id, schedule_row__isnull=False)
+                        .values('schedule_row__schedule_id', 'status')):
+                    sid = row['schedule_row__schedule_id']
+                    if sid is None:
+                        continue
+                    entry = mr_map.setdefault(sid, {'n_matched': 0, 'n_missed': 0, 'total': 0})
                     entry['total'] += 1
                     if row['status'] == 'matched':
                         entry['n_matched'] += 1
@@ -4699,21 +4710,22 @@ def summary_report(request):
                     .values_list('channel', 'month')
                 )
 
-                planned_map = {}
+                # Planned commercial rows per schedule PK.
+                planned_map = {}  # schedule_id -> count
                 for row in (ScheduleRow.objects
                         .filter(account_id=account_id, ad_type='COMMERCIAL BENEFITS')
-                        .values('channel', 'month')
+                        .values('schedule_id')
                         .annotate(n=Count('id'))):
-                    planned_map[(row['channel'], row['month'])] = row['n']
+                    planned_map[row['schedule_id']] = row['n']
 
                 cards_raw = []
-                for c in combos:
-                    ch, mo   = c['channel'] or '', c['month'] or ''
-                    mr       = mr_map.get((c['channel'], c['month']), {})
-                    planned  = planned_map.get((c['channel'], c['month']), 0)
-                    aired    = mr.get('n_matched', 0)
-                    missed   = mr.get('n_missed', 0)
-                    has_tc         = (c['channel'], c['month']) in tc_scopes
+                for sched in schedules_deduped:
+                    ch, mo = sched.channel or '', sched.month or ''
+                    mr      = mr_map.get(sched.id, {})
+                    planned = planned_map.get(sched.id, 0)
+                    aired   = mr.get('n_matched', 0)
+                    missed  = mr.get('n_missed', 0)
+                    has_tc         = (ch, mo) in tc_scopes
                     has_reconciled = mr.get('total', 0) > 0
                     pct = min(int(aired / planned * 100), 100) if planned else 0
 
@@ -4727,7 +4739,12 @@ def summary_report(request):
                         sc = 'has_missed'
 
                     cards_raw.append({
-                        'channel': ch, 'month': mo,
+                        'channel':           ch,
+                        'month':             mo,
+                        'schedule_id':       sched.id,
+                        'schedule_number':   sched.schedule_number,
+                        'version':           sched.version,
+                        'original_filename': sched.original_filename,
                         'planned': planned, 'aired': aired, 'missed': missed,
                         'has_tc': has_tc, 'has_reconciled': has_reconciled,
                         'status': sc, 'percent': pct,
@@ -4737,7 +4754,9 @@ def summary_report(request):
                     try:    return _dt2.strptime(c['month'], '%B %Y')
                     except: return _dt2.min  # noqa: E722
 
-                cards_raw.sort(key=lambda c: (-_mk(c).timestamp(), c['channel']))
+                cards_raw.sort(key=lambda c: (
+                    -_mk(c).timestamp(), c['channel'], str(c['schedule_number'])
+                ))
                 _grp = _OD()
                 for card in cards_raw:
                     _grp.setdefault(card['month'], []).append(card)
