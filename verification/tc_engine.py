@@ -630,6 +630,7 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
     def _lmrb_row_count(lmrb_themes, dur_int, exclude_spon=False):
         """Count LMRBRows for this brand in the scope.
 
+        lmrb_themes: list of (norm_theme, norm_product) pairs from _lmrb_themes_for_brand.
         exclude_spon=True: exclude rows already claimed by a SponsorshipLmrbAssignment
         (is_sponsorship_matched=True), so they are not double-counted in the
         commercial 3rd-party column.
@@ -642,7 +643,8 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
             q = q.filter(date__range=(date_min, date_max))
         if lmrb_themes:
             tq = Q()
-            for t in lmrb_themes:
+            for entry in lmrb_themes:
+                t = entry[0] if isinstance(entry, tuple) else entry
                 tq |= Q(advt_theme__iexact=t)
             q = q.filter(tq)
         if dur_int is not None:
@@ -781,7 +783,10 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
     # show the button at all.
 
     def _leftover_lmrb_count(lmrb_themes, dur_int):
-        """Count LMRBRows that are not matched commercially or for sponsorship."""
+        """Count LMRBRows that are not matched commercially or for sponsorship.
+
+        lmrb_themes: list of (norm_theme, norm_product) pairs from _lmrb_themes_for_brand.
+        """
         q = LMRBRow.objects.filter(
             _lmrb_channel_q(channel), account_id=account_id,
             is_matched=False, is_sponsorship_matched=False,
@@ -790,7 +795,8 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
             q = q.filter(date__range=(date_min, date_max))
         if lmrb_themes:
             tq = Q()
-            for t in lmrb_themes:
+            for entry in lmrb_themes:
+                t = entry[0] if isinstance(entry, tuple) else entry
                 tq |= Q(advt_theme__iexact=t)
             q = q.filter(tq)
         if dur_int is not None:

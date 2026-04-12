@@ -563,7 +563,8 @@ def run_scope(account_id, channel, month, mode='smart'):
     _extra_themes_exact = set()
     _extra_themes_prefix = []
     for _norms in brand_theme_map.values():
-        for _nt, _nd in _norms:
+        for entry in _norms:
+            _nt = entry[0]  # norm_theme (index 0 regardless of tuple length)
             if _nt.endswith('*'):
                 _extra_themes_prefix.append(_nt[:-1])
             else:
