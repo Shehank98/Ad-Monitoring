@@ -62,28 +62,37 @@ def _lmrb_channel_q(channel: str) -> Q:
 
 def _build_lmrb_theme_map(account_id):
     """
-    Returns {norm_brand: [(norm_theme, duration_or_None), ...]}
+    Returns {norm_brand: [(norm_theme, duration_or_None, norm_product), ...]}
     Uses BrandMapping.theme (the LMRB/MapOnline theme field).
+    norm_product: '' means "match any product" (backward compat for non-TAG brands).
     """
     mapping = {}
     for bm in BrandMapping.objects.filter(account_id=account_id).exclude(theme=''):
-        norm_brand = _normalize(bm.brand)
-        norm_theme = _normalize(bm.theme)
-        dur        = int(bm.duration) if bm.duration is not None else None
-        mapping.setdefault(norm_brand, []).append((norm_theme, dur))
+        norm_brand   = _normalize(bm.brand)
+        norm_theme   = _normalize(bm.theme)
+        dur          = int(bm.duration) if bm.duration is not None else None
+        norm_product = _normalize(bm.product)  # '' when not set
+        mapping.setdefault(norm_brand, []).append((norm_theme, dur, norm_product))
     return mapping
 
 
-def _lmrb_themes_for_brand(brand: str, duration, lmrb_theme_map: dict) -> list[str]:
-    """Return list of normalised LMRB themes for a brand + optional duration."""
+def _lmrb_themes_for_brand(brand: str, duration, lmrb_theme_map: dict) -> list[tuple]:
+    """Return list of (norm_theme, norm_product) pairs for a brand + optional duration.
+    norm_product == '' means no product filter (match any LMRB product).
+    """
     nb = _normalize(brand)
     candidates = lmrb_theme_map.get(nb, [])
     dur = int(duration) if duration is not None else None
-    themes = []
-    for theme, map_dur in candidates:
+    result = []
+    for entry in candidates:
+        if len(entry) == 3:
+            theme, map_dur, product = entry
+        else:
+            theme, map_dur = entry
+            product = ''
         if map_dur is None or map_dur == dur:
-            themes.append(theme)
-    return themes
+            result.append((theme, product))
+    return result
 
 logger = logging.getLogger(__name__)
 
@@ -307,13 +316,13 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
         key = (_normalize(tcrow.channel), tcrow.date, dur)
         candidates = lmrb_index.get(key, [])
 
-        # Build expected LMRB themes via tc_theme → brand → lmrb_theme chain.
+        # Build expected LMRB (theme, product) pairs via tc_theme → brand → lmrb_theme chain.
         # TCRows whose tc_theme has no BrandMapping entry skip theme validation
         # (they may still confirm by time alone).
         brands = _brands_for_tc_theme(tcrow.tc_theme, dur, reverse_tc_theme_map)
-        expected_lmrb_themes: list = []
+        expected_lmrb_pairs: list = []  # list of (norm_theme, norm_product)
         for brand in brands:
-            expected_lmrb_themes.extend(_lmrb_themes_for_brand(brand, dur, lmrb_theme_map))
+            expected_lmrb_pairs.extend(_lmrb_themes_for_brand(brand, dur, lmrb_theme_map))
 
         best = None
         best_diff = time_tolerance + 1
@@ -322,12 +331,15 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
                 continue
             if lmrb_secs is None:
                 continue
-            # Skip LMRB rows whose theme does not match the expected set
-            if expected_lmrb_themes:
-                lr_theme = _normalize(lr_obj.advt_theme)
+            # Skip LMRB rows whose theme+product does not match the expected set.
+            # For TAG commercials: theme matches but product must also match when set.
+            if expected_lmrb_pairs:
+                lr_theme   = _normalize(lr_obj.advt_theme)
+                lr_product = _normalize(lr_obj.product) if lr_obj.product else ''
                 if not any(
-                    lr_theme.startswith(t[:-1]) if t.endswith('*') else lr_theme == t
-                    for t in expected_lmrb_themes
+                    (lr_theme.startswith(t[:-1]) if t.endswith('*') else lr_theme == t)
+                    and (not p or lr_product == p)  # '' product = match any
+                    for t, p in expected_lmrb_pairs
                 ):
                     continue
             diff = abs(tc_secs - lmrb_secs)

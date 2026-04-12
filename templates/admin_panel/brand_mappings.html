@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load core_extras %}
 {% block title %}Brand Mappings{% endblock %}
 {% block page_title %}Brand Mappings{% endblock %}
 {% block page_subtitle %}Connect schedule brand names to LMRB themes and TC theme names{% endblock %}
@@ -200,15 +201,35 @@
             <p class="field-hint">As it appears in TC files. You can add multiple.</p>
           </div>
 
-          <!-- MapOnline Theme(s) -->
+          <!-- MapOnline Theme(s) - chip picker -->
           <div>
             <label class="field-label">
               <i class="fa-solid fa-map mr-1 text-slate-400"></i> MapOnline Theme(s)
-              <span class="text-slate-400 font-normal normal-case ml-1">optional · for preliminary check</span>
+              <span class="text-slate-400 font-normal normal-case ml-1">optional · multiple allowed</span>
             </label>
-            <input type="text" name="maponline_theme" placeholder="e.g. Brand Tag (30)(Sin)|Brand Tag (30)(Eng)"
-                   class="input-field">
-            <p class="field-hint">Theme as it appears in MapOnline files (Theme column). Separate multiple with <code class="bg-slate-100 px-1 rounded">|</code>. Leave blank to skip this brand in MapOnline matching.</p>
+            <div id="addMaponlineChips"
+                 class="min-h-[38px] flex flex-wrap gap-1.5 p-2 bg-slate-50 border border-slate-200
+                        rounded-lg mb-2 cursor-text"
+                 onclick="document.getElementById('addMaponlineInput').focus()">
+            </div>
+            <div class="flex gap-2">
+              <div class="relative flex-1">
+                <input type="text" id="addMaponlineInput" list="maponlineThemeOptions"
+                       placeholder="Type or pick a MapOnline theme…"
+                       class="input-field pr-8" autocomplete="off"
+                       onkeydown="handleMaponlineInputKey(event,'add')">
+                <datalist id="maponlineThemeOptions"></datalist>
+              </div>
+              <button type="button" onclick="addMaponlineChip('add')"
+                      class="px-3 py-2 bg-cyan-100 text-cyan-700 rounded-lg text-xs font-bold
+                             hover:bg-cyan-200 transition-colors flex-shrink-0">Add</button>
+            </div>
+            <div id="addMaponlineQuickPick" class="mt-2 hidden">
+              <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">Known MapOnline themes - click to add:</p>
+              <div id="addMaponlineQuickPickItems" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto"></div>
+            </div>
+            <input type="hidden" name="maponline_theme" id="addMaponlineHidden">
+            <p class="field-hint">Theme column in MapOnline files. Leave blank to skip this brand in MapOnline matching.</p>
           </div>
 
           <!-- Duration -->
@@ -270,6 +291,15 @@
             <button type="submit" class="btn-primary"><i class="fa-solid fa-filter"></i> Filter</button>
             <a href="/dashboard/brand-mappings/" class="btn-secondary">Clear</a>
           </div>
+          {% if filters.account %}
+          <div class="pb-0.5">
+            <a href="/dashboard/brand-mappings/export/?account={{ filters.account }}"
+               class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold hover:bg-emerald-100 transition-colors"
+               title="Export brand mappings for this account to Excel">
+              <i class="fa-solid fa-file-excel"></i> Export Excel
+            </a>
+          </div>
+          {% endif %}
         </div>
       </form>
 
@@ -427,77 +457,95 @@
       </div>
       {% endif %}
 
-      <!-- Table -->
+      <!-- Table (grouped by brand — one row per brand/product/duration group) -->
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        {% if mappings %}
+        {% if grouped_mappings %}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
               <tr class="bg-slate-50 border-b border-slate-100">
-                <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider w-[110px]">Account</th>
                 <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Product</th>
-                <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Brand</th>
-                <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">LMRB Theme</th>
+                <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Brand (Schedule)</th>
+                <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">LMRB Theme(s)</th>
                 <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">TC Theme(s)</th>
-                <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">MapOnline Theme</th>
+                <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">MapOnline Theme(s)</th>
                 <th class="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider w-16">Dur</th>
-                <th class="px-3 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider w-20">Action</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-50">
-              {% for m in mappings %}
-              <tr class="hover:bg-slate-50/60 transition-colors group" id="row-{{ m.id }}">
-                <td class="px-3 py-2.5">
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-semibold">{{ m.account.name }}</span>
-                </td>
-                <td class="px-3 py-2.5">
-                  <div class="flex items-center gap-1">
-                    {% if m.product %}
-                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 text-[11px] font-semibold ring-1 ring-indigo-200 max-w-[130px]" title="{{ m.product }}">
+            <tbody class="divide-y divide-slate-100">
+              {% for grp in grouped_mappings %}
+              {% with first_id=grp.lmrb_themes.0.id %}
+              <tr class="hover:bg-slate-50/60 transition-colors align-top">
+
+                <!-- Product -->
+                <td class="px-3 py-3">
+                  <div class="flex items-start gap-1">
+                    {% if grp.product %}
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 text-[11px] font-semibold ring-1 ring-indigo-200 max-w-[130px]" title="{{ grp.product }}">
                       <i class="fa-solid fa-boxes-stacked text-[9px] flex-shrink-0"></i>
-                      <span class="truncate">{{ m.product }}</span>
+                      <span class="truncate">{{ grp.product }}</span>
                     </span>
                     {% else %}
-                    <span class="text-[11px] text-slate-400 italic">-</span>
+                    <span class="text-[11px] text-slate-400 italic">—</span>
                     {% endif %}
-                    <button onclick="openEditFieldModal({{ m.id }}, 'product', '{{ m.product|escapejs }}')"
-                            class="inline-flex items-center px-1 py-0.5 rounded text-[10px] text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 transition-colors border border-transparent hover:border-indigo-200"
+                    <button onclick="openEditFieldModal({{ first_id }}, 'product', '{{ grp.product|escapejs }}')"
+                            class="mt-0.5 inline-flex items-center px-1 py-0.5 rounded text-[10px] text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 transition-colors border border-transparent hover:border-indigo-200"
                             title="Edit product">
                       <i class="fa-solid fa-pencil"></i>
                     </button>
                   </div>
                 </td>
-                <td class="px-3 py-2.5">
-                  <div class="flex items-center gap-1">
-                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700 text-[11px] font-semibold ring-1 ring-blue-200 max-w-[140px]">
+
+                <!-- Brand -->
+                <td class="px-3 py-3">
+                  <div class="flex items-start gap-1">
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700 text-[11px] font-semibold ring-1 ring-blue-200 max-w-[160px]">
                       <i class="fa-solid fa-tag text-[9px] flex-shrink-0"></i>
-                      <span class="truncate" title="{{ m.brand }}">{{ m.brand }}</span>
+                      <span class="truncate" title="{{ grp.brand }}">{{ grp.brand }}</span>
                     </span>
-                    <button onclick="openEditFieldModal({{ m.id }}, 'brand', '{{ m.brand|escapejs }}')"
-                            class="inline-flex items-center px-1 py-0.5 rounded text-[10px] text-slate-300 hover:text-blue-600 hover:bg-blue-50 transition-colors border border-transparent hover:border-blue-200"
+                    <button onclick="openEditFieldModal({{ first_id }}, 'brand', '{{ grp.brand|escapejs }}')"
+                            class="mt-0.5 inline-flex items-center px-1 py-0.5 rounded text-[10px] text-slate-300 hover:text-blue-600 hover:bg-blue-50 transition-colors border border-transparent hover:border-blue-200"
                             title="Edit brand">
                       <i class="fa-solid fa-pencil"></i>
                     </button>
                   </div>
                 </td>
-                <td class="px-3 py-2.5">
-                  <div class="flex items-center gap-1">
-                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 text-[11px] font-semibold ring-1 ring-emerald-200 max-w-[160px]">
-                      <i class="fa-solid fa-arrow-right text-[9px] flex-shrink-0"></i>
-                      <span class="truncate" title="{{ m.theme }}">{{ m.theme }}</span>
-                    </span>
-                    <button onclick="openEditFieldModal({{ m.id }}, 'theme', '{{ m.theme|escapejs }}')"
-                            class="inline-flex items-center px-1 py-0.5 rounded text-[10px] text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 transition-colors border border-transparent hover:border-emerald-200"
-                            title="Edit LMRB theme">
-                      <i class="fa-solid fa-pencil"></i>
-                    </button>
+
+                <!-- LMRB Themes — all themes for this brand group as chips -->
+                <td class="px-3 py-3">
+                  <div class="flex flex-wrap gap-1.5">
+                    {% for lt in grp.lmrb_themes %}
+                    <div class="flex items-center gap-0.5 group/chip" id="row-{{ lt.id }}">
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 text-[11px] font-semibold ring-1 ring-emerald-200 max-w-[200px]">
+                        <span class="truncate" title="{{ lt.theme }}">{{ lt.theme }}</span>
+                      </span>
+                      <button onclick="openEditFieldModal({{ lt.id }}, 'theme', '{{ lt.theme|escapejs }}')"
+                              class="inline-flex items-center px-0.5 py-0.5 rounded text-[9px] text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 transition-colors opacity-0 group-hover/chip:opacity-100"
+                              title="Edit this LMRB theme">
+                        <i class="fa-solid fa-pencil"></i>
+                      </button>
+                      <form method="post" class="inline" onsubmit="return confirm('Remove LMRB theme: {{ lt.theme|escapejs }}?')">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="mapping_id" value="{{ lt.id }}">
+                        <button type="submit"
+                                class="inline-flex items-center px-0.5 py-0.5 rounded text-[9px] text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover/chip:opacity-100"
+                                title="Remove this LMRB theme">
+                          <i class="fa-solid fa-xmark"></i>
+                        </button>
+                      </form>
+                    </div>
+                    {% endfor %}
                   </div>
+                  <p class="text-[10px] text-slate-400 mt-1.5">{{ grp.lmrb_themes|length }} theme{{ grp.lmrb_themes|length|pluralize }}</p>
                 </td>
-                <td class="px-3 py-2.5" id="tc-cell-{{ m.id }}">
-                  <div class="flex flex-wrap items-center gap-1">
-                    {% if m.tc_theme %}
-                    {% for t in m.tc_themes_list %}
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[11px] font-semibold ring-1 ring-amber-200 max-w-[150px]" title="{{ t }}">
+
+                <!-- TC Themes -->
+                <td class="px-3 py-3" id="tc-cell-{{ first_id }}">
+                  <div class="flex flex-wrap items-start gap-1">
+                    {% if grp.tc_theme %}
+                    {% for t in grp.tc_theme|split_pipe %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[11px] font-semibold ring-1 ring-amber-200 max-w-[160px]" title="{{ t }}">
                       <span class="truncate">{{ t }}</span>
                     </span>
                     {% endfor %}
@@ -506,60 +554,54 @@
                       <i class="fa-solid fa-triangle-exclamation text-[8px]"></i> Not set
                     </span>
                     {% endif %}
-                    <button onclick="openEditTcModal({{ m.id }}, '{{ m.tc_theme|escapejs }}')"
+                    <button onclick="openEditTcModal({{ first_id }}, '{{ grp.tc_theme|escapejs }}')"
                             class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors border border-transparent hover:border-amber-200"
                             title="Edit TC themes">
                       <i class="fa-solid fa-pencil"></i>
                     </button>
                   </div>
                 </td>
-                <td class="px-3 py-2.5" id="maponline-cell-{{ m.id }}">
-                  <div class="flex flex-wrap items-center gap-1">
-                    {% if m.maponline_theme %}
-                    {% for t in m.maponline_themes_list %}
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-[11px] font-semibold ring-1 ring-blue-200 max-w-[150px]" title="{{ t }}">
+
+                <!-- MapOnline Themes -->
+                <td class="px-3 py-3" id="maponline-cell-{{ first_id }}">
+                  <div class="flex flex-wrap items-start gap-1">
+                    {% if grp.maponline_theme %}
+                    {% for t in grp.maponline_theme|split_pipe %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-cyan-50 text-cyan-700 text-[11px] font-semibold ring-1 ring-cyan-200 max-w-[160px]" title="{{ t }}">
+                      <i class="fa-solid fa-map text-[8px] flex-shrink-0 mr-1"></i>
                       <span class="truncate">{{ t }}</span>
                     </span>
                     {% endfor %}
                     {% else %}
-                    <span class="text-[10px] text-slate-300">—</span>
+                    <span class="text-[11px] text-slate-300">—</span>
                     {% endif %}
-                    <button onclick="openEditMaponlineModal({{ m.id }}, '{{ m.maponline_theme|escapejs }}')"
-                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors border border-transparent hover:border-blue-200"
-                            title="Edit MapOnline theme">
+                    <button onclick="openEditMaponlineModal({{ first_id }}, '{{ grp.maponline_theme|escapejs }}')"
+                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 transition-colors border border-transparent hover:border-cyan-200"
+                            title="Edit MapOnline themes">
                       <i class="fa-solid fa-pencil"></i>
                     </button>
                   </div>
                 </td>
-                <td class="px-3 py-2.5 text-center">
-                  {% if m.duration %}
-                    <span class="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-[11px] font-bold ring-1 ring-violet-200">{{ m.duration }}s</span>
+
+                <!-- Duration -->
+                <td class="px-3 py-3 text-center">
+                  {% if grp.duration %}
+                    <span class="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-[11px] font-bold ring-1 ring-violet-200">{{ grp.duration }}s</span>
                   {% else %}
                     <span class="text-[11px] text-slate-400">any</span>
                   {% endif %}
                 </td>
-                <td class="px-3 py-2.5 text-right">
-                  <form method="post" class="inline"
-                        onsubmit="return confirm('Delete mapping: {{ m.brand|escapejs }} → {{ m.theme|escapejs }}?')">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="delete">
-                    <input type="hidden" name="mapping_id" value="{{ m.id }}">
-                    <button type="submit"
-                            class="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200
-                                   text-xs text-slate-400 hover:border-red-300 hover:text-red-500
-                                   hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100">
-                      <i class="fa-solid fa-trash text-[10px]"></i>
-                    </button>
-                  </form>
-                </td>
+
               </tr>
+              {% endwith %}
               {% endfor %}
             </tbody>
           </table>
         </div>
         <div class="px-4 py-2.5 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
           <i class="fa-solid fa-layer-group text-slate-400 text-xs"></i>
-          <span class="text-xs text-slate-500">{{ mappings|length }} mapping{{ mappings|length|pluralize }}</span>
+          <span class="text-xs text-slate-500">{{ grouped_mappings|length }} brand group{{ grouped_mappings|length|pluralize }}</span>
+          <span class="text-xs text-slate-400">({{ mappings|length }} LMRB theme{{ mappings|length|pluralize }} total)</span>
         </div>
         {% else %}
         <div class="py-16 text-center">
@@ -664,27 +706,45 @@
 <div id="editMaponlineModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl border border-slate-100 p-6 w-full max-w-md mx-4">
     <div class="flex items-center gap-3 mb-4">
-      <span class="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
-        <i class="fa-solid fa-map text-blue-600 text-sm"></i>
+      <span class="w-9 h-9 bg-cyan-100 rounded-xl flex items-center justify-center flex-shrink-0">
+        <i class="fa-solid fa-map text-cyan-600 text-sm"></i>
       </span>
       <div>
         <h3 class="font-bold text-slate-800 text-sm">Edit MapOnline Theme(s)</h3>
-        <p class="text-[11px] text-slate-400">Theme names as they appear in MapOnline files</p>
+        <p class="text-[11px] text-slate-400">Add or remove MapOnline theme names for this mapping</p>
       </div>
+    </div>
+    <div class="mb-2">
+      <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Selected MapOnline themes:</p>
+      <div id="editMaponlineChips"
+           class="min-h-[42px] flex flex-wrap gap-1.5 p-2 bg-slate-50 border border-slate-200
+                  rounded-lg cursor-text"
+           onclick="document.getElementById('editMaponlineInput').focus()">
+      </div>
+    </div>
+    <div class="flex gap-2 mb-3">
+      <div class="relative flex-1">
+        <input type="text" id="editMaponlineInput" list="editMaponlineThemeOptions"
+               placeholder="Type or pick a MapOnline theme…"
+               class="input-field" autocomplete="off"
+               onkeydown="handleMaponlineInputKey(event,'edit')">
+        <datalist id="editMaponlineThemeOptions"></datalist>
+      </div>
+      <button type="button" onclick="addMaponlineChip('edit')"
+              class="px-3 py-2 bg-cyan-100 text-cyan-700 rounded-lg text-xs font-bold
+                     hover:bg-cyan-200 transition-colors flex-shrink-0">Add</button>
+    </div>
+    <div id="editMaponlineQuickPick" class="mb-4 hidden">
+      <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-1.5">Known MapOnline themes - click to add:</p>
+      <div id="editMaponlineQuickPickItems" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto"></div>
     </div>
     <form method="post" id="editMaponlineForm">
       {% csrf_token %}
       <input type="hidden" name="action" value="edit_maponline_theme">
       <input type="hidden" name="mapping_id" id="editMaponlineMappingId">
-      <div class="mb-3">
-        <label class="text-[11px] font-semibold text-slate-600 block mb-1">MapOnline Theme(s) — separate multiple with <code class="bg-slate-100 px-1 rounded">|</code></label>
-        <input type="text" name="maponline_theme" id="editMaponlineThemeInput"
-               placeholder="e.g. Brand Tag (30)(Sin)|Brand Tag (30)(Eng)"
-               class="input-field">
-        <p class="text-[10px] text-slate-400 mt-1">Leave blank to skip this brand in MapOnline preliminary matching.</p>
-      </div>
+      <input type="hidden" name="maponline_theme" id="editMaponlineHidden">
       <div class="flex gap-2">
-        <button type="submit" class="btn-primary flex-1 justify-center">
+        <button type="submit" class="btn-primary flex-1 justify-center" onclick="prepareMaponlineEditSubmit()">
           <i class="fa-solid fa-check"></i> Save
         </button>
         <button type="button" onclick="closeEditMaponlineModal()" class="btn-secondary flex-1 justify-center">Cancel</button>
@@ -715,12 +775,15 @@
 {% block extra_js %}
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-let _addTcSelected   = [];
-let _editTcSelected  = [];
-let _addLmrbSelected = [];  // selected LMRB themes for bulk add
-let _knownTcThemes   = [];
-let _mappedThemes    = [];  // LMRB themes that already have a BrandMapping
-let _themeProductMap = {};  // theme → product (most common product per theme)
+let _addTcSelected        = [];
+let _editTcSelected       = [];
+let _addLmrbSelected      = [];  // selected LMRB themes for bulk add
+let _addMaponlineSelected = [];
+let _editMaponlineSelected= [];
+let _knownTcThemes        = [];
+let _knownMaponlineThemes = [];
+let _mappedThemes         = [];  // LMRB themes that already have a BrandMapping
+let _themeProductMap      = {};  // theme → product (most common product per theme)
 
 // Current scope selections in the add form
 let _curAccountId  = '';
@@ -823,37 +886,45 @@ function _loadOptions() {
   fetch(url)
     .then(r => r.json())
     .then(data => {
-      const brands   = data.brands    || [];
-      const themes   = data.themes    || [];
-      _knownTcThemes = data.tc_themes || [];
-      _allProducts   = data.products  || [];
-      _mappedThemes    = data.mapped_themes || [];
-      _themeProductMap = data.theme_product_map || {};
-      _fillDatalist('brandOptions',   brands);
-      _fillDatalist('themeOptions',   themes);
-      _fillDatalist('tcThemeOptions', _knownTcThemes);
-      _fillDatalist('productOptions', _allProducts);
+      const brands        = data.brands    || [];
+      const themes        = data.themes    || [];
+      _knownTcThemes        = data.tc_themes        || [];
+      _knownMaponlineThemes = data.maponline_themes  || [];
+      _allProducts          = data.products          || [];
+      _mappedThemes         = data.mapped_themes     || [];
+      _themeProductMap      = data.theme_product_map || {};
+      _fillDatalist('brandOptions',          brands);
+      _fillDatalist('themeOptions',          themes);
+      _fillDatalist('tcThemeOptions',        _knownTcThemes);
+      _fillDatalist('maponlineThemeOptions', _knownMaponlineThemes);
+      _fillDatalist('productOptions',        _allProducts);
       _renderBrandQuickPick(brands);
       _renderProductQuickPick(_allProducts);
       _renderLmrbQuickPick(themes);
       _renderQuickPick('add', _knownTcThemes);
+      _renderMaponlineQuickPick('add', _knownMaponlineThemes);
     })
     .catch(() => {});
 }
 
 function _clearOptions() {
-  _fillDatalist('brandOptions',   []);
-  _fillDatalist('themeOptions',   []);
-  _fillDatalist('productOptions', []);
-  _knownTcThemes = [];
-  _allProducts   = [];
-  _fillDatalist('tcThemeOptions', []);
+  _fillDatalist('brandOptions',          []);
+  _fillDatalist('themeOptions',          []);
+  _fillDatalist('productOptions',        []);
+  _fillDatalist('tcThemeOptions',        []);
+  _fillDatalist('maponlineThemeOptions', []);
+  _knownTcThemes        = [];
+  _knownMaponlineThemes = [];
+  _allProducts          = [];
   _renderBrandQuickPick([]);
   _renderProductQuickPick([]);
   _renderLmrbQuickPick([]);
   _renderQuickPick('add', []);
-  _addLmrbSelected = [];
+  _renderMaponlineQuickPick('add', []);
+  _addLmrbSelected      = [];
+  _addMaponlineSelected = [];
   _renderLmrbChips();
+  _renderMaponlineChips('add');
 }
 
 // Called when user types in the Product input
@@ -1224,10 +1295,12 @@ function handleTcInputKey(e, ctx) {
 }
 
 function prepareAddSubmit()  {
-  document.getElementById('addTcHidden').value   = _addTcSelected.join('|');
-  document.getElementById('addLmrbHidden').value = _addLmrbSelected.join('|');
+  document.getElementById('addTcHidden').value         = _addTcSelected.join('|');
+  document.getElementById('addLmrbHidden').value       = _addLmrbSelected.join('|');
+  document.getElementById('addMaponlineHidden').value  = _addMaponlineSelected.join('|');
 }
-function prepareEditSubmit() { document.getElementById('editTcHidden').value = _editTcSelected.join('|'); }
+function prepareEditSubmit()         { document.getElementById('editTcHidden').value         = _editTcSelected.join('|'); }
+function prepareMaponlineEditSubmit(){ document.getElementById('editMaponlineHidden').value  = _editMaponlineSelected.join('|'); }
 
 // ── Edit Field modal (Product / Brand / LMRB Theme) ───────────────────────────
 const _fieldMeta = {
@@ -1293,12 +1366,85 @@ document.getElementById('editTcModal').addEventListener('click', function(e) {
   if (e.target === this) closeEditTcModal();
 });
 
+// ── MapOnline chip management ─────────────────────────────────────────────────
+function _renderMaponlineChips(ctx) {
+  const container = document.getElementById(`${ctx}MaponlineChips`);
+  const selected  = ctx === 'add' ? _addMaponlineSelected : _editMaponlineSelected;
+  if (!container) return;
+  if (!selected.length) {
+    container.innerHTML = '<span class="text-[11px] text-slate-400 italic px-1">No MapOnline themes selected</span>';
+    return;
+  }
+  container.innerHTML = selected.map((t, i) =>
+    `<span class="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md bg-cyan-100
+                  text-cyan-800 text-[11px] font-semibold border border-cyan-200">
+       ${_escHtml(t)}
+       <button type="button" onclick="_removeMaponlineChip('${ctx}',${i})"
+               class="text-cyan-600 hover:text-red-600 transition-colors ml-0.5">
+         <i class="fa-solid fa-xmark text-[9px]"></i>
+       </button>
+     </span>`
+  ).join('');
+}
+
+function _removeMaponlineChip(ctx, idx) {
+  const selected = ctx === 'add' ? _addMaponlineSelected : _editMaponlineSelected;
+  selected.splice(idx, 1);
+  _renderMaponlineChips(ctx);
+  _renderMaponlineQuickPick(ctx, _knownMaponlineThemes);
+}
+
+function addMaponlineChip(ctx) {
+  const inp = document.getElementById(ctx === 'add' ? 'addMaponlineInput' : 'editMaponlineInput');
+  const val = inp.value.trim();
+  if (!val) return;
+  const selected = ctx === 'add' ? _addMaponlineSelected : _editMaponlineSelected;
+  if (!selected.map(s=>s.toLowerCase()).includes(val.toLowerCase())) {
+    selected.push(val);
+    _renderMaponlineChips(ctx);
+    _renderMaponlineQuickPick(ctx, _knownMaponlineThemes);
+  }
+  inp.value = '';
+  inp.focus();
+}
+
+function handleMaponlineInputKey(e, ctx) {
+  if (e.key === 'Enter') { e.preventDefault(); addMaponlineChip(ctx); }
+}
+
+function _renderMaponlineQuickPick(ctx, themes) {
+  const wrap  = document.getElementById(`${ctx}MaponlineQuickPick`);
+  const items = document.getElementById(`${ctx}MaponlineQuickPickItems`);
+  if (!wrap || !items || !themes.length) { if (wrap) wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+  const selected = ctx === 'add' ? _addMaponlineSelected : _editMaponlineSelected;
+  items.innerHTML = themes.map(t => {
+    const already = selected.map(s=>s.toLowerCase()).includes(t.toLowerCase());
+    return `<button type="button" onclick="_pickMaponlineTheme('${ctx}','${_esc(t)}')"
+              class="px-2 py-0.5 rounded-md text-[11px] font-semibold border transition-all
+                     ${already ? 'bg-cyan-100 text-cyan-700 border-cyan-300 opacity-60 cursor-default' : 'bg-white text-slate-600 border-slate-200 hover:bg-cyan-50 hover:border-cyan-300 hover:text-cyan-700'}"
+              ${already ? 'disabled' : ''}>${_escHtml(t)}</button>`;
+  }).join('');
+}
+
+function _pickMaponlineTheme(ctx, theme) {
+  const selected = ctx === 'add' ? _addMaponlineSelected : _editMaponlineSelected;
+  if (!selected.map(s=>s.toLowerCase()).includes(theme.toLowerCase())) {
+    selected.push(theme);
+    _renderMaponlineChips(ctx);
+    _renderMaponlineQuickPick(ctx, _knownMaponlineThemes);
+  }
+}
+
 // ── Edit MapOnline theme modal ─────────────────────────────────────────────────
 function openEditMaponlineModal(mappingId, currentValue) {
   document.getElementById('editMaponlineMappingId').value = mappingId;
-  document.getElementById('editMaponlineThemeInput').value = currentValue || '';
+  _editMaponlineSelected = currentValue ? currentValue.split('|').map(t=>t.trim()).filter(Boolean) : [];
+  _renderMaponlineChips('edit');
+  _fillDatalist('editMaponlineThemeOptions', _knownMaponlineThemes);
+  _renderMaponlineQuickPick('edit', _knownMaponlineThemes);
   document.getElementById('editMaponlineModal').classList.remove('hidden');
-  setTimeout(() => document.getElementById('editMaponlineThemeInput').focus(), 100);
+  setTimeout(() => document.getElementById('editMaponlineInput').focus(), 100);
 }
 
 function closeEditMaponlineModal() {
@@ -1353,6 +1499,7 @@ function mapNow(brand) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 _renderChips('add');
 _renderLmrbChips();
+_renderMaponlineChips('add');
 
 // Auto-load if account is pre-selected (page loaded with ?account=...)
 // Also cascade channel + month from filter params when present.

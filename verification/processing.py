@@ -32,7 +32,11 @@ Processing rules
   • Matching occurs within the same channel (enforced by the caller).
 
 brand_theme_map format supplied by the caller:
-  {norm_brand: [(norm_theme, duration_or_None), ...]}
+  {norm_brand: [(norm_theme, duration_or_None, norm_product), ...]}
+  norm_product: normalised BrandMapping.product; '' means "match any product" (backward compat).
+  When non-empty, only LMRB rows whose _product matches will be considered as candidates.
+  This is used to disambiguate TAG commercials (5-sec ads all labelled "TAG" in LMRB)
+  by the Product column — e.g. product='milo' vs product='coca cola'.
 
 Smart re-run / multi-schedule support:
   pre_matched_fp  - set of LMRB fingerprints locked in a previous run.
@@ -213,21 +217,31 @@ def prepare_schedule(df: pd.DataFrame) -> pd.DataFrame:
 
 def _get_themes_for_dur(brand_theme_map, norm_brand, sch_dur):
     """
-    Return the list of monitoring themes relevant for this brand + duration.
+    Return list of (norm_theme, norm_product) pairs relevant for this brand + duration.
 
-    brand_theme_map: {norm_brand: [(norm_theme, mapping_dur_or_None), ...]}
+    brand_theme_map: {norm_brand: [(norm_theme, mapping_dur_or_None, norm_product), ...]}
     mapping_dur_or_None: if set, only applies when sch_dur matches; if None, applies to any duration.
+    norm_product: '' means "match any product" (no product filter applied).
 
     Themes may end with '*' (wildcard) - see _build_theme_mask().
+    Returns [] when brand has no mapping → treated as 'No Brand Mapping'.
     """
     entries = brand_theme_map.get(norm_brand, [])
-    themes = []
-    for norm_theme, map_dur in entries:
-        if map_dur is None:
-            themes.append(norm_theme)
-        elif sch_dur is not None and int(sch_dur) == int(map_dur):
-            themes.append(norm_theme)
-    return list(dict.fromkeys(themes))  # deduplicate, preserve order
+    result = []
+    seen = set()
+    for entry in entries:
+        # Support both old 2-tuples and new 3-tuples for safety
+        if len(entry) == 3:
+            norm_theme, map_dur, norm_product = entry
+        else:
+            norm_theme, map_dur = entry
+            norm_product = ''
+        if map_dur is None or (sch_dur is not None and int(sch_dur) == int(map_dur)):
+            key = (norm_theme, norm_product)
+            if key not in seen:
+                seen.add(key)
+                result.append((norm_theme, norm_product))
+    return result
 
 
 def _build_theme_mask(pool: pd.DataFrame, themes: list) -> pd.Series:
@@ -360,10 +374,13 @@ def match_ads(
         }
 
     # ── Pre-process schedule rows: skip/no-mapping/date-cap checks ────────────
-    # Each entry: (sch_series, sch_key, themes)
+    # Each entry: (sch_series, sch_key, theme_product_pairs)
+    # theme_product_pairs: list of (norm_theme, norm_product) from _get_themes_for_dur
     # Rows with no brand mapping or beyond max_verify_date go straight to not_aired.
     active_rows   = []   # rows that will enter the passes
     not_aired_rows = []
+
+    pool_has_product = '_product' in mon_pool.columns
 
     for _, row in sch_df.iterrows():
         sch_date       = row.get('Date')
@@ -383,8 +400,8 @@ def match_ads(
             except TypeError:
                 pass
 
-        themes = _get_themes_for_dur(brand_theme_map, sch_brand_norm, sch_dur)
-        if not themes:
+        theme_product_pairs = _get_themes_for_dur(brand_theme_map, sch_brand_norm, sch_dur)
+        if not theme_product_pairs:
             not_aired_rows.append({
                 'Brand':          row.get('Brand', sch_brand_norm),
                 'Programme':      row.get('Programme', ''),
@@ -398,17 +415,41 @@ def match_ads(
             })
             continue
 
-        active_rows.append((row, sch_key, themes))
+        active_rows.append((row, sch_key, theme_product_pairs))
 
-    # ── Helper: get candidates (theme + duration filtered, not consumed) ───────
-    def _candidates(themes, extra_mask=None):
-        theme_mask = _build_theme_mask(mon_pool, themes)
-        used_mask  = ~mon_pool.index.isin(matched_idx)
-        mask = theme_mask & used_mask
+    # ── Helper: get candidates (theme + optional product filtered, not consumed) ─
+    def _candidates(theme_product_pairs, extra_mask=None):
+        """
+        Build a boolean mask for the pool matching any of the (theme, product) pairs.
+
+        For pairs where product == '' → match by theme only (any product).
+        For pairs where product != '' → match by theme AND LMRB product (TAG disambiguation).
+        Pairs are combined with OR so a brand with multiple LMRB themes still works.
+        """
+        if not pool_has_product:
+            # Legacy pool without _product column — fall back to theme-only matching
+            themes = [t for t, _ in theme_product_pairs]
+            combined = _build_theme_mask(mon_pool, themes)
+        else:
+            import pandas as _pd
+            combined = _pd.Series(False, index=mon_pool.index)
+            # Separate into "no product filter" and "with product filter" pairs
+            no_product_themes = [t for t, p in theme_product_pairs if not p]
+            with_product_pairs = [(t, p) for t, p in theme_product_pairs if p]
+
+            if no_product_themes:
+                combined = combined | _build_theme_mask(mon_pool, no_product_themes)
+
+            for theme, product in with_product_pairs:
+                theme_mask   = _build_theme_mask(mon_pool, [theme])
+                product_mask = mon_pool['_product'] == product
+                combined     = combined | (theme_mask & product_mask)
+
+        used_mask = ~mon_pool.index.isin(matched_idx)
+        mask = combined & used_mask
         if extra_mask is not None:
             mask = mask & extra_mask
-        cands = mon_pool[mask]
-        return cands
+        return mon_pool[mask]
 
     def _dur_filter(cands, sch_dur):
         if pd.notna(sch_dur) and 'Dur' in cands.columns:
@@ -422,17 +463,17 @@ def match_ads(
     matched_rows      = []
     after_pass1: list = []   # rows that did not match in Pass 1
 
-    for row, sch_key, themes in active_rows:
+    for row, sch_key, theme_product_pairs in active_rows:
         sch_date  = row.get('Date')
         sch_dur   = row.get('_dur')
         sch_start = row.get('_start_secs')
         sch_end   = row.get('_end_secs')
 
         date_mask = mon_pool['Date'] == sch_date
-        cands     = _dur_filter(_candidates(themes, date_mask), sch_dur)
+        cands     = _dur_filter(_candidates(theme_product_pairs, date_mask), sch_dur)
 
         if cands.empty:
-            after_pass1.append((row, sch_key, themes))
+            after_pass1.append((row, sch_key, theme_product_pairs))
             continue
 
         # In-window: advt_time within [start_time, end_time]
@@ -444,7 +485,7 @@ def match_ads(
             in_win = cands   # no time info → treat all same-day as in-window
 
         if in_win.empty:
-            after_pass1.append((row, sch_key, themes))
+            after_pass1.append((row, sch_key, theme_product_pairs))
             continue
 
         best_idx = in_win.index[0]
@@ -462,16 +503,16 @@ def match_ads(
     after_pass2: list  = []   # rows that also failed the programme-name fallback
 
     # ── Pass 2a: within 10 minutes after end_time ─────────────────────────────
-    for row, sch_key, themes in after_pass1:
+    for row, sch_key, theme_product_pairs in after_pass1:
         sch_date  = row.get('Date')
         sch_dur   = row.get('_dur')
         sch_end   = row.get('_end_secs')
 
         date_mask = mon_pool['Date'] == sch_date if sch_date is not None and pd.notna(sch_date) else (mon_pool['Date'] != mon_pool['Date'])
-        cands     = _dur_filter(_candidates(themes, date_mask), sch_dur)
+        cands     = _dur_filter(_candidates(theme_product_pairs, date_mask), sch_dur)
 
         if cands.empty or not pool_has_air_secs or sch_end is None:
-            after_pass2a.append((row, sch_key, themes))
+            after_pass2a.append((row, sch_key, theme_product_pairs))
             continue
 
         # After end_time, within 10-minute tolerance
@@ -481,7 +522,7 @@ def match_ads(
         ]
 
         if after_window.empty:
-            after_pass2a.append((row, sch_key, themes))
+            after_pass2a.append((row, sch_key, theme_product_pairs))
             continue
 
         # Pick the closest one (smallest overshoot)
@@ -495,16 +536,16 @@ def match_ads(
     # Triggered only when 2a found nothing.  Requires the schedule row to have a
     # non-empty Programme name and at least one candidate whose Programme column
     # has >= _PROG_NAME_MATCH_THRESHOLD word overlap with the scheduled name.
-    for row, sch_key, themes in after_pass2a:
+    for row, sch_key, theme_product_pairs in after_pass2a:
         sch_date = row.get('Date')
         sch_dur  = row.get('_dur')
         sch_prog = str(row.get('Programme', '')).strip()
 
         date_mask = mon_pool['Date'] == sch_date if sch_date is not None and pd.notna(sch_date) else (mon_pool['Date'] != mon_pool['Date'])
-        cands     = _dur_filter(_candidates(themes, date_mask), sch_dur)
+        cands     = _dur_filter(_candidates(theme_product_pairs, date_mask), sch_dur)
 
         if cands.empty or not sch_prog or 'Program' not in cands.columns:
-            after_pass2.append((row, sch_key, themes))
+            after_pass2.append((row, sch_key, theme_product_pairs))
             continue
 
         prog_matches = cands[
@@ -514,7 +555,7 @@ def match_ads(
         ]
 
         if prog_matches.empty:
-            after_pass2.append((row, sch_key, themes))
+            after_pass2.append((row, sch_key, theme_product_pairs))
             continue
 
         # Pick the earliest air time among programme-matched candidates
@@ -535,7 +576,7 @@ def match_ads(
     # ═══════════════════════════════════════════════════════════════════════════
     late_rows      = []
 
-    for row, sch_key, themes in after_pass2:
+    for row, sch_key, theme_product_pairs in after_pass2:
         sch_date  = row.get('Date')
         sch_dur   = row.get('_dur')
         sch_start = row.get('_start_secs')
@@ -557,7 +598,7 @@ def match_ads(
             continue
 
         later_mask = mon_pool['Date'] > sch_date
-        cands      = _dur_filter(_candidates(themes, later_mask), sch_dur)
+        cands      = _dur_filter(_candidates(theme_product_pairs, later_mask), sch_dur)
 
         # Must also fall within the planned time window
         if sch_start is not None and sch_end is not None and pool_has_air_secs and not cands.empty:

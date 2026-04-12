@@ -32,6 +32,7 @@ urlpatterns = [
     path('brand-mappings/channels/',  views.brand_mapping_channels,  name='brand_mapping_channels'),
     path('brand-mappings/months/',    views.brand_mapping_months,    name='brand_mapping_months'),
     path('brand-mappings/schedules/', views.brand_mapping_schedules, name='brand_mapping_schedules'),
+    path('brand-mappings/export/',    views.brand_mapping_export,    name='brand_mapping_export'),
 
     # Monitoring data
     path('monitoring/',                         views.monitoring_list,     name='monitoring_list'),

@@ -1833,8 +1833,31 @@ def brand_mapping_list(request):
                             'duration': bm.duration,
                         })
 
+    # ── Build grouped_mappings: one entry per (brand, product, duration) group ──
+    # This collapses multiple per-LMRB-theme rows into a single visual row so
+    # language variants (Sin/Tam/Eng) don't appear as duplicate entries.
+    # Structure: list of dicts with keys: brand, product, duration, tc_theme,
+    # maponline_theme, lmrb_themes (list of {id, theme}), account_id, account_name
+    _groups = {}
+    for bm in mappings:
+        gk = (bm.brand, bm.product or '', bm.duration, bm.account_id)
+        if gk not in _groups:
+            _groups[gk] = {
+                'brand':          bm.brand,
+                'product':        bm.product or '',
+                'duration':       bm.duration,
+                'tc_theme':       bm.tc_theme or '',
+                'maponline_theme': bm.maponline_theme or '',
+                'account_id':     bm.account_id,
+                'account_name':   bm.account.name if hasattr(bm, 'account') else '',
+                'lmrb_themes':    [],
+            }
+        _groups[gk]['lmrb_themes'].append({'id': bm.id, 'theme': bm.theme})
+    grouped_mappings = list(_groups.values())
+
     return render(request, 'admin_panel/brand_mappings.html', {
         'mappings':             mappings,
+        'grouped_mappings':     grouped_mappings,
         'accounts':             account_qs,
         'filters':              {
             'account': account_id,
@@ -1947,10 +1970,17 @@ def brand_mapping_options(request):
         tc_qs = tc_qs.filter(date__lte=sch_dates['e'])
     tc_themes = sorted(set(tc_qs.values_list('tc_theme', flat=True)))
 
+    # ── MapOnline themes (distinct advt_theme from MapOnline source) ──────
+    maponline_qs = lmrb_base.filter(source='maponline').exclude(advt_theme='')
+    if product:
+        maponline_qs = maponline_qs.filter(product__iexact=product)
+    maponline_themes = sorted(set(maponline_qs.values_list('advt_theme', flat=True)))
+
     return JsonResponse({
         'brands': brands, 'themes': themes, 'tc_themes': tc_themes,
         'products': products, 'mapped_themes': mapped_themes,
         'theme_product_map': theme_product_map,
+        'maponline_themes': maponline_themes,
     })
 
 
@@ -1994,6 +2024,62 @@ def brand_mapping_schedules(request):
         .values('id', 'schedule_number', 'version', 'row_count')
     )
     return JsonResponse({'schedules': schedules})
+
+
+@login_required
+@role_required(['super_admin', 'admin'])
+def brand_mapping_export(request):
+    """
+    Excel export of all BrandMapping rows for an account.
+    GET ?account=<id>  — required.
+    Returns a .xlsx file with one row per BrandMapping record.
+    """
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    account_id = request.GET.get('account', '').strip()
+    if not account_id or not _account_access(request.user, account_id):
+        messages.error(request, 'Account not found or access denied.')
+        return redirect('brand_mapping_list')
+
+    account = get_object_or_404(Account, id=account_id)
+    mappings = BrandMapping.objects.filter(account=account).select_related('account').order_by('brand', 'theme', 'duration')
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Brand Mappings'
+
+    header_font   = Font(bold=True, color='FFFFFF')
+    header_fill   = PatternFill('solid', fgColor='1e3a5f')
+    center_align  = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    wrap_align    = Alignment(wrap_text=True, vertical='top')
+
+    headers = ['Account', 'Brand (Schedule)', 'LMRB Theme', 'TC Theme(s)', 'MapOnline Theme(s)', 'Duration (s)', 'Product']
+    widths  = [20, 30, 40, 40, 40, 12, 25]
+    for col, (h, w) in enumerate(zip(headers, widths), start=1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font      = header_font
+        cell.fill      = header_fill
+        cell.alignment = center_align
+        ws.column_dimensions[cell.column_letter].width = w
+
+    ws.row_dimensions[1].height = 20
+
+    for row_num, bm in enumerate(mappings, start=2):
+        ws.cell(row=row_num, column=1, value=account.name).alignment = wrap_align
+        ws.cell(row=row_num, column=2, value=bm.brand).alignment = wrap_align
+        ws.cell(row=row_num, column=3, value=bm.theme).alignment = wrap_align
+        ws.cell(row=row_num, column=4, value=bm.tc_theme or '').alignment = wrap_align
+        ws.cell(row=row_num, column=5, value=bm.maponline_theme or '').alignment = wrap_align
+        ws.cell(row=row_num, column=6, value=bm.duration if bm.duration is not None else '').alignment = center_align
+        ws.cell(row=row_num, column=7, value=bm.product or '').alignment = wrap_align
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = f"brand_mappings_{account.name.replace(' ', '_')}.xlsx"
+    return FileResponse(buf, as_attachment=True, filename=filename,
+                        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
 # ── Monitoring Dashboard (Items 3 + 4) ───────────────────────────────────────

@@ -69,10 +69,11 @@ logger = logging.getLogger(__name__)
 def _build_brand_theme_map(account_id):
     brand_theme_map = {}
     for bm in BrandMapping.objects.filter(account_id=account_id):
-        norm_brand  = normalize(bm.brand)
-        norm_theme  = normalize(bm.theme)
-        mapping_dur = int(bm.duration) if bm.duration is not None else None
-        brand_theme_map.setdefault(norm_brand, []).append((norm_theme, mapping_dur))
+        norm_brand    = normalize(bm.brand)
+        norm_theme    = normalize(bm.theme)
+        mapping_dur   = int(bm.duration) if bm.duration is not None else None
+        norm_product  = normalize(bm.product)  # '' when not set — skip product filter
+        brand_theme_map.setdefault(norm_brand, []).append((norm_theme, mapping_dur, norm_product))
     return brand_theme_map
 
 
@@ -121,13 +122,13 @@ def _build_mon_pool(lmrb_qs):
     """
     records = list(lmrb_qs.values(
         'id', 'advt_theme', 'date', 'advt_time', 'duration', 'source',
-        'prog_time', 'program', 'is_sponsorship_matched',
+        'prog_time', 'program', 'is_sponsorship_matched', 'product',
     ))
     if not records:
         return pd.DataFrame(columns=[
             '_lmrb_db_id', 'Advt_Theme', 'Date', 'Advt_time',
             'Dur', '_source', '_norm_theme', '_air_secs',
-            'Prog_time', 'Program', '_prog_secs', '_is_spon_matched',
+            'Prog_time', 'Program', '_prog_secs', '_is_spon_matched', '_product',
         ])
     df = pd.DataFrame(records)
     df.rename(columns={
@@ -140,6 +141,7 @@ def _build_mon_pool(lmrb_qs):
         'prog_time':             'Prog_time',
         'program':               'Program',
         'is_sponsorship_matched': '_is_spon_matched',
+        'product':               '_product',
     }, inplace=True)
     df['Date']        = pd.to_datetime(df['Date'], errors='coerce')
     df['_norm_theme'] = df['Advt_Theme'].apply(normalize)
@@ -147,6 +149,8 @@ def _build_mon_pool(lmrb_qs):
     df['Dur']         = pd.to_numeric(df['Dur'], errors='coerce')
     # Rule 3: programme start time for time-window matching
     df['_prog_secs']  = df['Prog_time'].apply(_parse_time_to_seconds)
+    # Normalise product for case-insensitive matching (used for TAG disambiguation)
+    df['_product']    = df['_product'].apply(lambda v: str(v).lower().strip() if v else '')
     return df.reset_index(drop=True)
 
 
@@ -739,10 +743,11 @@ def _build_maponline_brand_theme_map(account_id):
     for bm in BrandMapping.objects.filter(account_id=account_id):
         if not bm.maponline_theme:
             continue
-        norm_brand  = normalize(bm.brand)
-        mapping_dur = int(bm.duration) if bm.duration is not None else None
+        norm_brand   = normalize(bm.brand)
+        mapping_dur  = int(bm.duration) if bm.duration is not None else None
+        norm_product = normalize(bm.product)  # '' = match any product
         for theme in bm.maponline_themes_list:
-            brand_theme_map.setdefault(norm_brand, []).append((normalize(theme), mapping_dur))
+            brand_theme_map.setdefault(norm_brand, []).append((normalize(theme), mapping_dur, norm_product))
     return brand_theme_map
 
 
