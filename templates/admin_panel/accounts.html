@@ -111,6 +111,12 @@
               <option value="{{ c.id }}" {% if c.id == acc.client_id %}selected{% endif %}>{{ c.name }}</option>
             {% endfor %}
           </select>
+          <label class="flex items-center gap-1 text-xs text-slate-600 cursor-pointer">
+            <input type="checkbox" name="enable_special_notes" value="1"
+                   {% if acc.enable_special_notes %}checked{% endif %}
+                   class="rounded border-slate-300">
+            Special Notes
+          </label>
           <button type="submit"
                   class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors">
             Save
@@ -172,6 +178,12 @@
               <option value="{{ c.id }}">{{ c.name }}</option>
             {% endfor %}
           </select>
+          <label class="flex items-center gap-1 text-xs text-slate-600 cursor-pointer">
+            <input type="checkbox" name="enable_special_notes" value="1"
+                   {% if acc.enable_special_notes %}checked{% endif %}
+                   class="rounded border-slate-300">
+            Special Notes
+          </label>
           <button type="submit"
                   class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors">
             Save

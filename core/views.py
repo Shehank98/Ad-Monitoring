@@ -404,7 +404,8 @@ def account_list(request):
             if name:
                 acc.name = name
             acc.client_id = client_id
-            acc.save(update_fields=['name', 'client_id'])
+            acc.enable_special_notes = request.POST.get('enable_special_notes') == '1'
+            acc.save(update_fields=['name', 'client_id', 'enable_special_notes'])
             messages.success(request, f'Account "{acc.name}" updated.')
             return redirect('/dashboard/accounts/')
 

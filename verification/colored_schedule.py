@@ -222,6 +222,169 @@ def _is_data_row(ws_row, col_map) -> bool:
     return bool(day and str(day).strip()) and bool(time and str(time).strip())
 
 
+# ── DB-based fallback workbook builder ───────────────────────────────────────
+
+def _build_wb_from_db(schedule, colors: dict, status_map=None):
+    """
+    Build a colored pivot workbook purely from ScheduleRow DB records.
+    Used when the original uploaded file is no longer on disk (e.g. after Railway redeploy).
+    """
+    import openpyxl
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill
+    from openpyxl.utils import get_column_letter
+    from core.models import ScheduleRow
+    from collections import defaultdict
+
+    rows_qs = (
+        ScheduleRow.objects
+        .filter(schedule=schedule)
+        .order_by('brand', 'programme', 'start_time', 'date')
+    )
+
+    fills = {
+        'aired':               _hex_to_fill(colors.get('aired',               '#22c55e')),
+        'not_aired':           _hex_to_fill(colors.get('not_aired',           '#ef4444')),
+        'late_telecast':       _hex_to_fill(colors.get('late_telecast',       '#a855f7')),
+        'programme_mismatch':  _hex_to_fill(colors.get('programme_mismatch',  '#f97316')),
+        'extra_aired':         _hex_to_fill(colors.get('extra_aired',         '#3b82f6')),
+        'planned':             _hex_to_fill(colors.get('planned',             '#94a3b8')),
+    }
+    status_to_fill = {
+        'matched': fills['aired'], 'manual_match': fills['aired'],
+        'not_aired': fills['not_aired'], 'late_telecast': fills['late_telecast'],
+        'programme_mismatch': fills['programme_mismatch'],
+        'extra_aired': fills['extra_aired'], 'planned': fills['planned'],
+    }
+
+    # Collect all unique dates sorted
+    all_dates = sorted({r.date for r in rows_qs if r.date})
+    if not all_dates:
+        wb = Workbook()
+        wb.active.cell(1, 1, 'No schedule rows found in database.')
+        return wb
+
+    # Collect any extra late-telecast actual dates
+    extra_dates: set = set()
+    if status_map:
+        for slot_dict in status_map.values():
+            for d_dict in slot_dict.values():
+                for actual_date in (d_dict.get('late_actual') or {}).keys():
+                    actual_d = _date.fromisoformat(actual_date) if isinstance(actual_date, str) else actual_date
+                    if actual_d not in all_dates:
+                        extra_dates.add(actual_date)
+    sorted_extra_dates = sorted(extra_dates)
+
+    # Group rows by (brand, programme, start_time, duration) → {date: count}
+    slot_groups: dict = defaultdict(lambda: defaultdict(int))
+    for r in rows_qs:
+        key = (r.brand or '', r.programme or '', r.start_time or '', r.duration or 0)
+        if r.date:
+            slot_groups[key][r.date.strftime('%Y-%m-%d')] += 1
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Colored Schedule'
+
+    # Fixed left columns: Brand, Programme, Start Time, Duration
+    LEFT_COLS = ['Brand', 'Programme', 'Start Time', 'Duration (s)']
+    n_left = len(LEFT_COLS)
+
+    # Header row
+    hdr_font = Font(bold=True, size=9)
+    for ci, label in enumerate(LEFT_COLS, start=1):
+        c = ws.cell(1, ci, label)
+        c.font = hdr_font
+    for di, d in enumerate(all_dates, start=n_left + 1):
+        c = ws.cell(1, di, d.strftime('%d/%m'))
+        c.font = hdr_font
+        c.alignment = Alignment(horizontal='center')
+    for ei, d_str in enumerate(sorted_extra_dates, start=n_left + len(all_dates) + 1):
+        c = ws.cell(1, ei, d_str)
+        c.font = hdr_font
+        c.alignment = Alignment(horizontal='center')
+
+    # Build date → output column mapping
+    date_str_to_col = {d.strftime('%Y-%m-%d'): n_left + i for i, d in enumerate(all_dates, start=1)}
+    for ei, d_str in enumerate(sorted_extra_dates, start=1):
+        date_str_to_col[d_str] = n_left + len(all_dates) + ei
+
+    # Data rows
+    current_brand = None
+    out_row = 2
+    for (brand, programme, start_time, duration), date_counts in sorted(slot_groups.items()):
+        if brand != current_brand:
+            # Brand header row
+            c = ws.cell(out_row, 1, brand)
+            c.font = Font(bold=True, size=9)
+            out_row += 1
+            current_brand = brand
+
+        # Write left columns
+        ws.cell(out_row, 1, brand).font = Font(size=9)
+        ws.cell(out_row, 2, programme).font = Font(size=9)
+        ws.cell(out_row, 3, start_time).font = Font(size=9)
+        ws.cell(out_row, 4, duration).font = Font(size=9)
+
+        # Write date columns
+        slot_key = (_normalize(programme), _normalize(start_time), duration)
+        slot_status = (status_map or {}).get(slot_key, {})
+
+        for d_str, planned_count in sorted(date_counts.items()):
+            col = date_str_to_col.get(d_str)
+            if not col:
+                continue
+            if not status_map:
+                status = 'planned'
+                count = planned_count
+            else:
+                d_data = slot_status.get(d_str, {})
+                statuses = _ordered_statuses({k: v for k, v in d_data.items() if k != 'late_actual'})
+                if statuses:
+                    status, count = statuses[0]
+                else:
+                    status, count = 'planned', planned_count
+            cell = ws.cell(out_row, col, count)
+            cell.fill = status_to_fill.get(status, fills['planned'])
+            cell.font = Font(bold=True, size=9)
+            cell.alignment = Alignment(horizontal='center')
+
+        # Extra late-telecast columns
+        if status_map:
+            for d_str, extra_col_idx in [(d, date_str_to_col[d]) for d in sorted_extra_dates]:
+                count = sum(
+                    d_dict.get('late_actual', {}).get(d_str, 0)
+                    for d_dict in slot_status.values()
+                )
+                if count:
+                    cell = ws.cell(out_row, extra_col_idx, count)
+                    cell.fill = fills['late_telecast']
+                    cell.font = Font(bold=True, size=9)
+                    cell.alignment = Alignment(horizontal='center')
+
+        out_row += 1
+
+    # Legend
+    legend_row = out_row + 1
+    ws.cell(legend_row, 1, 'LEGEND:').font = Font(bold=True, size=9)
+    legend_items = [
+        ('Aired as Planned', fills['aired']),
+        ('Not Aired',        fills['not_aired']),
+        ('Late / Diff Date', fills['late_telecast']),
+        ('Prog Mismatch',    fills['programme_mismatch']),
+        ('Extra Aired',      fills['extra_aired']),
+        ('Planned Only',     fills['planned']),
+    ]
+    for i, (label, fill) in enumerate(legend_items, start=2):
+        c = ws.cell(legend_row, i, f'  {label}  ')
+        c.fill = fill
+        c.font = Font(bold=True, size=8)
+        c.alignment = Alignment(horizontal='center')
+
+    ws.append(['', '', '', '', 'NOTE: Rebuilt from DB — original file unavailable.'])
+    return wb
+
+
 # ── Workbook builder ──────────────────────────────────────────────────────────
 
 def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
@@ -252,23 +415,24 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
     schedule = Schedule.objects.get(pk=schedule_pk)
 
     # Load the original file bytes from storage (works for local + Firebase)
+    raw_bytes = None
     try:
         raw_bytes = schedule.file.read()
     except Exception as exc:
-        raise FileNotFoundError(f'Cannot read original schedule file: {exc}') from exc
+        logger.warning('Cannot read original schedule file (%s): %s — falling back to DB reconstruction', schedule_pk, exc)
 
-    wb_src = openpyxl.load_workbook(io.BytesIO(raw_bytes), data_only=True)
-    ws_src = wb_src.active
-
-    # Detect pivot structure
-    header_row_idx, col_map, date_col_map = _detect_pivot_openpyxl(ws_src)
-
-    if not header_row_idx or not date_col_map:
-        # Not a pivot file – return workbook as-is with a warning note
-        wb_dst = openpyxl.load_workbook(io.BytesIO(raw_bytes))
-        ws_dst = wb_dst.active
-        ws_dst.cell(1, 1, 'WARNING: Pivot structure not detected. Colours not applied.')
-        return wb_dst
+    if raw_bytes:
+        wb_src = openpyxl.load_workbook(io.BytesIO(raw_bytes), data_only=True)
+        ws_src = wb_src.active
+        header_row_idx, col_map, date_col_map = _detect_pivot_openpyxl(ws_src)
+        if not header_row_idx or not date_col_map:
+            wb_dst = openpyxl.load_workbook(io.BytesIO(raw_bytes))
+            ws_dst = wb_dst.active
+            ws_dst.cell(1, 1, 'WARNING: Pivot structure not detected. Colours not applied.')
+            return wb_dst
+    else:
+        # Original file missing (e.g. Railway redeploy wiped /media/) — reconstruct from DB
+        return _build_wb_from_db(schedule, colors, status_map)
 
     # Build colour fills
     fills = {
