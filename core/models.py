@@ -72,7 +72,11 @@ class Account(models.Model):
         null=True, blank=True, related_name='accounts',
         help_text='Parent client that groups this account',
     )
-    name       = models.CharField(max_length=200, unique=True)
+    name                  = models.CharField(max_length=200, unique=True)
+    enable_special_notes  = models.BooleanField(
+        default=False,
+        help_text='Show the Special Notes / Cost Breakdown section on summary reports for this account.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -568,6 +572,8 @@ class SummaryReportMeta(models.Model):
     prepared_by          = models.CharField(max_length=200, blank=True, default='')
     checked_by           = models.CharField(max_length=200, blank=True, default='')
     authorised_by        = models.CharField(max_length=200, blank=True, default='')
+    schedule_cost        = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    deviated_cost        = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     created_at           = models.DateTimeField(auto_now_add=True)
     updated_at           = models.DateTimeField(auto_now=True)
 

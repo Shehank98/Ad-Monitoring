@@ -18,6 +18,8 @@
   #spon-modal.open { display:flex; }
   #spon-modal-inner { background:#fff; border-radius:1rem; width:min(720px,96vw); max-height:80vh; display:flex; flex-direction:column; }
   #spon-modal-body  { overflow-y:auto; flex:1; }
+  /* Special Notes cost breakdown table */
+  .sn-table td { vertical-align: middle; }
 </style>
 {% endblock %}
 
@@ -386,6 +388,31 @@
                      value="{{ meta.authorised_by|default:'' }}">
             </div>
           </div>
+
+          {% if enable_special_notes %}
+          <div class="pt-3 mt-1 border-t border-dashed border-teal-200">
+            <p class="text-[10px] font-bold text-teal-700 uppercase tracking-wider mb-2">
+              <i class="fa-solid fa-calculator mr-1"></i> Cost Breakdown Inputs
+            </p>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Schedule Cost</label>
+                <input type="number" step="0.01" min="0" name="schedule_cost"
+                       class="input-field text-sm text-right"
+                       placeholder="0.00"
+                       value="{{ meta.schedule_cost|default:'' }}">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Deviated Cost</label>
+                <input type="number" step="0.01" min="0" name="deviated_cost"
+                       class="input-field text-sm text-right"
+                       placeholder="0.00"
+                       value="{{ meta.deviated_cost|default:'' }}">
+              </div>
+            </div>
+          </div>
+          {% endif %}
+
           <button type="submit" class="btn-primary w-full justify-center text-sm">
             <i class="fa-solid fa-floppy-disk"></i> Save Details
           </button>
@@ -590,6 +617,86 @@
             {% if meta.authorised_by %}<p class="text-xs text-slate-700 mt-0.5">{{ meta.authorised_by }}</p>{% endif %}
           </div>
         </div>
+        {% endif %}
+
+        <!-- ── Special Notes / Cost Breakdown ────────────────────── -->
+        {% if enable_special_notes and special_notes_data %}
+        {% with sn=special_notes_data.fmt %}
+        <div class="mt-5 pt-4 border-t-2 border-teal-600">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="text-xs font-bold text-teal-800 uppercase tracking-wider bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200">
+              <i class="fa-solid fa-calculator mr-1 text-teal-600"></i> Special Notes
+            </span>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+
+            <!-- Left column -->
+            <div class="rounded-xl border border-slate-200 overflow-hidden">
+              <table class="w-full text-xs">
+                <tbody>
+                  <tr class="border-b border-slate-100">
+                    <td class="px-3 py-1.5 text-slate-600">Schedule Cost</td>
+                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.schedule_cost }}</td>
+                  </tr>
+                  <tr class="border-b border-slate-100 bg-slate-50">
+                    <td class="px-3 py-1.5 text-slate-600">Deviated Cost</td>
+                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.deviated_cost }}</td>
+                  </tr>
+                  <tr class="border-b border-slate-100">
+                    <td class="px-3 py-1.5 text-slate-700 font-semibold">Net Cost</td>
+                    <td class="px-3 py-1.5 text-right font-mono font-semibold text-slate-800">{{ sn.net_cost }}</td>
+                  </tr>
+                  <tr class="border-b border-slate-100 bg-slate-50">
+                    <td class="px-3 py-1.5 text-slate-600">2.50%</td>
+                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.two_point_five_percent }}</td>
+                  </tr>
+                  <tr class="border-b border-slate-100">
+                    <td class="px-3 py-1.5 text-slate-600">Total with Taxes (before VAT)</td>
+                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.total_with_tax_before_vat }}</td>
+                  </tr>
+                  <tr class="border-b border-slate-100 bg-slate-50">
+                    <td class="px-3 py-1.5 text-slate-600">VAT (18%)</td>
+                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.vat }}</td>
+                  </tr>
+                  <tr class="bg-teal-50">
+                    <td class="px-3 py-1.5 text-teal-800 font-bold">Total with Taxes (final)</td>
+                    <td class="px-3 py-1.5 text-right font-mono font-bold text-teal-800">{{ sn.total_with_tax_final }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Right column -->
+            <div class="rounded-xl border border-slate-200 overflow-hidden">
+              <table class="w-full text-xs">
+                <tbody>
+                  <tr class="border-b border-slate-100">
+                    <td class="px-3 py-1.5 text-slate-600">Payable to Media (85%)</td>
+                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.payable_to_media }}</td>
+                  </tr>
+                  <tr class="border-b border-slate-100 bg-slate-50">
+                    <td class="px-3 py-1.5 text-slate-600">Geometry Global Media (3%)</td>
+                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.geometry_global }}</td>
+                  </tr>
+                  <tr class="border-b border-slate-100">
+                    <td class="px-3 py-1.5 text-slate-600">Agency Commission (12%)</td>
+                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.agency_commission }}</td>
+                  </tr>
+                  <tr class="border-b border-slate-100 bg-slate-50">
+                    <td class="px-3 py-1.5 text-slate-700 font-semibold">Total Cost to Client (88%)</td>
+                    <td class="px-3 py-1.5 text-right font-mono font-semibold text-slate-800">{{ sn.total_cost_to_client_88 }}</td>
+                  </tr>
+                  <tr class="bg-teal-50">
+                    <td class="px-3 py-1.5 text-teal-800 font-bold">Total Cost to Client (with VAT)</td>
+                    <td class="px-3 py-1.5 text-right font-mono font-bold text-teal-800">{{ sn.total_cost_to_client_with_vat }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+        </div>
+        {% endwith %}
         {% endif %}
 
       </div><!-- /p-4 -->

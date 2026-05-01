@@ -4700,6 +4700,18 @@ def summary_report(request):
             meta.prepared_by         = request.POST.get('prepared_by', '').strip()
             meta.checked_by          = request.POST.get('checked_by', '').strip()
             meta.authorised_by       = request.POST.get('authorised_by', '').strip()
+            # Special Notes cost inputs (only saved when account has the feature enabled)
+            if account.enable_special_notes:
+                sc = request.POST.get('schedule_cost', '').strip()
+                dc = request.POST.get('deviated_cost', '').strip()
+                try:
+                    meta.schedule_cost = sc if sc else None
+                except Exception:
+                    meta.schedule_cost = None
+                try:
+                    meta.deviated_cost = dc if dc else None
+                except Exception:
+                    meta.deviated_cost = None
             meta.save()
             messages.success(request, 'Summary metadata saved.')
         qs_str = f'account_id={account_id}&channel={channel}&month={month}'
@@ -4880,22 +4892,33 @@ def summary_report(request):
         except Exception:
             logger.exception('Card-grid build failed for account_id=%s', account_id)
 
+    # Build Special Notes data if the account has the feature enabled
+    special_notes_data = None
+    enable_special_notes = selected_account.enable_special_notes if selected_account else False
+    if enable_special_notes and meta and (meta.schedule_cost is not None or meta.deviated_cost is not None):
+        from verification.special_notes import SpecialNotesService
+        special_notes_data = SpecialNotesService(
+            meta.schedule_cost, meta.deviated_cost
+        ).calculate()
+
     return render(request, 'summary/report.html', {
-        'accounts':           account_qs,
-        'selected_account':   selected_account,
-        'account_id':         account_id,
-        'channels':           channels,
-        'months':             months,
-        'schedules_in_scope': schedules_in_scope,
-        'schedule_id':        schedule_id,
-        'channel':            channel,
-        'month':              month,
-        'summary_data':       summary_data,
-        'meta':               meta,
-        'schedule_obj':       schedule_obj,
-        'tc_report':          tc_report,
-        'cards_by_month':     cards_by_month,
-        'total_scopes':       total_scopes,
+        'accounts':             account_qs,
+        'selected_account':     selected_account,
+        'account_id':           account_id,
+        'channels':             channels,
+        'months':               months,
+        'schedules_in_scope':   schedules_in_scope,
+        'schedule_id':          schedule_id,
+        'channel':              channel,
+        'month':                month,
+        'summary_data':         summary_data,
+        'meta':                 meta,
+        'schedule_obj':         schedule_obj,
+        'tc_report':            tc_report,
+        'cards_by_month':       cards_by_month,
+        'total_scopes':         total_scopes,
+        'enable_special_notes': enable_special_notes,
+        'special_notes_data':   special_notes_data,
     })
 
 
@@ -5097,6 +5120,59 @@ def summary_excel(request):
         row += 1
 
     row += 2  # blank
+
+    # ── Special Notes / Cost Breakdown ────────────────────────────────────────
+    if account.enable_special_notes and meta and (meta.schedule_cost is not None or meta.deviated_cost is not None):
+        from verification.special_notes import SpecialNotesService
+        sn = SpecialNotesService(meta.schedule_cost, meta.deviated_cost).calculate()
+        fmt = sn['fmt']
+
+        TEAL = PatternFill('solid', fgColor='0F766E')
+        TEAL_LITE = PatternFill('solid', fgColor='CCFBF1')
+
+        # Section header
+        ws.merge_cells(f'A{row}:G{row}')
+        c = ws.cell(row, 1, 'Special Notes')
+        c.font = Font(bold=True, size=11, color='FFFFFF'); c.fill = TEAL; c.alignment = left
+        ws.row_dimensions[row].height = 18
+        row += 1
+
+        # Column sub-headers
+        for col_i, label in [(1, 'Description'), (2, 'Amount'), (4, 'Description'), (5, 'Amount')]:
+            c = ws.cell(row, col_i, label)
+            c.font = Font(bold=True, size=9); c.fill = TEAL_LITE; c.alignment = centre
+            c.border = border()
+        ws.merge_cells(f'A{row}:A{row}')
+        ws.merge_cells(f'B{row}:C{row}')
+        ws.merge_cells(f'D{row}:D{row}')
+        ws.merge_cells(f'E{row}:G{row}')
+        row += 1
+
+        def _sn_row(left_label, left_val, right_label='', right_val='', bold=False):
+            fnt = Font(bold=bold, size=9)
+            c = ws.cell(row, 1, left_label); c.font = fnt; c.alignment = left; c.border = border()
+            ws.merge_cells(f'B{row}:C{row}')
+            c = ws.cell(row, 2, left_val); c.font = fnt; c.alignment = right; c.border = border()
+            c = ws.cell(row, 4, right_label); c.font = fnt; c.alignment = left; c.border = border()
+            ws.merge_cells(f'E{row}:G{row}')
+            c = ws.cell(row, 5, right_val); c.font = fnt; c.alignment = right; c.border = border()
+
+        _sn_row('Schedule Cost',                fmt['schedule_cost'],        'Payable to Media (85%)',          fmt['payable_to_media'])
+        row += 1
+        _sn_row('Deviated Cost',                fmt['deviated_cost'],        'Geometry Global Media (3%)',       fmt['geometry_global'])
+        row += 1
+        _sn_row('Net Cost',                     fmt['net_cost'],             'Agency Commission (12%)',          fmt['agency_commission'])
+        row += 1
+        _sn_row('2.50%',                        fmt['two_point_five_percent'],'Total Cost to Client (88%)',      fmt['total_cost_to_client_88'])
+        row += 1
+        _sn_row('Total with Taxes (before VAT)', fmt['total_with_tax_before_vat'], 'Total Cost to Client (with VAT)', fmt['total_cost_to_client_with_vat'])
+        row += 1
+        _sn_row('VAT (18%)',                    fmt['vat'],                  '')
+        row += 1
+        _sn_row('Total with Taxes (final)',      fmt['total_with_tax_final'], '', bold=True)
+        row += 1
+
+        row += 1  # blank
 
     # ── Signatures (3 across 7 columns: A-B, C-D-E, F-G) ─────────────────────
     sig_labels = ['PREPARED BY', 'CHECKED BY', 'AUTHORISED BY']
@@ -5692,6 +5768,104 @@ def summary_pdf(request):
         for line in meta.notes.splitlines():
             if line.strip():
                 story.append(Paragraph(line, S['sub']))
+
+    # ── Special Notes / Cost Breakdown ────────────────────────────────────────
+    if account.enable_special_notes and meta and (meta.schedule_cost is not None or meta.deviated_cost is not None):
+        from verification.special_notes import SpecialNotesService
+        from reportlab.lib.colors import HexColor as _HC
+        sn  = SpecialNotesService(meta.schedule_cost, meta.deviated_cost).calculate()
+        fmt = sn['fmt']
+
+        TEAL_HDR  = _HC('#0F766E')
+        TEAL_LITE = _HC('#CCFBF1')
+
+        story.append(Spacer(1, 0.6 * cm))
+        story.append(_section_heading('Special Notes — Cost Breakdown'))
+        story.append(Spacer(1, 0.25 * cm))
+
+        sn_col_w = content_w / 2 - 0.3 * cm
+
+        def _sn_para(text, bold=False, align=TA_LEFT):
+            style = _ps(f'sn_{text[:8]}', fontSize=8,
+                        textColor=SLATE_900,
+                        fontName='Helvetica-Bold' if bold else 'Helvetica',
+                        alignment=align)
+            return Paragraph(text, style)
+
+        def _sn_val(text, bold=False):
+            return _sn_para(text, bold=bold, align=TA_RIGHT)
+
+        sn_col = content_w / 4
+        # Two-column table: left side | right side, each with label + value
+        sn_rows_left = [
+            ('Schedule Cost',                 fmt['schedule_cost']),
+            ('Deviated Cost',                 fmt['deviated_cost']),
+            ('Net Cost',                      fmt['net_cost']),
+            ('2.50%',                         fmt['two_point_five_percent']),
+            ('Total with Taxes (before VAT)', fmt['total_with_tax_before_vat']),
+            ('VAT (18%)',                     fmt['vat']),
+            ('Total with Taxes (final)',       fmt['total_with_tax_final']),
+        ]
+        sn_rows_right = [
+            ('Payable to Media (85%)',           fmt['payable_to_media']),
+            ('Geometry Global Media (3%)',        fmt['geometry_global']),
+            ('Agency Commission (12%)',           fmt['agency_commission']),
+            ('Total Cost to Client (88%)',        fmt['total_cost_to_client_88']),
+            ('Total Cost to Client (with VAT)',   fmt['total_cost_to_client_with_vat']),
+        ]
+        max_rows = max(len(sn_rows_left), len(sn_rows_right))
+
+        # Column widths: label | value | gap | label | value
+        _lbl_w = sn_col * 1.6
+        _val_w = sn_col * 0.9
+        _gap_w = 0.6 * cm
+        sn_col_widths = [_lbl_w, _val_w, _gap_w, _lbl_w, _val_w]
+
+        sn_header = [
+            Paragraph('Description', _ps('snh_l', fontSize=7.5, textColor=WHITE, fontName='Helvetica-Bold')),
+            Paragraph('Amount',      _ps('snh_v', fontSize=7.5, textColor=WHITE, fontName='Helvetica-Bold', alignment=TA_RIGHT)),
+            Paragraph('',            S['cell']),
+            Paragraph('Description', _ps('snh_l2', fontSize=7.5, textColor=WHITE, fontName='Helvetica-Bold')),
+            Paragraph('Amount',      _ps('snh_v2', fontSize=7.5, textColor=WHITE, fontName='Helvetica-Bold', alignment=TA_RIGHT)),
+        ]
+        sn_tbl_data = [sn_header]
+        for i in range(max_rows):
+            left_lbl,  left_val  = sn_rows_left[i]  if i < len(sn_rows_left)  else ('', '')
+            right_lbl, right_val = sn_rows_right[i] if i < len(sn_rows_right) else ('', '')
+            is_final = (left_lbl == 'Total with Taxes (final)')
+            sn_tbl_data.append([
+                _sn_para(left_lbl,  bold=is_final),
+                _sn_val(left_val,   bold=is_final),
+                Paragraph('', S['cell']),
+                _sn_para(right_lbl),
+                _sn_val(right_val),
+            ])
+
+        sn_tbl = Table(sn_tbl_data, colWidths=sn_col_widths)
+        _sn_n = len(sn_tbl_data)
+        sn_style = [
+            ('BACKGROUND',    (0, 0), (1, 0),  TEAL_HDR),
+            ('BACKGROUND',    (3, 0), (4, 0),  TEAL_HDR),
+            ('TEXTCOLOR',     (0, 0), (4, 0),  WHITE),
+            ('LINEBELOW',     (0, 0), (1, 0),  1, GOLD),
+            ('LINEBELOW',     (3, 0), (4, 0),  1, GOLD),
+            ('ROWBACKGROUNDS',(0, 1), (1, _sn_n - 1), [SLATE_100, WHITE]),
+            ('ROWBACKGROUNDS',(3, 1), (4, _sn_n - 1), [SLATE_100, WHITE]),
+            ('FONTSIZE',      (0, 0), (-1, -1), 8),
+            ('TOPPADDING',    (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING',   (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING',  (0, 0), (-1, -1), 5),
+            ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+            ('LINEBELOW',     (0, 1), (1, _sn_n - 1), 0.25, SLATE_200),
+            ('LINEBELOW',     (3, 1), (4, _sn_n - 1), 0.25, SLATE_200),
+            # Bold total row (last left row)
+            ('BACKGROUND',    (0, _sn_n - 1), (1, _sn_n - 1), HexColor('#E0FDF4')),
+            ('LINEABOVE',     (0, _sn_n - 1), (1, _sn_n - 1), 1, TEAL_HDR),
+            ('BACKGROUND',    (3, _sn_n - 1), (4, _sn_n - 1), HexColor('#E0FDF4')),
+        ]
+        sn_tbl.setStyle(TableStyle(sn_style))
+        story.append(sn_tbl)
 
     # ═══════════════════════════════════════════════════════════════════════════
     # PAGE 3+ - MATCHED LMRB REPORT (Landscape)

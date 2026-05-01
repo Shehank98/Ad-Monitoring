@@ -1,7 +1,11 @@
 from django.contrib import admin
 from .models import Account, Schedule, MonitoringData
 
-admin.site.register(Account)
+@admin.register(Account)
+class AccountAdmin(admin.ModelAdmin):
+    list_display  = ('name', 'enable_special_notes', 'created_at')
+    list_filter   = ('enable_special_notes',)
+    search_fields = ('name',)
 
 @admin.register(Schedule)
 class ScheduleAdmin(admin.ModelAdmin):
