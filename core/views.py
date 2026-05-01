@@ -844,13 +844,13 @@ def schedule_download(request, pk):
     if not _is_admin(request.user) and schedule.account not in _account_qs(request.user):
         return HttpResponse('Access denied', status=403)
     try:
-        file_path = schedule.file.path
-        if not os.path.exists(file_path):
+        if not schedule.file or not schedule.file.storage.exists(schedule.file.name):
             return HttpResponse('File not found on server.', status=404)
+        fname = schedule.original_filename or schedule.file.name.split('/')[-1]
         return FileResponse(
-            open(file_path, 'rb'),
+            schedule.file.open('rb'),
             as_attachment=True,
-            filename=schedule.original_filename or os.path.basename(file_path),
+            filename=fname,
         )
     except Exception as e:
         return HttpResponse(f'Download failed: {e}', status=500)
@@ -1440,13 +1440,13 @@ def monitoring_download(request, pk):
     if not _is_admin(user) and mon.account not in _account_qs(user):
         return HttpResponse('Access denied', status=403)
     try:
-        file_path = mon.file.path
-        if not os.path.exists(file_path):
+        if not mon.file or not mon.file.storage.exists(mon.file.name):
             return HttpResponse('File not found on server.', status=404)
+        fname = mon.original_filename or mon.file.name.split('/')[-1]
         return FileResponse(
-            open(file_path, 'rb'),
+            mon.file.open('rb'),
             as_attachment=True,
-            filename=mon.original_filename or os.path.basename(file_path),
+            filename=fname,
         )
     except Exception as e:
         return HttpResponse(f'Download failed: {e}', status=500)
@@ -6091,6 +6091,123 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month):
 
 
 @login_required
+def colored_schedule_export(request, pk):
+    """Download the original schedule in pivot format with status-coloured date cells.
+
+    If reconciliation (MatchResult) data exists for the schedule's scope it is used
+    to colour cells. Otherwise all date cells are coloured in the 'planned' colour.
+    """
+    from verification.colored_schedule import build_colored_schedule_wb, build_status_map
+
+    schedule = get_object_or_404(Schedule, pk=pk)
+    if not _account_access(request.user, schedule.account_id):
+        return HttpResponse('Access denied', status=403)
+
+    colors = {
+        'aired':              get_setting('schedule_color_aired',              '#22c55e'),
+        'not_aired':          get_setting('schedule_color_not_aired',          '#ef4444'),
+        'late_telecast':      get_setting('schedule_color_late_telecast',      '#a855f7'),
+        'programme_mismatch': get_setting('schedule_color_programme_mismatch', '#f97316'),
+        'extra_aired':        get_setting('schedule_color_extra_aired',        '#3b82f6'),
+        'planned':            get_setting('schedule_color_planned',            '#94a3b8'),
+    }
+
+    # Use reconciliation data if it exists for this scope
+    from core.models import MatchResult
+    has_results = MatchResult.objects.filter(
+        account_id=schedule.account_id,
+        channel=schedule.channel,
+        month=schedule.month,
+    ).exists()
+
+    status_map = None
+    if has_results:
+        try:
+            status_map = build_status_map(schedule.account_id, schedule.channel, schedule.month)
+        except Exception:
+            logger.exception('build_status_map failed for schedule pk=%s', pk)
+
+    try:
+        wb = build_colored_schedule_wb(schedule.pk, colors, status_map)
+    except FileNotFoundError as exc:
+        messages.error(request, str(exc))
+        return redirect(f'/dashboard/schedules/')
+    except Exception as exc:
+        logger.exception('build_colored_schedule_wb failed for schedule pk=%s', pk)
+        messages.error(request, f'Could not generate colored schedule: {exc}')
+        return redirect(f'/dashboard/schedules/')
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    suffix = '_colored.xlsx'
+    base   = (schedule.original_filename or f'schedule_{pk}').rsplit('.', 1)[0]
+    fname  = base + suffix
+    resp   = HttpResponse(
+        buf.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    resp['Content-Disposition'] = f'attachment; filename="{fname}"'
+    return resp
+
+
+@login_required
+def summary_colored_schedule(request):
+    """Download colored schedule from the Summary Sheet page (always uses reconciliation data)."""
+    from verification.colored_schedule import build_colored_schedule_wb, build_status_map
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+
+    if not (account_id and channel and month):
+        messages.error(request, 'Incomplete parameters.')
+        return redirect('/dashboard/summary/')
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return redirect('/dashboard/summary/')
+
+    schedule = Schedule.objects.filter(
+        account_id=account_id, channel=channel, month=month
+    ).order_by('-uploaded_at').first()
+    if not schedule:
+        messages.error(request, 'No schedule found for this scope.')
+        return redirect('/dashboard/summary/')
+
+    colors = {
+        'aired':              get_setting('schedule_color_aired',              '#22c55e'),
+        'not_aired':          get_setting('schedule_color_not_aired',          '#ef4444'),
+        'late_telecast':      get_setting('schedule_color_late_telecast',      '#a855f7'),
+        'programme_mismatch': get_setting('schedule_color_programme_mismatch', '#f97316'),
+        'extra_aired':        get_setting('schedule_color_extra_aired',        '#3b82f6'),
+        'planned':            get_setting('schedule_color_planned',            '#94a3b8'),
+    }
+
+    try:
+        status_map = build_status_map(account_id, channel, month)
+        wb = build_colored_schedule_wb(schedule.pk, colors, status_map)
+    except FileNotFoundError as exc:
+        messages.error(request, str(exc))
+        return redirect(f'/dashboard/summary/?account_id={account_id}&channel={channel}&month={month}')
+    except Exception as exc:
+        logger.exception('summary_colored_schedule failed for %s/%s/%s', account_id, channel, month)
+        messages.error(request, f'Could not generate colored schedule: {exc}')
+        return redirect(f'/dashboard/summary/?account_id={account_id}&channel={channel}&month={month}')
+
+    account = get_object_or_404(Account, id=account_id)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f'ColoredSchedule_{account.name}_{channel}_{month}.xlsx'.replace(' ', '_')
+    resp  = HttpResponse(
+        buf.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    resp['Content-Disposition'] = f'attachment; filename="{fname}"'
+    return resp
+
+
+@login_required
 def matched_lmrb_excel(request):
     """
     Export all matched LMRB rows (commercial auto-matched + sponsorship manually
@@ -8142,13 +8259,13 @@ def tc_report_download(request, pk):
         return HttpResponse('Access denied', status=403)
 
     try:
-        file_path = report.file.path
-        if not os.path.exists(file_path):
+        if not report.file or not report.file.storage.exists(report.file.name):
             return HttpResponse('File not found on server.', status=404)
+        fname = report.original_filename or report.file.name.split('/')[-1]
         return FileResponse(
-            open(file_path, 'rb'),
+            report.file.open('rb'),
             as_attachment=True,
-            filename=report.original_filename or os.path.basename(file_path),
+            filename=fname,
         )
     except Exception as e:
         return HttpResponse(f'Download failed: {e}', status=500)

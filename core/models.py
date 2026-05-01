@@ -907,6 +907,49 @@ SETTING_DEFAULTS = [
         ),
         'category': 'whatsapp',
     },
+    # ── Schedule Export Colours ───────────────────────────────────────────────
+    {
+        'key': 'schedule_color_aired',
+        'value': '#22c55e',
+        'label': 'Colour: Aired as Planned',
+        'description': 'Cell fill colour for spots that aired on the scheduled date within the planned window.',
+        'category': 'display',
+    },
+    {
+        'key': 'schedule_color_not_aired',
+        'value': '#ef4444',
+        'label': 'Colour: Not Aired',
+        'description': 'Cell fill colour for spots that were not found in the monitoring data.',
+        'category': 'display',
+    },
+    {
+        'key': 'schedule_color_late_telecast',
+        'value': '#a855f7',
+        'label': 'Colour: Late / Different Date',
+        'description': 'Cell fill colour for spots that aired on a date different from the scheduled date.',
+        'category': 'display',
+    },
+    {
+        'key': 'schedule_color_programme_mismatch',
+        'value': '#f97316',
+        'label': 'Colour: Programme Mismatch',
+        'description': 'Cell fill colour for spots that aired just after the planned window (different programme).',
+        'category': 'display',
+    },
+    {
+        'key': 'schedule_color_extra_aired',
+        'value': '#3b82f6',
+        'label': 'Colour: Extra Aired',
+        'description': 'Cell fill colour for monitoring rows not linked to any scheduled spot.',
+        'category': 'display',
+    },
+    {
+        'key': 'schedule_color_planned',
+        'value': '#94a3b8',
+        'label': 'Colour: Planned (no reconciliation yet)',
+        'description': 'Cell fill colour when exporting a schedule that has not yet been reconciled.',
+        'category': 'display',
+    },
 ]
 
 
@@ -923,6 +966,7 @@ class SystemSetting(models.Model):
         ('tc_parsing',     'TC File Parsing'),
         ('lmrb_parsing',   'LMRB / MapOnline File Parsing'),
         ('whatsapp',       'WhatsApp Notifications'),
+        ('display',        'Display & Export'),
     ]
 
     key         = models.CharField(max_length=100, unique=True)

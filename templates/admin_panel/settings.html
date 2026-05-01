@@ -15,11 +15,12 @@
       <!-- Category header -->
       <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
         <div class="w-8 h-8 rounded-lg flex items-center justify-center
-          {% if 'Reconciliation' in category_label %}bg-blue-100{% elif 'TC' in category_label %}bg-emerald-100{% elif 'WhatsApp' in category_label %}bg-green-100{% else %}bg-amber-100{% endif %}">
+          {% if 'Reconciliation' in category_label %}bg-blue-100{% elif 'TC' in category_label %}bg-emerald-100{% elif 'WhatsApp' in category_label %}bg-green-100{% elif 'Display' in category_label %}bg-violet-100{% else %}bg-amber-100{% endif %}">
           <i class="text-sm
             {% if 'Reconciliation' in category_label %}fa-solid fa-scale-balanced text-blue-600
             {% elif 'TC' in category_label %}fa-solid fa-file-invoice text-emerald-600
             {% elif 'WhatsApp' in category_label %}fa-brands fa-whatsapp text-green-600
+            {% elif 'Display' in category_label %}fa-solid fa-palette text-violet-600
             {% else %}fa-solid fa-chart-bar text-amber-600{% endif %}"></i>
         </div>
         <div>
@@ -46,7 +47,22 @@
 
           <!-- Input (right 2 cols) -->
           <div class="lg:col-span-2">
-            {% if s.key == 'tc_lmrb_time_tolerance' %}
+            {% if 'schedule_color' in s.key %}
+            <!-- Colour picker for schedule export status colours -->
+            <div class="flex items-center gap-3">
+              <input
+                type="color"
+                id="field_{{ s.key }}"
+                name="{{ s.key }}"
+                value="{{ s.value|default:'#94a3b8' }}"
+                class="h-10 w-16 rounded-lg border border-slate-200 cursor-pointer p-0.5 bg-white"
+              >
+              <div>
+                <p class="text-sm font-mono text-slate-700">{{ s.value|default:'#94a3b8' }}</p>
+                <p class="text-[11px] text-slate-400">Click to change colour</p>
+              </div>
+            </div>
+            {% elif s.key == 'tc_lmrb_time_tolerance' %}
             <!-- Numeric input for tolerance -->
             <div class="relative">
               <input

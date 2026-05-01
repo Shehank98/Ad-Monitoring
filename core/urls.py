@@ -22,8 +22,9 @@ urlpatterns = [
     path('schedules/',                          views.schedule_list,     name='schedule_list'),
     path('schedules/upload/',                   views.schedule_upload,   name='schedule_upload'),
     path('schedules/detect/',                   views.schedule_detect,   name='schedule_detect'),
-    path('schedules/<int:pk>/download/',        views.schedule_download, name='schedule_download'),
-    path('schedules/<int:pk>/delete/',          views.schedule_delete,   name='schedule_delete'),
+    path('schedules/<int:pk>/download/',        views.schedule_download,         name='schedule_download'),
+    path('schedules/<int:pk>/colored-export/', views.colored_schedule_export,    name='colored_schedule_export'),
+    path('schedules/<int:pk>/delete/',          views.schedule_delete,           name='schedule_delete'),
     path('schedules/lock/',                     views.schedule_lock,     name='schedule_lock'),
 
     # Brand mappings
@@ -65,8 +66,9 @@ urlpatterns = [
 
     # Summary Sheet Report
     path('summary/',                            views.summary_report,      name='summary_report'),
-    path('summary/excel/',                      views.summary_excel,       name='summary_excel'),
-    path('summary/pdf/',                        views.summary_pdf,         name='summary_pdf'),
+    path('summary/excel/',            views.summary_excel,            name='summary_excel'),
+    path('summary/pdf/',              views.summary_pdf,              name='summary_pdf'),
+    path('summary/colored-schedule/', views.summary_colored_schedule, name='summary_colored_schedule'),
     path('monitoring/matched-lmrb-excel/',      views.matched_lmrb_excel,  name='matched_lmrb_excel'),
     path('admin-export/',                       views.admin_export,        name='admin_export'),
 

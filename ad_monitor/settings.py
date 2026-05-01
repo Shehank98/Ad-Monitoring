@@ -77,11 +77,18 @@ STATICFILES_DIRS = [BASE_DIR / 'static']
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 MEDIA_URL = '/media/'
-# Allow MEDIA_ROOT to be overridden via env var so a Railway Volume
-# (or any persistent mount) can be used instead of the ephemeral container
-# filesystem.  Set MEDIA_ROOT=/volumes/media in Railway Variables and mount
-# a Volume at /volumes/media to make uploaded files survive redeploys.
 MEDIA_ROOT = env('MEDIA_ROOT', default=str(BASE_DIR / 'media'))
+
+# ── Firebase Storage ──────────────────────────────────────────────────────────
+# When FIREBASE_STORAGE_BUCKET is set, all FileField uploads are routed through
+# Firebase Storage so they survive Railway redeploys.
+# Set this to your Firebase project's default bucket, e.g.:
+#   FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com
+# The Firebase service-account credentials are read from the standard
+# FIREBASE_* env vars (same ones used by the legacy Streamlit layer).
+FIREBASE_STORAGE_BUCKET = env('FIREBASE_STORAGE_BUCKET', default='')
+if FIREBASE_STORAGE_BUCKET:
+    DEFAULT_FILE_STORAGE = 'core.firebase_storage.FirebaseStorage'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

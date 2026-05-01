@@ -277,8 +277,14 @@
                         <a href="/dashboard/schedules/{{ s.id }}/download/"
                            class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200
                                   text-xs font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-600
-                                  hover:bg-blue-50 transition-all" title="Download">
+                                  hover:bg-blue-50 transition-all" title="Download original">
                           <i class="fa-solid fa-download"></i>
+                        </a>
+                        <a href="/dashboard/schedules/{{ s.id }}/colored-export/"
+                           class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-violet-200
+                                  text-xs font-semibold text-violet-500 hover:border-violet-400 hover:text-violet-700
+                                  hover:bg-violet-50 transition-all" title="Download colored schedule">
+                          <i class="fa-solid fa-palette"></i>
                         </a>
                         {% if request.user.role in "super_admin,admin" or s.uploaded_at.date == today and s.uploaded_by == request.user %}
                           <a href="/dashboard/schedules/{{ s.id }}/delete/"
