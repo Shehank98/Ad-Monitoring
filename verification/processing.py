@@ -442,7 +442,7 @@ def match_ads(
 
             for theme, product in with_product_pairs:
                 theme_mask   = _build_theme_mask(mon_pool, [theme])
-                product_mask = mon_pool['_product'] == product
+                product_mask = (mon_pool['_product'] == product).fillna(False)
                 combined     = combined | (theme_mask & product_mask)
 
         used_mask = ~mon_pool.index.isin(matched_idx)
