@@ -149,17 +149,19 @@ def build_status_map(account_id, channel, month) -> dict:
                 actual_str = row['aired_date'].strftime('%Y-%m-%d')
                 # late_actual → used to add purple count on the actual aired date
                 late_actual_map[slot_key][date_str][actual_str] += 1
-                # late_to → used for the cell comment on the planned date
-                status_map[slot_key][date_str]['late_to'][actual_str] += 1
+                # late_to stored separately (can't use defaultdict(int) for nested dict)
         elif status in _NOT_AIRED_STATUSES:
             status_map[slot_key][date_str]['not_aired'] += 1
         else:
             status_map[slot_key][date_str][status] += 1
 
-    # Embed late_actual into status_map (keyed off the PLANNED date)
+    # Embed late_actual and late_to into status_map (keyed off the PLANNED date).
+    # late_to == late_actual from the planned-date perspective; stored as a plain
+    # dict so the cell-comment code can iterate it without touching defaultdict(int).
     for slot_key, date_dict in late_actual_map.items():
         for date_str, actual_dict in date_dict.items():
             status_map[slot_key][date_str]['late_actual'] = dict(actual_dict)
+            status_map[slot_key][date_str]['late_to'] = dict(actual_dict)
 
     return dict(status_map)
 

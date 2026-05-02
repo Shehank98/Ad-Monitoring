@@ -700,7 +700,16 @@ def schedule_upload(request):
                 makeup_end_date   = makeup_end_date,
                 parent_schedule   = parent_schedule_obj,
             )
-            schedule.file.save(excel_file.name, excel_file)
+            # Build a clean storage filename: AccountName_Channel_Month_ScheduleNum.xlsx
+            import re as _re
+            def _slugify(s):
+                return _re.sub(r'[^\w]+', '_', str(s).strip()).strip('_')
+            _month_slug = _slugify(month)      # e.g. "March_2026"
+            _chan_slug   = _slugify(channel_name)
+            _acct_slug   = _slugify(account.name)
+            _num_slug    = _slugify(sched_number)
+            storage_filename = f'{_acct_slug}_{_chan_slug}_{_month_slug}_{_num_slug}.xlsx'
+            schedule.file.save(storage_filename, excel_file)
             schedule.save()
 
             # ── Parse Schedule rows into DB ────────────────────────────────────
