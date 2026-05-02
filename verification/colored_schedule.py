@@ -365,22 +365,7 @@ def _build_wb_from_db(schedule, colors: dict, status_map=None):
         out_row += 1
 
     # Legend
-    legend_row = out_row + 1
-    ws.cell(legend_row, 1, 'LEGEND:').font = Font(bold=True, size=9)
-    legend_items = [
-        ('Aired as Planned', fills['aired']),
-        ('Not Aired',        fills['not_aired']),
-        ('Late / Diff Date', fills['late_telecast']),
-        ('Prog Mismatch',    fills['programme_mismatch']),
-        ('Extra Aired',      fills['extra_aired']),
-        ('Planned Only',     fills['planned']),
-    ]
-    for i, (label, fill) in enumerate(legend_items, start=2):
-        c = ws.cell(legend_row, i, f'  {label}  ')
-        c.fill = fill
-        c.font = Font(bold=True, size=8)
-        c.alignment = Alignment(horizontal='center')
-
+    _write_legend(ws, out_row + 1, fills)
     ws.append(['', '', '', '', 'NOTE: Rebuilt from DB — original file unavailable.'])
     return wb
 
@@ -512,11 +497,22 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
             continue
 
         if row_idx == header_row_idx:
-            # Header row: add extra date column headers
+            # Header row: strip time from date column values, add extra date headers
+            for oc in out_cells:
+                if oc['col'] in date_col_map:
+                    date_str = date_col_map[oc['col']]  # 'YYYY-MM-DD'
+                    try:
+                        d = _date.fromisoformat(date_str)
+                        oc['value'] = d.strftime('%d %b')  # e.g. "20 Mar"
+                    except Exception:
+                        oc['value'] = date_str
             for d, col in extra_date_col_map.items():
                 for oc in out_cells:
                     if oc['col'] == col:
-                        oc['value'] = d   # date string as header
+                        try:
+                            oc['value'] = _date.fromisoformat(d).strftime('%d %b')
+                        except Exception:
+                            oc['value'] = d
                         break
             output_rows.append(out_cells)
             src_row_meta.append({'type': _ROW_OTHER})
@@ -692,24 +688,64 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
                 dst_cell.font = Font(bold=True, size=9)
                 dst_cell.alignment = Alignment(horizontal='center', vertical='center')
 
-    # ── Legend ────────────────────────────────────────────────────────────────
-    legend_row = len(output_rows) + 2
-    legend_items = [
-        ('Aired as Planned', fills['aired']),
-        ('Not Aired',        fills['not_aired']),
-        ('Late / Diff Date', fills['late_telecast']),
-        ('Prog Mismatch',    fills['programme_mismatch']),
-        ('Extra Aired',      fills['extra_aired']),
-        ('Planned Only',     fills['planned']),
-    ]
-    ws_dst.cell(legend_row, 1, 'LEGEND:').font = Font(bold=True, size=9)
-    for i, (label, fill) in enumerate(legend_items, start=2):
-        c = ws_dst.cell(legend_row, i, f'  {label}  ')
-        c.fill = fill
-        c.font = Font(bold=True, size=8)
-        c.alignment = Alignment(horizontal='center')
+    # ── Legend (vertical colour key) ──────────────────────────────────────────
+    _write_legend(ws_dst, len(output_rows) + 2, fills)
 
     return wb_dst
+
+
+# ── Legend helper ─────────────────────────────────────────────────────────────
+
+def _write_legend(ws, start_row: int, fills: dict):
+    """
+    Write a vertical colour-key table starting at start_row.
+
+    Layout (each row):
+      Col A : coloured cell with short label
+      Col B : full description
+    """
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+    thin = Side(border_style='thin', color='CCCCCC')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    legend_items = [
+        ('aired',              'Aired as Planned',   'Ad was detected on the scheduled date and within the planned time window'),
+        ('not_aired',          'Not Aired',          'Ad was not detected by 3rd-party monitoring (LMRB/MapOnline)'),
+        ('late_telecast',      'Late / Diff Date',   'Ad aired on a different date from the one scheduled'),
+        ('programme_mismatch', 'Programme Mismatch', 'Ad aired after the planned time window (same date)'),
+        ('extra_aired',        'Extra Aired',        'Ad detected by monitoring but not present in the schedule'),
+        ('planned',            'Planned Only',       'Scheduled but no reconciliation data available yet'),
+    ]
+
+    # Header
+    hdr = ws.cell(start_row, 1, 'COLOUR LEGEND')
+    hdr.font = Font(bold=True, size=10, color='FFFFFF')
+    hdr.fill = PatternFill('solid', fgColor='334155')
+    hdr.alignment = Alignment(horizontal='left', vertical='center', indent=1)
+    ws.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=2)
+    ws.row_dimensions[start_row].height = 18
+
+    for i, (status_key, short_label, description) in enumerate(legend_items, start=1):
+        r = start_row + i
+        ws.row_dimensions[r].height = 16
+
+        # Col A: coloured badge with short label
+        a = ws.cell(r, 1, f'  {short_label}  ')
+        a.fill = fills[status_key]
+        a.font = Font(bold=True, size=9, color='FFFFFF')
+        a.alignment = Alignment(horizontal='left', vertical='center', indent=1)
+        a.border = border
+
+        # Col B: description
+        b = ws.cell(r, 2, description)
+        b.font = Font(size=9, color='334155')
+        b.alignment = Alignment(horizontal='left', vertical='center', indent=1, wrap_text=True)
+        b.border = border
+
+    # Widen col B to fit descriptions
+    ws.column_dimensions['B'].width = max(ws.column_dimensions['B'].width or 0, 60)
+    ws.column_dimensions['A'].width = max(ws.column_dimensions['A'].width or 0, 22)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
