@@ -68,6 +68,14 @@ def _normalize(s) -> str:
     return str(s).strip().lower() if s else ''
 
 
+def _try_int(val):
+    """Return int(val) or None if val is not a valid integer."""
+    try:
+        return int(float(val))
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize_time(raw) -> str:
     """
     Convert an openpyxl time cell value to a normalised 'HH:MM:SS' string.
@@ -623,6 +631,14 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
                         per_date[date_str]['late_actual'] = date_data['late_actual']
                     if 'late_to' in date_data:
                         per_date[date_str]['late_to'] = dict(date_data['late_to'])
+
+        # Skip rows where every date column is zero (hidden / unused template rows).
+        total_planned = sum(
+            _try_int(row_cells[c - 1].value) or 0
+            for c in all_date_cols
+        )
+        if total_planned == 0:
+            continue
 
         # For EVERY date column (scheduled + extra), add late arrivals from other dates.
         # A spot planned for date A but aired on date B: date A → RED, date B → PURPLE +1.
