@@ -670,13 +670,16 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
     for extra_col in extra_date_col_map.values():
         ws_dst.column_dimensions[get_column_letter(extra_col)].width = 10
 
-    # Copy row heights where available
+    # Find last row that actually has a value, to avoid writing the legend
+    # hundreds of rows below when the source file has trailing empty rows.
+    last_data_row = 1
     src_rows_list = list(ws_src.iter_rows())
     for r_idx, out_cells in enumerate(output_rows, start=1):
         src_r = r_idx if r_idx <= len(src_rows_list) else None
         if src_r and src_r in ws_src.row_dimensions:
             ws_dst.row_dimensions[r_idx].height = ws_src.row_dimensions[src_r].height
 
+        has_content = False
         for oc in sorted(out_cells, key=lambda x: x['col']):
             dst_cell = ws_dst.cell(row=r_idx, column=oc['col'])
             dst_cell.value = oc['value']
@@ -687,9 +690,13 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
                 dst_cell.fill = oc['fill']
                 dst_cell.font = Font(bold=True, size=9)
                 dst_cell.alignment = Alignment(horizontal='center', vertical='center')
+            if oc['value'] is not None:
+                has_content = True
+        if has_content:
+            last_data_row = r_idx
 
     # ── Legend (vertical colour key) ──────────────────────────────────────────
-    _write_legend(ws_dst, len(output_rows) + 2, fills)
+    _write_legend(ws_dst, last_data_row + 2, fills)
 
     return wb_dst
 
