@@ -74,8 +74,6 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static']
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
-
 MEDIA_URL = '/media/'
 MEDIA_ROOT = env('MEDIA_ROOT', default=str(BASE_DIR / 'media'))
 
@@ -84,11 +82,23 @@ MEDIA_ROOT = env('MEDIA_ROOT', default=str(BASE_DIR / 'media'))
 # Firebase Storage so they survive Railway redeploys.
 # Set this to your Firebase project's default bucket, e.g.:
 #   FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com
-# The Firebase service-account credentials are read from the standard
-# FIREBASE_* env vars (same ones used by the legacy Streamlit layer).
 FIREBASE_STORAGE_BUCKET = env('FIREBASE_STORAGE_BUCKET', default='')
-if FIREBASE_STORAGE_BUCKET:
-    DEFAULT_FILE_STORAGE = 'core.firebase_storage.FirebaseStorage'
+
+# Django 5.x STORAGES dict (replaces deprecated DEFAULT_FILE_STORAGE /
+# STATICFILES_STORAGE settings). WhiteNoise handles static files; Firebase
+# handles uploaded media when the bucket env var is configured.
+STORAGES = {
+    'default': {
+        'BACKEND': (
+            'core.firebase_storage.FirebaseStorage'
+            if FIREBASE_STORAGE_BUCKET
+            else 'django.core.files.storage.FileSystemStorage'
+        ),
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

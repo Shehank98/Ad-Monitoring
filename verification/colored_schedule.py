@@ -50,7 +50,7 @@ def _hex_to_fill(hex_color: str):
 
 def _copy_cell_style(src_cell, dst_cell):
     """Copy basic style (font bold/size/color, alignment) from src to dst."""
-    from openpyxl.styles import Font, Alignment, copy
+    from copy import copy
     try:
         if src_cell.font:
             dst_cell.font = copy(src_cell.font)
