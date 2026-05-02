@@ -74,29 +74,33 @@ def build_status_map(account_id, channel, month) -> dict:
     """
     Build a per-slot, per-date status count dict from MatchResult records.
 
+    Late-telecast handling (key design decision):
+      The PLANNED date of a late spot shows as NOT_AIRED (red) because the ad
+      was genuinely missing on its original date.  The ACTUAL aired date receives
+      a 'late_telecast' count (purple) via the 'late_actual' side-channel so that
+      the cell on the actual date shows total airings including the delayed spot.
+
     Returns
     -------
     dict keyed by (norm_programme, norm_start_time, duration_int) →
         dict keyed by date_str ('YYYY-MM-DD') →
             {
               'matched': int,
-              'not_aired': int,
-              'late_telecast': int,
+              'not_aired': int,          # true missed + late-planned-date spots
+              'late_telecast': int,      # (only on actual aired date via late_actual)
               'programme_mismatch': int,
               'manual_match': int,
-              'no_mapping': int,
               'extra_aired': int,
-              'late_actual': {actual_date_str: int},  # for late spots
+              'late_actual': {actual_date_str: int},  # actual aired date → count
+              'late_to':     {actual_date_str: int},  # for comment: where it moved to
             }
     """
-    from django.db.models import Count
     from core.models import MatchResult
 
     qs = (
         MatchResult.objects
         .filter(account_id=account_id, channel=channel, month=month)
         .exclude(status='extra_aired')
-        .select_related('schedule_row')
         .values(
             'brand', 'programme', 'scheduled_date', 'planned_start',
             'duration', 'status', 'aired_date',
@@ -104,7 +108,6 @@ def build_status_map(account_id, channel, month) -> dict:
     )
 
     status_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
-    # Also track late actual dates: slot_key → {date_str → {actual_date_str → count}}
     late_actual_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
 
     for row in qs:
@@ -120,18 +123,21 @@ def build_status_map(account_id, channel, month) -> dict:
         date_str = s_date.strftime('%Y-%m-%d')
         slot_key = (prog, start, dur)
 
-        # Merge 'not_aired' and 'no_mapping' under 'not_aired' bucket
-        if status in _NOT_AIRED_STATUSES:
+        if status == 'late_telecast':
+            # Planned date shows RED (not aired on its original date)
+            status_map[slot_key][date_str]['not_aired'] += 1
+            if row['aired_date']:
+                actual_str = row['aired_date'].strftime('%Y-%m-%d')
+                # late_actual → used to add purple count on the actual aired date
+                late_actual_map[slot_key][date_str][actual_str] += 1
+                # late_to → used for the cell comment on the planned date
+                status_map[slot_key][date_str]['late_to'][actual_str] += 1
+        elif status in _NOT_AIRED_STATUSES:
             status_map[slot_key][date_str]['not_aired'] += 1
         else:
             status_map[slot_key][date_str][status] += 1
 
-        # Track actual aired date for late telecasts
-        if status == 'late_telecast' and row['aired_date']:
-            actual_str = row['aired_date'].strftime('%Y-%m-%d')
-            late_actual_map[slot_key][date_str][actual_str] += 1
-
-    # Embed late_actual into status_map
+    # Embed late_actual into status_map (keyed off the PLANNED date)
     for slot_key, date_dict in late_actual_map.items():
         for date_str, actual_dict in date_dict.items():
             status_map[slot_key][date_str]['late_actual'] = dict(actual_dict)
@@ -551,7 +557,11 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
         # All sub-rows share the same left-column values (blank).
 
         # Collect per-date status data
-        per_date: dict = {}   # date_str → {status: count, 'late_actual': {...}}
+        # per_date[date_str] keys: status counts + special metadata keys:
+        #   'late_actual'  {actual_date: n}  – where late spots from THIS date ended up
+        #   'late_to'      {actual_date: n}  – same, for comment on planned-date cell
+        #   'late_from'    {orig_date: n}    – late spots FROM other dates arriving HERE
+        per_date: dict = {}
         for src_col, date_str in all_date_cols.items():
             src_cell_val = row_cells[src_col - 1].value if src_col <= len(row_cells) else None
             try:
@@ -571,32 +581,43 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
                 if not date_data:
                     per_date[date_str] = {'planned': planned_count}
                 else:
-                    counts = {
+                    # Copy all non-zero numeric statuses and metadata dicts
+                    per_date[date_str] = {
                         k: v for k, v in date_data.items()
-                        if k != 'late_actual' and v > 0
+                        if k not in ('late_actual', 'late_to') and isinstance(v, int) and v > 0
                     }
-                    per_date[date_str] = counts
                     if 'late_actual' in date_data:
                         per_date[date_str]['late_actual'] = date_data['late_actual']
+                    if 'late_to' in date_data:
+                        per_date[date_str]['late_to'] = dict(date_data['late_to'])
 
-        # Also check extra date columns for late telecast arrivals
-        for date_str, extra_col in extra_date_col_map.items():
-            slot_data = status_map.get(slot_key, {}) if status_map else {}
-            count = 0
-            for orig_date, d_dict in slot_data.items():
-                la = d_dict.get('late_actual', {})
-                count += la.get(date_str, 0)
-            if count:
-                per_date[date_str] = per_date.get(date_str, {})
-                per_date[date_str]['late_telecast'] = (
-                    per_date[date_str].get('late_telecast', 0) + count
-                )
+        # For EVERY date column (scheduled + extra), add late arrivals from other dates.
+        # A spot planned for date A but aired on date B: date A → RED, date B → PURPLE +1.
+        all_candidate_dates = set(all_date_cols.values()) | set(extra_date_col_map.keys())
+        if status_map:
+            slot_data = status_map.get(slot_key, {})
+            for orig_date_str, orig_dict in slot_data.items():
+                la = orig_dict.get('late_actual', {})
+                for actual_date_str, late_count in la.items():
+                    if late_count <= 0:
+                        continue
+                    if actual_date_str not in per_date:
+                        per_date[actual_date_str] = {}
+                    entry = per_date[actual_date_str]
+                    entry['late_telecast'] = entry.get('late_telecast', 0) + late_count
+                    # Track which original dates contributed (for comment)
+                    if 'late_from' not in entry:
+                        entry['late_from'] = {}
+                    entry['late_from'][orig_date_str] = (
+                        entry['late_from'].get(orig_date_str, 0) + late_count
+                    )
 
         # Determine maximum number of sub-rows needed across all dates
         # (e.g. 3 statuses in one date → 2 sub-rows in addition to main)
+        _META_KEYS = {'late_actual', 'late_to', 'late_from'}
         max_sub_rows = 0
         for date_str, counts in per_date.items():
-            statuses = [s for s in counts if s not in ('late_actual',) and counts[s] > 0]
+            statuses = [s for s in counts if s not in _META_KEYS and isinstance(counts[s], int) and counts[s] > 0]
             max_sub_rows = max(max_sub_rows, len(statuses) - 1)
 
         # Build main row + sub-rows
@@ -606,28 +627,48 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
         sub_rows = [[] for _ in range(max_sub_rows)]
 
         # Update date cells in main out_cells
+        def _build_comment(date_str: str, counts: dict) -> str | None:
+            """Build a comment string for a date cell, or None if not needed."""
+            late_to   = counts.get('late_to',   {})
+            late_from = counts.get('late_from', {})
+            parts = []
+            if late_to:
+                for actual, n in sorted(late_to.items()):
+                    d = _fmt_date(actual)
+                    parts.append(
+                        f'{n} spot(s) NOT aired on this date — aired on {d} instead.'
+                    )
+            if late_from:
+                for orig, n in sorted(late_from.items()):
+                    d = _fmt_date(orig)
+                    parts.append(
+                        f'Includes {n} delayed spot(s) originally planned for {d}.'
+                    )
+            return '\n'.join(parts) if parts else None
+
         for src_col, date_str in all_date_cols.items():
             counts = per_date.get(date_str, {})
             statuses = _ordered_statuses(counts)
-            # Find the out_cells entry for this column
+            comment_text = _build_comment(date_str, counts)
             main_entry = next((oc for oc in out_cells if oc['col'] == src_col), None)
             if not statuses:
                 if main_entry:
                     main_entry['value'] = None
                 continue
-            # Main row
             if main_entry:
                 s0, c0 = statuses[0]
-                main_entry['value'] = c0
-                main_entry['fill']  = status_to_fill.get(s0, fills['planned'])
-            # Sub-rows
+                main_entry['value']   = c0
+                main_entry['fill']    = status_to_fill.get(s0, fills['planned'])
+                main_entry['comment'] = comment_text
             for i, (si, ci) in enumerate(statuses[1:]):
-                sub_rows[i].append({'col': src_col, 'status': si, 'count': ci})
+                sub_rows[i].append({'col': src_col, 'status': si, 'count': ci,
+                                    'comment': comment_text if i == 0 else None})
 
-        # Extra date columns (late telecast actual arrivals)
+        # Extra date columns (late telecast actual arrivals from dates outside schedule)
         for date_str, extra_col in extra_date_col_map.items():
             counts = per_date.get(date_str, {})
             statuses = _ordered_statuses(counts)
+            comment_text = _build_comment(date_str, counts)
             main_entry = next((oc for oc in out_cells if oc['col'] == extra_col), None)
             if not statuses:
                 if main_entry:
@@ -635,11 +676,13 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
                 continue
             if main_entry:
                 s0, c0 = statuses[0]
-                main_entry['value'] = c0
-                main_entry['fill']  = status_to_fill.get(s0, fills['planned'])
+                main_entry['value']   = c0
+                main_entry['fill']    = status_to_fill.get(s0, fills['planned'])
+                main_entry['comment'] = comment_text
             for i, (si, ci) in enumerate(statuses[1:]):
                 if i < len(sub_rows):
-                    sub_rows[i].append({'col': extra_col, 'status': si, 'count': ci})
+                    sub_rows[i].append({'col': extra_col, 'status': si, 'count': ci,
+                                        'comment': comment_text if i == 0 else None})
 
         output_rows.append(out_cells)
         src_row_meta.append({'type': _ROW_DATA, 'n_sub': max_sub_rows})
@@ -690,6 +733,9 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
                 dst_cell.fill = oc['fill']
                 dst_cell.font = Font(bold=True, size=9)
                 dst_cell.alignment = Alignment(horizontal='center', vertical='center')
+            if oc.get('comment'):
+                from openpyxl.comments import Comment
+                dst_cell.comment = Comment(oc['comment'], 'Ad Monitor')
             if oc['value'] is not None:
                 has_content = True
         if has_content:
@@ -718,8 +764,8 @@ def _write_legend(ws, start_row: int, fills: dict):
 
     legend_items = [
         ('aired',              'Aired as Planned',   'Ad was detected on the scheduled date and within the planned time window'),
-        ('not_aired',          'Not Aired',          'Ad was not detected by 3rd-party monitoring (LMRB/MapOnline)'),
-        ('late_telecast',      'Late / Diff Date',   'Ad aired on a different date from the one scheduled'),
+        ('not_aired',          'Not Aired / Missed', 'Ad was not detected on its planned date (either missed entirely or aired on a different date — hover cell for details)'),
+        ('late_telecast',      'Late Arrival',       'This date received spots that were originally planned for an earlier date (hover cell for details)'),
         ('programme_mismatch', 'Programme Mismatch', 'Ad aired after the planned time window (same date)'),
         ('extra_aired',        'Extra Aired',        'Ad detected by monitoring but not present in the schedule'),
         ('planned',            'Planned Only',       'Scheduled but no reconciliation data available yet'),
@@ -763,15 +809,26 @@ _STATUS_ORDER = [
 ]
 
 
+_META_KEYS_GLOBAL = {'late_actual', 'late_to', 'late_from'}
+
+
 def _ordered_statuses(counts: dict) -> list:
-    """Return [(status, count)] in display order, skipping zeros and 'late_actual'."""
+    """Return [(status, count)] in display order, skipping metadata and zero counts."""
     result = []
     seen = set()
     for s in _STATUS_ORDER:
-        if s in counts and counts[s] > 0:
+        if s in counts and isinstance(counts[s], int) and counts[s] > 0:
             result.append((s, counts[s]))
             seen.add(s)
     for s, c in counts.items():
-        if s not in seen and s != 'late_actual' and isinstance(c, int) and c > 0:
+        if s not in seen and s not in _META_KEYS_GLOBAL and isinstance(c, int) and c > 0:
             result.append((s, c))
     return result
+
+
+def _fmt_date(date_str: str) -> str:
+    """'2026-03-20' → '20 Mar 2026'."""
+    try:
+        return _date.fromisoformat(date_str).strftime('%d %b %Y')
+    except Exception:
+        return date_str
