@@ -693,10 +693,12 @@ def schedule_upload(request):
                 f'Schedule #{schedule.schedule_number} v{version} for {account} '
                 f'({month}, {start_date} → {end_date}) uploaded - {row_count:,} rows.')
 
-            # Auto-run verification for all available scopes
+            # Auto-run verification in background (avoids HTTP timeout on large accounts)
             try:
-                from verification.engine import auto_run_all_for_account
-                auto_run_all_for_account(account.id)
+                import threading
+                from verification.engine import auto_run_all_for_account as _auto_run
+                t = threading.Thread(target=_auto_run, args=(account.id,), daemon=True)
+                t.start()
             except Exception:
                 pass
 
@@ -1192,14 +1194,18 @@ def monitoring_upload(request):
 
             # Auto-run verification: MapOnline → preliminary engine; MediaWatch → final engine
             try:
+                import threading
                 if data_type == 'maponline':
                     from verification.engine import auto_run_maponline_for_account
-                    print(f"[monitoring_upload] auto-running MapOnline preliminary matching for account {account.id}")
-                    auto_run_maponline_for_account(account.id)
+                    t = threading.Thread(
+                        target=auto_run_maponline_for_account, args=(account.id,), daemon=True
+                    )
                 else:
                     from verification.engine import auto_run_all_for_account
-                    print(f"[monitoring_upload] auto-running LMRB verification for account {account.id}")
-                    auto_run_all_for_account(account.id)
+                    t = threading.Thread(
+                        target=auto_run_all_for_account, args=(account.id,), daemon=True
+                    )
+                t.start()
             except Exception as e:
                 print(f"[monitoring_upload] auto-verification error (non-fatal): {e}")
 
