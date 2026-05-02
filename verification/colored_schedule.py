@@ -68,6 +68,25 @@ def _normalize(s) -> str:
     return str(s).strip().lower() if s else ''
 
 
+def _normalize_time(raw) -> str:
+    """
+    Convert an openpyxl time cell value to a normalised 'HH:MM:SS' string.
+
+    Excel stores times as a fraction of a day. openpyxl may return:
+      - datetime.time(9, 0, 0)           → "09:00:00"
+      - datetime.datetime(1899,12,30,9,0) → we want "09:00:00", not the full repr
+      - str "09:00:00"                    → keep as-is
+    """
+    from datetime import time as _time, datetime as _datetime
+    if raw is None:
+        return ''
+    if isinstance(raw, _time):
+        return raw.strftime('%H:%M:%S')
+    if isinstance(raw, _datetime):
+        return raw.strftime('%H:%M:%S')
+    return _normalize(str(raw))
+
+
 # ── Status map builder ────────────────────────────────────────────────────────
 
 def build_status_map(account_id, channel, month) -> dict:
@@ -223,9 +242,15 @@ def _is_skip_row(val_str: str) -> bool:
 
 def _is_data_row(ws_row, col_map) -> bool:
     """True when the row has non-empty DAY and TIME values."""
+    from datetime import time as _time, datetime as _datetime
     day  = ws_row[col_map.get('day', 1) - 1].value
-    time = ws_row[col_map.get('start_time', 1) - 1].value
-    return bool(day and str(day).strip()) and bool(time and str(time).strip())
+    time_val = ws_row[col_map.get('start_time', 1) - 1].value
+    day_ok  = bool(day and str(day).strip())
+    # time_val can be a datetime/time object (always truthy even at midnight)
+    time_ok = isinstance(time_val, (_time, _datetime)) or bool(
+        time_val and str(time_val).strip()
+    )
+    return day_ok and time_ok
 
 
 # ── DB-based fallback workbook builder ───────────────────────────────────────
@@ -542,7 +567,7 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
         # ── Data row ──────────────────────────────────────────────────────────
         prog       = _normalize(prog_cell_val)
         start_raw  = row_cells[col_map['start_time'] - 1].value
-        start_time = _normalize(str(start_raw or ''))
+        start_time = _normalize_time(start_raw)
         try:
             dur = int(float(row_cells[col_map['duration'] - 1].value or 0))
         except (ValueError, TypeError):
