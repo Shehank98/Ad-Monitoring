@@ -71,11 +71,16 @@ class FirebaseStorage(Storage):
             blob.delete()
 
     def url(self, name):
+        """Return a signed download URL valid for 4 hours.
+
+        Uses v2 signing which works with a service-account private key on any
+        host (no GCP infrastructure or extra IAM roles required).
+        """
         blob = self._blob(name)
         return blob.generate_signed_url(
-            expiration=timedelta(hours=1),
+            expiration=timedelta(hours=4),
             method='GET',
-            version='v4',
+            version='v2',
         )
 
     def size(self, name):

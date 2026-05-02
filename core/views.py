@@ -114,6 +114,34 @@ def _account_qs(user):
     return Account.objects.filter(Q(id__in=direct) | Q(id__in=via_client))
 
 
+def _serve_file(field_file, filename: str):
+    """
+    Serve a FileField's file as a download.
+
+    When Firebase Storage is active the storage backend's url() method returns
+    a signed HTTPS URL.  We redirect the browser there so Django never proxies
+    the file bytes — no server-side download, no gunicorn timeout, no exists()
+    round-trip that could silently return False.
+
+    For local FileSystemStorage we fall back to a streaming FileResponse.
+    """
+    try:
+        raw_url = field_file.url          # calls storage.url(name)
+    except Exception:
+        raw_url = None
+
+    if raw_url and raw_url.startswith('http'):
+        # Firebase (or any cloud storage) — redirect browser directly to the signed URL
+        from django.shortcuts import redirect as _redirect
+        return _redirect(raw_url)
+
+    # Local filesystem — stream via FileResponse
+    try:
+        return FileResponse(field_file.open('rb'), as_attachment=True, filename=filename)
+    except Exception as exc:
+        return HttpResponse(f'Download failed: {exc}', status=500)
+
+
 def _detect_schedule_meta(df):
     """Auto-detect month, start_date, end_date from a schedule DataFrame."""
     df = df.copy()
@@ -846,17 +874,10 @@ def schedule_download(request, pk):
     schedule = get_object_or_404(Schedule, pk=pk)
     if not _is_admin(request.user) and schedule.account not in _account_qs(request.user):
         return HttpResponse('Access denied', status=403)
-    try:
-        if not schedule.file or not schedule.file.storage.exists(schedule.file.name):
-            return HttpResponse('File not found on server.', status=404)
-        fname = schedule.original_filename or schedule.file.name.split('/')[-1]
-        return FileResponse(
-            schedule.file.open('rb'),
-            as_attachment=True,
-            filename=fname,
-        )
-    except Exception as e:
-        return HttpResponse(f'Download failed: {e}', status=500)
+    if not schedule.file:
+        return HttpResponse('No file associated with this schedule.', status=404)
+    fname = schedule.original_filename or schedule.file.name.split('/')[-1]
+    return _serve_file(schedule.file, fname)
 
 
 @login_required
@@ -1446,17 +1467,10 @@ def monitoring_download(request, pk):
     user = request.user
     if not _is_admin(user) and mon.account not in _account_qs(user):
         return HttpResponse('Access denied', status=403)
-    try:
-        if not mon.file or not mon.file.storage.exists(mon.file.name):
-            return HttpResponse('File not found on server.', status=404)
-        fname = mon.original_filename or mon.file.name.split('/')[-1]
-        return FileResponse(
-            mon.file.open('rb'),
-            as_attachment=True,
-            filename=fname,
-        )
-    except Exception as e:
-        return HttpResponse(f'Download failed: {e}', status=500)
+    if not mon.file:
+        return HttpResponse('No file associated with this record.', status=404)
+    fname = mon.original_filename or mon.file.name.split('/')[-1]
+    return _serve_file(mon.file, fname)
 
 
 @login_required
@@ -8265,17 +8279,10 @@ def tc_report_download(request, pk):
     elif not _account_access(user, report.account_id):
         return HttpResponse('Access denied', status=403)
 
-    try:
-        if not report.file or not report.file.storage.exists(report.file.name):
-            return HttpResponse('File not found on server.', status=404)
-        fname = report.original_filename or report.file.name.split('/')[-1]
-        return FileResponse(
-            report.file.open('rb'),
-            as_attachment=True,
-            filename=fname,
-        )
-    except Exception as e:
-        return HttpResponse(f'Download failed: {e}', status=500)
+    if not report.file:
+        return HttpResponse('No file associated with this report.', status=404)
+    fname = report.original_filename or report.file.name.split('/')[-1]
+    return _serve_file(report.file, fname)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
