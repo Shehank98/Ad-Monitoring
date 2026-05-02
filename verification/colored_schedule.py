@@ -432,25 +432,31 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
 
     schedule = Schedule.objects.get(pk=schedule_pk)
 
-    # Load the original file bytes from storage (works for local + Firebase)
-    raw_bytes = None
+    # Load the original file bytes from storage (works for local + Firebase).
+    # Never fall back to DB reconstruction — it produces wrong programme names and order.
     try:
         raw_bytes = schedule.file.read()
     except Exception as exc:
-        logger.warning('Cannot read original schedule file (%s): %s — falling back to DB reconstruction', schedule_pk, exc)
+        raise FileNotFoundError(
+            f'The original schedule file "{schedule.original_filename}" is no longer '
+            f'available in storage. Please re-upload the schedule to generate a '
+            f'colored export.'
+        ) from exc
 
-    if raw_bytes:
-        wb_src = openpyxl.load_workbook(io.BytesIO(raw_bytes), data_only=True)
-        ws_src = wb_src.active
-        header_row_idx, col_map, date_col_map = _detect_pivot_openpyxl(ws_src)
-        if not header_row_idx or not date_col_map:
-            wb_dst = openpyxl.load_workbook(io.BytesIO(raw_bytes))
-            ws_dst = wb_dst.active
-            ws_dst.cell(1, 1, 'WARNING: Pivot structure not detected. Colours not applied.')
-            return wb_dst
-    else:
-        # Original file missing (e.g. Railway redeploy wiped /media/) — reconstruct from DB
-        return _build_wb_from_db(schedule, colors, status_map)
+    if not raw_bytes:
+        raise FileNotFoundError(
+            f'The original schedule file "{schedule.original_filename}" is empty. '
+            f'Please re-upload the schedule.'
+        )
+
+    wb_src = openpyxl.load_workbook(io.BytesIO(raw_bytes), data_only=True)
+    ws_src = wb_src.active
+    header_row_idx, col_map, date_col_map = _detect_pivot_openpyxl(ws_src)
+    if not header_row_idx or not date_col_map:
+        wb_dst = openpyxl.load_workbook(io.BytesIO(raw_bytes))
+        ws_dst = wb_dst.active
+        ws_dst.cell(1, 1, 'WARNING: Pivot structure not detected. Colours not applied.')
+        return wb_dst
 
     # Build colour fills
     fills = {
