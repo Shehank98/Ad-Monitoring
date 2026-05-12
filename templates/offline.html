@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>You're Offline — Ad Monitor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#4f46e5">
+</head>
+<body class="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+  <div class="max-w-sm w-full text-center">
+    <div class="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-6">
+      <svg class="w-10 h-10 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M18.364 5.636a9 9 0 010 12.728M15.536 8.464a5 5 0 010 7.072M12 12h.01
+                 M3 3l18 18M8.464 15.536a5 5 0 01-1.414-5.657"/>
+      </svg>
+    </div>
+    <h1 class="text-2xl font-bold text-slate-800 mb-2">You're offline</h1>
+    <p class="text-slate-500 mb-8">
+      Please check your connection and try again. Your previously visited pages
+      will load automatically once you're back online.
+    </p>
+    <button onclick="window.location.reload()"
+            class="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white font-semibold
+                   rounded-xl hover:bg-indigo-700 active:scale-95 transition-all">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581
+                 m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>
+      Try Again
+    </button>
+  </div>
+</body>
+</html>

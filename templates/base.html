@@ -365,6 +365,13 @@
     .mob-tab.active { color: var(--og-red); }
   </style>
   {% block extra_head %}{% endblock %}
+  <!-- PWA -->
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Ad Monitor">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 </head>
 
 <body class="h-full bg-slate-50 antialiased">
@@ -685,5 +692,12 @@
   })();
 </script>
 {% block extra_scripts %}{% endblock %}
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/static/js/sw.js').catch(() => {});
+    });
+  }
+</script>
 </body>
 </html>

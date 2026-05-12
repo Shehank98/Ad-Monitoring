@@ -107,8 +107,10 @@ urlpatterns = [
     path('competitor/', include('competitor.urls')),
 
     # Channel Officer self-service
-    path('channel-officer/',               views.channel_officer_dashboard, name='channel_officer_dashboard'),
-    path('tc/<int:pk>/download/',          views.tc_report_download,        name='tc_report_download'),
+    path('channel-officer/',               views.channel_officer_dashboard,    name='channel_officer_dashboard'),
+    path('channel-officer/brand-mapping/', views.channel_officer_brand_mapping, name='channel_officer_brand_mapping'),
+    path('channel-officer/missed-ads/',    views.channel_officer_missed_ads,    name='channel_officer_missed_ads'),
+    path('tc/<int:pk>/download/',          views.tc_report_download,            name='tc_report_download'),
 
     # Channel Officers (admin management)
     path('channel-officers/',              views.channel_officer_list,      name='channel_officer_list'),

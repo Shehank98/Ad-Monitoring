@@ -10,8 +10,9 @@ from django.conf import settings as django_settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Max, Min, Count
-from django.http import FileResponse, HttpResponse, JsonResponse
+from django.http import FileResponse, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -8426,6 +8427,8 @@ def channel_officer_dashboard(request):
     tc_reports = []
     summary    = {}
 
+    unmapped_theme_count = 0
+
     if selected_account and selected_channel:
         from django.db.models import Sum as _Sum
         schedules = (
@@ -8448,16 +8451,31 @@ def channel_officer_dashboard(request):
             'latest_end':     latest_schedule.end_date if latest_schedule else None,
         }
 
+        # Count unmapped TC themes for the alert banner
+        uploaded_themes = set(
+            TCRow.objects.filter(account=selected_account, channel=selected_channel)
+            .values_list('tc_theme', flat=True).distinct()
+        )
+        mapped_tc_themes = set()
+        for bm in BrandMapping.objects.filter(account=selected_account):
+            for t in bm.tc_themes_list:
+                mapped_tc_themes.add(t.lower().strip())
+        unmapped_theme_count = sum(
+            1 for t in uploaded_themes
+            if t and t.strip() and t.lower().strip() not in mapped_tc_themes
+        )
+
     return render(request, 'channel_officers/dashboard.html', {
-        'profile':           profile,
-        'profiles':          profiles,
-        'user_accounts':     user_accounts,
-        'selected_account':  selected_account,
-        'account_channels':  account_channels,
-        'selected_channel':  selected_channel,
-        'schedules':         schedules,
-        'tc_reports':        tc_reports,
-        'summary':           summary,
+        'profile':              profile,
+        'profiles':             profiles,
+        'user_accounts':        user_accounts,
+        'selected_account':     selected_account,
+        'account_channels':     account_channels,
+        'selected_channel':     selected_channel,
+        'schedules':            schedules,
+        'tc_reports':           tc_reports,
+        'summary':              summary,
+        'unmapped_theme_count': unmapped_theme_count,
     })
 
 
@@ -8990,3 +9008,147 @@ def _handle_incoming_whatsapp(msg: dict):
         f'If you believe this is an error, please contact your administrator.\n\n'
         f'_(Automated message from {company})_',
     )
+
+
+# ── PWA offline page ───────────────────────────────────────────────────────────
+
+def offline_page(request):
+    """Served by the service worker as the offline fallback page."""
+    return render(request, 'offline.html')
+
+
+# ── Channel Officer: TC Theme Brand Mapping ────────────────────────────────────
+
+@login_required
+@role_required(['channel_officer', 'super_admin', 'admin'])
+def channel_officer_brand_mapping(request):
+    """
+    Let channel officers map unrecognised TC themes to schedule brands.
+    Writes into BrandMapping.tc_theme (pipe-separated) for their account/channel.
+    """
+    user = request.user
+
+    # Resolve active account + channel (same logic as dashboard)
+    profiles = list(
+        ChannelOfficer.objects.filter(user=user).select_related('account')
+        if user.role == 'channel_officer'
+        else []
+    )
+    if user.role != 'channel_officer':
+        # Admin access: pick from GET params
+        from core.models import Account as _Account
+        account_id = request.GET.get('account_id') or request.POST.get('account_id')
+        channel    = request.GET.get('channel')    or request.POST.get('channel')
+        account    = get_object_or_404(_Account, pk=account_id) if account_id else None
+    else:
+        account_id = request.GET.get('account_id') or request.POST.get('account_id')
+        channel    = request.GET.get('channel')    or request.POST.get('channel')
+        # Fall back to first profile
+        if not account_id and profiles:
+            account_id = str(profiles[0].account_id)
+            channel    = profiles[0].channel
+        profile  = next((p for p in profiles if str(p.account_id) == str(account_id) and p.channel == channel), None)
+        if profile is None and profiles:
+            profile    = profiles[0]
+            account_id = str(profile.account_id)
+            channel    = profile.channel
+        account = profile.account if profile else None
+
+    if not account or not channel:
+        return redirect('channel_officer_dashboard')
+
+    # ── Find unmapped TC themes ─────────────────────────────────────────────────
+    uploaded_themes = set(
+        TCRow.objects.filter(account=account, channel=channel)
+        .values_list('tc_theme', flat=True).distinct()
+    )
+
+    mapped_tc_themes = set()
+    for bm in BrandMapping.objects.filter(account=account):
+        for t in bm.tc_themes_list:
+            mapped_tc_themes.add(t.lower().strip())
+
+    unmapped = sorted(
+        t for t in uploaded_themes
+        if t and t.strip() and t.lower().strip() not in mapped_tc_themes
+    )
+
+    # Schedule brands available for this account/channel
+    brands = sorted(set(
+        ScheduleRow.objects.filter(account=account, channel=channel)
+        .values_list('brand', flat=True)
+    ))
+    # Also include brands already in BrandMapping (in case schedule rows were deleted)
+    bm_brands = sorted(set(
+        BrandMapping.objects.filter(account=account)
+        .values_list('brand', flat=True)
+    ))
+    all_brands = sorted(set(brands + bm_brands))
+
+    if request.method == 'POST':
+        saved = 0
+        for theme in unmapped:
+            brand = request.POST.get(f'brand_{theme}', '').strip()
+            if not brand or brand == '__skip__':
+                continue
+            # Append tc_theme to existing BrandMapping for this brand, or create new
+            existing = BrandMapping.objects.filter(account=account, brand=brand).first()
+            if existing:
+                current = [t for t in existing.tc_themes_list if t.strip()]
+                if theme not in current:
+                    current.append(theme)
+                    existing.tc_theme = '|'.join(current)
+                    existing.save(update_fields=['tc_theme'])
+            else:
+                BrandMapping.objects.create(account=account, brand=brand, tc_theme=theme)
+            saved += 1
+
+        if saved:
+            messages.success(request, f'{saved} theme mapping{"s" if saved != 1 else ""} saved.')
+        return redirect(f'{reverse("channel_officer_dashboard")}?account_id={account.pk}&channel={channel}')
+
+    return render(request, 'channel_officers/brand_mapping.html', {
+        'account':    account,
+        'channel':    channel,
+        'unmapped':   unmapped,
+        'all_brands': all_brands,
+        'profiles':   profiles,
+    })
+
+
+# ── Channel Officer: Missed Ads Summary ────────────────────────────────────────
+
+@login_required
+@role_required(['channel_officer', 'super_admin', 'admin'])
+def channel_officer_missed_ads(request):
+    """
+    Show a simplified planned / aired / missed breakdown per brand for one schedule.
+    Uses the existing build_summary_data() engine from tc_engine.
+    """
+    from verification.tc_engine import build_summary_data
+
+    user        = request.user
+    schedule_id = request.GET.get('schedule_id', '').strip()
+    schedule    = get_object_or_404(Schedule, pk=schedule_id)
+
+    # Channel officers may only see schedules for their own accounts/channels
+    if user.role == 'channel_officer':
+        allowed_accounts = list(ChannelOfficer.objects.filter(user=user).values_list('account_id', flat=True))
+        allowed_channels = list(ChannelOfficer.objects.filter(user=user).values_list('channel', flat=True))
+        if schedule.account_id not in allowed_accounts or schedule.channel not in allowed_channels:
+            return HttpResponseForbidden('You do not have access to this schedule.')
+
+    summary = build_summary_data(schedule.account_id, schedule.channel, schedule.month, schedule_id=schedule.pk)
+
+    commercial = summary.get('commercial', [])
+    comm_total = summary.get('commercial_total', {})
+    sponsorship_groups = summary.get('sponsorship', [])
+    spon_total = summary.get('sponsorship_total', {})
+
+    return render(request, 'channel_officers/missed_ads.html', {
+        'schedule':          schedule,
+        'commercial':        commercial,
+        'comm_total':        comm_total,
+        'sponsorship_groups':sponsorship_groups,
+        'spon_total':        spon_total,
+    })
