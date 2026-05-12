@@ -840,7 +840,7 @@ def _parse_schedule_rows(df, schedule, account, channel, month, brand_type_map=N
 
 
 @login_required
-@role_required(['planner', 'super_admin', 'admin'])
+@role_required(['planner', 'super_admin', 'admin', 'team_head', 'operations'])
 @require_POST
 def schedule_upload_multi(request):
     """
