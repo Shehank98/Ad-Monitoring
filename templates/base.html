@@ -288,16 +288,98 @@
 
     body.sidebar-collapsed .sidebar-footer-text { opacity: 0; max-width: 0; pointer-events: none; overflow: hidden; }
 
-    /* ══ Officer (PWA) mode — full mobile app, no sidebar ══════════════ */
+    /* ══════════════════════════════════════════════════════════════════
+       OFFICER / PWA MODE  — native mobile app feel
+    ══════════════════════════════════════════════════════════════════ */
+
+    /* Hide desktop chrome */
     .officer-mode #app-sidebar      { display: none !important; }
     .officer-mode #sidebar-toggle   { display: none !important; }
     .officer-mode #sidebar-backdrop { display: none !important; }
-    /* Bottom tab bar always visible for officers (not just ≤768px) */
+
+    /* Always show bottom tab bar (not just ≤768px) */
     .officer-mode #mobile-tab-bar   { display: flex !important; }
-    /* Teal accent line in top bar for officers */
-    .officer-mode .topbar-accent    { background: #0d9488; }
-    /* Ensure body scrolls content above the always-visible tab bar */
-    .officer-mode main .flex-1.overflow-y-auto { padding-bottom: 5rem; }
+
+    /* Bottom tab bar — frosted glass, native-app style */
+    .officer-mode #mobile-tab-bar {
+      background: rgba(8, 10, 14, 0.96) !important;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-top: 1px solid rgba(255,255,255,.07) !important;
+      padding: 6px 8px env(safe-area-inset-bottom, 10px) !important;
+      height: auto;
+    }
+
+    /* Teal accent in top bar */
+    .officer-mode .topbar-accent { background: #0d9488; }
+
+    /* Scroll area clears bottom bar + FAB */
+    .officer-mode main .flex-1.overflow-y-auto {
+      padding-bottom: 6rem;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+    }
+
+    /* Top bar — slightly taller, teal accent */
+    .officer-mode header {
+      background: #fff;
+      border-bottom: 1px solid rgba(0,0,0,.06);
+    }
+
+    /* Remove tap highlight globally for officers */
+    .officer-mode * { -webkit-tap-highlight-color: transparent; }
+
+    /* Fast touch response on all interactive elements */
+    .officer-mode a,
+    .officer-mode button,
+    .officer-mode select,
+    .officer-mode input,
+    .officer-mode label { touch-action: manipulation; }
+
+    /* Page entrance animation */
+    @keyframes officerPageIn {
+      from { opacity: 0; transform: translateY(18px); }
+      to   { opacity: 1; transform: translateY(0);    }
+    }
+    .officer-page-content {
+      animation: officerPageIn 0.28s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+    }
+
+    /* Press effect on tappable cards */
+    .officer-mode .tap-card {
+      transition: transform 0.1s ease, box-shadow 0.1s ease;
+      cursor: pointer;
+    }
+    .officer-mode .tap-card:active {
+      transform: scale(0.975);
+      box-shadow: 0 1px 4px rgba(0,0,0,.12);
+    }
+
+    /* Floating Action Button */
+    .officer-fab {
+      position: fixed;
+      bottom: calc(72px + env(safe-area-inset-bottom, 0px) + 12px);
+      right: 20px;
+      z-index: 45;
+      width: 58px; height: 58px;
+      background: linear-gradient(145deg, #14b8a6, #0d9488);
+      border-radius: 50%;
+      display: none;
+      align-items: center; justify-content: center;
+      box-shadow: 0 6px 24px rgba(13,148,136,.45), 0 2px 8px rgba(0,0,0,.2);
+      color: #fff;
+      font-size: 22px;
+      text-decoration: none;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .officer-mode .officer-fab { display: flex; }
+    .officer-fab:active {
+      transform: scale(0.88);
+      box-shadow: 0 2px 12px rgba(13,148,136,.3);
+    }
+
+    /* Mobile-only overrides inside officer mode */
+    .officer-mode .px-3 { padding-left: .875rem !important; padding-right: .875rem !important; }
 
     /* ── Sidebar toggle btn ── */
     #sidebar-toggle {
@@ -358,24 +440,42 @@
     #mobile-tab-bar {
       display: none;
       position: fixed; bottom: 0; left: 0; right: 0; z-index: 999;
-      background: #111827; border-top: 1px solid #1f2937;
-      padding: .5rem 0 env(safe-area-inset-bottom, .5rem);
-      justify-content: space-around; align-items: center;
+      background: #0f172a; border-top: 1px solid #1e293b;
+      padding: 4px 8px env(safe-area-inset-bottom, 8px);
+      justify-content: space-around; align-items: stretch;
+      gap: 4px;
     }
     @media (max-width: 768px) { #mobile-tab-bar { display: flex; } }
 
     .mob-tab {
-      display: flex; flex-direction: column; align-items: center; gap: .2rem;
-      color: #6b7280; text-decoration: none; padding: .35rem .5rem;
-      font-size: .6rem; font-weight: 600; letter-spacing: .03em;
-      border-radius: .5rem; transition: color .15s;
-      min-width: 3.5rem; text-align: center;
+      position: relative;
+      display: flex; flex-direction: column; align-items: center;
+      gap: 3px; padding: 7px 6px 5px;
+      color: rgba(255,255,255,.3); text-decoration: none;
+      font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+      border-radius: 14px; transition: color .15s, background .15s;
+      flex: 1; min-height: 50px; text-align: center;
+      -webkit-tap-highlight-color: transparent;
     }
-    .mob-tab i { font-size: 1.1rem; display: block; }
-    .mob-tab:hover { color: #d1d5db; }
-    .mob-tab.active { color: var(--og-red); }
-    /* Officers get teal active color to match their accent */
-    .officer-mode .mob-tab.active { color: #0d9488; }
+    .mob-tab i { font-size: 1.3rem; display: block; line-height: 1; }
+    .mob-tab:hover { color: rgba(255,255,255,.6); }
+    .mob-tab.active { color: #fff; }
+    /* Active indicator: top pill */
+    .mob-tab.active::before {
+      content: '';
+      position: absolute; top: 0; left: 50%;
+      transform: translateX(-50%);
+      width: 28px; height: 3px;
+      background: var(--og-red);
+      border-radius: 0 0 4px 4px;
+    }
+    /* Officers: teal active */
+    .officer-mode .mob-tab.active { color: #2dd4bf; }
+    .officer-mode .mob-tab.active::before { background: #0d9488; }
+    .officer-mode .mob-tab.active .mob-tab-bg {
+      background: rgba(13,148,136,.15);
+      border-radius: 12px;
+    }
   </style>
   {% block extra_head %}{% endblock %}
   <!-- PWA -->
@@ -650,16 +750,28 @@
   {% with path=request.path ur=request.user.role %}
   {% if ur == 'channel_officer' %}
   <a href="/dashboard/channel-officer/" class="mob-tab {% if path == '/dashboard/channel-officer/' %}active{% endif %}">
-    <i class="fa-solid fa-calendar-days"></i><span>Schedules</span>
+    <span class="mob-tab-bg px-3 py-1.5 flex flex-col items-center gap-0.5">
+      <i class="fa-solid fa-calendar-days"></i>
+    </span>
+    <span>Schedules</span>
   </a>
   <a href="/dashboard/tc/upload/" class="mob-tab {% if 'tc/upload' in path %}active{% endif %}">
-    <i class="fa-solid fa-cloud-arrow-up"></i><span>Upload TC</span>
+    <span class="mob-tab-bg px-3 py-1.5 flex flex-col items-center gap-0.5">
+      <i class="fa-solid fa-cloud-arrow-up"></i>
+    </span>
+    <span>Upload TC</span>
   </a>
   <a href="/dashboard/channel-officer/brand-mapping/" class="mob-tab {% if 'brand-mapping' in path %}active{% endif %}">
-    <i class="fa-solid fa-tags"></i><span>Map Themes</span>
+    <span class="mob-tab-bg px-3 py-1.5 flex flex-col items-center gap-0.5">
+      <i class="fa-solid fa-tags"></i>
+    </span>
+    <span>Map Themes</span>
   </a>
   <a href="/auth/logout/" class="mob-tab">
-    <i class="fa-solid fa-arrow-right-from-bracket"></i><span>Sign Out</span>
+    <span class="mob-tab-bg px-3 py-1.5 flex flex-col items-center gap-0.5">
+      <i class="fa-solid fa-arrow-right-from-bracket"></i>
+    </span>
+    <span>Sign Out</span>
   </a>
   {% else %}
   <a href="/dashboard/" class="mob-tab {% if path == '/dashboard/' %}active{% endif %}">

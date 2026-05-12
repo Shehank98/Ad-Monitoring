@@ -4,7 +4,7 @@
 {% block page_subtitle %}Upload the channel's TC file received after schedule completion - aired spots are auto-parsed{% endblock %}
 
 {% block content %}
-<div class="max-w-2xl">
+<div class="max-w-2xl officer-page-content">
 
   {% if is_officer %}
   <a href="/dashboard/channel-officer/"
@@ -412,6 +412,29 @@ function onFileChange(input) {
         `Channel: ${data.channel||'(not detected)'} | Dates: ${data.start_date} → ${data.end_date} | ${data.row_count} rows`;
     })
     .catch(() => {});
+}
+
+// ── Desktop drag & drop ───────────────────────────────────────────
+const dropLabel = document.querySelector('label[for="tcFile"]');
+if (dropLabel) {
+  ['dragenter','dragover'].forEach(ev => {
+    dropLabel.addEventListener(ev, e => {
+      e.preventDefault();
+      dropLabel.classList.add('border-teal-500', 'bg-teal-100');
+    });
+  });
+  ['dragleave','drop'].forEach(ev => {
+    dropLabel.addEventListener(ev, e => {
+      e.preventDefault();
+      dropLabel.classList.remove('border-teal-500', 'bg-teal-100');
+      if (ev === 'drop' && e.dataTransfer.files.length) {
+        const dt = e.dataTransfer;
+        const input = document.getElementById('tcFile');
+        input.files = dt.files;
+        onFileChange(input);
+      }
+    });
+  });
 }
 
 // ── Preview / loading helpers ─────────────────────────────────────────────────

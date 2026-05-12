@@ -6,7 +6,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="space-y-4 pb-4">
+<div class="space-y-4 pb-4 officer-page-content">
 
   {% if not profile %}
   <div class="bg-amber-50 border border-amber-200 rounded-2xl p-5 text-amber-800">
@@ -131,7 +131,7 @@
     {% if schedules %}
     <div class="space-y-3">
       {% for sch in schedules %}
-      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden tap-card">
         <!-- Schedule header -->
         <div class="px-4 pt-4 pb-3 flex items-start justify-between gap-3">
           <div class="flex-1 min-w-0">
@@ -244,5 +244,13 @@
 
   {% endif %}{# end selected_account #}
   {% endif %}{# end profile #}
+
+<!-- FAB: Upload TC -->
+{% if selected_account and selected_channel %}
+<a href="/dashboard/tc/upload/?account_id={{ selected_account.id }}&channel={{ selected_channel|urlencode }}"
+   class="officer-fab" title="Upload TC">
+  <i class="fa-solid fa-cloud-arrow-up"></i>
+</a>
+{% endif %}
 </div>
 {% endblock %}
