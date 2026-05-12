@@ -35,8 +35,8 @@ const ACCOUNTS = [
   {% endfor %}
 ];
 
-const ACTIVE_CHANNELS   = ["TV Derana","Sirasa TV","Swarnawahini TV","ITN","Vasantham TV"];
-const DISABLED_CHANNELS = ["Hiru TV","Siyatha TV","Rupavahini","Supreme TV","Shakthi TV","Star Tamil","Channel Eye"];
+const ACTIVE_CHANNELS   = ["TV Derana","Sirasa TV","Swarnawahini TV","ITN","Vasantham TV","Hiru TV","Shakthi TV","Star Tamil","Siyatha TV","Supreme TV"];
+const DISABLED_CHANNELS = ["Rupavahini","Channel Eye"];
 
 /* ── Icons ─────────────────────────────────────────────────────── */
 const Ico = ({ d, size=16 }) => (
@@ -51,7 +51,7 @@ const IcoX        = ({size=16}) => <svg width={size} height={size} viewBox="0 0 
 const IcoCheck    = ({size=14}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>;
 const IcoUpload   = ({size=16}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;
 
-/* ── PDF heuristic parser (unchanged from standalone) ────────────────────── */
+/* ── PDF heuristic parser ─────────────────────────────────────────────────── */
 async function parsePDF(file, selectedChannel) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -70,7 +70,9 @@ async function parsePDF(file, selectedChannel) {
 
     let currentLine = [], currentY = null, lastEndX = null;
     items.forEach(item => {
-      const y = item.transform[5], x = item.transform[4], str = item.str;
+      const y = item.transform[5], x = item.transform[4];
+      let str = item.str;
+      if (selectedChannel === 'Supreme TV') str = str.replace(/\$/g, '');
       if (!str.trim()) return;
       const charWidth = item.width / Math.max(1, str.length);
       const parts = str.split(/(\s{2,})/);
@@ -99,12 +101,18 @@ async function parsePDF(file, selectedChannel) {
     if (currentLine.length > 0) extractedRows.push(currentLine);
   }
 
+  const SKIP_RE = /\b(VAT No|Invoice No|Invoice Details|Date\s*:|From\s*:|To\s*:|Contractor Number|Contract No|Schedule No|Client\s*:|Agent\s*:|Ref No|Client Code|Agent Code|Total Value|Certified By|Checked By|Prepared By|POWER HOUSE|UNLESS OBJECTIONS|Page \d+(?: of \d+)?|Prog\. Date|Caption\/Copy Title|Duration \(sec\)|Channel\s*:|Sr\.No\.|MTV Channel|Braybrooke|TELECAST CERTIFICATE|Advertiser\s*:|Address\s*:|Telecast Certificate dt|Campaign Period|Account Executive|Marketing Executive|Co\/Agency|Release Order Ref|Traffic Order No|Reg No\.|Brand\s*:|TOTAL SPOTS|AUTHORISED SIGNATORY|System Generated|Digitally Signed|Day Time|Duration Lan Mat|Cut No|Product Details|Posi|Position|Net Rate|Remarks|Bill Number|Booking Number|Deal Number|Agency Reference No|Total Spot|We certify the commercials|Net Rate 1|Agency Name|Printed Date|Printed Time|Printed By|Client Name|Agent Name|Client \/ Contract Debits|Asia Broadcasting|TELECAST T\/BELT|PRODUCT|DURA\.?|Gross Value|Net Value|Agency Comm|Sub Total|Total Amount|Taxes|SSCL|E\s*&\s*O\.?\s*E|Errors\s*&\s*Omissions|For MTV|Telecast Summary|Campaign Summary|Total Cost|Payment Terms|Certificate of Transmission|Voice of Asia|This is a computer generated|Transmission certificate|no signature is required|J Lanka Group Of Companies|Authorized Signature|TC_TIME|Supreme TV|Actual time|Time Belt|Time\s*Programme\s*Date|Programme\s*Date)\b/i;
+  const HEADER_RE = /^(DATE|PROGRAMME|TIME|POSI|POSITION|PRODUCT|DURA\.?|TELECAST(?: T\/BELT)?|TC_TIME|REMARKS|DURATION|ACTUAL TIME|TIME BELT|\s)+$/i;
+  // Supports numeric dates (1-2 digit parts, 2-4 digit year) and text-month dates (e.g. 1-Apr-26, 09/Mar/26)
+  const DATE_RE = /(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{1,2}[-/][a-zA-Z]{3}[-/]\d{2,4})/;
+
   const extractedRecords = [];
   extractedRows.forEach(line => {
     const textLine = line.map(i => i.text).join(' ');
-    if (/\b(VAT No|Invoice No|Invoice Details|Date\s*:|From\s*:|To\s*:|Contractor Number|Contract No|Schedule No|Client\s*:|Agent\s*:|Ref No|Client Code|Agent Code|Total Value|Certified By|Checked By|Prepared By|POWER HOUSE|UNLESS OBJECTIONS|Page \d+ of \d+|Prog\. Date|Caption\/Copy Title|Duration \(sec\)|Channel\s*:|Sr\.No\.|MTV Channel|Braybrooke|TELECAST CERTIFICATE|Advertiser\s*:|Address\s*:|Telecast Certificate dt|Campaign Period|Account Executive|Co\/Agency|Release Order Ref|Traffic Order No|Brand\s*:|TOTAL SPOTS|AUTHORISED SIGNATORY|System Generated|Digitally Signed|Day Time|Duration Lan Mat|Cut No|Product Details|Posi|Net Rate|Remarks|Bill Number|Booking Number|Deal Number|Agency Reference No|Total Spot|We certify the commercials|Net Rate 1|Agency Name|Printed Date|Printed Time|Printed By|Client Name|Agent Name|Client \/ Contract Debits)\b/i.test(textLine) ||
-        /Rs\s*:/i.test(textLine) || /\.{4,}/.test(textLine) || /^\s*(Rs\.?\s*:?\s*)?[\d,]+\.\d{2}\s*$/i.test(textLine)) return;
-    const dateMatch = textLine.match(/\b(\d{2}[-/]\d{2}[-/]\d{4})\b/);
+    if (SKIP_RE.test(textLine) || /Rs\s*:/i.test(textLine) || /\.{4,}/.test(textLine) ||
+        /^\s*(Rs\.?\s*:?\s*)?[\d,]+\.\d{2}\s*$/i.test(textLine) ||
+        HEADER_RE.test(textLine.trim()) || /^- PAGE -\s*\d+$/i.test(textLine.trim())) return;
+    const dateMatch = textLine.match(DATE_RE);
     if (dateMatch) {
       extractedRecords.push({ mainLine: line, allItems: [...line] });
     } else if (extractedRecords.length > 0 && textLine.length > 2) {
@@ -113,88 +121,156 @@ async function parsePDF(file, selectedChannel) {
   });
 
   const parsedData = [];
+  const MONTH_MAP = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  // Matches HH:MM:SS (24h) and H:MM AM/PM (12h)
+  const TIME_RE = /(\d{1,2}[:.]\d{2}[:.]\d{2}(?:[:.\d]*)|\d{1,2}[:.]\d{2}\s*[APMampm]{2})/g;
+
   extractedRecords.forEach(record => {
-    const mainTextLine = record.mainLine.map(i => i.text).join(' ');
-    const allTextLine  = record.allItems.map(i => i.text).join(' ');
-    const dateMatch    = mainTextLine.match(/\b(\d{2}[-/]\d{2}[-/]\d{4})\b/);
-    const allTimes     = [...allTextLine.matchAll(/\b(\d{2}:\d{2}:\d{2}(?::\d{2})?)\b/g)].map(m => m[1]);
+    const mainText = record.mainLine.map(i => i.text).join(' ');
+    const allText  = record.allItems.map(i => i.text).join(' ');
+    const dateMatch = mainText.match(DATE_RE);
+    if (!dateMatch) return;
 
-    if (!dateMatch || allTimes.length === 0) return;
+    const allTimes = [...allText.matchAll(TIME_RE)].map(m => m[1]);
+    if (!allTimes.length) return;
 
-    let rawDate   = dateMatch[1];
-    let dateParts = rawDate.split(/[-/]/);
-    let date = selectedChannel === 'Sirasa TV'
-      ? `${parseInt(dateParts[0],10)}/${parseInt(dateParts[1],10)}/${dateParts[2]}`
-      : `${parseInt(dateParts[1],10)}/${parseInt(dateParts[0],10)}/${dateParts[2]}`;
-
-    const durationTime = allTimes.find(t => t.startsWith('00:00:'));
-    const advtTime     = allTimes.find(t => !t.startsWith('00:00:')) || allTimes[0];
-    const time         = advtTime ? advtTime.split(':').slice(0,3).join(':') : '';
-    let duration = '';
-    if (durationTime) {
-      duration = durationTime.replace('00:00:','');
+    // ── Date parsing ──────────────────────────────────────────────────────
+    const rawDate = dateMatch[1];
+    let date = '';
+    if (/[a-zA-Z]{3}/.test(rawDate)) {
+      // Text-month format: "1-Apr-26" or "09/Mar/26" → output D/M/YYYY for server
+      const parts = rawDate.split(/[-/]/);
+      const month = MONTH_MAP[parts[1].toLowerCase()] || 1;
+      let year = parts[2]; if (year.length === 2) year = '20' + year;
+      date = `${parseInt(parts[0],10)}/${month}/${year}`;
     } else {
-      let ti = allTextLine.search(/\b\d{2}:\d{2}:\d{2}/);
+      const parts = rawDate.split(/[-/]/);
+      let year = parts[2]; if (year.length === 2) year = '20' + year;
+      if (['Sirasa TV','Hiru TV','Shakthi TV'].includes(selectedChannel)) {
+        // DD/MM/YYYY
+        date = `${parseInt(parts[0],10)}/${parseInt(parts[1],10)}/${year}`;
+      } else {
+        // MM/DD/YYYY (TV Derana, Swarnawahini, ITN, Vasantham, Supreme TV, …)
+        date = `${parseInt(parts[1],10)}/${parseInt(parts[0],10)}/${year}`;
+      }
+    }
+
+    // ── Time & duration extraction ─────────────────────────────────────────
+    let time = '', duration = '';
+    let durationTime, advtTime;
+
+    if (selectedChannel === 'Supreme TV') {
+      durationTime = allTimes.find(t => t.startsWith('0:00:'));
+      advtTime     = allTimes.find(t => !t.startsWith('0:00:')) || allTimes[0];
+    } else {
+      durationTime = allTimes.find(t => t.startsWith('00:00:'));
+      if (selectedChannel === 'Star Tamil' || selectedChannel === 'Siyatha TV') {
+        // Prefer actual HH:MM:SS over scheduled AM/PM time
+        advtTime = allTimes.find(t => /\d{2}[:.]\d{2}[:.]\d{2}/.test(t) && !t.startsWith('00:00:'))
+                || allTimes.find(t => /[AP]M/i.test(t))
+                || allTimes.find(t => !t.startsWith('00:00:'))
+                || allTimes[0];
+      } else {
+        advtTime = allTimes.find(t => !t.startsWith('00:00:')) || allTimes[0];
+      }
+    }
+
+    if (advtTime) {
+      if (/[AP]M/i.test(advtTime)) {
+        const m = advtTime.match(/(\d{1,2})[:.](\d{2})\s*([AP]M)/i);
+        if (m) {
+          let h = parseInt(m[1],10);
+          if (m[3].toUpperCase() === 'PM' && h < 12) h += 12;
+          if (m[3].toUpperCase() === 'AM' && h === 12) h = 0;
+          time = `${h.toString().padStart(2,'0')}:${m[2]}:00`;
+        } else { time = advtTime; }
+      } else {
+        time = advtTime.substring(0, 8);
+      }
+    }
+
+    if (durationTime) {
+      if (selectedChannel === 'Supreme TV') {
+        duration = parseInt(durationTime.replace('0:00:',''), 10).toString();
+      } else {
+        duration = durationTime.substring(0, 8).replace('00:00:','');
+      }
+    } else {
+      const ti = allText.search(/\b\d{2}:\d{2}:\d{2}/);
       if (ti > 0) {
-        const lw = allTextLine.substring(0,ti).trim().match(/\b(\d+)\b$/);
+        const lw = allText.substring(0,ti).trim().match(/\b(\d+)\b$/);
         if (lw && ['5','10','15','20','25','30','45','60'].includes(lw[1])) duration = lw[1];
       }
       if (!duration) {
-        const dm = allTextLine.match(/\b(\d{2})\b(?=\s*$)/) || allTextLine.match(/\b(10|15|20|25|30)\b/);
+        const dm = allText.match(/\b(\d{2})\b(?=\s*$)/) || allText.match(/\b(10|15|20|25|30)\b/);
         if (dm) duration = dm[1];
       }
     }
 
-    let remainingItems = record.allItems.filter(item => {
-      const c = item.text.trim();
-      return !c.includes(rawDate) &&
-             !/\b\d{2}:\d{2}:\d{2}(?::\d{2})?\b/.test(c) &&
-             !/^(Mon|Tue|Wed|We|Thu|Fri|Sat|Sun|BS|PO|PD|OTHERS|Rs\.?:?|[STE])$/i.test(c) &&
-             !/^CB\s*\d*$/i.test(c) &&
-             !/^[\d,]+\.\d+$/.test(c) &&
-             !/^\.+$/.test(c) &&
-             c !== duration &&
-             (!durationTime || c !== durationTime) &&
-             !(/^\d{1,4}$/.test(c) && item.x < 50) &&
-             !(/^(ITNCOMM|VTVCOMM|ITNOPCL)\w+$/i.test(c) || /^\d{5,}$/.test(c)) &&
-             c.length > 1;
+    // ── Filter noise words ────────────────────────────────────────────────
+    const remainingItems = [];
+    record.allItems.forEach(item => {
+      let c = item.text.trim();
+      if (!c || c.length <= 1) return;
+      if (/^\d{1,4}$/.test(c) && item.x < 50) return;
+      if (/^(ITNCOMM|VTVCOMM|ITNOPCL)\w+$/i.test(c) || /^\d{5,}$/.test(c)) return;
+      if (c === String(duration) || (durationTime && c === durationTime)) return;
+      c = c.replace(rawDate, '').trim();
+      c = c.replace(/\d{1,2}[:.]\d{2}[:.]\d{2}(?:[:.\d]*)/g, '').trim();
+      c = c.replace(/\d{1,2}[:.]\d{2}\s*[APMampm]{2}/gi, '').trim();
+      c = c.replace(/\d{2}[:.]\d{2}(?:[:.]\d{2})?\s*-\s*\d{2}[:.]\d{2}(?:[:.]\d{2})?/g, '').trim();
+      c = c.replace(/\b(CB|FCT|SPO)\b/gi, '').trim();
+      c = c.replace(/Certificate of Transmission/gi,'').replace(/Voice of Asia(?: Network)?(?:\s*\(Pvt\)\s*Ltd\.?)?/gi,'').trim();
+      c = c.replace(/This is a computer generated.*?$/gi,'').replace(/Transmission certificate.*?$/gi,'').trim();
+      c = c.replace(/Page\s*\d+/gi,'').replace(/J Lanka Group Of Companies/gi,'').trim();
+      c = c.replace(/Actual time/gi,'').replace(/Time Belt/gi,'').trim();
+      if (!c || c.length <= 1) return;
+      if (/^(Mon|Tue|Wed|We|Thu|Fri|Sat|Sun|BS|PO|PD|OTHERS|Rs\.?:?|[STE]|AM|PM)$/i.test(c)) return;
+      if (HEADER_RE.test(c) || /^CB\s*\d*$/i.test(c) || /^[\d,]+\.\d+$/.test(c) || /^\.+$/.test(c)) return;
+      remainingItems.push({ ...item, text: c });
     });
 
+    // ── Split Programme vs Theme via largest horizontal gap ───────────────
     let program = '', commercial = '';
-    if (remainingItems.length > 0) {
-      const sortedItems = [...remainingItems].sort((a,b) => a.x - b.x);
-      let maxGap = 0, splitIndex = -1;
-      for (let i = 0; i < sortedItems.length-1; i++) {
-        const gap = sortedItems[i+1].x - sortedItems[i].endX;
-        if (gap > maxGap) { maxGap = gap; splitIndex = i; }
+    if (selectedChannel === 'Supreme TV') {
+      commercial = remainingItems.map(i => i.text).join(' ').trim();
+    } else if (remainingItems.length > 0) {
+      const sorted = [...remainingItems].sort((a,b) => a.x - b.x);
+      let maxGap = 0, splitIdx = -1;
+      for (let i = 0; i < sorted.length-1; i++) {
+        const gap = sorted[i+1].x - sorted[i].endX;
+        if (gap > maxGap) { maxGap = gap; splitIdx = i; }
       }
-      const commXThreshold = (maxGap > 4 && splitIndex !== -1)
-        ? sortedItems[splitIndex].endX + maxGap/2
-        : 9999;
-      const programParts = [], commercialParts = [];
+      const threshold = (maxGap > 4 && splitIdx >= 0) ? sorted[splitIdx].endX + maxGap/2 : 9999;
+      const progParts = [], commParts = [];
       remainingItems.forEach(item => {
-        if (item.x >= commXThreshold) { commercialParts.push(item.text); return; }
-        const isCrossed  = commXThreshold !== 9999 && item.endX > commXThreshold+5;
-        const splitMatch = item.text.match(/^(.*?)\s+-\s*(.*)$/);
-        if (splitMatch && (commXThreshold===9999||isCrossed) && splitMatch[1].trim().length>2 && splitMatch[2].trim().length>2) {
-          programParts.push(splitMatch[1].trim()); commercialParts.push(splitMatch[2].trim());
-        } else { programParts.push(item.text); }
+        if (item.x >= threshold) { commParts.push(item.text); return; }
+        const crossed = threshold !== 9999 && item.endX > threshold + 5;
+        const sm = item.text.match(/^(.*?)\s+-\s*(.*)$/);
+        if (sm && (threshold === 9999 || crossed) && sm[1].trim().length > 2 && sm[2].trim().length > 2) {
+          progParts.push(sm[1].trim()); commParts.push(sm[2].trim());
+        } else { progParts.push(item.text); }
       });
-      program    = programParts.join(' ').trim();
-      commercial = commercialParts.join(' ').trim();
-      if (program.endsWith('-')) program = program.slice(0,-1).trim();
-      if (commercial.startsWith('-')) commercial = commercial.slice(1).trim();
+      program    = progParts.join(' ').trim().replace(/-$/, '').trim();
+      commercial = commParts.join(' ').trim().replace(/^-/, '').trim();
       if (program && !commercial) {
         const sm = program.match(/^(.*?)\s+-\s*(.*)$/);
-        if (sm && sm[1].trim().length>2) { program = sm[1].trim(); commercial = sm[2].trim(); }
+        if (sm && sm[1].trim().length > 2) { program = sm[1].trim(); commercial = sm[2].trim(); }
       } else if (!program && commercial) {
         const sm = commercial.match(/^(.*?)\s+-\s*(.*)$/);
-        if (sm && sm[1].trim().length>2) { program = sm[1].trim(); commercial = sm[2].trim(); }
+        if (sm && sm[1].trim().length > 2) { program = sm[1].trim(); commercial = sm[2].trim(); }
       }
-      if (duration && commercial.endsWith(duration)) commercial = commercial.slice(0,-duration.length).trim();
+      if (duration && commercial.endsWith(duration)) commercial = commercial.slice(0, -duration.length).trim();
     }
+
     if (program || commercial) {
-      parsedData.push({ DATE: date, PROGRAMME: program.trim(), Advt_time: time, Advt_theme: commercial.trim(), Duration: duration });
+      parsedData.push({
+        DATE:       date,
+        PROGRAMME:  selectedChannel === 'Supreme TV' ? 'N/A' : program.trim(),
+        Advt_time:  time,
+        Advt_theme: commercial.trim(),
+        Duration:   duration,
+      });
     }
   });
   return parsedData;
