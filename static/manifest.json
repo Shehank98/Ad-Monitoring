@@ -3,7 +3,7 @@
   "short_name": "Ad Monitor",
   "description": "Upload TCs, map themes and track missed ads for your channel.",
   "start_url": "/dashboard/channel-officer/",
-  "scope": "/dashboard/channel-officer/",
+  "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#ffffff",
