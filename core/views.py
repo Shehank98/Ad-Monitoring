@@ -922,6 +922,12 @@ def schedule_upload_multi(request):
                 month = 'Unknown'
 
             row_count = len(df)
+
+            # Count actual spot types for the result summary
+            _at = df.get('Advertisement_Type', pd.Series(dtype=str)).astype(str).str.strip().str.upper()
+            _commercial_spots  = int((_at == 'COMMERCIAL BENEFITS').sum())
+            _sponsorship_spots = int(_at.isin(['SPONSORSHIP BENEFITS', 'SPONSORSHIP']).sum())
+
             _sch_media_type, _ = _pmt(channel_name)
 
             # Version = next version per (account, channel, month)
@@ -962,16 +968,18 @@ def schedule_upload_multi(request):
             _parse_schedule_rows(df, schedule, account, channel_name, month)
 
             results.append({
-                'sheet':      sname,
-                'ok':         True,
-                'schedule_id': schedule.pk,
-                'channel':    channel_name,
-                'month':      month,
-                'start_date': str(start_date) if start_date else '',
-                'end_date':   str(end_date) if end_date else '',
-                'row_count':  row_count,
-                'version':    version,
-                'is_pivot':   pivot,
+                'sheet':             sname,
+                'ok':                True,
+                'schedule_id':       schedule.pk,
+                'channel':           channel_name,
+                'month':             month,
+                'start_date':        str(start_date) if start_date else '',
+                'end_date':          str(end_date) if end_date else '',
+                'row_count':         row_count,
+                'commercial_spots':  _commercial_spots,
+                'sponsorship_spots': _sponsorship_spots,
+                'version':           version,
+                'is_pivot':          pivot,
             })
 
         except Exception as exc:

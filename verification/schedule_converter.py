@@ -165,40 +165,58 @@ def list_excel_sheets(file_obj) -> list:
 def detect_sheet_metadata(file_obj, sheet_name) -> dict:
     """
     Run pivot converter (or flat fallback) on one sheet.
-    Returns {sheet_name, month, start_date, end_date, row_count, is_pivot, schedule_number}.
+    Returns {sheet_name, month, start_date, end_date, row_count,
+             commercial_spots, sponsorship_spots, total_spots,
+             is_pivot, is_schedule, schedule_number}.
     """
+    _SUMMARY_NAMES = {
+        'cover', 'channel summary', 'day wise', 'spot summary',
+        'summary', 'rate card', 'index', 'contents',
+    }
     result = {
-        'sheet_name':      sheet_name,
-        'month':           '',
-        'start_date':      '',
-        'end_date':        '',
-        'row_count':       0,
-        'is_pivot':        False,
-        'schedule_number': '',
+        'sheet_name':       sheet_name,
+        'month':            '',
+        'start_date':       '',
+        'end_date':         '',
+        'row_count':        0,
+        'commercial_spots': 0,
+        'sponsorship_spots':0,
+        'total_spots':      0,
+        'is_pivot':         False,
+        'is_schedule':      False,
+        'schedule_number':  '',
     }
     try:
-        # Try to extract schedule number from metadata rows (first 10 rows)
+        # ── Step 1: read metadata rows (schedule number + fallback month) ──────
+        raw_meta = None
         try:
-            raw_meta = pd.read_excel(file_obj, header=None, nrows=10, sheet_name=sheet_name)
+            raw_meta = pd.read_excel(file_obj, header=None, nrows=15, sheet_name=sheet_name)
             file_obj.seek(0)
-            _SCH_KEYWORDS = {'sch no', 'sch_no', 'schedule no', 'schedule number', 'sch num'}
+        except Exception:
+            pass
+
+        # Schedule number: scan first 15 rows × first 8 columns
+        if raw_meta is not None:
+            _SCH_KEYWORDS = {
+                'sch no', 'sch_no', 'sch.no', 'sch no.', 'sch. no',
+                'schedule no', 'schedule number', 'sch num', 'schedule #',
+            }
             for r in range(len(raw_meta)):
-                for c in range(min(4, len(raw_meta.columns))):
+                for c in range(min(8, len(raw_meta.columns))):
                     cell = str(raw_meta.iloc[r, c]).lower().strip()
-                    if any(kw in cell for kw in _SCH_KEYWORDS):
-                        # Value is in the next non-empty cell on the same row
+                    if (any(kw in cell for kw in _SCH_KEYWORDS)
+                            or (cell.startswith('sch') and len(cell) < 15)):
                         for nc in range(c + 1, len(raw_meta.columns)):
                             val = raw_meta.iloc[r, nc]
-                            if pd.notna(val) and str(val).strip() and str(val).strip().lower() != 'nan':
-                                result['schedule_number'] = str(val).strip()
+                            s = str(val).strip()
+                            if pd.notna(val) and s and s.lower() != 'nan':
+                                result['schedule_number'] = s
                                 break
                         break
                 if result['schedule_number']:
                     break
-        except Exception:
-            pass
 
-        # Try pivot conversion first
+        # ── Step 2: try pivot conversion ───────────────────────────────────────
         df = convert_schedule_excel(file_obj, sheet_name=sheet_name)
         file_obj.seek(0)
         pivot = df is not None and not df.empty
@@ -215,16 +233,53 @@ def detect_sheet_metadata(file_obj, sheet_name) -> dict:
         if df is None or df.empty:
             return result
 
-        # Extract month/dates
-        if 'Date' in df.columns:
-            dates = pd.to_datetime(df['Date'], errors='coerce').dropna()
+        result['row_count'] = len(df)
+        result['is_pivot']  = pivot
+
+        # ── Step 3: month / date detection ────────────────────────────────────
+        # Level 1: case-insensitive 'Date' column in converted df
+        date_col = next((c for c in df.columns if c.lower().strip() == 'date'), None)
+        if date_col:
+            dates = pd.to_datetime(df[date_col], errors='coerce').dropna()
             if not dates.empty:
                 result['start_date'] = str(dates.min().date())
                 result['end_date']   = str(dates.max().date())
                 result['month']      = dates.min().strftime('%B %Y')
 
-        result['row_count'] = len(df)
-        result['is_pivot']  = pivot
+        # Level 2: scan metadata rows for "Revised Date" / "Period" / "Month" label
+        if not result['month'] and raw_meta is not None:
+            _DATE_LABEL_KW = {'revised date', 'period', 'month', 'campaign period', 'campaign month'}
+            for r in range(len(raw_meta)):
+                for c in range(min(5, len(raw_meta.columns))):
+                    cell = str(raw_meta.iloc[r, c]).lower().strip()
+                    if any(kw in cell for kw in _DATE_LABEL_KW):
+                        for nc in range(c + 1, len(raw_meta.columns)):
+                            val = raw_meta.iloc[r, nc]
+                            if pd.notna(val) and str(val).strip():
+                                dt = pd.to_datetime(str(val), dayfirst=True, errors='coerce')
+                                if pd.notna(dt):
+                                    result['month'] = dt.strftime('%B %Y')
+                                    break
+                        break
+                if result['month']:
+                    break
+
+        # ── Step 4: commercial / sponsorship spot counts ───────────────────────
+        if 'Advertisement_Type' in df.columns:
+            at = df['Advertisement_Type'].astype(str).str.strip().str.upper()
+            c_spots = int((at == 'COMMERCIAL BENEFITS').sum())
+            s_spots = int(at.isin(['SPONSORSHIP BENEFITS', 'SPONSORSHIP']).sum())
+            result['commercial_spots']  = c_spots
+            result['sponsorship_spots'] = s_spots
+            result['total_spots']       = c_spots + s_spots
+
+        # ── Step 5: is_schedule heuristic ─────────────────────────────────────
+        name_lower = str(sheet_name).lower().strip()
+        result['is_schedule'] = (
+            result['total_spots'] > 0
+            and not any(kw in name_lower for kw in _SUMMARY_NAMES)
+        )
+
     except Exception:
         pass
     return result

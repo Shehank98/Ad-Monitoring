@@ -325,15 +325,27 @@
           <p class="text-xs text-indigo-700">
             Each sheet will be uploaded as a separate Schedule record. Edit channel names and schedule numbers as needed, then uncheck sheets you don't want to import.
           </p>
+          <div class="flex gap-2 mb-2">
+            <button type="button" onclick="setAllSheets(true)"
+                    class="text-xs px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-700 font-semibold hover:bg-indigo-200 transition-colors">
+              Select All
+            </button>
+            <button type="button" onclick="setAllSheets(false)"
+                    class="text-xs px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 font-semibold hover:bg-slate-200 transition-colors">
+              Deselect All
+            </button>
+          </div>
           <div class="overflow-x-auto rounded-xl border border-indigo-200">
             <table class="min-w-full text-xs" id="sheet-config-table">
               <thead>
                 <tr class="bg-indigo-100 text-indigo-800">
                   <th class="px-3 py-2 text-left font-bold">Sheet</th>
+                  <th class="px-3 py-2 text-left font-bold">Format</th>
                   <th class="px-3 py-2 text-left font-bold">Channel Name</th>
                   <th class="px-3 py-2 text-left font-bold">Schedule #</th>
                   <th class="px-3 py-2 text-left font-bold">Month</th>
-                  <th class="px-3 py-2 text-right font-bold">Rows</th>
+                  <th class="px-3 py-2 text-right font-bold">Commercial</th>
+                  <th class="px-3 py-2 text-right font-bold">Sponsorship</th>
                   <th class="px-3 py-2 text-center font-bold">Include</th>
                 </tr>
               </thead>
@@ -532,57 +544,84 @@
   }
 
   function showSheetConfigPanel(sheets) {
-    // Hide normal form submit area and show multi-sheet panel
     if (submitBtn) submitBtn.closest('div.flex')?.classList.add('hidden');
     multiPanel.classList.remove('hidden');
     sheetBody.innerHTML = '';
 
-    // Count sheets with actual data
-    const dataSheets = sheets.filter(s => s.row_count > 0);
-    sheetBadge.textContent = `${sheets.length} sheets · ${dataSheets.length} with data`;
+    const schedSheets = sheets.filter(s => s.is_schedule);
+    sheetBadge.textContent = `${sheets.length} sheets · ${schedSheets.length} channel schedule${schedSheets.length !== 1 ? 's' : ''} detected`;
 
-    // Shared schedule number field (pre-filled from first detected value)
+    // Use first detected schedule number as the default for all rows
     const defaultSchedNum = sheets.find(s => s.schedule_number)?.schedule_number || '';
 
     sheets.forEach((s, idx) => {
-      const hasData   = s.row_count > 0;
-      const checked   = hasData ? 'checked' : '';
-      const rowClass  = hasData ? 'hover:bg-indigo-50' : 'bg-slate-50 opacity-60';
-      const rowBadge  = !hasData
-        ? `<span class="ml-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">NO DATA</span>`
+      const isSchedule = !!s.is_schedule;
+      const checked    = isSchedule ? 'checked' : '';
+      const rowClass   = isSchedule ? 'hover:bg-indigo-50' : 'bg-slate-50 opacity-50';
+
+      const fmtBadge = s.is_pivot
+        ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-700">PIVOT</span>`
+        : (s.total_spots > 0
+           ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-700">FLAT</span>`
+           : `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-200 text-slate-500">—</span>`);
+
+      const skippedBadge = !isSchedule
+        ? `<span class="ml-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">SKIP</span>`
         : '';
+
+      const cSpots = s.commercial_spots  || 0;
+      const sSpots = s.sponsorship_spots || 0;
+
+      const monthLine = s.month || '—';
+      const rangeLine = (s.start_date && s.end_date)
+        ? `<br><span class="text-[10px] text-slate-400">${s.start_date} → ${s.end_date}</span>`
+        : '';
+
+      // Per-sheet schedule number: prefer detected value for this sheet, else use default
+      const schedNum = s.schedule_number || defaultSchedNum;
 
       sheetBody.insertAdjacentHTML('beforeend', `
         <tr class="${rowClass}" data-idx="${idx}">
           <td class="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">
-            ${escHtml(s.sheet_name)}${rowBadge}
+            ${escHtml(s.sheet_name)}${skippedBadge}
           </td>
+          <td class="px-3 py-2">${fmtBadge}</td>
           <td class="px-3 py-2">
             <input type="text"
                    class="input-field text-xs py-1 min-w-[140px]"
                    data-field="channel"
                    value="${escHtml(s.sheet_name)}"
                    placeholder="Channel name"
-                   ${!hasData ? 'disabled' : ''}>
+                   ${!isSchedule ? 'disabled' : ''}>
           </td>
           <td class="px-3 py-2">
             <input type="text"
                    class="input-field text-xs py-1 w-28"
                    data-field="schedule_number"
-                   value="${escHtml(defaultSchedNum)}"
+                   value="${escHtml(schedNum)}"
                    placeholder="e.g. T/5616"
-                   ${!hasData ? 'disabled' : ''}>
+                   ${!isSchedule ? 'disabled' : ''}>
           </td>
-          <td class="px-3 py-2 text-slate-600 whitespace-nowrap">${s.month || '—'}</td>
-          <td class="px-3 py-2 text-right font-mono ${hasData ? 'text-indigo-700 font-bold' : 'text-slate-400'}">
-            ${s.row_count.toLocaleString()}
+          <td class="px-3 py-2 text-slate-700 whitespace-nowrap text-xs">
+            ${monthLine}${rangeLine}
+          </td>
+          <td class="px-3 py-2 text-right font-mono font-bold ${cSpots > 0 ? 'text-blue-700' : 'text-slate-300'}">
+            ${cSpots > 0 ? cSpots.toLocaleString() : '—'}
+          </td>
+          <td class="px-3 py-2 text-right font-mono font-bold ${sSpots > 0 ? 'text-amber-600' : 'text-slate-300'}">
+            ${sSpots > 0 ? sSpots.toLocaleString() : '—'}
           </td>
           <td class="px-3 py-2 text-center">
             <input type="checkbox" class="w-4 h-4 accent-indigo-600 cursor-pointer"
-                   data-field="include" ${checked} ${!hasData ? 'disabled' : ''}>
+                   data-field="include" ${checked} ${!isSchedule ? 'disabled' : ''}>
           </td>
         </tr>`);
     });
+  }
+
+  function setAllSheets(checked) {
+    sheetBody.querySelectorAll('[data-field="include"]:not([disabled])')
+      .forEach(cb => cb.checked = checked);
   }
 
   async function uploadAllSheets() {
@@ -662,11 +701,14 @@
 
     const rows = (data.results || []).map(r => {
       if (r.ok) {
+        const cSpots = r.commercial_spots  || 0;
+        const sSpots = r.sponsorship_spots || 0;
         return `<tr>
           <td class="px-3 py-2 font-medium text-slate-700">${escHtml(r.sheet)}</td>
           <td class="px-3 py-2 text-slate-600">${escHtml(r.channel)}</td>
           <td class="px-3 py-2 text-slate-600">${escHtml(r.month)}</td>
-          <td class="px-3 py-2 text-right font-bold text-indigo-700">${r.row_count.toLocaleString()}</td>
+          <td class="px-3 py-2 text-right font-bold ${cSpots > 0 ? 'text-blue-700' : 'text-slate-300'}">${cSpots > 0 ? cSpots.toLocaleString() : '—'}</td>
+          <td class="px-3 py-2 text-right font-bold ${sSpots > 0 ? 'text-amber-600' : 'text-slate-300'}">${sSpots > 0 ? sSpots.toLocaleString() : '—'}</td>
           <td class="px-3 py-2 text-center">
             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
               <i class="fa-solid fa-circle-check"></i> Uploaded
@@ -676,7 +718,7 @@
       } else {
         return `<tr>
           <td class="px-3 py-2 font-medium text-slate-700">${escHtml(r.sheet)}</td>
-          <td colspan="3" class="px-3 py-2 text-red-600 text-[11px]">${escHtml(r.error || 'Error')}</td>
+          <td colspan="4" class="px-3 py-2 text-red-600 text-[11px]">${escHtml(r.error || 'Error')}</td>
           <td class="px-3 py-2 text-center">
             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">
               <i class="fa-solid fa-circle-xmark"></i> Failed
@@ -690,7 +732,7 @@
       <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
         <p class="text-sm font-bold text-emerald-800 mb-2">
           <i class="fa-solid fa-circle-check mr-1"></i>
-          ${data.ok_count} of ${data.total} sheet${data.total !== 1 ? 's' : ''} uploaded successfully
+          ${data.ok_count} of ${data.total} channel${data.total !== 1 ? 's' : ''} uploaded successfully
         </p>
         <div class="overflow-x-auto rounded-xl border border-emerald-200">
           <table class="min-w-full text-xs">
@@ -699,7 +741,8 @@
                 <th class="px-3 py-2 text-left font-bold">Sheet</th>
                 <th class="px-3 py-2 text-left font-bold">Channel</th>
                 <th class="px-3 py-2 text-left font-bold">Month</th>
-                <th class="px-3 py-2 text-right font-bold">Rows</th>
+                <th class="px-3 py-2 text-right font-bold">Commercial</th>
+                <th class="px-3 py-2 text-right font-bold">Sponsorship</th>
                 <th class="px-3 py-2 text-center font-bold">Status</th>
               </tr>
             </thead>
