@@ -1,6 +1,6 @@
 {
-  "name": "Ad Monitor — Officer Portal",
-  "short_name": "Ad Monitor",
+  "name": "Ogilvy Nova",
+  "short_name": "Ogilvy Nova",
   "description": "Upload TCs, map themes and track missed ads for your channel.",
   "start_url": "/dashboard/channel-officer/",
   "scope": "/",
