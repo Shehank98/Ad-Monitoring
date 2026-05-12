@@ -289,97 +289,11 @@
     body.sidebar-collapsed .sidebar-footer-text { opacity: 0; max-width: 0; pointer-events: none; overflow: hidden; }
 
     /* ══════════════════════════════════════════════════════════════════
-       OFFICER / PWA MODE  — native mobile app feel
+       OFFICER MODE  — teal accent, desktop-first layout
     ══════════════════════════════════════════════════════════════════ */
-
-    /* Hide desktop chrome */
-    .officer-mode #app-sidebar      { display: none !important; }
-    .officer-mode #sidebar-toggle   { display: none !important; }
-    .officer-mode #sidebar-backdrop { display: none !important; }
-
-    /* Always show bottom tab bar (not just ≤768px) */
-    .officer-mode #mobile-tab-bar   { display: flex !important; }
-
-    /* Bottom tab bar — frosted glass, native-app style */
-    .officer-mode #mobile-tab-bar {
-      background: rgba(8, 10, 14, 0.96) !important;
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border-top: 1px solid rgba(255,255,255,.07) !important;
-      padding: 6px 8px env(safe-area-inset-bottom, 10px) !important;
-      height: auto;
-    }
 
     /* Teal accent in top bar */
     .officer-mode .topbar-accent { background: #0d9488; }
-
-    /* Scroll area clears bottom bar + FAB */
-    .officer-mode main .flex-1.overflow-y-auto {
-      padding-bottom: 6rem;
-      -webkit-overflow-scrolling: touch;
-      overscroll-behavior-y: contain;
-    }
-
-    /* Top bar — slightly taller, teal accent */
-    .officer-mode header {
-      background: #fff;
-      border-bottom: 1px solid rgba(0,0,0,.06);
-    }
-
-    /* Remove tap highlight globally for officers */
-    .officer-mode * { -webkit-tap-highlight-color: transparent; }
-
-    /* Fast touch response on all interactive elements */
-    .officer-mode a,
-    .officer-mode button,
-    .officer-mode select,
-    .officer-mode input,
-    .officer-mode label { touch-action: manipulation; }
-
-    /* Page entrance animation */
-    @keyframes officerPageIn {
-      from { opacity: 0; transform: translateY(18px); }
-      to   { opacity: 1; transform: translateY(0);    }
-    }
-    .officer-page-content {
-      animation: officerPageIn 0.28s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-    }
-
-    /* Press effect on tappable cards */
-    .officer-mode .tap-card {
-      transition: transform 0.1s ease, box-shadow 0.1s ease;
-      cursor: pointer;
-    }
-    .officer-mode .tap-card:active {
-      transform: scale(0.975);
-      box-shadow: 0 1px 4px rgba(0,0,0,.12);
-    }
-
-    /* Floating Action Button */
-    .officer-fab {
-      position: fixed;
-      bottom: calc(72px + env(safe-area-inset-bottom, 0px) + 12px);
-      right: 20px;
-      z-index: 45;
-      width: 58px; height: 58px;
-      background: linear-gradient(145deg, #14b8a6, #0d9488);
-      border-radius: 50%;
-      display: none;
-      align-items: center; justify-content: center;
-      box-shadow: 0 6px 24px rgba(13,148,136,.45), 0 2px 8px rgba(0,0,0,.2);
-      color: #fff;
-      font-size: 22px;
-      text-decoration: none;
-      transition: transform 0.15s, box-shadow 0.15s;
-    }
-    .officer-mode .officer-fab { display: flex; }
-    .officer-fab:active {
-      transform: scale(0.88);
-      box-shadow: 0 2px 12px rgba(13,148,136,.3);
-    }
-
-    /* Mobile-only overrides inside officer mode */
-    .officer-mode .px-3 { padding-left: .875rem !important; padding-right: .875rem !important; }
 
     /* ── Sidebar toggle btn ── */
     #sidebar-toggle {
