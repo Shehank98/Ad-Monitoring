@@ -133,7 +133,104 @@ def _find_date_columns(df: pd.DataFrame, header_row: int, col_map: dict) -> dict
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def convert_schedule_excel(file_obj) -> pd.DataFrame | None:
+def find_flat_header_row(file_obj, sheet_name=0) -> int:
+    """
+    Scan first 20 rows for the row containing ≥2 schedule-header keywords.
+    Returns the 0-based row index to use as header= in pd.read_excel().
+    Returns 0 if not found (preserves current behaviour).
+    """
+    _KEYWORDS = {'date', 'brand', 'programme', 'program', 'duration',
+                 'time', 'advertisement', 'advertisement_type'}
+    try:
+        raw = pd.read_excel(file_obj, header=None, nrows=20, sheet_name=sheet_name)
+    except Exception:
+        return 0
+    for r in range(len(raw)):
+        row_vals = [str(v).lower().strip() for v in raw.iloc[r] if pd.notna(v) and str(v).strip()]
+        matches = sum(1 for rv in row_vals if any(kw in rv for kw in _KEYWORDS))
+        if matches >= 2:
+            return r
+    return 0
+
+
+def list_excel_sheets(file_obj) -> list:
+    """Return all sheet names in the workbook."""
+    try:
+        xl = pd.ExcelFile(file_obj)
+        return xl.sheet_names
+    except Exception:
+        return []
+
+
+def detect_sheet_metadata(file_obj, sheet_name) -> dict:
+    """
+    Run pivot converter (or flat fallback) on one sheet.
+    Returns {sheet_name, month, start_date, end_date, row_count, is_pivot, schedule_number}.
+    """
+    result = {
+        'sheet_name':      sheet_name,
+        'month':           '',
+        'start_date':      '',
+        'end_date':        '',
+        'row_count':       0,
+        'is_pivot':        False,
+        'schedule_number': '',
+    }
+    try:
+        # Try to extract schedule number from metadata rows (first 10 rows)
+        try:
+            raw_meta = pd.read_excel(file_obj, header=None, nrows=10, sheet_name=sheet_name)
+            file_obj.seek(0)
+            _SCH_KEYWORDS = {'sch no', 'sch_no', 'schedule no', 'schedule number', 'sch num'}
+            for r in range(len(raw_meta)):
+                for c in range(min(4, len(raw_meta.columns))):
+                    cell = str(raw_meta.iloc[r, c]).lower().strip()
+                    if any(kw in cell for kw in _SCH_KEYWORDS):
+                        # Value is in the next non-empty cell on the same row
+                        for nc in range(c + 1, len(raw_meta.columns)):
+                            val = raw_meta.iloc[r, nc]
+                            if pd.notna(val) and str(val).strip() and str(val).strip().lower() != 'nan':
+                                result['schedule_number'] = str(val).strip()
+                                break
+                        break
+                if result['schedule_number']:
+                    break
+        except Exception:
+            pass
+
+        # Try pivot conversion first
+        df = convert_schedule_excel(file_obj, sheet_name=sheet_name)
+        file_obj.seek(0)
+        pivot = df is not None and not df.empty
+        if not pivot:
+            header_row = find_flat_header_row(file_obj, sheet_name=sheet_name)
+            file_obj.seek(0)
+            try:
+                df = pd.read_excel(file_obj, header=header_row, sheet_name=sheet_name)
+                df.columns = df.columns.str.strip()
+                file_obj.seek(0)
+            except Exception:
+                return result
+
+        if df is None or df.empty:
+            return result
+
+        # Extract month/dates
+        if 'Date' in df.columns:
+            dates = pd.to_datetime(df['Date'], errors='coerce').dropna()
+            if not dates.empty:
+                result['start_date'] = str(dates.min().date())
+                result['end_date']   = str(dates.max().date())
+                result['month']      = dates.min().strftime('%B %Y')
+
+        result['row_count'] = len(df)
+        result['is_pivot']  = pivot
+    except Exception:
+        pass
+    return result
+
+
+def convert_schedule_excel(file_obj, sheet_name=0) -> pd.DataFrame | None:
     """
     Convert a pivot-format agency schedule Excel into a flat DataFrame.
 
@@ -141,6 +238,8 @@ def convert_schedule_excel(file_obj) -> pd.DataFrame | None:
     ----------
     file_obj : file-like or path
         The uploaded Excel file.
+    sheet_name : int or str
+        Sheet to read (default 0 = first sheet).
 
     Returns
     -------
@@ -152,7 +251,7 @@ def convert_schedule_excel(file_obj) -> pd.DataFrame | None:
     """
     # Read with header=None so we can detect the header row ourselves
     try:
-        raw = pd.read_excel(file_obj, header=None)
+        raw = pd.read_excel(file_obj, header=None, sheet_name=sheet_name)
     except Exception:
         return None
 

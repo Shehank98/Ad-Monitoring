@@ -22,6 +22,7 @@ urlpatterns = [
     path('schedules/',                          views.schedule_list,     name='schedule_list'),
     path('schedules/upload/',                   views.schedule_upload,   name='schedule_upload'),
     path('schedules/detect/',                   views.schedule_detect,   name='schedule_detect'),
+    path('schedules/upload-multi/',             views.schedule_upload_multi, name='schedule_upload_multi'),
     path('schedules/<int:pk>/download/',        views.schedule_download,         name='schedule_download'),
     path('schedules/<int:pk>/colored-export/', views.colored_schedule_export,    name='colored_schedule_export'),
     path('schedules/<int:pk>/delete/',          views.schedule_delete,           name='schedule_delete'),

@@ -587,12 +587,14 @@ def schedule_upload(request):
         if form.is_valid():
             excel_file = request.FILES['file']
             try:
-                from verification.schedule_converter import convert_schedule_excel
+                from verification.schedule_converter import convert_schedule_excel, find_flat_header_row
                 df = convert_schedule_excel(excel_file)
                 if df is None or df.empty:
-                    # Not pivot format - fall back to plain flat read
+                    # Not pivot format - fall back to flat read with header auto-detection
                     excel_file.seek(0)
-                    df = pd.read_excel(excel_file)
+                    header_row = find_flat_header_row(excel_file)
+                    excel_file.seek(0)
+                    df = pd.read_excel(excel_file, header=header_row)
                     df.columns = df.columns.str.strip()
             except Exception as e:
                 messages.error(request, f'Cannot read Excel file: {e}')
@@ -838,6 +840,162 @@ def _parse_schedule_rows(df, schedule, account, channel, month, brand_type_map=N
 
 
 @login_required
+@role_required(['planner', 'super_admin', 'admin'])
+@require_POST
+def schedule_upload_multi(request):
+    """
+    Process a multi-sheet Excel upload.
+    POST fields:
+      - file         : the Excel workbook
+      - account      : account ID
+      - sheets_config: JSON array of {sheet_name, channel, schedule_number, include}
+    Creates one Schedule + ScheduleRows per included sheet.
+    Returns JSON with per-sheet results.
+    """
+    from verification.schedule_converter import convert_schedule_excel, find_flat_header_row
+    import re as _re
+
+    excel_file = request.FILES.get('file')
+    account_id = request.POST.get('account', '').strip()
+    sheets_config_raw = request.POST.get('sheets_config', '[]')
+
+    if not excel_file:
+        return JsonResponse({'ok': False, 'error': 'No file provided'})
+    if not account_id:
+        return JsonResponse({'ok': False, 'error': 'Account is required'})
+
+    try:
+        sheets_config = json.loads(sheets_config_raw)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'Invalid sheets_config JSON'})
+
+    try:
+        account = Account.objects.get(pk=account_id)
+    except Account.DoesNotExist:
+        return JsonResponse({'ok': False, 'error': 'Account not found'})
+
+    # Access check for non-admins
+    user = request.user
+    if not _is_admin(user) and account not in user.accounts.all():
+        return JsonResponse({'ok': False, 'error': 'Access denied'})
+
+    from core.models import parse_channel_media_type as _pmt
+
+    def _slugify(s):
+        return _re.sub(r'[^\w]+', '_', str(s).strip()).strip('_')
+
+    results = []
+    included = [s for s in sheets_config if s.get('include')]
+
+    if not included:
+        return JsonResponse({'ok': False, 'error': 'No sheets selected for upload'})
+
+    for sheet_cfg in included:
+        sname       = sheet_cfg.get('sheet_name', '')
+        channel_name = sheet_cfg.get('channel', '').strip()
+        sched_number = sheet_cfg.get('schedule_number', '').strip()
+
+        if not channel_name:
+            results.append({'sheet': sname, 'ok': False, 'error': 'Channel name is required'})
+            continue
+        if not sched_number:
+            results.append({'sheet': sname, 'ok': False, 'error': 'Schedule number is required'})
+            continue
+
+        try:
+            excel_file.seek(0)
+            df = convert_schedule_excel(excel_file, sheet_name=sname)
+            pivot = df is not None and not df.empty
+            if not pivot:
+                excel_file.seek(0)
+                header_row = find_flat_header_row(excel_file, sheet_name=sname)
+                excel_file.seek(0)
+                df = pd.read_excel(excel_file, header=header_row, sheet_name=sname)
+                df.columns = df.columns.str.strip()
+
+            if df is None or df.empty:
+                results.append({'sheet': sname, 'ok': False, 'error': 'No data rows detected'})
+                continue
+
+            month, start_date, end_date = _detect_schedule_meta(df)
+            if not month:
+                month = 'Unknown'
+
+            row_count = len(df)
+            _sch_media_type, _ = _pmt(channel_name)
+
+            # Version = next version per (account, channel, month)
+            last_ver = (
+                Schedule.objects
+                .filter(account=account, channel=channel_name, month=month)
+                .aggregate(Max('version'))['version__max'] or 0
+            )
+            version = last_ver + 1
+
+            # Save this sheet's data as a standalone Excel file
+            from django.core.files.base import ContentFile
+            sheet_buf = io.BytesIO()
+            df.to_excel(sheet_buf, index=False)
+            sheet_buf.seek(0)
+
+            schedule = Schedule(
+                account           = account,
+                channel           = channel_name,
+                media_type        = _sch_media_type,
+                month             = month,
+                schedule_number   = sched_number,
+                original_filename = f'{excel_file.name} [{sname}]',
+                row_count         = row_count,
+                start_date        = start_date,
+                end_date          = end_date,
+                version           = version,
+                uploaded_by       = user,
+            )
+            _month_slug = _slugify(month)
+            _chan_slug   = _slugify(channel_name)
+            _acct_slug   = _slugify(account.name)
+            _num_slug    = _slugify(sched_number)
+            storage_filename = f'{_acct_slug}_{_chan_slug}_{_month_slug}_{_num_slug}.xlsx'
+            schedule.file.save(storage_filename, ContentFile(sheet_buf.read()))
+            schedule.save()
+
+            _parse_schedule_rows(df, schedule, account, channel_name, month)
+
+            results.append({
+                'sheet':      sname,
+                'ok':         True,
+                'schedule_id': schedule.pk,
+                'channel':    channel_name,
+                'month':      month,
+                'start_date': str(start_date) if start_date else '',
+                'end_date':   str(end_date) if end_date else '',
+                'row_count':  row_count,
+                'version':    version,
+                'is_pivot':   pivot,
+            })
+
+        except Exception as exc:
+            results.append({'sheet': sname, 'ok': False, 'error': str(exc)})
+
+    # Auto-run verification in background
+    try:
+        import threading
+        from verification.engine import auto_run_all_for_account as _auto_run
+        t = threading.Thread(target=_auto_run, args=(account.id,), daemon=True)
+        t.start()
+    except Exception:
+        pass
+
+    ok_count = sum(1 for r in results if r.get('ok'))
+    return JsonResponse({
+        'ok':      ok_count > 0,
+        'results': results,
+        'ok_count': ok_count,
+        'total':   len(results),
+    })
+
+
+@login_required
 @require_POST
 def schedule_detect(request):
     """AJAX: parse an uploaded schedule file and return detected metadata."""
@@ -845,12 +1003,32 @@ def schedule_detect(request):
     if not excel_file:
         return JsonResponse({'ok': False, 'error': 'No file provided'})
     try:
-        from verification.schedule_converter import convert_schedule_excel
+        from verification.schedule_converter import (
+            convert_schedule_excel, find_flat_header_row,
+            list_excel_sheets, detect_sheet_metadata,
+        )
+
+        # Multi-sheet detection
+        excel_file.seek(0)
+        sheets = list_excel_sheets(excel_file)
+        if len(sheets) > 1:
+            sheet_meta = []
+            for sname in sheets:
+                excel_file.seek(0)
+                meta = detect_sheet_metadata(excel_file, sname)
+                sheet_meta.append(meta)
+            return JsonResponse({'ok': True, 'multi_sheet': True, 'sheets': sheet_meta})
+
+        # Single-sheet: existing behaviour + flat header fix
+        excel_file.seek(0)
         df = convert_schedule_excel(excel_file)
         pivot = df is not None and not df.empty
         if not pivot:
             excel_file.seek(0)
-            df = pd.read_excel(excel_file)
+            header_row = find_flat_header_row(excel_file)
+            excel_file.seek(0)
+            df = pd.read_excel(excel_file, header=header_row)
+            df.columns = df.columns.str.strip()
         month, start_date, end_date = _detect_schedule_meta(df)
 
         # Extract unique sponsorship brands if Advertisement_Type column exists
@@ -866,6 +1044,7 @@ def schedule_detect(request):
 
         return JsonResponse({
             'ok':          True,
+            'multi_sheet': False,
             'month':       month,
             'start_date':  str(start_date) if start_date else '',
             'end_date':    str(end_date)   if end_date   else '',
