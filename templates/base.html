@@ -288,6 +288,17 @@
 
     body.sidebar-collapsed .sidebar-footer-text { opacity: 0; max-width: 0; pointer-events: none; overflow: hidden; }
 
+    /* ══ Officer (PWA) mode — full mobile app, no sidebar ══════════════ */
+    .officer-mode #app-sidebar      { display: none !important; }
+    .officer-mode #sidebar-toggle   { display: none !important; }
+    .officer-mode #sidebar-backdrop { display: none !important; }
+    /* Bottom tab bar always visible for officers (not just ≤768px) */
+    .officer-mode #mobile-tab-bar   { display: flex !important; }
+    /* Teal accent line in top bar for officers */
+    .officer-mode .topbar-accent    { background: #0d9488; }
+    /* Ensure body scrolls content above the always-visible tab bar */
+    .officer-mode main .flex-1.overflow-y-auto { padding-bottom: 5rem; }
+
     /* ── Sidebar toggle btn ── */
     #sidebar-toggle {
       background: none; border: none; cursor: pointer;
@@ -347,22 +358,24 @@
     #mobile-tab-bar {
       display: none;
       position: fixed; bottom: 0; left: 0; right: 0; z-index: 999;
-      background: #0f0f0f; border-top: 1px solid #222;
-      padding: .4rem 0 env(safe-area-inset-bottom, .4rem);
+      background: #111827; border-top: 1px solid #1f2937;
+      padding: .5rem 0 env(safe-area-inset-bottom, .5rem);
       justify-content: space-around; align-items: center;
     }
     @media (max-width: 768px) { #mobile-tab-bar { display: flex; } }
 
     .mob-tab {
-      display: flex; flex-direction: column; align-items: center; gap: .15rem;
-      color: #6b7280; text-decoration: none; padding: .2rem .5rem;
-      font-size: .58rem; font-weight: 600; letter-spacing: .03em;
-      border-radius: .375rem; transition: color .15s;
-      min-width: 3.2rem; text-align: center;
+      display: flex; flex-direction: column; align-items: center; gap: .2rem;
+      color: #6b7280; text-decoration: none; padding: .35rem .5rem;
+      font-size: .6rem; font-weight: 600; letter-spacing: .03em;
+      border-radius: .5rem; transition: color .15s;
+      min-width: 3.5rem; text-align: center;
     }
-    .mob-tab i { font-size: 1rem; display: block; }
+    .mob-tab i { font-size: 1.1rem; display: block; }
     .mob-tab:hover { color: #d1d5db; }
     .mob-tab.active { color: var(--og-red); }
+    /* Officers get teal active color to match their accent */
+    .officer-mode .mob-tab.active { color: #0d9488; }
   </style>
   {% block extra_head %}{% endblock %}
   <!-- PWA -->
@@ -374,7 +387,7 @@
   <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 </head>
 
-<body class="h-full bg-slate-50 antialiased">
+<body class="h-full bg-slate-50 antialiased {% if request.user.is_authenticated and request.user.role == 'channel_officer' %}officer-mode{% endif %}">
 <div class="flex h-screen overflow-hidden">
 
   <!-- ════════ SIDEBAR ════════════════════════════════════════════ -->
@@ -577,10 +590,16 @@
 
     <!-- Top bar -->
     <header class="relative flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100 shadow-sm flex-shrink-0">
-      <!-- Sidebar toggle - always visible in topbar -->
+      <!-- Sidebar toggle - hidden for officers via .officer-mode CSS -->
       <button id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
         <i class="fa-solid fa-bars text-sm"></i>
       </button>
+      {% if request.user.is_authenticated and request.user.role == 'channel_officer' %}
+      <!-- Officer app header: teal logo mark + title -->
+      <div class="w-7 h-7 rounded-lg bg-teal-600 flex items-center justify-center flex-shrink-0">
+        <i class="fa-solid fa-tv text-white text-[10px]"></i>
+      </div>
+      {% endif %}
       <div class="flex-1 min-w-0">
         <h1 class="text-sm font-bold text-slate-800 leading-tight">{% block page_title %}Dashboard{% endblock %}</h1>
         <p class="text-[11px] text-slate-400 mt-0.5">{% block page_subtitle %}{% endblock %}</p>
@@ -591,7 +610,7 @@
           {% elif request.user.role == 'admin' %}bg-gradient-to-br from-blue-500 to-blue-700
           {% elif request.user.role == 'team_head' %}bg-gradient-to-br from-emerald-500 to-emerald-700
           {% elif request.user.role == 'planner' %}bg-gradient-to-br from-amber-400 to-amber-600
-          {% else %}bg-gradient-to-br from-orange-400 to-orange-600{% endif %}">
+          {% else %}bg-gradient-to-br from-teal-500 to-teal-700{% endif %}">
           {{ request.user.initials }}
         </div>
         <span class="text-xs font-medium text-slate-600 hidden sm:block">{{ request.user.name }}</span>
@@ -630,11 +649,17 @@
 <nav id="mobile-tab-bar" aria-label="Mobile navigation">
   {% with path=request.path ur=request.user.role %}
   {% if ur == 'channel_officer' %}
-  <a href="/dashboard/channel-officer/" class="mob-tab {% if 'channel-officer' in path %}active{% endif %}">
+  <a href="/dashboard/channel-officer/" class="mob-tab {% if path == '/dashboard/channel-officer/' %}active{% endif %}">
     <i class="fa-solid fa-calendar-days"></i><span>Schedules</span>
   </a>
   <a href="/dashboard/tc/upload/" class="mob-tab {% if 'tc/upload' in path %}active{% endif %}">
     <i class="fa-solid fa-cloud-arrow-up"></i><span>Upload TC</span>
+  </a>
+  <a href="/dashboard/channel-officer/brand-mapping/" class="mob-tab {% if 'brand-mapping' in path %}active{% endif %}">
+    <i class="fa-solid fa-tags"></i><span>Map Themes</span>
+  </a>
+  <a href="/auth/logout/" class="mob-tab">
+    <i class="fa-solid fa-arrow-right-from-bracket"></i><span>Sign Out</span>
   </a>
   {% else %}
   <a href="/dashboard/" class="mob-tab {% if path == '/dashboard/' %}active{% endif %}">
