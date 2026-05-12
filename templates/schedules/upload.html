@@ -433,8 +433,8 @@
 </div>
 {% endblock %}
 
-{{ all_channels|default:"[]"|json_script:"all-channels-data" }}
 {% block extra_js %}
+{{ all_channels|default:"[]"|json_script:"all-channels-data" }}
 <script>
   const CSRF        = '{{ csrf_token }}';
   const ALL_CHANNELS = JSON.parse(document.getElementById('all-channels-data').textContent);
