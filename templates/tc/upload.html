@@ -84,14 +84,13 @@
       </div>
     </div>
 
-    <!-- Excel upload form (used when file is .xlsx/.xls) -->
     <form method="post" enctype="multipart/form-data" class="px-4 sm:px-6 py-5 space-y-5" id="tc-upload-form">
       {% csrf_token %}
 
       {% if is_officer %}
-      <div class="bg-teal-50 border border-teal-200 rounded-xl px-4 py-3 text-sm text-teal-800 mb-2">
-        <i class="fa-brands fa-whatsapp mr-1"></i>
-        Upload the Transmission Certificate for your channel. Your account and channel are pre-filled.
+      <div class="bg-teal-50 border border-teal-200 rounded-2xl px-4 py-4 text-sm text-teal-800">
+        <i class="fa-solid fa-tv mr-2 text-teal-600"></i>
+        Upload the Transmission Certificate for your channel.
       </div>
       {% endif %}
 
@@ -100,7 +99,9 @@
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
           <i class="fa-solid fa-building mr-1 text-slate-400"></i> Account <span class="text-red-400">*</span>
         </label>
-        <select name="account_id" id="selAccount" class="select-field" required onchange="loadSchedules()">
+        <select name="account_id" id="selAccount"
+                class="{% if is_officer %}text-base py-4{% else %}select-field{% endif %} w-full border-2 border-slate-200 rounded-xl px-4 bg-white text-slate-700 font-medium focus:outline-none focus:border-teal-400 appearance-none"
+                required onchange="loadSchedules()">
           <option value="">Select account…</option>
           {% for acc in accounts %}
             <option value="{{ acc.id }}" {% if prefill.account_id == acc.id|stringformat:"s" %}selected{% endif %}>{{ acc.name }}</option>
@@ -113,9 +114,9 @@
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
           <i class="fa-solid fa-tv mr-1 text-slate-400"></i> Channel <span class="text-red-400">*</span>
         </label>
-        <input type="text" name="channel" id="inpChannel" placeholder="e.g. Sirasa TV - Voice"
-               class="input-field{% if is_officer %} bg-teal-50{% endif %}" required
-               value="{{ prefill.channel }}" {% if is_officer %}readonly{% endif %}>
+        <input type="text" name="channel" id="inpChannel" placeholder="e.g. Sirasa TV"
+               class="w-full {% if is_officer %}text-base py-4 border-2{% else %}{% endif %} border-slate-200 rounded-xl px-4 bg-white text-slate-700 font-medium focus:outline-none focus:border-teal-400 {% if is_officer %}bg-teal-50{% endif %}"
+               required value="{{ prefill.channel }}" {% if is_officer %}readonly{% endif %}>
       </div>
 
       <!-- Month -->
@@ -123,8 +124,9 @@
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
           <i class="fa-solid fa-calendar mr-1 text-slate-400"></i> Month <span class="text-red-400">*</span>
         </label>
-        <input type="text" name="month" id="inpMonth" placeholder="e.g. June 2025" class="input-field" required
-               value="{{ prefill.month }}">
+        <input type="text" name="month" id="inpMonth" placeholder="e.g. June 2025"
+               class="w-full {% if is_officer %}text-base py-4 border-2{% endif %} border-slate-200 rounded-xl px-4 bg-white text-slate-700 font-medium focus:outline-none focus:border-teal-400"
+               required value="{{ prefill.month }}">
       </div>
 
       <!-- Linked Schedule -->
@@ -132,7 +134,9 @@
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
           <i class="fa-solid fa-link mr-1 text-slate-400"></i> Link to Schedule <span class="text-red-400">*</span>
         </label>
-        <select name="schedule_id" id="selSchedule" class="select-field" onchange="scheduleSelected(this)" required>
+        <select name="schedule_id" id="selSchedule"
+                class="{% if is_officer %}text-base py-4{% else %}select-field{% endif %} w-full border-2 border-slate-200 rounded-xl px-4 bg-white text-slate-700 font-medium focus:outline-none focus:border-teal-400 appearance-none"
+                onchange="scheduleSelected(this)" required>
           <option value="">Select schedule…</option>
           {% for sch in schedules %}
             <option value="{{ sch.id }}"
@@ -140,7 +144,7 @@
                     data-channel="{{ sch.channel }}"
                     data-month="{{ sch.month }}"
                     {% if prefill.schedule_pk == sch.id|stringformat:"s" %}selected{% endif %}>
-              {{ sch.account.name }} | {{ sch.channel }} | {{ sch.month }} | #{{ sch.schedule_number }}
+              {% if is_officer %}{{ sch.month }} | #{{ sch.schedule_number }}{% else %}{{ sch.account.name }} | {{ sch.channel }} | {{ sch.month }} | #{{ sch.schedule_number }}{% endif %}
             </option>
           {% endfor %}
         </select>
@@ -152,28 +156,29 @@
           <i class="fa-solid fa-file-arrow-up mr-1 text-slate-400"></i> TC File <span class="text-red-400">*</span>
         </label>
         <label for="tcFile"
-               class="flex flex-col items-center justify-center w-full min-h-[100px] border-2 border-dashed
-                      border-amber-300 rounded-xl cursor-pointer bg-amber-50 hover:bg-amber-100
-                      active:bg-amber-200 transition-colors p-4 gap-2">
-          <i class="fa-solid fa-file-arrow-up text-amber-500 text-2xl"></i>
-          <p class="text-sm font-semibold text-amber-700">Tap to choose TC file</p>
-          <p class="text-xs text-amber-500">Excel (.xlsx / .xls) or PDF</p>
-          <p id="tcFileName" class="text-xs text-amber-800 font-medium hidden"></p>
+               class="flex flex-col items-center justify-center w-full min-h-[120px] border-2 border-dashed
+                      border-teal-300 rounded-2xl cursor-pointer bg-teal-50 hover:bg-teal-100
+                      active:bg-teal-200 transition-colors p-5 gap-2">
+          <i class="fa-solid fa-file-arrow-up text-teal-500 text-3xl"></i>
+          <p class="text-base font-bold text-teal-700">Tap to choose TC file</p>
+          <p class="text-sm text-teal-500">Excel (.xlsx / .xls) or PDF</p>
+          <p id="tcFileName" class="text-sm text-teal-800 font-semibold hidden mt-1"></p>
         </label>
         <input type="file" name="tc_file" id="tcFile" accept=".xlsx,.xls,.pdf"
                class="sr-only" onchange="onFileChange(this)" required>
       </div>
 
       <!-- Excel detect result -->
-      <div id="detectResult" class="hidden p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800">
+      <div id="detectResult" class="hidden p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-sm text-emerald-800">
         <p class="font-semibold mb-1"><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> File detected</p>
         <p id="detectText"></p>
       </div>
 
       <!-- Preview button -->
       <button type="button" id="btnPreview" onclick="runPreview()"
-              class="btn-primary w-full justify-center">
-        <i class="fa-solid fa-magnifying-glass"></i> Preview &amp; Verify Data
+              class="w-full flex items-center justify-center gap-3 py-4 bg-amber-500 hover:bg-amber-600
+                     active:scale-95 text-white text-base font-bold rounded-2xl shadow-md transition-all">
+        <i class="fa-solid fa-magnifying-glass text-lg"></i> Preview &amp; Verify Data
       </button>
     </form>
 
@@ -286,14 +291,16 @@
       </div>
 
       <!-- Action buttons -->
-      <div class="px-6 py-5 bg-slate-50 flex items-center gap-3">
-        <button type="button" onclick="cancelPreview()"
-                class="btn-secondary flex-1 justify-center">
-          <i class="fa-solid fa-arrow-left"></i> Back &amp; Edit
-        </button>
+      <div class="px-5 py-5 bg-slate-50 flex flex-col gap-3">
         <button type="button" id="btnConfirmUpload" onclick="confirmUpload()"
-                class="btn-primary flex-1 justify-center">
-          <i class="fa-solid fa-cloud-arrow-up"></i> Confirm Upload
+                class="w-full flex items-center justify-center gap-3 py-4 bg-teal-600 hover:bg-teal-700
+                       active:scale-95 text-white text-base font-bold rounded-2xl shadow-md transition-all">
+          <i class="fa-solid fa-cloud-arrow-up text-lg"></i> Confirm Upload
+        </button>
+        <button type="button" onclick="cancelPreview()"
+                class="w-full flex items-center justify-center gap-2 py-3.5 border-2 border-slate-200
+                       text-slate-600 text-base font-semibold rounded-2xl hover:bg-slate-100 active:scale-95 transition-all">
+          <i class="fa-solid fa-arrow-left"></i> Back &amp; Edit
         </button>
       </div>
     </div>
