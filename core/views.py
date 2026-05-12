@@ -802,6 +802,7 @@ def schedule_upload(request):
         'spon_type_options': spon_type_options,
         'upload_summary': upload_summary,
         'parent_schedule_choices': parent_schedule_choices,
+        'all_channels': list(Channel.objects.order_by('name').values_list('name', flat=True)),
     })
 
 

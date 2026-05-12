@@ -433,9 +433,11 @@
 </div>
 {% endblock %}
 
+{{ all_channels|default:"[]"|json_script:"all-channels-data" }}
 {% block extra_js %}
 <script>
   const CSRF        = '{{ csrf_token }}';
+  const ALL_CHANNELS = JSON.parse(document.getElementById('all-channels-data').textContent);
   const fi          = document.getElementById('schedule-file');
   const fn          = document.getElementById('file-name');
   const dl          = document.getElementById('drop-label');
@@ -580,6 +582,24 @@
       // Per-sheet schedule number: prefer detected value for this sheet, else use default
       const schedNum = s.schedule_number || defaultSchedNum;
 
+      // Build channel dropdown options, pre-selecting best match for this sheet
+      const sheetNameUp = s.sheet_name.toUpperCase();
+      let bestMatch = '';
+      let bestScore = 0;
+      ALL_CHANNELS.forEach(ch => {
+        const chUp = ch.toUpperCase();
+        // Score: count matching words between sheet name and channel name
+        const chWords = chUp.split(/\W+/).filter(Boolean);
+        const score = chWords.reduce((n, w) => n + (w.length > 1 && sheetNameUp.includes(w) ? 1 : 0), 0);
+        if (score > bestScore) { bestScore = score; bestMatch = ch; }
+      });
+      // Fall back to first channel if nothing matched
+      if (!bestMatch && ALL_CHANNELS.length) bestMatch = ALL_CHANNELS[0];
+
+      const channelOptions = ALL_CHANNELS.map(ch =>
+        `<option value="${escHtml(ch)}" ${ch === bestMatch ? 'selected' : ''}>${escHtml(ch)}</option>`
+      ).join('');
+
       sheetBody.insertAdjacentHTML('beforeend', `
         <tr class="${rowClass}" data-idx="${idx}">
           <td class="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">
@@ -587,12 +607,11 @@
           </td>
           <td class="px-3 py-2">${fmtBadge}</td>
           <td class="px-3 py-2">
-            <input type="text"
-                   class="input-field text-xs py-1 min-w-[140px]"
-                   data-field="channel"
-                   value="${escHtml(s.sheet_name)}"
-                   placeholder="Channel name"
-                   ${!isSchedule ? 'disabled' : ''}>
+            <select class="select-field text-xs py-1 min-w-[160px]"
+                    data-field="channel"
+                    ${!isSchedule ? 'disabled' : ''}>
+              ${channelOptions}
+            </select>
           </td>
           <td class="px-3 py-2">
             <input type="text"
@@ -655,7 +674,7 @@
       if (include && !sched) missingSchedNum = true;
 
       sheetsConfig.push({
-        sheet_name:      row.cells[0].textContent.trim().replace(/NO DATA$/, '').trim(),
+        sheet_name:      row.cells[0].textContent.trim().replace(/\s*(SKIP|NO DATA)\s*$/, '').trim(),
         channel:         channel,
         schedule_number: sched,
         include:         include,
