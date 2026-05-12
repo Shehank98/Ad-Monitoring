@@ -4387,7 +4387,15 @@ def tc_upload(request):
         return redirect('/dashboard/tc/')
 
     # GET - show upload form (accept pre-fill params from WhatsApp links)
-    schedules = Schedule.objects.filter(account__in=account_qs).select_related('account').order_by('-uploaded_at')
+    schedules_qs = Schedule.objects.filter(account__in=account_qs).select_related('account')
+    # channel_officer: restrict schedule list to their channel(s) only
+    if user.role == 'channel_officer':
+        officer_channels = list(
+            ChannelOfficer.objects.filter(user=user).values_list('channel', flat=True).distinct()
+        )
+        if officer_channels:
+            schedules_qs = schedules_qs.filter(channel__in=officer_channels)
+    schedules = schedules_qs.order_by('-uploaded_at')
     prefill = {
         'account_id':  request.GET.get('account_id', ''),
         'channel':     request.GET.get('channel', ''),

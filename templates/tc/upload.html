@@ -18,7 +18,8 @@
   </a>
   {% endif %}
 
-  <!-- Supported channels banner -->
+  <!-- Supported channels banner (hidden for channel officers) -->
+  {% if not is_officer %}
   <div class="mb-4 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
     <p class="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
       <i class="fa-solid fa-tv mr-1 text-slate-400"></i> Supported Channels for PDF Parsing
@@ -45,6 +46,7 @@
       Excel uploads work for any channel.
     </p>
   </div>
+  {% endif %}
 
   <!-- Info cards — stack on mobile, 2-col on sm+ -->
   <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
