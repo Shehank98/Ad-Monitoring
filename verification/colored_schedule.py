@@ -185,16 +185,28 @@ def _detect_pivot_openpyxl(ws):
       col_map         – {'programme': int, 'day': int, 'start_time': int,
                          'end_time': int, 'duration': int} (1-based col indices)
       date_col_map    – {col_idx: 'YYYY-MM-DD'} (1-based)
+
+    Accepts a wide variety of column naming conventions so that different
+    client schedule file formats are handled without code changes.
     """
     from datetime import datetime as _dt
+
+    _PROGRAMME_NAMES = {'PROGRAM', 'PROGRAMME', 'PROG', 'PROG NAME',
+                        'PROGRAMME NAME', 'PROGRAM NAME', 'PRG', 'PRG NAME'}
+    _DAY_NAMES       = {'DAY', 'DAY OF WEEK', 'WEEKDAY', 'WK DAY', 'WEEK DAY'}
+    _TIME_NAMES      = {'TIME', 'START TIME', 'START', 'FROM', 'TIME (START)',
+                        'START_TIME', 'TIME START', 'STARTTIME', 'AD TIME'}
+    _DUR_NAMES       = {'DUR', 'DURATION', 'SPOT DUR', 'DUR (SEC)',
+                        'DURATION (SEC)', 'SECONDS', 'SECS', 'SEC', 'AD DUR'}
 
     header_row_idx = None
     col_map = {}
 
-    for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=min(20, ws.max_row)), start=1):
-        for c_idx, cell in enumerate(row[:6], start=1):
+    # Scan first 25 rows; check up to 15 columns for the programme header
+    for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=min(25, ws.max_row)), start=1):
+        for c_idx, cell in enumerate(row[:15], start=1):
             val = str(cell.value or '').strip().upper()
-            if val in ('PROGRAM', 'PROGRAMME'):
+            if val in _PROGRAMME_NAMES:
                 header_row_idx = row_idx
                 col_map['programme'] = c_idx
                 break
@@ -206,19 +218,17 @@ def _detect_pivot_openpyxl(ws):
 
     # Walk the header row for other semantic columns
     header_row = list(ws.iter_rows(min_row=header_row_idx, max_row=header_row_idx))[0]
-    end_time_set = False
     for cell in header_row:
         val = str(cell.value or '').strip().upper()
         c   = cell.column
-        if val == 'DAY':
+        if val in _DAY_NAMES and 'day' not in col_map:
             col_map['day'] = c
-        elif val == 'TIME':
+        elif val in _TIME_NAMES and 'start_time' not in col_map:
             col_map['start_time'] = c
             col_map['end_time']   = c + 1
-            end_time_set = True
-        elif val == 'DUR':
+        elif val in _DUR_NAMES and 'duration' not in col_map:
             col_map['duration'] = c
-        elif val == 'BRAND':
+        elif val == 'BRAND' and 'brand' not in col_map:
             col_map['brand'] = c
 
     if not col_map.get('day') or not col_map.get('start_time') or not col_map.get('duration'):
@@ -461,10 +471,13 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
     ws_src = wb_src.active
     header_row_idx, col_map, date_col_map = _detect_pivot_openpyxl(ws_src)
     if not header_row_idx or not date_col_map:
-        wb_dst = openpyxl.load_workbook(io.BytesIO(raw_bytes))
-        ws_dst = wb_dst.active
-        ws_dst.cell(1, 1, 'WARNING: Pivot structure not detected. Colours not applied.')
-        return wb_dst
+        # Pivot structure not detected in the uploaded file — fall back to
+        # rebuilding from DB records so colours are always applied.
+        logger.warning(
+            'build_colored_schedule_wb: pivot structure not detected for schedule pk=%s; '
+            'falling back to DB-based builder.', schedule_pk
+        )
+        return _build_wb_from_db(schedule, colors, status_map)
 
     # Build colour fills
     fills = {

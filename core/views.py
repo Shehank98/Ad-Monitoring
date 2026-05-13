@@ -6297,8 +6297,14 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
         tc_confirmed_q = tc_confirmed_q.filter(tc_report__schedule_id=schedule_id)
     tc_confirmed_ids = set(tc_confirmed_q.values_list('matched_lmrb_id', flat=True))
 
-    # Combine, deduplicate by id, sort by date+time
-    all_ids = set(comm_qs.values_list('id', flat=True)) | spon_ids | tc_spon_lmrb_ids | tc_confirmed_ids
+    # Combine, deduplicate by id, sort by date+time.
+    # When TC-confirmed rows exist, restrict LMRB-engine commercial matches to
+    # only those also confirmed by TC. This prevents the union from exceeding
+    # the number of TC ads (e.g. 53 rows when only 44 ads in the TC file).
+    comm_lmrb_ids = set(comm_qs.values_list('id', flat=True))
+    if tc_confirmed_ids:
+        comm_lmrb_ids &= tc_confirmed_ids
+    all_ids = comm_lmrb_ids | spon_ids | tc_spon_lmrb_ids | tc_confirmed_ids
     combined = list(
         LMRBRow.objects.filter(id__in=all_ids).order_by('date', 'advt_time')
     )

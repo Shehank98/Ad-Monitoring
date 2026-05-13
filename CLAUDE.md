@@ -245,8 +245,12 @@ duration (int, optional) ← if set, mapping only applies when duration matches 
 >   a common prefix, e.g. `Ai National Expo 2025*` matches
 >   `Ai National Expo 2025_1 (30)(Sin)`, `Ai National Expo 2025_3 (30)(Sin)`, etc.
 >   This avoids creating a separate mapping row for every theme variant.
-> - **Wildcard is Schedule↔LMRB only** — `tc_theme` pipe-separated values are used
->   verbatim; wildcard `*` suffix is NOT supported for TC reconciliation.
+> - **Wildcard `*` suffix is also supported for `tc_theme`** — if a `tc_theme` ends
+>   with `*`, TC reconciliation treats it as a prefix match. Any TCRow whose tc_theme
+>   starts with the prefix (before `*`) resolves to this brand.
+>   Example: `"Unlimited Fiber - 20 Sec*"` matches `"Unlimited Fiber - 20 Sec"` and
+>   `"Unlimited Fiber - 20 Sec extra"`. Pipe-separated values and wildcard can be
+>   combined: `"Theme A|Theme B*"`.
 
 ### `TransmissionReport`
 One record per TC file upload.
@@ -638,7 +642,7 @@ Function: `summary_pdf()` in `core/views.py`
 | Manual match prevents automatic re-matching | `is_manual_matched=True` rows are permanently skipped | To undo, use `/dashboard/manual/` → de-match. `mode='reset'` does NOT clear manual matches |
 | Sponsorship "Aired" shows zero | Sponsorship LMRB assignments not run yet | Visit the Summary Sheet sponsorship panel and click "Auto-reconcile" or assign manually |
 | TC–LMRB confirmed count too low | Time tolerance too tight — TC and LMRB timestamps differ by more than 5s | Increase **TC–LMRB Time Tolerance** in `/dashboard/settings/` |
-| Wildcard theme not working in TC | `theme` wildcard (`*` suffix) is only supported for Schedule↔LMRB, not TC reconciliation | Use pipe-separated exact themes in `tc_theme` field instead |
+| TC theme variant not matching (e.g. "Brand extra") | tc_theme exact-match misses variant suffixes | Add `*` suffix to `tc_theme` in Brand Mappings, e.g. `"Unlimited Fiber - 20 Sec*"` |
 
 ---
 

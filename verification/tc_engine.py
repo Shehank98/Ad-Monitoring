@@ -151,6 +151,11 @@ def _build_reverse_tc_theme_map(account_id):
     Returns {norm_tc_theme: [(norm_brand, duration_or_None), ...]}
     Reverse of _build_tc_theme_map: lets us look up brand from a TCRow's tc_theme.
     Handles pipe-separated tc_theme values.
+
+    Wildcard suffix '*': a tc_theme like 'unlimited fiber - 20 sec*' is stored
+    with the '*' preserved.  _brands_for_tc_theme handles prefix matching so any
+    TCRow whose tc_theme starts with 'unlimited fiber - 20 sec' will resolve to
+    the same brand (e.g. 'unlimited fiber - 20 sec extra' → same brand group).
     """
     mapping = {}
     for bm in BrandMapping.objects.filter(account_id=account_id).exclude(tc_theme=''):
@@ -164,14 +169,29 @@ def _build_reverse_tc_theme_map(account_id):
 
 
 def _brands_for_tc_theme(tc_theme: str, duration, reverse_tc_map: dict) -> list[str]:
-    """Return list of normalised brand names for a tc_theme + optional duration."""
-    nt = _normalize(tc_theme)
-    candidates = reverse_tc_map.get(nt, [])
+    """Return list of normalised brand names for a tc_theme + optional duration.
+
+    Supports wildcard prefix matching: if a stored key ends with '*', any TCRow
+    tc_theme that starts with the prefix (before the '*') will match.
+    """
+    nt  = _normalize(tc_theme)
     dur = int(duration) if duration is not None else None
-    brands = []
-    for norm_brand, map_dur in candidates:
-        if map_dur is None or map_dur == dur:
-            brands.append(norm_brand)
+    brands: list[str] = []
+    seen: set = set()
+    for stored_theme, candidates in reverse_tc_map.items():
+        # Exact match
+        if stored_theme == nt:
+            match = True
+        # Wildcard prefix match: stored key ends with '*'
+        elif stored_theme.endswith('*') and nt.startswith(stored_theme[:-1]):
+            match = True
+        else:
+            match = False
+        if match:
+            for norm_brand, map_dur in candidates:
+                if (map_dur is None or map_dur == dur) and norm_brand not in seen:
+                    brands.append(norm_brand)
+                    seen.add(norm_brand)
     return brands
 
 
@@ -485,13 +505,29 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
 
         matched_row = None
         for tc_theme in tc_themes:
-            key        = (tc_theme, dur)
-            candidates = available_unconfirmed.get(key, [])
-            # Late-aired rule: TCRow.date >= ScheduleRow.date
-            valid = [r for r in candidates if r.date >= sr.date]
-            if valid:
-                matched_row = valid[0]
-                break
+            if tc_theme.endswith('*'):
+                # Wildcard prefix: find all available_unconfirmed keys whose
+                # tc_theme starts with the prefix (before the '*').
+                prefix = tc_theme[:-1]
+                matching_keys = [
+                    k for k in available_unconfirmed
+                    if k[1] == dur and k[0].startswith(prefix)
+                ]
+                for k in matching_keys:
+                    valid = [r for r in available_unconfirmed[k] if r.date >= sr.date]
+                    if valid:
+                        matched_row = valid[0]
+                        break
+                if matched_row:
+                    break
+            else:
+                key        = (tc_theme, dur)
+                candidates = available_unconfirmed.get(key, [])
+                # Late-aired rule: TCRow.date >= ScheduleRow.date
+                valid = [r for r in candidates if r.date >= sr.date]
+                if valid:
+                    matched_row = valid[0]
+                    break
 
         if matched_row:
             avail_key = (_normalize(matched_row.tc_theme), dur)
