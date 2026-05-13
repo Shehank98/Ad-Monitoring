@@ -5069,9 +5069,17 @@ def summary_report(request):
                     elif row['status'] == 'not_aired':
                         entry['n_missed'] += 1
 
-                tc_scopes = set(
+                # Per-schedule TC: reports explicitly linked to a schedule via the FK.
+                # Unlinked reports (schedule=NULL, uploaded without selecting a schedule)
+                # fall back to channel+month matching for backward compatibility.
+                per_schedule_tc_ids = set(
                     TransmissionReport.objects
-                    .filter(account_id=account_id)
+                    .filter(account_id=account_id, schedule__isnull=False)
+                    .values_list('schedule_id', flat=True)
+                )
+                unlinked_tc_scopes = set(
+                    TransmissionReport.objects
+                    .filter(account_id=account_id, schedule__isnull=True)
                     .values_list('channel', 'month')
                 )
 
@@ -5090,7 +5098,7 @@ def summary_report(request):
                     planned = planned_map.get(sched.id, 0)
                     aired   = mr.get('n_matched', 0)
                     missed  = mr.get('n_missed', 0)
-                    has_tc         = (ch, mo) in tc_scopes
+                    has_tc         = (sched.id in per_schedule_tc_ids) or ((ch, mo) in unlinked_tc_scopes)
                     has_reconciled = mr.get('total', 0) > 0
                     pct = min(int(aired / planned * 100), 100) if planned else 0
 
