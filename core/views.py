@@ -733,11 +733,14 @@ def schedule_upload(request):
                 f'Schedule #{schedule.schedule_number} v{version} for {account} '
                 f'({month}, {start_date} → {end_date}) uploaded - {row_count:,} rows.')
 
-            # Auto-run verification in background (avoids HTTP timeout on large accounts)
+            # Auto-run verification in background then email not-aired spots report
             try:
                 import threading
-                from verification.engine import auto_run_all_for_account as _auto_run
-                t = threading.Thread(target=_auto_run, args=(account.id,), daemon=True)
+                t = threading.Thread(
+                    target=_run_verification_then_email,
+                    args=(account.id,),
+                    daemon=True,
+                )
                 t.start()
             except Exception:
                 pass
@@ -1414,19 +1417,17 @@ def monitoring_upload(request):
                 f'{"MapOnline" if data_type == "maponline" else "MediaWatch (LMRB)"} - '
                 f'{account} - {len(channel_metas)} channel(s): {ch_names}. Uploaded successfully.')
 
-            # Auto-run verification: MapOnline → preliminary engine; MediaWatch → final engine
+            # Auto-run verification then send not-aired email notification.
+            # MapOnline → preliminary engine; MediaWatch → final engine.
+            # The wrapper thread runs the engine first, then emails recipients.
             try:
                 import threading
-                if data_type == 'maponline':
-                    from verification.engine import auto_run_maponline_for_account
-                    t = threading.Thread(
-                        target=auto_run_maponline_for_account, args=(account.id,), daemon=True
-                    )
-                else:
-                    from verification.engine import auto_run_all_for_account
-                    t = threading.Thread(
-                        target=auto_run_all_for_account, args=(account.id,), daemon=True
-                    )
+                t = threading.Thread(
+                    target=_run_verification_then_email,
+                    args=(account.id,),
+                    kwargs={'is_maponline': data_type == 'maponline'},
+                    daemon=True,
+                )
                 t.start()
             except Exception as e:
                 print(f"[monitoring_upload] auto-verification error (non-fatal): {e}")
@@ -7047,12 +7048,13 @@ def system_settings(request):
 
     # Group settings by their category display label
     from collections import OrderedDict
-    CATEGORY_ORDER = ['reconciliation', 'tc_parsing', 'lmrb_parsing', 'whatsapp']
+    CATEGORY_ORDER = ['reconciliation', 'tc_parsing', 'lmrb_parsing', 'whatsapp', 'email']
     CATEGORY_LABELS = {
         'reconciliation': 'Reconciliation',
         'tc_parsing':     'TC File Parsing',
         'lmrb_parsing':   'LMRB / MapOnline File Parsing',
         'whatsapp':       'WhatsApp Notifications',
+        'email':          'Email Notifications',
     }
     all_settings = list(SystemSetting.objects.all())
     categories = OrderedDict()
@@ -8428,6 +8430,185 @@ def _notify_reconciliation_done_whatsapp(account_id, channel, month, result):
             lmrb_confirmed=result.get('lmrb_confirmed', 0),
             account_id=account_id,
         )
+
+
+def _notify_missed_spots_email(account_id):
+    """After a verification run, email all active users with account access.
+
+    Sends one email per (channel, month) scope that has not-aired spots,
+    with an HTML table in the body and a missed-ads PDF attached.
+    Reads SMTP credentials from SystemSetting (category: email).
+    Safe to call even when email is disabled or not configured — returns silently.
+    """
+    from core.models import (
+        Account as AccountModel, MatchResult, Schedule,
+        get_setting, get_setting_int,
+    )
+    from accounts.models import User as UserModel
+    from django.core.mail import EmailMessage, get_connection
+
+    if not get_setting_int('email_enabled', 0):
+        return
+
+    host      = get_setting('email_host', '').strip()
+    port      = get_setting_int('email_port', 587)
+    use_tls   = bool(get_setting_int('email_use_tls', 1))
+    username  = get_setting('email_host_user', '').strip()
+    password  = get_setting('email_host_password', '').strip()
+    from_addr = get_setting('email_from_address', '').strip() or username
+
+    if not host or not username or not from_addr:
+        print('[email notify] SMTP not fully configured — skipping.')
+        return
+
+    account = AccountModel.objects.filter(pk=account_id).first()
+    if not account:
+        return
+
+    # Collect recipient addresses: direct account users + client-level users
+    direct_emails = list(
+        UserModel.objects.filter(is_active=True, accounts=account)
+        .values_list('email', flat=True)
+    )
+    client_emails = []
+    if getattr(account, 'client_id', None):
+        client_emails = list(
+            UserModel.objects.filter(is_active=True, clients=account.client_id)
+            .values_list('email', flat=True)
+        )
+    all_emails = list({e for e in direct_emails + client_emails if e})
+    if not all_emails:
+        print(f'[email notify] No recipients found for account {account} — skipping.')
+        return
+
+    # One email per (channel, month) scope that has not-aired spots
+    scopes = list(
+        MatchResult.objects.filter(account=account, status__in=['not_aired', 'no_mapping'])
+        .values_list('channel', 'month').distinct()
+    )
+
+    for channel, month in scopes:
+        not_aired_rows = list(
+            MatchResult.objects.filter(
+                account=account, channel=channel, month=month,
+                status__in=['not_aired', 'no_mapping'],
+            ).order_by('scheduled_date', 'brand')
+        )
+        if not not_aired_rows:
+            continue
+
+        # ── Build HTML body ────────────────────────────────────────────────
+        table_rows_html = ''
+        for mr in not_aired_rows:
+            date_str     = mr.scheduled_date.strftime('%d %b %Y') if mr.scheduled_date else '—'
+            window_str   = f'{mr.planned_start or "—"} – {mr.planned_end or "—"}'
+            dur_str      = f'{mr.duration}s' if mr.duration else '—'
+            status_label = 'Not Aired' if mr.status == 'not_aired' else 'No Brand Mapping'
+            table_rows_html += (
+                f'<tr>'
+                f'<td style="padding:6px 10px;border:1px solid #e2e8f0;">{mr.brand}</td>'
+                f'<td style="padding:6px 10px;border:1px solid #e2e8f0;">{mr.programme or "—"}</td>'
+                f'<td style="padding:6px 10px;border:1px solid #e2e8f0;">{date_str}</td>'
+                f'<td style="padding:6px 10px;border:1px solid #e2e8f0;">{window_str}</td>'
+                f'<td style="padding:6px 10px;border:1px solid #e2e8f0;">{dur_str}</td>'
+                f'<td style="padding:6px 10px;border:1px solid #e2e8f0;color:#dc2626;font-weight:600;">{status_label}</td>'
+                f'</tr>'
+            )
+
+        count = len(not_aired_rows)
+        html_body = f'''<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,sans-serif;color:#1e293b;margin:0;padding:20px;background:#f8fafc;">
+  <div style="max-width:820px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.12);">
+    <div style="background:#1e3a5f;color:#fff;padding:24px 32px;">
+      <h1 style="margin:0;font-size:20px;">Not Aired Spots Report</h1>
+      <p style="margin:6px 0 0;opacity:.85;font-size:14px;">{account} &bull; {channel} &bull; {month}</p>
+    </div>
+    <div style="padding:24px 32px;">
+      <p style="margin:0 0 16px;font-size:14px;">
+        <strong>{count}</strong> spot{"s" if count != 1 else ""} not found in monitoring data.
+        Please verify with the channel and update the Marketing Officer accordingly.
+      </p>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="background:#f1f5f9;">
+            <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left;">Brand</th>
+            <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left;">Programme</th>
+            <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left;">Planned Date</th>
+            <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left;">Window</th>
+            <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left;">Duration</th>
+            <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left;">Status</th>
+          </tr>
+        </thead>
+        <tbody>{table_rows_html}</tbody>
+      </table>
+      <p style="margin:20px 0 0;font-size:11px;color:#94a3b8;">
+        A full missed-ads PDF is attached to this email.
+      </p>
+    </div>
+  </div>
+</body>
+</html>'''
+
+        # ── Build PDF attachment ───────────────────────────────────────────
+        pdf_bytes = b''
+        try:
+            all_rows = list(
+                MatchResult.objects.filter(
+                    account=account, channel=channel, month=month,
+                    status__in=['not_aired', 'no_mapping', 'programme_mismatch', 'late_telecast'],
+                ).order_by('scheduled_date', 'brand')
+            )
+            schedule = Schedule.objects.filter(
+                account=account, channel=channel, month=month,
+            ).order_by('-uploaded_at').first()
+            sched_no = schedule.schedule_number if schedule else ''
+            pdf_bytes = _build_missed_ad_pdf(str(account), channel, month, all_rows,
+                                             schedule_number=sched_no)
+        except Exception as exc:
+            print(f'[email notify] PDF generation failed (non-fatal): {exc}')
+
+        # ── Send email ─────────────────────────────────────────────────────
+        try:
+            conn = get_connection(
+                backend='django.core.mail.backends.smtp.EmailBackend',
+                host=host, port=port, username=username, password=password,
+                use_tls=use_tls, fail_silently=True,
+            )
+            subject = (
+                f'Not Aired Spots – {account} – {channel} – {month} '
+                f'({count} spot{"s" if count != 1 else ""})'
+            )
+            msg = EmailMessage(subject=subject, body=html_body,
+                               from_email=from_addr, to=all_emails, connection=conn)
+            msg.content_subtype = 'html'
+            if pdf_bytes:
+                safe_ch = channel.replace(' ', '_').replace('/', '_')
+                safe_mo = month.replace(' ', '_')
+                msg.attach(f'not_aired_{safe_ch}_{safe_mo}.pdf', pdf_bytes, 'application/pdf')
+            msg.send(fail_silently=True)
+            print(f'[email notify] Sent not-aired email: {channel}/{month}, '
+                  f'{count} spots, {len(all_emails)} recipients')
+        except Exception as exc:
+            print(f'[email notify] Failed to send email for {channel}/{month}: {exc}')
+
+
+def _run_verification_then_email(account_id, is_maponline=False):
+    """Thread target: run verification engine then send not-aired email notification."""
+    try:
+        if is_maponline:
+            from verification.engine import auto_run_maponline_for_account
+            auto_run_maponline_for_account(account_id)
+        else:
+            from verification.engine import auto_run_all_for_account
+            auto_run_all_for_account(account_id)
+    except Exception as exc:
+        print(f'[verify thread] engine error (non-fatal): {exc}')
+    try:
+        _notify_missed_spots_email(account_id)
+    except Exception as exc:
+        print(f'[verify thread] email notify error (non-fatal): {exc}')
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

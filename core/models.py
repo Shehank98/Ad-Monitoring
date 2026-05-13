@@ -950,6 +950,84 @@ SETTING_DEFAULTS = [
         'description': 'Cell fill colour when exporting a schedule that has not yet been reconciled.',
         'category': 'display',
     },
+    # ── Email Notifications ───────────────────────────────────────────────────
+    {
+        'key': 'email_enabled',
+        'value': '0',
+        'label': 'Email Notifications Enabled',
+        'description': (
+            'Set to 1 to enable email notifications. '
+            'Requires SMTP settings to be configured below. '
+            'When enabled, all active users with account access receive an email '
+            'with not-aired spots (and a PDF attachment) after each verification run.'
+        ),
+        'category': 'email',
+    },
+    {
+        'key': 'email_host',
+        'value': '',
+        'label': 'SMTP Host',
+        'description': (
+            'SMTP server hostname. '
+            'Examples: smtp.gmail.com (Gmail), smtp.office365.com (Outlook/M365), '
+            'smtp.mailgun.org (Mailgun).'
+        ),
+        'category': 'email',
+    },
+    {
+        'key': 'email_port',
+        'value': '587',
+        'label': 'SMTP Port',
+        'description': (
+            'SMTP port number. '
+            'Use 587 for STARTTLS (recommended), 465 for implicit SSL, '
+            '25 for plain/unauthenticated (not recommended).'
+        ),
+        'category': 'email',
+    },
+    {
+        'key': 'email_use_tls',
+        'value': '1',
+        'label': 'Use STARTTLS',
+        'description': (
+            'Set to 1 to use STARTTLS encryption (required for port 587). '
+            'Set to 0 for plain or implicit-SSL connections.'
+        ),
+        'category': 'email',
+    },
+    {
+        'key': 'email_host_user',
+        'value': '',
+        'label': 'SMTP Username / Sender Address',
+        'description': (
+            'The email address used to authenticate and send notifications. '
+            'For Gmail: your.address@gmail.com. '
+            'This address is also used as the From: address unless overridden below.'
+        ),
+        'category': 'email',
+    },
+    {
+        'key': 'email_host_password',
+        'value': '',
+        'label': 'SMTP Password / App Password',
+        'description': (
+            'SMTP password for the sender account. '
+            'For Gmail with 2-Factor Authentication: generate a 16-character App Password '
+            'at Google Account → Security → App Passwords.'
+        ),
+        'category': 'email',
+    },
+    {
+        'key': 'email_from_address',
+        'value': '',
+        'label': 'From: Address (optional override)',
+        'description': (
+            'Display name and address shown to recipients. '
+            'Leave blank to use the SMTP Username. '
+            'Example: Ad Monitor <noreply@agency.com>.'
+        ),
+        'category': 'email',
+    },
 ]
 
 
@@ -966,6 +1044,7 @@ class SystemSetting(models.Model):
         ('tc_parsing',     'TC File Parsing'),
         ('lmrb_parsing',   'LMRB / MapOnline File Parsing'),
         ('whatsapp',       'WhatsApp Notifications'),
+        ('email',          'Email Notifications'),
         ('display',        'Display & Export'),
     ]
 
