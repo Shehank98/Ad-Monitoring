@@ -4629,13 +4629,18 @@ def tc_three_way(request):
             sch_filter['schedule_id'] = schedule_id
         planned_count = ScheduleRow.objects.filter(**sch_filter).count()
 
-        # Query all TC rows for this scope, ordered by date + time
+        # Query all TC rows for this scope, ordered by date + time.
+        # When a schedule_id is active, restrict to the TC report explicitly
+        # linked to that schedule so rows from other schedules' TC reports
+        # (which may have stale is_lmrb_confirmed flags) are not shown here.
         tc_qs = (
             TCRow.objects
             .filter(account_id=account_id, channel=channel, tc_report__month=month)
             .select_related('matched_lmrb', 'matched_schedule')
             .order_by('date', 'aired_time')
         )
+        if schedule_id:
+            tc_qs = tc_qs.filter(tc_report__schedule_id=schedule_id)
 
         for tc in tc_qs:
             lmrb = tc.matched_lmrb  # None if not LMRB-confirmed
