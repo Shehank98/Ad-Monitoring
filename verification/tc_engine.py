@@ -228,10 +228,15 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
     # ── Reset mode ────────────────────────────────────────────────────────────
     if mode == 'reset':
         # Exclude TC rows pinned by a ManualMatch so manual links survive a reset.
-        TCRow.objects.filter(
+        reset_qs = TCRow.objects.filter(
             account_id=account_id, channel=channel, tc_report__month=month,
             manual_match__isnull=True,
-        ).update(
+        )
+        if schedule_id:
+            # Only reset TC rows belonging to the TC report linked to this schedule,
+            # so a reset for T/5617 never touches T/5588's matched TC rows.
+            reset_qs = reset_qs.filter(tc_report__schedule_id=schedule_id)
+        reset_qs.update(
             is_schedule_matched=False, matched_schedule=None,
             is_lmrb_confirmed=False, matched_lmrb=None,
             is_extra=False,
@@ -266,6 +271,11 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
         account_id=account_id, channel__iexact=channel,
         tc_report__month=month,
     )
+    if schedule_id:
+        # Restrict to TC rows from the TC report explicitly linked to this schedule.
+        # This prevents two schedules on the same channel+month from sharing TC rows
+        # and producing inflated/incorrect matched counts.
+        tc_qs = tc_qs.filter(tc_report__schedule_id=schedule_id)
     if mode == 'smart':
         # Also exclude TC rows already pinned by a ManualMatch.
         tc_qs = tc_qs.filter(
@@ -706,6 +716,10 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
             tc_report__month=month,
             is_lmrb_confirmed=True,
         )
+        if schedule_id:
+            # Scope to TC rows from the report linked to this specific schedule so
+            # two schedules on the same channel+month don't share TC matched counts.
+            aired_q = aired_q.filter(tc_report__schedule_id=schedule_id)
         if tc_themes:
             theme_q = Q()
             for t in tc_themes:
@@ -736,6 +750,8 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
             tc_report__month=month,
             is_lmrb_confirmed=True,
         )
+        if schedule_id:
+            third_party_q = third_party_q.filter(tc_report__schedule_id=schedule_id)
         if tc_themes:
             tq = Q()
             for t in tc_themes:

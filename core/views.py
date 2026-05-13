@@ -5159,9 +5159,10 @@ def summary_excel(request):
     from openpyxl.utils import get_column_letter
     from verification.tc_engine import build_summary_data
 
-    account_id = request.GET.get('account_id', '')
-    channel    = request.GET.get('channel', '')
-    month      = request.GET.get('month', '')
+    account_id  = request.GET.get('account_id', '')
+    channel     = request.GET.get('channel', '')
+    month       = request.GET.get('month', '')
+    schedule_id = request.GET.get('schedule_id', '').strip()
 
     if not (account_id and channel and month):
         messages.error(request, 'Incomplete parameters.')
@@ -5172,13 +5173,16 @@ def summary_excel(request):
         return redirect('/dashboard/summary/')
 
     account  = get_object_or_404(Account, id=account_id)
-    data     = build_summary_data(account_id, channel, month)
+    sid      = int(schedule_id) if schedule_id else None
+    data     = build_summary_data(account_id, channel, month, schedule_id=sid)
     meta     = SummaryReportMeta.objects.filter(
         account_id=account_id, channel=channel, month=month
     ).first()
-    sched    = Schedule.objects.filter(
-        account_id=account_id, channel=channel, month=month
-    ).order_by('-uploaded_at').first()
+    sched    = (
+        Schedule.objects.filter(id=sid).first() if sid else
+        Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+        .order_by('-uploaded_at').first()
+    )
 
     estimate_no = sched.schedule_number if sched else ''
 
@@ -5456,9 +5460,10 @@ def summary_pdf(request):
     from verification.tc_engine import build_summary_data
     from django.db.models import Min, Max
 
-    account_id = request.GET.get('account_id', '')
-    channel    = request.GET.get('channel', '')
-    month      = request.GET.get('month', '')
+    account_id  = request.GET.get('account_id', '')
+    channel     = request.GET.get('channel', '')
+    month       = request.GET.get('month', '')
+    schedule_id = request.GET.get('schedule_id', '').strip()
 
     if not (account_id and channel and month):
         messages.error(request, 'Incomplete parameters.')
@@ -5468,13 +5473,16 @@ def summary_pdf(request):
         return redirect('/dashboard/summary/')
 
     account = get_object_or_404(Account, id=account_id)
-    data    = build_summary_data(account_id, channel, month)
+    sid     = int(schedule_id) if schedule_id else None
+    data    = build_summary_data(account_id, channel, month, schedule_id=sid)
     meta    = SummaryReportMeta.objects.filter(
         account_id=account_id, channel=channel, month=month
     ).first()
-    sched = Schedule.objects.filter(
-        account_id=account_id, channel=channel, month=month
-    ).order_by('-uploaded_at').first()
+    sched = (
+        Schedule.objects.filter(id=sid).first() if sid else
+        Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+        .order_by('-uploaded_at').first()
+    )
     estimate_no = sched.schedule_number if sched else ''
 
     # ── Palette ───────────────────────────────────────────────────────────────
