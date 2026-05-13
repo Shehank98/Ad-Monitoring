@@ -2438,7 +2438,7 @@ def monitoring_dashboard(request):
 
         not_aired_rows = list(qs.filter(status__in=['not_aired', 'no_mapping']).order_by('scheduled_date', 'brand'))
 
-        # Build notes_map for the Not Aired tab so MO notes are visible to ops
+        # Build notes_map for the Not Aired tab so both MO and Ops notes are visible
         _na_sr_ids = [mr.schedule_row_id for mr in not_aired_rows if mr.schedule_row_id]
         _notes_qs  = SpotNote.objects.filter(schedule_row_id__in=_na_sr_ids)
         not_aired_notes_map = {}
@@ -2446,14 +2446,22 @@ def monitoring_dashboard(request):
             not_aired_notes_map.setdefault(_n.schedule_row_id, {})
             not_aired_notes_map[_n.schedule_row_id][_n.role] = _n
 
+        # Count unread MO notes so ops sees a badge on the Not Aired tab
+        not_aired_unread_mo = sum(
+            1 for sr_id in _na_sr_ids
+            if not_aired_notes_map.get(sr_id, {}).get('mo') and
+               not_aired_notes_map[sr_id]['mo'].unread_for_recipient
+        )
+
         tab_data = {
-            'full':      _full_rows,
+            'full':                  _full_rows,
             # Programme mismatch = valid match (same day, brand, theme - time offset only)
-            'matched':   list(qs.filter(status__in=['matched', 'programme_mismatch']).select_related('lmrb_row').order_by('scheduled_date', 'brand')),
-            'not_aired': not_aired_rows,
-            'prog_mis':  list(qs.filter(status='programme_mismatch').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
-            'late':      list(qs.filter(status='late_telecast').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
-            'not_aired_notes_map': not_aired_notes_map,
+            'matched':               list(qs.filter(status__in=['matched', 'programme_mismatch']).select_related('lmrb_row').order_by('scheduled_date', 'brand')),
+            'not_aired':             not_aired_rows,
+            'prog_mis':              list(qs.filter(status='programme_mismatch').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
+            'late':                  list(qs.filter(status='late_telecast').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
+            'not_aired_notes_map':   not_aired_notes_map,
+            'not_aired_unread_mo':   not_aired_unread_mo,
         }
 
         # Channel summary (only one channel in this scope)
@@ -8886,6 +8894,8 @@ def channel_officer_missed_commercials(request):
                     month=sched.month,
                     schedule_row__schedule=sched,
                     status__in=['not_aired', 'no_mapping'],
+                ).exclude(
+                    schedule_row__is_manual_matched=True,
                 ).select_related('schedule_row').order_by('scheduled_date', 'brand')
             )
 
@@ -8921,14 +8931,36 @@ def channel_officer_missed_commercials(request):
                 'count':    len(rows),
             })
 
+    # Count unread ops notes for the MO's channels so we can show a badge
+    unread_ops_count = 0
+    if selected_account and account_channels:
+        sr_ids_for_channel = list(
+            ScheduleRow.objects.filter(
+                account=selected_account, channel=selected_channel,
+            ).values_list('id', flat=True)
+        )
+        unread_ops_count = SpotNote.objects.filter(
+            schedule_row_id__in=sr_ids_for_channel,
+            role='ops',
+            unread_for_recipient=True,
+        ).count()
+
+    # Unread in-app notifications for this MO
+    from core.models import SpotNotification
+    unread_notifications = list(
+        SpotNotification.objects.filter(recipient=user, is_read=False).order_by('-created_at')[:20]
+    )
+
     return render(request, 'channel_officers/missed_commercials.html', {
-        'profile':          profile,
-        'user_accounts':    user_accounts,
-        'selected_account': selected_account,
-        'account_channels': account_channels,
-        'selected_channel': selected_channel,
-        'schedule_groups':  schedule_groups,
-        'total_missed':     sum(g['count'] for g in schedule_groups),
+        'profile':              profile,
+        'user_accounts':        user_accounts,
+        'selected_account':     selected_account,
+        'account_channels':     account_channels,
+        'selected_channel':     selected_channel,
+        'schedule_groups':      schedule_groups,
+        'total_missed':         sum(g['count'] for g in schedule_groups),
+        'unread_ops_count':     unread_ops_count,
+        'unread_notifications': unread_notifications,
     })
 
 
@@ -8983,7 +9015,7 @@ def spot_note_save(request):
     note, _ = SpotNote.objects.update_or_create(
         schedule_row_id=sr_id,
         role=role,
-        defaults={'text': text, 'created_by': user},
+        defaults={'text': text, 'created_by': user, 'unread_for_recipient': True},
     )
     author_name = note.created_by.name if note.created_by else 'Unknown'
     return JsonResponse({
@@ -8992,7 +9024,218 @@ def spot_note_save(request):
         'text':        note.text,
         'updated_at':  note.updated_at.strftime('%d %b %Y %H:%M'),
         'author_name': author_name,
+        'role':        role,
     })
+
+
+@login_required
+@require_POST
+def mark_spot_aired(request):
+    """AJAX POST: Operations staff manually confirms a Not Aired spot as aired.
+
+    Creates a schedule_lmrb ManualMatch linking the ScheduleRow to a chosen
+    LMRBRow, immediately writes a manual_match MatchResult so the spot
+    disappears from the Not Aired tab and the MO's Missed Commercials list,
+    then sends an in-app SpotNotification to all Marketing Officers for the
+    account/channel.
+
+    POST params:
+        schedule_row_id  – ScheduleRow.pk
+        lmrb_row_id      – LMRBRow.pk (the extra / unmatched LMRB row to link)
+        account_id       – Account.pk
+        channel
+        month
+    """
+    from core.models import ManualMatch, MatchResult, SpotNotification
+    from accounts.models import User as AuthUser
+
+    if request.user.role not in ('operations', 'admin', 'super_admin', 'team_head'):
+        return JsonResponse({'ok': False, 'error': 'Not authorised'}, status=403)
+
+    schedule_row_id = request.POST.get('schedule_row_id', '').strip()
+    lmrb_row_id     = request.POST.get('lmrb_row_id', '').strip()
+    account_id      = request.POST.get('account_id', '').strip()
+    channel         = request.POST.get('channel', '').strip()
+    month           = request.POST.get('month', '').strip()
+
+    if not all([schedule_row_id, lmrb_row_id, account_id, channel, month]):
+        return JsonResponse({'ok': False, 'error': 'Missing parameters'}, status=400)
+
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied'}, status=403)
+
+    sr = get_object_or_404(ScheduleRow, id=schedule_row_id, account_id=account_id)
+    if sr.is_manual_matched:
+        return JsonResponse({'ok': False, 'error': 'Row already manually matched'})
+
+    lr = get_object_or_404(
+        LMRBRow, id=lmrb_row_id, account_id=account_id,
+        is_manual_matched=False, is_sponsorship_matched=False,
+    )
+    if ManualMatch.objects.filter(lmrb_row=lr).exists():
+        return JsonResponse({'ok': False, 'error': 'LMRB row already matched'})
+    if ManualMatch.objects.filter(schedule_row=sr).exists():
+        return JsonResponse({'ok': False, 'error': 'Schedule row already matched'})
+
+    mm = ManualMatch.objects.create(
+        account_id   = account_id,
+        channel      = channel,
+        month        = month,
+        match_mode   = 'schedule_lmrb',
+        schedule_row = sr,
+        lmrb_row     = lr,
+        matched_by   = request.user,
+    )
+
+    ScheduleRow.objects.filter(id=sr.id).update(is_manual_matched=True)
+    LMRBRow.objects.filter(id=lr.id).update(is_manual_matched=True)
+
+    # Remove any stale engine MatchResult and create a manual_match one immediately
+    MatchResult.objects.filter(
+        schedule_row=sr,
+        status__in=['not_aired', 'no_mapping', 'late_telecast', 'programme_mismatch'],
+    ).delete()
+
+    MatchResult.objects.update_or_create(
+        schedule_row=sr,
+        defaults={
+            'account_id':     account_id,
+            'channel':        channel,
+            'month':          month,
+            'status':         'manual_match',
+            'brand':          sr.brand or '',
+            'programme':      sr.programme or '',
+            'theme':          '',
+            'scheduled_date': sr.date,
+            'planned_start':  sr.start_time or '',
+            'planned_end':    sr.end_time or '',
+            'duration':       sr.duration,
+            'lmrb_row':       lr,
+            'aired_date':     lr.date,
+            'air_time':       lr.advt_time or '',
+            'source':         lr.source or '',
+        },
+    )
+
+    # Notify all Marketing Officers who have access to this account+channel
+    from core.models import ChannelOfficer
+    mo_users = AuthUser.objects.filter(
+        role='channel_officer',
+        channel_officer_profiles__account_id=account_id,
+        channel_officer_profiles__channel=channel,
+        is_active=True,
+    ).distinct()
+
+    brand_label = sr.brand or 'Unknown brand'
+    date_label  = sr.date.strftime('%d %b %Y') if sr.date else ''
+    actor_name  = request.user.name or request.user.email or 'Operations'
+    notif_msg   = (
+        f'{brand_label} ({sr.duration}s) on {date_label} has been '
+        f'manually confirmed as aired by {actor_name}.'
+    )
+    for mo_user in mo_users:
+        SpotNotification.objects.create(
+            recipient    = mo_user,
+            schedule_row = sr,
+            message      = notif_msg,
+            created_by   = request.user,
+        )
+
+    return JsonResponse({
+        'ok':       True,
+        'mm_id':    mm.id,
+        'brand':    brand_label,
+        'date':     date_label,
+        'notified': mo_users.count(),
+    })
+
+
+@login_required
+@require_POST
+def mark_notes_read(request):
+    """AJAX POST: mark SpotNotes as read for the requesting user.
+
+    Clears unread_for_recipient=True on notes where the requesting user is
+    the intended recipient, scoped by account_id + channel + month.
+
+    POST params:
+        account_id
+        channel
+        month
+        target_role  – 'mo' or 'ops' (the role that WROTE the notes, i.e. the
+                       notes THIS user needs to read)
+    """
+    from core.models import SpotNote
+
+    account_id  = request.POST.get('account_id', '').strip()
+    channel     = request.POST.get('channel', '').strip()
+    month       = request.POST.get('month', '').strip()
+    target_role = request.POST.get('target_role', '').strip()
+
+    if not all([account_id, channel, target_role]):
+        return JsonResponse({'ok': False, 'error': 'Missing parameters'}, status=400)
+
+    user = request.user
+
+    # Determine if this user is a legitimate recipient for target_role notes
+    if target_role == 'mo':
+        # ops reads MO notes on Not Aired tab
+        if user.role not in ('operations', 'admin', 'super_admin', 'team_head'):
+            return JsonResponse({'ok': False, 'error': 'Not authorised'}, status=403)
+        if not _account_access(user, account_id):
+            return JsonResponse({'ok': False, 'error': 'Access denied'}, status=403)
+    elif target_role == 'ops':
+        # MO reads ops notes on Missed Commercials
+        if user.role == 'channel_officer':
+            allowed_accounts = list(
+                ChannelOfficer.objects.filter(user=user).values_list('account_id', flat=True)
+            )
+            allowed_channels = list(
+                ChannelOfficer.objects.filter(user=user).values_list('channel', flat=True)
+            )
+            if int(account_id) not in allowed_accounts or channel not in allowed_channels:
+                return JsonResponse({'ok': False, 'error': 'Access denied'}, status=403)
+        elif not _account_access(user, account_id):
+            return JsonResponse({'ok': False, 'error': 'Access denied'}, status=403)
+    else:
+        return JsonResponse({'ok': False, 'error': 'Invalid target_role'}, status=400)
+
+    # Mark unread notes as read (month is optional — omit to clear all months)
+    sr_filter = {'account_id': account_id, 'channel': channel}
+    if month:
+        sr_filter['month'] = month
+    sr_ids = list(
+        ScheduleRow.objects.filter(**sr_filter).values_list('id', flat=True)
+    )
+    updated = SpotNote.objects.filter(
+        schedule_row_id__in=sr_ids,
+        role=target_role,
+        unread_for_recipient=True,
+    ).update(unread_for_recipient=False)
+
+    return JsonResponse({'ok': True, 'cleared': updated})
+
+
+@login_required
+def spot_notifications(request):
+    """AJAX GET: return unread SpotNotifications for the requesting user.
+    Also marks them as read if ?mark_read=1 is passed.
+    """
+    from core.models import SpotNotification
+    user = request.user
+    qs   = SpotNotification.objects.filter(recipient=user, is_read=False).order_by('-created_at')[:20]
+    items = [
+        {
+            'id':         n.id,
+            'message':    n.message,
+            'created_at': n.created_at.strftime('%d %b %Y %H:%M'),
+            'sr_id':      n.schedule_row_id,
+        }
+        for n in qs
+    ]
+    if request.GET.get('mark_read') == '1':
+        SpotNotification.objects.filter(recipient=user, is_read=False).update(is_read=True)
+    return JsonResponse({'ok': True, 'notifications': items, 'count': len(items)})
 
 
 @login_required

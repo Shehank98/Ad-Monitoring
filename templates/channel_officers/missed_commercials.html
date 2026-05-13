@@ -30,7 +30,6 @@
   .note-textarea {
     width: 100%; font-size: .75rem; border: 1px solid #cbd5e1;
     border-radius: .4rem; padding: .4rem .5rem; resize: vertical; min-height: 60px;
-    focus: outline-none;
   }
   .note-textarea:focus { outline: none; border-color: #0891b2; box-shadow: 0 0 0 2px rgba(8,145,178,.15); }
   .note-save-btn {
@@ -57,6 +56,28 @@
   <p class="font-bold">No channel assigned. Contact your administrator.</p>
 </div>
 {% else %}
+
+<!-- Notifications banner -->
+{% if unread_notifications %}
+<div class="mb-4 rounded-xl border border-amber-200 bg-amber-50 divide-y divide-amber-100" id="notif-banner">
+  <div class="flex items-center justify-between px-4 py-2">
+    <p class="text-xs font-bold text-amber-700">
+      <i class="fa-solid fa-bell mr-1"></i>{{ unread_notifications|length }} new notification{{ unread_notifications|length|pluralize }}
+    </p>
+    <button onclick="dismissNotifications()" class="text-[10px] font-semibold text-amber-600 hover:text-amber-800">
+      <i class="fa-solid fa-check mr-0.5"></i>Mark all read
+    </button>
+  </div>
+  {% for notif in unread_notifications %}
+  <div class="px-4 py-2">
+    <p class="text-xs text-amber-800">
+      <i class="fa-solid fa-check-circle text-emerald-500 mr-1"></i>{{ notif.message }}
+    </p>
+    <p class="text-[10px] text-amber-500 mt-0.5">{{ notif.created_at|date:"d M Y H:i" }}</p>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
 
 <!-- Account / Channel filter -->
 <div class="flex flex-wrap items-center gap-3 mb-5">
@@ -89,6 +110,11 @@
       No not-aired spots found
     {% endif %}
   </span>
+  {% if unread_ops_count %}
+  <span class="px-2 py-0.5 rounded-full bg-blue-500 text-white text-[10px] font-bold">
+    <i class="fa-solid fa-comment mr-0.5"></i>{{ unread_ops_count }} new ops note{{ unread_ops_count|pluralize }}
+  </span>
+  {% endif %}
 </div>
 
 {% if not schedule_groups %}
@@ -219,6 +245,9 @@
               <i class="fa-solid fa-user text-[9px] mr-0.5"></i>
               {{ row.ops_note.created_by.name|default:"Unknown" }}
               &middot; {{ row.ops_note.updated_at|date:"d M Y H:i" }}
+              {% if row.ops_note.unread_for_recipient %}
+              <span class="ml-1 px-1 py-0.5 bg-blue-500 text-white rounded text-[8px] font-bold">NEW</span>
+              {% endif %}
             </p>
             {% else %}
             <p class="note-empty">—</p>
@@ -300,7 +329,6 @@ function saveMONote(srId) {
             data.author_name + ' &middot; ' + data.updated_at;
         }
       }
-      // refresh edit button label
       const btn = wrapEl.querySelector('.note-edit-btn');
       if (btn) {
         btn.innerHTML = text
@@ -314,5 +342,30 @@ function saveMONote(srId) {
       alert('Network error — note not saved.');
     });
 }
+
+// ── Dismiss notifications ────────────────────────────────────────────────────
+function dismissNotifications() {
+  fetch('{% url "spot_notifications" %}?mark_read=1')
+    .then(() => {
+      const banner = document.getElementById('notif-banner');
+      if (banner) { banner.style.opacity = '0'; banner.style.transition = 'opacity 0.3s'; setTimeout(() => banner.remove(), 350); }
+    })
+    .catch(() => {});
+}
+
+// ── Auto-mark ops notes as read on page load ─────────────────────────────────
+{% if selected_account and selected_channel %}
+(function() {
+  const fd = new FormData();
+  fd.append('account_id', '{{ selected_account.id }}');
+  fd.append('channel', '{{ selected_channel|escapejs }}');
+  fd.append('month', '');
+  fd.append('target_role', 'ops');
+  fd.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+  // month is empty string here → mark_notes_read will handle empty month by
+  // querying all ScheduleRows for this account+channel (any month).
+  fetch('{% url "mark_notes_read" %}', { method: 'POST', body: fd }).catch(() => {});
+})();
+{% endif %}
 </script>
 {% endblock %}

@@ -112,6 +112,9 @@ urlpatterns = [
     path('channel-officer/missed-ads/',         views.channel_officer_missed_ads,           name='channel_officer_missed_ads'),
     path('channel-officer/missed-commercials/', views.channel_officer_missed_commercials,   name='channel_officer_missed_commercials'),
     path('spot-note/save/',                     views.spot_note_save,                       name='spot_note_save'),
+    path('spot/mark-aired/',                    views.mark_spot_aired,                      name='mark_spot_aired'),
+    path('spot/mark-notes-read/',               views.mark_notes_read,                      name='mark_notes_read'),
+    path('spot/notifications/',                 views.spot_notifications,                   name='spot_notifications'),
     path('tc/<int:pk>/download/',               views.tc_report_download,                   name='tc_report_download'),
 
     # Channel Officers (admin management)

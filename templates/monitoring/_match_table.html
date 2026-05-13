@@ -8,7 +8,12 @@
     tbody_id            - optional str, id attribute for the <tbody> (enables filterTab())
     filter_placeholder  - optional str, placeholder text for the filter input
     notes_map           - optional dict {schedule_row_id: {'mo': SpotNote|None, 'ops': SpotNote|None}}
-                          when provided, an extra "MO Notes" column is appended (read-only for ops)
+                          when provided, a "Notes" column is appended showing MO + Ops notes
+    show_mark_aired     - optional bool, when True adds an "Actions" column with "Mark as Aired" button
+                          (only rendered for ops users — JS handles the AJAX action)
+    account_id          - optional str, needed when show_mark_aired is True
+    channel             - optional str, needed when show_mark_aired is True
+    month               - optional str, needed when show_mark_aired is True
 {% endcomment %}
 {% if tbody_id %}
 <div class="mb-3">
@@ -32,12 +37,13 @@
         <th>Aired Date</th>
         <th>Aired Time</th>
         {% if show_status %}<th>Status</th>{% endif %}
-        {% if notes_map is not None %}<th style="min-width:180px;">MO Notes</th>{% endif %}
+        {% if notes_map is not None %}<th style="min-width:200px;">Notes</th>{% endif %}
+        {% if show_mark_aired %}<th>Actions</th>{% endif %}
       </tr>
     </thead>
     <tbody{% if tbody_id %} id="{{ tbody_id }}"{% endif %}>
       {% for mr in rows %}
-      <tr>
+      <tr id="mr-row-{{ mr.schedule_row_id }}">
         <td class="font-medium text-slate-800">{{ mr.brand|default:"-" }}</td>
         <td class="text-slate-600 max-w-[160px] truncate" title="{{ mr.programme }}">{{ mr.programme|default:"-" }}</td>
         {% if show_aired_programme %}
@@ -64,35 +70,102 @@
             <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">No Mapping</span>
           {% elif mr.status == 'pending' %}
             <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-yellow-100 text-yellow-700">Pending</span>
+          {% elif mr.status == 'manual_match' %}
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">Manually Confirmed</span>
           {% else %}
             <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">Not Aired</span>
           {% endif %}
         </td>
         {% endif %}
+
         {% if notes_map is not None %}
-        <td style="min-width:180px;">
+        <td style="min-width:200px;" id="notes-cell-{{ mr.schedule_row_id }}">
           {% if mr.schedule_row_id %}
             {% with row_notes=notes_map|get_item:mr.schedule_row_id %}
-            {% if row_notes and row_notes.mo %}
-            <p class="text-xs text-teal-800 leading-snug bg-teal-50 rounded px-2 py-1 border border-teal-100">
-              <i class="fa-solid fa-comment text-teal-400 mr-1 text-[10px]"></i>{{ row_notes.mo.text }}
-            </p>
-            <p class="text-[10px] text-slate-400 mt-0.5">
-              <i class="fa-solid fa-user text-[9px] mr-0.5"></i>
-              {{ row_notes.mo.created_by.name|default:"Unknown" }}
-              &middot; {{ row_notes.mo.updated_at|date:"d M Y H:i" }}
-            </p>
-            {% else %}
-            <span class="text-[11px] text-slate-300 italic">No MO note</span>
-            {% endif %}
+            {# ── MO Note ── #}
+            <div class="mb-1.5" id="mo-note-wrap-{{ mr.schedule_row_id }}">
+              <p class="text-[9px] font-bold text-teal-500 uppercase tracking-wide mb-0.5">MO Note</p>
+              {% if row_notes and row_notes.mo %}
+              <p class="text-xs text-teal-800 leading-snug bg-teal-50 rounded px-2 py-1 border border-teal-100"
+                 id="mo-note-text-{{ mr.schedule_row_id }}">
+                <i class="fa-solid fa-comment text-teal-400 mr-1 text-[10px]"></i>{{ row_notes.mo.text }}
+              </p>
+              <p class="text-[10px] text-slate-400 mt-0.5" id="mo-note-meta-{{ mr.schedule_row_id }}">
+                <i class="fa-solid fa-user text-[9px] mr-0.5"></i>
+                {{ row_notes.mo.created_by.name|default:"Unknown" }}
+                &middot; {{ row_notes.mo.updated_at|date:"d M Y H:i" }}
+                {% if row_notes.mo.unread_for_recipient %}
+                <span class="ml-1 px-1 py-0.5 bg-teal-500 text-white rounded text-[8px] font-bold">NEW</span>
+                {% endif %}
+              </p>
+              {% else %}
+              <span class="text-[11px] text-slate-300 italic" id="mo-note-text-{{ mr.schedule_row_id }}">No MO note</span>
+              <p class="text-[10px] text-slate-300 mt-0.5 hidden" id="mo-note-meta-{{ mr.schedule_row_id }}"></p>
+              {% endif %}
+            </div>
+
+            {# ── Ops Note (editable for ops, read-only for MO) ── #}
+            <div id="ops-note-wrap-{{ mr.schedule_row_id }}">
+              <p class="text-[9px] font-bold text-blue-500 uppercase tracking-wide mb-0.5">Ops Note</p>
+              <div id="ops-note-display-{{ mr.schedule_row_id }}">
+                {% if row_notes and row_notes.ops %}
+                <p class="text-xs text-blue-800 leading-snug bg-blue-50 rounded px-2 py-1 border border-blue-100"
+                   id="ops-note-text-{{ mr.schedule_row_id }}">{{ row_notes.ops.text }}</p>
+                <p class="text-[10px] text-slate-400 mt-0.5" id="ops-note-meta-{{ mr.schedule_row_id }}">
+                  <i class="fa-solid fa-user text-[9px] mr-0.5"></i>
+                  {{ row_notes.ops.created_by.name|default:"Unknown" }}
+                  &middot; {{ row_notes.ops.updated_at|date:"d M Y H:i" }}
+                </p>
+                {% else %}
+                <span class="text-[11px] text-slate-300 italic" id="ops-note-text-{{ mr.schedule_row_id }}">No ops note</span>
+                <p class="text-[10px] text-slate-300 mt-0.5 hidden" id="ops-note-meta-{{ mr.schedule_row_id }}"></p>
+                {% endif %}
+                {% if show_mark_aired %}
+                <button class="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-blue-600 bg-none border-none cursor-pointer hover:text-blue-800"
+                        onclick="openOpsNote({{ mr.schedule_row_id }})">
+                  <i class="fa-solid fa-{% if row_notes and row_notes.ops %}pen{% else %}plus{% endif %} text-[9px]"></i>
+                  {% if row_notes and row_notes.ops %}Edit{% else %}Add ops note{% endif %}
+                </button>
+                {% endif %}
+              </div>
+              {% if show_mark_aired %}
+              <div class="hidden mt-1" id="ops-form-{{ mr.schedule_row_id }}">
+                <textarea class="w-full text-xs border border-slate-200 rounded px-2 py-1 resize-y min-h-[52px] focus:outline-none focus:border-blue-400"
+                          id="ops-textarea-{{ mr.schedule_row_id }}"
+                          placeholder="Add your operations note…">{% if row_notes and row_notes.ops %}{{ row_notes.ops.text }}{% endif %}</textarea>
+                <div class="flex items-center gap-1 mt-1">
+                  <button class="text-[10px] font-bold px-2 py-0.5 bg-blue-600 text-white rounded cursor-pointer border-none"
+                          onclick="saveOpsNote({{ mr.schedule_row_id }})">
+                    <i class="fa-solid fa-floppy-disk mr-0.5"></i>Save
+                  </button>
+                  <button class="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded cursor-pointer border-none"
+                          onclick="cancelOpsNote({{ mr.schedule_row_id }})">Cancel</button>
+                  <span class="hidden text-[10px] text-slate-400" id="ops-spinner-{{ mr.schedule_row_id }}">
+                    <i class="fa-solid fa-circle-notch fa-spin"></i>
+                  </span>
+                </div>
+              </div>
+              {% endif %}
+            </div>
             {% endwith %}
           {% else %}—{% endif %}
+        </td>
+        {% endif %}
+
+        {% if show_mark_aired %}
+        <td class="text-center">
+          <button class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold
+                         bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200
+                         cursor-pointer transition-colors"
+                  onclick="openMarkAiredModal({{ mr.schedule_row_id }}, '{{ mr.brand|escapejs }}', '{{ mr.scheduled_date|date:'d M Y' }}', {{ mr.duration|default:0 }}, '{{ month }}')">
+            <i class="fa-solid fa-check-circle text-[9px]"></i>Mark as Aired
+          </button>
         </td>
         {% endif %}
       </tr>
       {% empty %}
       <tr>
-        <td colspan="{% if notes_map is not None %}{% if show_status and show_aired_programme %}11{% elif show_status or show_aired_programme %}10{% else %}9{% endif %}{% elif show_status and show_aired_programme %}10{% elif show_status or show_aired_programme %}9{% else %}8{% endif %}"
+        <td colspan="{% if notes_map is not None and show_mark_aired %}{% if show_status and show_aired_programme %}13{% elif show_status or show_aired_programme %}12{% else %}11{% endif %}{% elif notes_map is not None %}{% if show_status and show_aired_programme %}12{% elif show_status or show_aired_programme %}11{% else %}10{% endif %}{% elif show_mark_aired %}{% if show_status and show_aired_programme %}11{% elif show_status or show_aired_programme %}10{% else %}9{% endif %}{% elif show_status and show_aired_programme %}10{% elif show_status or show_aired_programme %}9{% else %}8{% endif %}"
             class="text-center text-slate-400 py-10">
           No records in this category.
         </td>

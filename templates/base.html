@@ -514,8 +514,10 @@
         <a href="/dashboard/channel-officer/" class="nav-item {% if 'channel-officer' in path and 'missed-commercials' not in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-text">My Schedules</span>
         </a>
-        <a href="/dashboard/channel-officer/missed-commercials/" class="nav-item {% if 'missed-commercials' in path %}active{% endif %}">
-          <i class="nav-icon fa-solid fa-circle-xmark"></i><span class="nav-text">Missed Commercials</span>
+        <a href="/dashboard/channel-officer/missed-commercials/" class="nav-item {% if 'missed-commercials' in path %}active{% endif %}" id="nav-missed-commercials">
+          <i class="nav-icon fa-solid fa-circle-xmark"></i>
+          <span class="nav-text">Missed Commercials</span>
+          <span id="mc-notif-badge" class="hidden ml-1 px-1.5 py-0.5 rounded-full bg-blue-500 text-white text-[9px] font-bold leading-none"></span>
         </a>
         <a href="/dashboard/tc/upload/" class="nav-item {% if 'tc/upload' in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload TC</span>
@@ -745,6 +747,31 @@
     });
   })();
 </script>
+{% if request.user.is_authenticated and request.user.role == 'channel_officer' %}
+<script>
+// Poll for unread notifications and update the Missed Commercials badge
+(function pollMCBadge() {
+  function update() {
+    fetch('/dashboard/spot/notifications/')
+      .then(r => r.json())
+      .then(data => {
+        const badge = document.getElementById('mc-notif-badge');
+        if (!badge) return;
+        if (data.count > 0) {
+          badge.textContent = data.count;
+          badge.classList.remove('hidden');
+        } else {
+          badge.classList.add('hidden');
+        }
+      })
+      .catch(() => {});
+  }
+  update();
+  // Refresh every 2 minutes
+  setInterval(update, 120000);
+})();
+</script>
+{% endif %}
 {% block extra_scripts %}{% endblock %}
 <script>
   // ── PWA: Service Worker ────────────────────────────────────────────────────

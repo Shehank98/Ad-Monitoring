@@ -669,12 +669,51 @@ class SpotNote(models.Model):
     created_at   = models.DateTimeField(auto_now_add=True)
     updated_at   = models.DateTimeField(auto_now=True)
 
+    unread_for_recipient = models.BooleanField(
+        default=False,
+        help_text=(
+            "True when the note was just saved and the other role has not yet seen it. "
+            "Cleared when the recipient opens the relevant page."
+        ),
+    )
+
     class Meta:
         unique_together = [('schedule_row', 'role')]
         ordering = ['schedule_row', 'role']
 
     def __str__(self):
         return f'SpotNote({self.role}) — {self.schedule_row_id}'
+
+
+# ── Spot Notifications ────────────────────────────────────────────────────────
+
+class SpotNotification(models.Model):
+    """In-app notification sent to a specific user about a spot action.
+
+    Used to notify Marketing Officers when Operations staff marks a spot as
+    manually confirmed / aired.
+    """
+    recipient    = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='spot_notifications',
+    )
+    schedule_row = models.ForeignKey(
+        ScheduleRow, on_delete=models.CASCADE,
+        related_name='notifications', null=True, blank=True,
+    )
+    message      = models.TextField()
+    is_read      = models.BooleanField(default=False)
+    created_at   = models.DateTimeField(auto_now_add=True)
+    created_by   = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='created_notifications',
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Notification → {self.recipient} | {self.message[:60]}'
 
 
 # ── System Settings ───────────────────────────────────────────────────────────
