@@ -4387,7 +4387,11 @@ def tc_upload(request):
 
         messages.success(request, f'TC uploaded: {count} rows for {channel} / {month}.')
         if user.role == 'channel_officer':
-            return redirect('/dashboard/channel-officer/')
+            from urllib.parse import quote as _quote
+            return redirect(
+                f'/dashboard/channel-officer/?account_id={account_id}'
+                f'&channel={_quote(channel)}&new_tc={tc_report.id}'
+            )
         return redirect('/dashboard/tc/')
 
     # GET - show upload form (accept pre-fill params from WhatsApp links)
@@ -8615,6 +8619,75 @@ def _run_verification_then_email(account_id, is_maponline=False):
 # Channel Officer — Self-service dashboard
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _build_tc_spot_summary(account, channel, month, tc_report=None):
+    """Compare planned ScheduleRow counts vs actual TCRow counts per brand.
+
+    Uses BrandMapping.tc_theme (with pipe-separated values and wildcard * support)
+    to map TC rows to brands.  If tc_report is given, only rows from that
+    specific TransmissionReport are counted; otherwise all TCRows for the
+    (account, channel, month) scope are used.
+
+    Returns a list sorted by brand name:
+        [{'brand': str, 'scheduled': int, 'tc': int, 'diff': int}, ...]
+    """
+    from collections import defaultdict
+    from django.db.models import Count as _Count
+
+    # ── Scheduled spots per brand ────────────────────────────────────────────
+    sched_counts = defaultdict(int)
+    for row in (
+        ScheduleRow.objects
+        .filter(account=account, channel=channel, month=month)
+        .values('brand')
+        .annotate(n=_Count('id'))
+    ):
+        sched_counts[row['brand']] += row['n']
+
+    # ── Build tc_theme → brand lookup (case-insensitive, wildcard *) ─────────
+    exact_map  = {}   # normalised_theme → brand
+    prefix_map = []   # [(prefix_str, brand), ...]
+    for bm in BrandMapping.objects.filter(account=account):
+        for raw in bm.tc_themes_list:
+            key = raw.lower().strip()
+            if key.endswith('*'):
+                prefix_map.append((key[:-1], bm.brand))
+            else:
+                exact_map[key] = bm.brand
+
+    def _tc_theme_to_brand(raw_theme):
+        k = raw_theme.lower().strip() if raw_theme else ''
+        if not k:
+            return None
+        if k in exact_map:
+            return exact_map[k]
+        for prefix, brand in prefix_map:
+            if k.startswith(prefix):
+                return brand
+        return None
+
+    # ── TC spots per brand ───────────────────────────────────────────────────
+    tc_counts = defaultdict(int)
+    tc_qs = (
+        TCRow.objects.filter(tc_report=tc_report)
+        if tc_report
+        else TCRow.objects.filter(account=account, channel=channel,
+                                  tc_report__month=month)
+    )
+    for theme, n in tc_qs.values_list('tc_theme').annotate(n=_Count('id')).values_list('tc_theme', 'n'):
+        brand = _tc_theme_to_brand(theme)
+        if brand:
+            tc_counts[brand] += n
+
+    # ── Merge: all brands present in either source ───────────────────────────
+    all_brands = sorted(set(sched_counts) | set(tc_counts))
+    rows = []
+    for brand in all_brands:
+        sched = sched_counts.get(brand, 0)
+        tc    = tc_counts.get(brand, 0)
+        rows.append({'brand': brand, 'scheduled': sched, 'tc': tc, 'diff': tc - sched})
+    return rows
+
+
 @login_required
 @role_required(['channel_officer'])
 def channel_officer_dashboard(request):
@@ -8663,6 +8736,9 @@ def channel_officer_dashboard(request):
     summary    = {}
 
     unmapped_theme_count = 0
+    tc_spot_summary      = []   # brand-level scheduled-vs-tc comparison table
+    tc_summary_report    = None  # the TransmissionReport the summary is built from
+    is_new_tc_upload     = False  # True when redirected here straight after an upload
 
     if selected_account and selected_channel:
         from django.db.models import Sum as _Sum
@@ -8700,6 +8776,24 @@ def channel_officer_dashboard(request):
             if t and t.strip() and t.lower().strip() not in mapped_tc_themes
         )
 
+        # ── TC Upload Summary table ──────────────────────────────────────────
+        # Use a specific TC report if ?new_tc=pk was passed (post-upload redirect),
+        # otherwise fall back to the most recently uploaded TC for this scope.
+        new_tc_pk = request.GET.get('new_tc', '').strip()
+        if new_tc_pk:
+            tc_summary_report = tc_reports.filter(pk=new_tc_pk).first()
+            is_new_tc_upload  = tc_summary_report is not None
+        if tc_summary_report is None:
+            tc_summary_report = tc_reports.first()
+
+        if tc_summary_report:
+            tc_spot_summary = _build_tc_spot_summary(
+                selected_account,
+                selected_channel,
+                tc_summary_report.month,
+                tc_report=tc_summary_report,
+            )
+
     return render(request, 'channel_officers/dashboard.html', {
         'profile':              profile,
         'profiles':             profiles,
@@ -8711,6 +8805,9 @@ def channel_officer_dashboard(request):
         'tc_reports':           tc_reports,
         'summary':              summary,
         'unmapped_theme_count': unmapped_theme_count,
+        'tc_spot_summary':      tc_spot_summary,
+        'tc_summary_report':    tc_summary_report,
+        'is_new_tc_upload':     is_new_tc_upload,
     })
 
 
