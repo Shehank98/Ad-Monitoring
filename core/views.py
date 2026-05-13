@@ -8985,11 +8985,13 @@ def spot_note_save(request):
         role=role,
         defaults={'text': text, 'created_by': user},
     )
+    author_name = note.created_by.name if note.created_by else 'Unknown'
     return JsonResponse({
-        'ok':         True,
-        'note_id':    note.pk,
-        'text':       note.text,
-        'updated_at': note.updated_at.strftime('%d %b %Y %H:%M'),
+        'ok':          True,
+        'note_id':     note.pk,
+        'text':        note.text,
+        'updated_at':  note.updated_at.strftime('%d %b %Y %H:%M'),
+        'author_name': author_name,
     })
 
 

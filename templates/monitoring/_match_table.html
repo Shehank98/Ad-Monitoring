@@ -77,7 +77,11 @@
             <p class="text-xs text-teal-800 leading-snug bg-teal-50 rounded px-2 py-1 border border-teal-100">
               <i class="fa-solid fa-comment text-teal-400 mr-1 text-[10px]"></i>{{ row_notes.mo.text }}
             </p>
-            <p class="text-[10px] text-slate-400 mt-0.5">{{ row_notes.mo.updated_at|date:"d M Y H:i" }}</p>
+            <p class="text-[10px] text-slate-400 mt-0.5">
+              <i class="fa-solid fa-user text-[9px] mr-0.5"></i>
+              {{ row_notes.mo.created_by.name|default:"Unknown" }}
+              &middot; {{ row_notes.mo.updated_at|date:"d M Y H:i" }}
+            </p>
             {% else %}
             <span class="text-[11px] text-slate-300 italic">No MO note</span>
             {% endif %}

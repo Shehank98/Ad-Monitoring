@@ -182,11 +182,14 @@
             <div id="mo-note-display-{{ row.sr_id }}">
               {% if row.mo_note %}
               <p class="note-display" id="mo-note-text-{{ row.sr_id }}">{{ row.mo_note.text }}</p>
-              <p class="text-[10px] text-slate-400 mt-0.5">
-                {{ row.mo_note.updated_at|date:"d M Y H:i" }}
+              <p class="text-[10px] text-slate-400 mt-0.5" id="mo-note-meta-{{ row.sr_id }}">
+                <i class="fa-solid fa-user text-[9px] mr-0.5"></i>
+                {{ row.mo_note.created_by.name|default:"Unknown" }}
+                &middot; {{ row.mo_note.updated_at|date:"d M Y H:i" }}
               </p>
               {% else %}
               <p class="note-empty" id="mo-note-text-{{ row.sr_id }}">No note yet</p>
+              <p class="text-[10px] text-slate-300 mt-0.5" id="mo-note-meta-{{ row.sr_id }}"></p>
               {% endif %}
               <button class="note-edit-btn mt-1" onclick="openMONote({{ row.sr_id }})">
                 <i class="fa-solid fa-{% if row.mo_note %}pen{% else %}plus{% endif %} text-[10px]"></i>
@@ -213,7 +216,9 @@
             {% if row.ops_note %}
             <p class="ops-note-display">{{ row.ops_note.text }}</p>
             <p class="text-[10px] text-slate-400 mt-0.5">
-              {{ row.ops_note.updated_at|date:"d M Y H:i" }}
+              <i class="fa-solid fa-user text-[9px] mr-0.5"></i>
+              {{ row.ops_note.created_by.name|default:"Unknown" }}
+              &middot; {{ row.ops_note.updated_at|date:"d M Y H:i" }}
             </p>
             {% else %}
             <p class="note-empty">—</p>
@@ -279,14 +284,21 @@ function saveMONote(srId) {
       if (!data.ok) { alert('Could not save note: ' + (data.error || 'unknown error')); return; }
 
       const displayEl = document.getElementById('mo-note-text-' + srId);
+      const metaEl    = document.getElementById('mo-note-meta-' + srId);
       const wrapEl    = document.getElementById('mo-note-display-' + srId);
 
       if (data.deleted || !text) {
         displayEl.textContent = 'No note yet';
         displayEl.className   = 'note-empty';
+        if (metaEl) metaEl.textContent = '';
       } else {
         displayEl.textContent = data.text;
         displayEl.className   = 'note-display';
+        if (metaEl) {
+          metaEl.innerHTML =
+            '<i class="fa-solid fa-user" style="font-size:9px;margin-right:2px;"></i>' +
+            data.author_name + ' &middot; ' + data.updated_at;
+        }
       }
       // refresh edit button label
       const btn = wrapEl.querySelector('.note-edit-btn');
