@@ -13,17 +13,17 @@
 </div>
 
 <!-- Schedule info -->
-<div class="card mb-5 flex flex-wrap items-center gap-4">
-  <div class="w-10 h-10 bg-teal-100 rounded-xl flex items-center justify-center shrink-0">
-    <i class="fa-solid fa-tv text-teal-600"></i>
+<div class="rounded-2xl mb-5 px-5 py-4 flex flex-wrap items-center gap-4 shadow-md" style="background:linear-gradient(135deg,#1e293b 0%,#0d4f4a 100%);border:1px solid rgba(13,148,136,0.25);">
+  <div class="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style="background:rgba(13,148,136,0.2);border:1px solid rgba(13,148,136,0.35);">
+    <i class="fa-solid fa-tv text-teal-300 text-base"></i>
   </div>
   <div class="flex-1 min-w-0">
-    <p class="font-bold text-slate-800">{{ schedule.channel }}</p>
-    <p class="text-sm text-slate-500">{{ schedule.month }} &middot; Schedule #{{ schedule.schedule_number }}</p>
+    <p class="font-bold text-white">{{ schedule.channel }}</p>
+    <p class="text-sm text-teal-300">{{ schedule.month }} &middot; Schedule #{{ schedule.schedule_number }}</p>
   </div>
   {% if schedule.start_date and schedule.end_date %}
-  <div class="text-sm text-slate-500">
-    <i class="fa-solid fa-calendar mr-1"></i>
+  <div class="text-sm text-slate-400">
+    <i class="fa-solid fa-calendar mr-1 text-slate-500"></i>
     {{ schedule.start_date|date:"d M" }} &rarr; {{ schedule.end_date|date:"d M Y" }}
   </div>
   {% endif %}
@@ -31,16 +31,16 @@
   <!-- Status badge -->
   {% with total_missed=comm_total.missed|default:0|add:spon_total.missed|default:0 %}
   {% if total_missed == 0 and comm_total.planned %}
-  <span class="badge bg-emerald-100 text-emerald-700" style="font-size:.8rem;padding:.3rem .75rem;">
-    <i class="fa-solid fa-circle-check mr-1"></i> All spots aired
+  <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold" style="background:rgba(16,185,129,0.2);color:#34d399;border:1px solid rgba(16,185,129,0.35);">
+    <i class="fa-solid fa-circle-check"></i> All spots aired
   </span>
   {% elif comm_total.planned %}
-  <span class="badge bg-red-100 text-red-700" style="font-size:.8rem;padding:.3rem .75rem;">
-    <i class="fa-solid fa-triangle-exclamation mr-1"></i> {{ total_missed }} missed
+  <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold" style="background:rgba(239,68,68,0.2);color:#fca5a5;border:1px solid rgba(239,68,68,0.35);">
+    <i class="fa-solid fa-triangle-exclamation"></i> {{ total_missed }} missed
   </span>
   {% else %}
-  <span class="badge bg-slate-100 text-slate-500" style="font-size:.8rem;padding:.3rem .75rem;">
-    <i class="fa-solid fa-circle-info mr-1"></i> No data yet
+  <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold" style="background:rgba(100,116,139,0.2);color:#94a3b8;border:1px solid rgba(100,116,139,0.3);">
+    <i class="fa-solid fa-circle-info"></i> No data yet
   </span>
   {% endif %}
   {% endwith %}
@@ -49,21 +49,21 @@
 <!-- Summary stats -->
 {% if comm_total.planned %}
 <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-  <div class="card text-center py-4">
+  <div class="card text-center py-4" style="border-top:3px solid #1e293b;">
     <p class="text-3xl font-extrabold text-slate-800">{{ comm_total.planned|default:0 }}</p>
     <p class="text-xs text-slate-400 mt-1 font-semibold uppercase tracking-wider">Planned</p>
   </div>
-  <div class="card text-center py-4">
+  <div class="card text-center py-4" style="border-top:3px solid #10b981;">
     <p class="text-3xl font-extrabold text-emerald-600">{{ comm_total.aired|default:0 }}</p>
     <p class="text-xs text-slate-400 mt-1 font-semibold uppercase tracking-wider">Aired</p>
   </div>
-  <div class="card text-center py-4 {% if comm_total.missed %}border-red-200 bg-red-50{% endif %}">
+  <div class="card text-center py-4" {% if comm_total.missed %}style="border-top:3px solid #ef4444;border-color:transparent;background:#fef2f2;"{% else %}style="border-top:3px solid #e2e8f0;"{% endif %}>
     <p class="text-3xl font-extrabold {% if comm_total.missed %}text-red-600{% else %}text-slate-300{% endif %}">
       {{ comm_total.missed|default:0 }}
     </p>
     <p class="text-xs mt-1 font-semibold uppercase tracking-wider {% if comm_total.missed %}text-red-400{% else %}text-slate-400{% endif %}">Missed</p>
   </div>
-  <div class="card text-center py-4">
+  <div class="card text-center py-4" style="border-top:3px solid #6366f1;">
     <p class="text-3xl font-extrabold {% if comm_total.extra %}text-blue-600{% else %}text-slate-300{% endif %}">
       {{ comm_total.extra|default:0 }}
     </p>

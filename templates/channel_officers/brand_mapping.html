@@ -13,13 +13,15 @@
 </div>
 
 <!-- Info banner -->
-<div class="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3 mb-6">
-  <i class="fa-solid fa-circle-info text-blue-500 text-lg mt-0.5 shrink-0"></i>
+<div class="rounded-xl p-4 flex items-start gap-3 mb-6" style="background:rgba(13,148,136,0.08);border:1px solid rgba(13,148,136,0.3);">
+  <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5" style="background:rgba(13,148,136,0.15);">
+    <i class="fa-solid fa-link text-teal-400 text-sm"></i>
+  </div>
   <div>
-    <p class="font-bold text-blue-800 text-sm">What is this?</p>
-    <p class="text-sm text-blue-700 mt-0.5">
+    <p class="font-bold text-teal-400 text-sm">Map TC Themes to Brands</p>
+    <p class="text-sm text-slate-400 mt-0.5">
       Each theme below was found in your uploaded TC file. Match it to the correct brand in your schedule.
-      Choose <strong>Skip</strong> for promos or channel noise.
+      Choose <strong class="text-slate-300">Skip</strong> for promos or channel noise.
     </p>
   </div>
 </div>
@@ -34,7 +36,17 @@
 {% endif %}
 
 {% if unmapped %}
-<div class="card">
+<div class="rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+  <div class="px-5 py-4 flex items-center gap-3" style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);">
+    <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style="background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);">
+      <i class="fa-solid fa-tags text-amber-400 text-sm"></i>
+    </div>
+    <div>
+      <p class="font-bold text-white text-sm">Unmapped TC Themes</p>
+      <p class="text-xs text-slate-400">Link each theme to a schedule brand</p>
+    </div>
+  </div>
+<div class="p-5">
   <form method="post">
     {% csrf_token %}
     <input type="hidden" name="account_id" value="{{ account.id }}">
@@ -84,6 +96,7 @@
       </a>
     </div>
   </form>
+</div>
 </div>
 
 {% else %}

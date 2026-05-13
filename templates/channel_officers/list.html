@@ -5,18 +5,28 @@
 
 {% block content %}
 
-<div class="flex items-center justify-between mb-5">
-  <div class="flex gap-2">
+<!-- Page header banner -->
+<div class="rounded-2xl px-5 py-4 mb-5 shadow-md flex flex-wrap items-center justify-between gap-3" style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);border:1px solid rgba(100,116,139,0.2);">
+  <div class="flex items-center gap-3">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style="background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.35);">
+      <i class="fa-solid fa-users text-indigo-400"></i>
+    </div>
+    <div>
+      <p class="font-bold text-white leading-tight">Marketing Officers</p>
+      <p class="text-xs text-slate-400 leading-tight">Manage officers &amp; WhatsApp notifications per channel</p>
+    </div>
+  </div>
+  <div class="flex items-center gap-2">
     <a href="{% url 'whatsapp_send_tc_reminders' %}"
        onclick="return confirm('Send TC upload reminders to all officers with ended schedules?')"
-       class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors">
+       class="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors" style="background:#15803d;color:#fff;">
       <i class="fa-brands fa-whatsapp"></i> Send TC Reminders
     </a>
+    <a href="{% url 'channel_officer_create' %}"
+       class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-og-red hover:bg-red-700 text-white text-sm font-semibold transition-colors">
+      <i class="fa-solid fa-plus"></i> Add Officer
+    </a>
   </div>
-  <a href="{% url 'channel_officer_create' %}"
-     class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-og-red hover:bg-red-700 text-white text-sm font-semibold transition-colors">
-    <i class="fa-solid fa-plus"></i> Add Officer
-  </a>
 </div>
 
 {% if messages %}
@@ -31,7 +41,7 @@
 {% endif %}
 
 {% if officers %}
-<div class="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden ring-1 ring-slate-100">
   <table class="w-full text-sm">
     <thead>
       <tr class="border-b border-slate-100 bg-slate-50">
@@ -101,9 +111,9 @@
 </div>
 {% endif %}
 
-<div class="mt-6 bg-teal-50 border border-teal-200 rounded-xl px-5 py-4 text-sm text-teal-800">
-  <div class="font-semibold mb-1"><i class="fa-brands fa-whatsapp mr-1"></i> How WhatsApp notifications work</div>
-  <ul class="list-disc ml-4 space-y-1 text-teal-700">
+<div class="mt-6 rounded-xl px-5 py-4 text-sm" style="background:rgba(13,148,136,0.08);border:1px solid rgba(13,148,136,0.25);">
+  <div class="font-semibold mb-1 text-teal-400"><i class="fa-brands fa-whatsapp mr-1"></i> How WhatsApp notifications work</div>
+  <ul class="list-disc ml-4 space-y-1 text-slate-400">
     <li><strong>Missed spots:</strong> Sent automatically after LMRB upload runs verification — officer is notified per channel</li>
     <li><strong>TC reminder:</strong> Click "Send TC Reminders" above to notify officers whose schedules ended but have no TC uploaded</li>
     <li><strong>Reconciliation done:</strong> Sent to operations staff (set their WhatsApp in <a href="{% url 'user_list' %}" class="underline">User Management</a>) after TC reconcile</li>

@@ -27,7 +27,17 @@
   </div>
 {% endif %}
 
-<form method="post" class="bg-white rounded-xl border border-slate-100 shadow-sm p-6 space-y-5">
+<div class="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+  <div class="px-6 py-5 flex items-center gap-3" style="background:linear-gradient(135deg,#1e293b 0%,#134e4a 100%);">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style="background:rgba(13,148,136,0.2);border:1px solid rgba(13,148,136,0.35);">
+      <i class="fa-solid fa-user-tie text-teal-400"></i>
+    </div>
+    <div>
+      <h2 class="font-bold text-white">{% if edit %}Edit Officer{% else %}New Marketing Officer{% endif %}</h2>
+      <p class="text-xs text-slate-400">{% if edit %}Update officer details and login{% else %}Create officer with WhatsApp &amp; optional system login{% endif %}</p>
+    </div>
+  </div>
+<form method="post" class="p-6 space-y-5">
   {% csrf_token %}
 
   <div>
@@ -120,6 +130,7 @@
     </a>
   </div>
 </form>
+</div>
 
 {% if edit %}
 <!-- Delete section -->

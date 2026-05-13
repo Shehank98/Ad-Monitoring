@@ -28,57 +28,59 @@
 </div>
 {% else %}
 
-<!-- Top info bar -->
-<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-  <div class="flex items-center gap-3">
-    <div class="w-10 h-10 bg-teal-600 rounded-xl flex items-center justify-center shrink-0">
-      <i class="fa-solid fa-tv text-white"></i>
+<!-- Top info banner -->
+<div class="rounded-2xl px-5 py-5 mb-6 shadow-lg" style="background:linear-gradient(135deg,#1e293b 0%,#0d4f4a 100%);border:1px solid rgba(13,148,136,0.25);">
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <div class="flex items-center gap-4">
+      <div class="w-12 h-12 rounded-xl flex items-center justify-center shrink-0" style="background:rgba(13,148,136,0.2);border:1px solid rgba(13,148,136,0.35);">
+        <i class="fa-solid fa-tv text-teal-300 text-lg"></i>
+      </div>
+      <div>
+        <p class="font-bold text-white text-lg leading-tight">{{ profile.channel }}</p>
+        {% if selected_account %}<p class="text-sm text-teal-300 leading-tight">{{ selected_account.name }}</p>{% endif %}
+      </div>
     </div>
-    <div>
-      <p class="font-bold text-slate-800 text-base leading-tight">{{ profile.channel }}</p>
-      {% if selected_account %}<p class="text-sm text-slate-500">{{ selected_account.name }}</p>{% endif %}
-    </div>
-  </div>
 
-  <div class="flex items-center gap-3">
-    {% if user_accounts.count > 1 %}
-    <form method="get" class="flex items-center gap-2">
-      {% if selected_channel %}<input type="hidden" name="channel" value="{{ selected_channel }}">{% endif %}
-      <label class="text-xs font-semibold text-slate-500">Account</label>
-      <select name="account_id" onchange="this.form.submit()" class="select-field w-auto">
-        {% for acc in user_accounts %}
-        <option value="{{ acc.id }}" {% if selected_account.id == acc.id %}selected{% endif %}>{{ acc.name }}</option>
-        {% endfor %}
-      </select>
-    </form>
-    {% endif %}
-    {% if account_channels|length > 1 %}
-    <form method="get" class="flex items-center gap-2">
-      {% if selected_account %}<input type="hidden" name="account_id" value="{{ selected_account.id }}">{% endif %}
-      <label class="text-xs font-semibold text-slate-500">Channel</label>
-      <select name="channel" onchange="this.form.submit()" class="select-field w-auto">
-        {% for ch in account_channels %}
-        <option value="{{ ch }}" {% if ch == selected_channel %}selected{% endif %}>{{ ch }}</option>
-        {% endfor %}
-      </select>
-    </form>
-    {% endif %}
-    <a href="/dashboard/tc/upload/?account_id={{ selected_account.id }}&channel={{ selected_channel|urlencode }}"
-       class="btn-primary">
-      <i class="fa-solid fa-cloud-arrow-up"></i> Upload TC
-    </a>
+    <div class="flex flex-wrap items-center gap-3">
+      {% if user_accounts.count > 1 %}
+      <form method="get" class="flex items-center gap-2">
+        {% if selected_channel %}<input type="hidden" name="channel" value="{{ selected_channel }}">{% endif %}
+        <label class="text-xs font-semibold text-teal-300">Account</label>
+        <select name="account_id" onchange="this.form.submit()" class="select-field w-auto bg-slate-700 border-slate-600 text-white text-sm">
+          {% for acc in user_accounts %}
+          <option value="{{ acc.id }}" {% if selected_account.id == acc.id %}selected{% endif %}>{{ acc.name }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      {% endif %}
+      {% if account_channels|length > 1 %}
+      <form method="get" class="flex items-center gap-2">
+        {% if selected_account %}<input type="hidden" name="account_id" value="{{ selected_account.id }}">{% endif %}
+        <label class="text-xs font-semibold text-teal-300">Channel</label>
+        <select name="channel" onchange="this.form.submit()" class="select-field w-auto bg-slate-700 border-slate-600 text-white text-sm">
+          {% for ch in account_channels %}
+          <option value="{{ ch }}" {% if ch == selected_channel %}selected{% endif %}>{{ ch }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      {% endif %}
+      <a href="/dashboard/tc/upload/?account_id={{ selected_account.id }}&channel={{ selected_channel|urlencode }}"
+         class="btn-primary">
+        <i class="fa-solid fa-cloud-arrow-up"></i> Upload TC
+      </a>
+    </div>
   </div>
 </div>
 
 <!-- Unmapped themes alert -->
 {% if unmapped_theme_count > 0 %}
-<div class="mb-5 bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-4">
-  <div class="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center shrink-0">
-    <i class="fa-solid fa-tags text-amber-600"></i>
+<div class="mb-5 rounded-xl p-4 flex items-center gap-4" style="background:rgba(120,53,15,0.15);border:1px solid rgba(217,119,6,0.4);">
+  <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style="background:rgba(217,119,6,0.2);">
+    <i class="fa-solid fa-tags text-amber-500"></i>
   </div>
   <div class="flex-1 min-w-0">
-    <p class="font-bold text-amber-900 text-sm">{{ unmapped_theme_count }} TC theme{{ unmapped_theme_count|pluralize }} need mapping</p>
-    <p class="text-xs text-amber-700 mt-0.5">Map TC themes to your schedule brands so missed ads can be calculated.</p>
+    <p class="font-bold text-amber-400 text-sm">{{ unmapped_theme_count }} TC theme{{ unmapped_theme_count|pluralize }} need mapping</p>
+    <p class="text-xs text-amber-500 mt-0.5">Map TC themes to your schedule brands so missed ads can be calculated.</p>
   </div>
   <a href="{% url 'channel_officer_brand_mapping' %}?account_id={{ selected_account.id }}&channel={{ selected_channel|urlencode }}"
      class="btn-primary shrink-0" style="background:#d97706;">
@@ -90,19 +92,19 @@
 <!-- Summary stats -->
 {% if summary %}
 <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-  <div class="card text-center py-4">
+  <div class="card text-center py-4" style="border-top:3px solid #0d9488;">
     <p class="text-3xl font-extrabold text-teal-600">{{ summary.schedule_count }}</p>
     <p class="text-xs text-slate-500 mt-1 font-semibold uppercase tracking-wider">Schedule{{ summary.schedule_count|pluralize }}</p>
   </div>
-  <div class="card text-center py-4">
+  <div class="card text-center py-4" style="border-top:3px solid #1e293b;">
     <p class="text-3xl font-extrabold text-slate-800">{{ summary.total_spots }}</p>
     <p class="text-xs text-slate-500 mt-1 font-semibold uppercase tracking-wider">Total Spots</p>
   </div>
-  <div class="card text-center py-4">
+  <div class="card text-center py-4" style="border-top:3px solid #f59e0b;">
     <p class="text-3xl font-extrabold text-amber-600">{{ summary.tc_count }}</p>
     <p class="text-xs text-slate-500 mt-1 font-semibold uppercase tracking-wider">TC{{ summary.tc_count|pluralize }} Uploaded</p>
   </div>
-  <div class="card text-center py-4">
+  <div class="card text-center py-4" style="border-top:3px solid #6366f1;">
     <p class="text-lg font-extrabold text-slate-700 leading-tight">
       {% if summary.latest_month %}{{ summary.latest_month }}{% else %}&mdash;{% endif %}
     </p>
@@ -112,14 +114,17 @@
 {% endif %}
 
 <!-- Schedules -->
-<div class="card mb-6">
-  <div class="flex items-center justify-between mb-4">
-    <div class="flex items-center gap-2">
-      <i class="fa-solid fa-calendar-days text-teal-500"></i>
-      <h2 class="font-bold text-slate-700">Schedules</h2>
-      <span class="badge bg-teal-50 text-teal-700 ring-1 ring-teal-200">{{ schedules.count }}</span>
+<div class="rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-6">
+  <div class="flex items-center justify-between px-5 py-4" style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgba(13,148,136,0.2);border:1px solid rgba(13,148,136,0.35);">
+        <i class="fa-solid fa-calendar-days text-teal-400 text-sm"></i>
+      </div>
+      <h2 class="font-bold text-white">Schedules</h2>
+      <span class="px-2 py-0.5 rounded-full text-[11px] font-bold" style="background:rgba(13,148,136,0.2);color:#5eead4;border:1px solid rgba(13,148,136,0.3);">{{ schedules.count }}</span>
     </div>
   </div>
+  <div class="p-5">
 
   {% if schedules %}
   <div class="overflow-x-auto rounded-xl border border-slate-100">
@@ -171,17 +176,21 @@
     <p class="text-sm mt-1">Schedules uploaded by your agency will appear here.</p>
   </div>
   {% endif %}
+  </div>
 </div>
 
 <!-- Uploaded TCs -->
-<div class="card">
-  <div class="flex items-center justify-between mb-4">
-    <div class="flex items-center gap-2">
-      <i class="fa-solid fa-file-invoice text-amber-500"></i>
-      <h2 class="font-bold text-slate-700">Uploaded TC Reports</h2>
-      <span class="badge bg-slate-100 text-slate-600">{{ tc_reports.count }}</span>
+<div class="rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+  <div class="flex items-center justify-between px-5 py-4" style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);">
+        <i class="fa-solid fa-file-invoice text-amber-400 text-sm"></i>
+      </div>
+      <h2 class="font-bold text-white">Uploaded TC Reports</h2>
+      <span class="px-2 py-0.5 rounded-full text-[11px] font-bold" style="background:rgba(100,116,139,0.2);color:#94a3b8;border:1px solid rgba(100,116,139,0.3);">{{ tc_reports.count }}</span>
     </div>
   </div>
+  <div class="p-5">
 
   {% if tc_reports %}
   <div class="overflow-x-auto rounded-xl border border-slate-100">
@@ -238,6 +247,7 @@
     </a>
   </div>
   {% endif %}
+  </div>
 </div>
 
 {% endif %}{# end selected_account #}
