@@ -255,12 +255,12 @@
     <i class="fa-solid fa-file-pdf text-red-500"></i> Download Reconciliation PDF
   </a>
 
-  <a href="/dashboard/monitoring/matched-lmrb-excel/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
+  <a href="/dashboard/monitoring/matched-lmrb-excel/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
      class="btn-secondary text-xs">
     <i class="fa-solid fa-file-excel text-teal-600"></i> Download Matched LMRB
   </a>
 
-  <a href="/dashboard/summary/colored-schedule/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
+  <a href="/dashboard/summary/colored-schedule/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
      class="btn-secondary text-xs">
     <i class="fa-solid fa-palette text-violet-600"></i> Colored Schedule
   </a>

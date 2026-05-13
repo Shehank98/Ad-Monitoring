@@ -1093,9 +1093,12 @@ def schedule_delete(request, pk):
             LMRBRow.objects.filter(matched_schedule_id__in=sch_row_ids).update(
                 is_matched=False, matched_schedule=None, matched_at=None,
             )
-            # Reset TCRow schedule-match state for these schedule rows
+            # Reset TCRow schedule-match AND LMRB-confirmation state for these rows.
+            # Clearing is_lmrb_confirmed prevents stale "Aired" counts in the
+            # remaining schedule's summary after this schedule is deleted.
             TCRow.objects.filter(matched_schedule_id__in=sch_row_ids).update(
                 is_schedule_matched=False, matched_schedule=None,
+                is_lmrb_confirmed=False, matched_lmrb=None, is_extra=False,
             )
             # Delete MatchResult records for this schedule's rows
             MatchResult.objects.filter(schedule_row_id__in=sch_row_ids).delete()
@@ -4832,6 +4835,8 @@ def lmrb_tc_section(request):
             .select_related('matched_lmrb', 'matched_schedule')
             .order_by('date', 'aired_time')
         )
+        if schedule_id:
+            tc_qs = tc_qs.filter(tc_report__schedule_id=schedule_id)
 
         # Group by brand
         brand_map = {}   # brand_name → list of row dicts
@@ -5428,7 +5433,7 @@ def summary_excel(request):
 
     # ── Matched LMRB sheet (second sheet) ────────────────────────────────────
     ws_lmrb = wb.create_sheet('Matched LMRB')
-    _write_matched_lmrb_sheet(ws_lmrb, account_id, channel, month)
+    _write_matched_lmrb_sheet(ws_lmrb, account_id, channel, month, schedule_id=sid)
 
     # ── Build response ────────────────────────────────────────────────────────
     buf = io.BytesIO()
@@ -6209,7 +6214,7 @@ def summary_pdf(request):
     return response
 
 
-def _write_matched_lmrb_sheet(ws, account_id, channel, month):
+def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
     """
     Shared helper: write all matched LMRB rows (commercial + sponsorship) into
     an existing openpyxl worksheet.  Returns the row count written.
@@ -6217,6 +6222,8 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month):
     Commercial matched  = LMRBRow.is_matched=True (Schedule↔LMRB engine)
     Sponsorship matched = LMRBRow rows linked via SponsorshipLmrbAssignment
     Both sets are deduplicated so a row appearing in both groups is written once.
+
+    schedule_id: when provided, restrict to rows belonging to that schedule only.
     """
     import openpyxl  # noqa - imported by callers too; ensure available
     from openpyxl.styles import Font, Alignment, PatternFill
@@ -6235,42 +6242,47 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month):
     )
     if date_min and date_max:
         comm_qs = comm_qs.filter(date__range=(date_min, date_max))
+    if schedule_id:
+        comm_qs = comm_qs.filter(matched_schedule__schedule_id=schedule_id)
 
     # Sponsorship matched (via SponsorshipLmrbAssignment)
-    spon_ids = set(
-        SponsorshipLmrbAssignment.objects.filter(
-            account_id=account_id,
-            schedule_row__channel=channel,
-            schedule_row__month=month,
-        ).values_list('lmrb_row_id', flat=True)
+    spon_q = SponsorshipLmrbAssignment.objects.filter(
+        account_id=account_id,
+        schedule_row__channel=channel,
+        schedule_row__month=month,
     )
+    if schedule_id:
+        spon_q = spon_q.filter(schedule_row__schedule_id=schedule_id)
+    spon_ids = set(spon_q.values_list('lmrb_row_id', flat=True))
 
     # TC-confirmed sponsorship LMRB rows: TCRow.matched_lmrb where the TCRow is
     # linked to a SPONSORSHIP ScheduleRow.  These are confirmed by TC reconciliation
     # but may not have a SponsorshipLmrbAssignment record yet; they must still appear
     # in the final LMRB export so the complete aired picture is captured.
-    tc_spon_lmrb_ids = set(
-        TCRow.objects.filter(
-            account_id=account_id, channel=channel,
-            tc_report__month=month,
-            is_schedule_matched=True,
-            is_lmrb_confirmed=True,
-            matched_schedule__ad_type='SPONSORSHIP',
-            matched_lmrb__isnull=False,
-        ).values_list('matched_lmrb_id', flat=True)
+    tc_spon_q = TCRow.objects.filter(
+        account_id=account_id, channel=channel,
+        tc_report__month=month,
+        is_schedule_matched=True,
+        is_lmrb_confirmed=True,
+        matched_schedule__ad_type='SPONSORSHIP',
+        matched_lmrb__isnull=False,
     )
+    if schedule_id:
+        tc_spon_q = tc_spon_q.filter(matched_schedule__schedule_id=schedule_id)
+    tc_spon_lmrb_ids = set(tc_spon_q.values_list('matched_lmrb_id', flat=True))
 
     # Also include LMRB rows confirmed by TC reconciliation engine (TCRow.matched_lmrb_id).
     # The TC engine does NOT set LMRBRow.is_matched=True, so comm_qs misses these rows
     # when only TC reconciliation has been run (the common workflow).
-    tc_confirmed_ids = set(
-        TCRow.objects.filter(
-            account_id=account_id, channel__iexact=channel,
-            tc_report__month=month,
-            is_lmrb_confirmed=True,
-            matched_lmrb__isnull=False,
-        ).values_list('matched_lmrb_id', flat=True)
+    tc_confirmed_q = TCRow.objects.filter(
+        account_id=account_id, channel__iexact=channel,
+        tc_report__month=month,
+        is_lmrb_confirmed=True,
+        matched_lmrb__isnull=False,
     )
+    if schedule_id:
+        tc_confirmed_q = tc_confirmed_q.filter(tc_report__schedule_id=schedule_id)
+    tc_confirmed_ids = set(tc_confirmed_q.values_list('matched_lmrb_id', flat=True))
 
     # Combine, deduplicate by id, sort by date+time
     all_ids = set(comm_qs.values_list('id', flat=True)) | spon_ids | tc_spon_lmrb_ids | tc_confirmed_ids
@@ -6391,9 +6403,10 @@ def summary_colored_schedule(request):
     """Download colored schedule from the Summary Sheet page (always uses reconciliation data)."""
     from verification.colored_schedule import build_colored_schedule_wb, build_status_map
 
-    account_id = request.GET.get('account_id', '')
-    channel    = request.GET.get('channel', '')
-    month      = request.GET.get('month', '')
+    account_id  = request.GET.get('account_id', '')
+    channel     = request.GET.get('channel', '')
+    month       = request.GET.get('month', '')
+    schedule_id = request.GET.get('schedule_id', '').strip()
 
     if not (account_id and channel and month):
         messages.error(request, 'Incomplete parameters.')
@@ -6402,9 +6415,13 @@ def summary_colored_schedule(request):
         messages.error(request, 'Access denied.')
         return redirect('/dashboard/summary/')
 
-    schedule = Schedule.objects.filter(
-        account_id=account_id, channel=channel, month=month
-    ).order_by('-uploaded_at').first()
+    sid = int(schedule_id) if schedule_id else None
+    if sid:
+        schedule = Schedule.objects.filter(id=sid, account_id=account_id).first()
+    else:
+        schedule = Schedule.objects.filter(
+            account_id=account_id, channel=channel, month=month
+        ).order_by('-uploaded_at').first()
     if not schedule:
         messages.error(request, 'No schedule found for this scope.')
         return redirect('/dashboard/summary/')
@@ -6450,9 +6467,10 @@ def matched_lmrb_excel(request):
     """
     import openpyxl
 
-    account_id = request.GET.get('account_id', '')
-    channel    = request.GET.get('channel', '')
-    month      = request.GET.get('month', '')
+    account_id  = request.GET.get('account_id', '')
+    channel     = request.GET.get('channel', '')
+    month       = request.GET.get('month', '')
+    schedule_id = request.GET.get('schedule_id', '').strip()
 
     if not (account_id and channel and month):
         return HttpResponse('Missing parameters: account_id, channel, month', status=400)
@@ -6460,12 +6478,13 @@ def matched_lmrb_excel(request):
         return HttpResponse('Access denied', status=403)
 
     account = get_object_or_404(Account, id=account_id)
+    sid     = int(schedule_id) if schedule_id else None
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = 'Matched LMRB'
 
-    _write_matched_lmrb_sheet(ws, account_id, channel, month)
+    _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=sid)
 
     buf = io.BytesIO()
     wb.save(buf); buf.seek(0)
