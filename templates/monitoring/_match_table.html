@@ -1,3 +1,4 @@
+{% load core_extras %}
 {% comment %}
   Shared partial: renders a MatchResult table.
   Context vars:
@@ -6,6 +7,8 @@
     show_aired_programme - bool, show Aired Programme column (for mismatch/late tabs)
     tbody_id            - optional str, id attribute for the <tbody> (enables filterTab())
     filter_placeholder  - optional str, placeholder text for the filter input
+    notes_map           - optional dict {schedule_row_id: {'mo': SpotNote|None, 'ops': SpotNote|None}}
+                          when provided, an extra "MO Notes" column is appended (read-only for ops)
 {% endcomment %}
 {% if tbody_id %}
 <div class="mb-3">
@@ -29,6 +32,7 @@
         <th>Aired Date</th>
         <th>Aired Time</th>
         {% if show_status %}<th>Status</th>{% endif %}
+        {% if notes_map is not None %}<th style="min-width:180px;">MO Notes</th>{% endif %}
       </tr>
     </thead>
     <tbody{% if tbody_id %} id="{{ tbody_id }}"{% endif %}>
@@ -65,10 +69,26 @@
           {% endif %}
         </td>
         {% endif %}
+        {% if notes_map is not None %}
+        <td style="min-width:180px;">
+          {% if mr.schedule_row_id %}
+            {% with row_notes=notes_map|get_item:mr.schedule_row_id %}
+            {% if row_notes and row_notes.mo %}
+            <p class="text-xs text-teal-800 leading-snug bg-teal-50 rounded px-2 py-1 border border-teal-100">
+              <i class="fa-solid fa-comment text-teal-400 mr-1 text-[10px]"></i>{{ row_notes.mo.text }}
+            </p>
+            <p class="text-[10px] text-slate-400 mt-0.5">{{ row_notes.mo.updated_at|date:"d M Y H:i" }}</p>
+            {% else %}
+            <span class="text-[11px] text-slate-300 italic">No MO note</span>
+            {% endif %}
+            {% endwith %}
+          {% else %}—{% endif %}
+        </td>
+        {% endif %}
       </tr>
       {% empty %}
       <tr>
-        <td colspan="{% if show_status and show_aired_programme %}10{% elif show_status or show_aired_programme %}9{% else %}8{% endif %}"
+        <td colspan="{% if notes_map is not None %}{% if show_status and show_aired_programme %}11{% elif show_status or show_aired_programme %}10{% else %}9{% endif %}{% elif show_status and show_aired_programme %}10{% elif show_status or show_aired_programme %}9{% else %}8{% endif %}"
             class="text-center text-slate-400 py-10">
           No records in this category.
         </td>

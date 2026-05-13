@@ -1,0 +1,306 @@
+{% extends 'base.html' %}
+{% block title %}Missed Commercials{% endblock %}
+{% block page_title %}Missed Commercials{% endblock %}
+{% block page_subtitle %}Not-aired spots by schedule — {{ selected_channel }}{% endblock %}
+
+{% block extra_head %}
+<style>
+  .tab-btn {
+    padding: .4rem .9rem; border-radius: .5rem;
+    font-size: .75rem; font-weight: 600; color: #64748b;
+    cursor: pointer; transition: all .15s; border: none; background: transparent;
+    white-space: nowrap;
+  }
+  .tab-btn.active { background: #dc2626; color: #fff; }
+  .tab-btn:not(.active):hover { background: #fef2f2; color: #991b1b; }
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+
+  .note-cell { min-width: 200px; }
+  .note-display { font-size: .75rem; color: #475569; line-height: 1.4; }
+  .note-empty   { font-size: .75rem; color: #cbd5e1; font-style: italic; }
+  .note-edit-btn {
+    display: inline-flex; align-items: center; gap: .25rem;
+    font-size: .65rem; font-weight: 600; color: #0891b2;
+    background: none; border: none; cursor: pointer; padding: .15rem .35rem;
+    border-radius: .3rem; transition: background .1s;
+  }
+  .note-edit-btn:hover { background: #e0f2fe; }
+  .note-form-wrap { display: none; margin-top: .35rem; }
+  .note-textarea {
+    width: 100%; font-size: .75rem; border: 1px solid #cbd5e1;
+    border-radius: .4rem; padding: .4rem .5rem; resize: vertical; min-height: 60px;
+    focus: outline-none;
+  }
+  .note-textarea:focus { outline: none; border-color: #0891b2; box-shadow: 0 0 0 2px rgba(8,145,178,.15); }
+  .note-save-btn {
+    font-size: .7rem; font-weight: 600; padding: .25rem .6rem;
+    background: #0891b2; color: #fff; border: none; border-radius: .35rem;
+    cursor: pointer; transition: background .1s;
+  }
+  .note-save-btn:hover { background: #0e7490; }
+  .note-cancel-btn {
+    font-size: .7rem; font-weight: 600; padding: .25rem .6rem;
+    background: #f1f5f9; color: #64748b; border: none; border-radius: .35rem;
+    cursor: pointer; transition: background .1s; margin-left: .25rem;
+  }
+  .note-cancel-btn:hover { background: #e2e8f0; }
+  .ops-note-display { font-size: .75rem; color: #1e40af; line-height: 1.4; }
+  .saving-spinner { display: none; font-size: .65rem; color: #94a3b8; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if not profile %}
+<div class="bg-amber-50 border border-amber-200 rounded-xl p-5 text-amber-800">
+  <p class="font-bold">No channel assigned. Contact your administrator.</p>
+</div>
+{% else %}
+
+<!-- Account / Channel filter -->
+<div class="flex flex-wrap items-center gap-3 mb-5">
+  {% if user_accounts.count > 1 %}
+  <form method="get" class="flex items-center gap-2">
+    {% if selected_channel %}<input type="hidden" name="channel" value="{{ selected_channel }}">{% endif %}
+    <label class="text-xs font-semibold text-slate-500">Account</label>
+    <select name="account_id" onchange="this.form.submit()" class="select-field w-auto text-sm">
+      {% for acc in user_accounts %}
+      <option value="{{ acc.id }}" {% if selected_account.id == acc.id %}selected{% endif %}>{{ acc.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+  {% endif %}
+  {% if account_channels|length > 1 %}
+  <form method="get" class="flex items-center gap-2">
+    {% if selected_account %}<input type="hidden" name="account_id" value="{{ selected_account.id }}">{% endif %}
+    <label class="text-xs font-semibold text-slate-500">Channel</label>
+    <select name="channel" onchange="this.form.submit()" class="select-field w-auto text-sm">
+      {% for ch in account_channels %}
+      <option value="{{ ch }}" {% if ch == selected_channel %}selected{% endif %}>{{ ch }}</option>
+      {% endfor %}
+    </select>
+  </form>
+  {% endif %}
+  <span class="ml-auto text-xs text-slate-400">
+    {% if total_missed %}
+      <span class="font-bold text-red-600">{{ total_missed }}</span> not-aired spot{{ total_missed|pluralize }} across all schedules
+    {% else %}
+      No not-aired spots found
+    {% endif %}
+  </span>
+</div>
+
+{% if not schedule_groups %}
+<div class="card text-center py-16">
+  <i class="fa-solid fa-circle-check text-emerald-400 text-4xl mb-3"></i>
+  <p class="font-semibold text-slate-600">No missed commercials</p>
+  <p class="text-sm text-slate-400 mt-1">All spots are either aired or pending verification.</p>
+</div>
+{% else %}
+
+<!-- Schedule tabs -->
+<div class="flex flex-wrap gap-1.5 mb-4 p-1 bg-slate-50 rounded-xl border border-slate-200">
+  {% for grp in schedule_groups %}
+  <button class="tab-btn {% if forloop.first %}active{% endif %}"
+          onclick="showMCTab('sched-{{ grp.schedule.id }}', this)">
+    <i class="fa-solid fa-calendar-days mr-1"></i>
+    #{{ grp.schedule.schedule_number }}
+    <span class="ml-1 text-[10px] px-1.5 py-0.5 rounded
+      {% if grp.count %}bg-red-100 text-red-700{% else %}bg-slate-100 text-slate-500{% endif %}">
+      {{ grp.count }}
+    </span>
+  </button>
+  {% endfor %}
+</div>
+
+{% for grp in schedule_groups %}
+<div id="tab-sched-{{ grp.schedule.id }}" class="tab-pane {% if forloop.first %}active{% endif %}">
+
+  <!-- Schedule header -->
+  <div class="rounded-xl px-4 py-3 mb-4 flex flex-wrap items-center gap-3"
+       style="background:linear-gradient(135deg,#1e293b 0%,#0d4f4a 100%);border:1px solid rgba(13,148,136,0.25);">
+    <div class="flex-1 min-w-0">
+      <p class="font-bold text-white text-sm">
+        Schedule #{{ grp.schedule.schedule_number }}
+        <span class="text-teal-300 ml-2">{{ grp.schedule.month }}</span>
+      </p>
+      <p class="text-xs text-slate-400 mt-0.5">
+        {% if grp.schedule.start_date %}{{ grp.schedule.start_date|date:"d M" }}{% endif %}
+        {% if grp.schedule.start_date and grp.schedule.end_date %} – {% endif %}
+        {% if grp.schedule.end_date %}{{ grp.schedule.end_date|date:"d M Y" }}{% endif %}
+      </p>
+    </div>
+    {% if grp.count %}
+    <span class="px-3 py-1 rounded-full text-xs font-bold"
+          style="background:rgba(239,68,68,0.25);color:#fca5a5;border:1px solid rgba(239,68,68,0.4);">
+      <i class="fa-solid fa-triangle-exclamation mr-1"></i>{{ grp.count }} not aired
+    </span>
+    {% else %}
+    <span class="px-3 py-1 rounded-full text-xs font-bold"
+          style="background:rgba(16,185,129,0.2);color:#6ee7b7;border:1px solid rgba(16,185,129,0.35);">
+      <i class="fa-solid fa-circle-check mr-1"></i>All clear
+    </span>
+    {% endif %}
+  </div>
+
+  {% if grp.rows %}
+  <div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
+    <table class="data-table w-full">
+      <thead>
+        <tr>
+          <th>Brand</th>
+          <th>Programme</th>
+          <th>Planned Date</th>
+          <th>Window</th>
+          <th class="text-right">Duration</th>
+          <th>Status</th>
+          <th class="note-cell">MO Notes</th>
+          <th class="note-cell">Operations Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in grp.rows %}
+        <tr id="spot-row-{{ row.sr_id }}">
+          <td class="font-medium text-slate-800">{{ row.mr.brand|default:"—" }}</td>
+          <td class="text-slate-600 max-w-[140px] truncate" title="{{ row.mr.programme }}">{{ row.mr.programme|default:"—" }}</td>
+          <td class="text-slate-600 whitespace-nowrap">{{ row.mr.scheduled_date|date:"d M Y"|default:"—" }}</td>
+          <td class="text-slate-600 whitespace-nowrap text-xs">
+            {{ row.mr.planned_start|default:"—" }} – {{ row.mr.planned_end|default:"—" }}
+          </td>
+          <td class="text-right text-slate-700">{{ row.mr.duration|default:"—" }}s</td>
+          <td>
+            {% if row.mr.status == 'no_mapping' %}
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">No Mapping</span>
+            {% else %}
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">Not Aired</span>
+            {% endif %}
+          </td>
+
+          <!-- MO Notes (editable) -->
+          <td class="note-cell" id="mo-cell-{{ row.sr_id }}">
+            <div id="mo-note-display-{{ row.sr_id }}">
+              {% if row.mo_note %}
+              <p class="note-display" id="mo-note-text-{{ row.sr_id }}">{{ row.mo_note.text }}</p>
+              <p class="text-[10px] text-slate-400 mt-0.5">
+                {{ row.mo_note.updated_at|date:"d M Y H:i" }}
+              </p>
+              {% else %}
+              <p class="note-empty" id="mo-note-text-{{ row.sr_id }}">No note yet</p>
+              {% endif %}
+              <button class="note-edit-btn mt-1" onclick="openMONote({{ row.sr_id }})">
+                <i class="fa-solid fa-{% if row.mo_note %}pen{% else %}plus{% endif %} text-[10px]"></i>
+                {% if row.mo_note %}Edit{% else %}Add note{% endif %}
+              </button>
+            </div>
+            <div class="note-form-wrap" id="mo-form-{{ row.sr_id }}">
+              <textarea class="note-textarea" id="mo-textarea-{{ row.sr_id }}"
+                        placeholder="e.g. Confirmed aired on 02 May at 14:35 in Neela Pabalu — station log ref #4421">{{ row.mo_note.text|default:"" }}</textarea>
+              <div class="flex items-center gap-1 mt-1">
+                <button class="note-save-btn" onclick="saveMONote({{ row.sr_id }})">
+                  <i class="fa-solid fa-floppy-disk mr-1"></i>Save
+                </button>
+                <button class="note-cancel-btn" onclick="cancelMONote({{ row.sr_id }})">Cancel</button>
+                <span class="saving-spinner" id="mo-spinner-{{ row.sr_id }}">
+                  <i class="fa-solid fa-circle-notch fa-spin"></i> Saving…
+                </span>
+              </div>
+            </div>
+          </td>
+
+          <!-- Ops Note (read-only for MO) -->
+          <td class="note-cell">
+            {% if row.ops_note %}
+            <p class="ops-note-display">{{ row.ops_note.text }}</p>
+            <p class="text-[10px] text-slate-400 mt-0.5">
+              {{ row.ops_note.updated_at|date:"d M Y H:i" }}
+            </p>
+            {% else %}
+            <p class="note-empty">—</p>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card text-center py-10">
+    <i class="fa-solid fa-circle-check text-emerald-400 text-3xl mb-3"></i>
+    <p class="font-semibold text-slate-600">No missed spots for this schedule</p>
+    <p class="text-sm text-slate-400 mt-1">Either all spots aired or verification hasn't run yet.</p>
+  </div>
+  {% endif %}
+
+</div>{% comment %} end tab-pane {% endcomment %}
+{% endfor %}
+
+{% endif %}{% comment %} end schedule_groups {% endcomment %}
+{% endif %}{% comment %} end profile {% endcomment %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function showMCTab(id, btn) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + id)?.classList.add('active');
+  btn.classList.add('active');
+}
+
+// ── MO Note inline editing ────────────────────────────────────────────────────
+function openMONote(srId) {
+  document.getElementById('mo-note-display-' + srId).style.display = 'none';
+  document.getElementById('mo-form-' + srId).style.display = 'block';
+  document.getElementById('mo-textarea-' + srId).focus();
+}
+
+function cancelMONote(srId) {
+  document.getElementById('mo-note-display-' + srId).style.display = '';
+  document.getElementById('mo-form-' + srId).style.display = 'none';
+}
+
+function saveMONote(srId) {
+  const text    = document.getElementById('mo-textarea-' + srId).value.trim();
+  const spinner = document.getElementById('mo-spinner-' + srId);
+  spinner.style.display = 'inline';
+
+  const fd = new FormData();
+  fd.append('schedule_row_id', srId);
+  fd.append('text', text);
+  fd.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+  fetch('{% url "spot_note_save" %}', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      spinner.style.display = 'none';
+      if (!data.ok) { alert('Could not save note: ' + (data.error || 'unknown error')); return; }
+
+      const displayEl = document.getElementById('mo-note-text-' + srId);
+      const wrapEl    = document.getElementById('mo-note-display-' + srId);
+
+      if (data.deleted || !text) {
+        displayEl.textContent = 'No note yet';
+        displayEl.className   = 'note-empty';
+      } else {
+        displayEl.textContent = data.text;
+        displayEl.className   = 'note-display';
+      }
+      // refresh edit button label
+      const btn = wrapEl.querySelector('.note-edit-btn');
+      if (btn) {
+        btn.innerHTML = text
+          ? '<i class="fa-solid fa-pen text-[10px]"></i> Edit'
+          : '<i class="fa-solid fa-plus text-[10px]"></i> Add note';
+      }
+      cancelMONote(srId);
+    })
+    .catch(() => {
+      spinner.style.display = 'none';
+      alert('Network error — note not saved.');
+    });
+}
+</script>
+{% endblock %}

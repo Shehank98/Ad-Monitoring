@@ -641,6 +641,42 @@ class MatchResult(models.Model):
         return f'{self.account} | {self.channel} | {self.brand} | {self.scheduled_date} | {self.status}'
 
 
+# ── Spot Notes ───────────────────────────────────────────────────────────────
+
+class SpotNote(models.Model):
+    """A note attached to a planned ad spot (ScheduleRow).
+
+    One note per role per spot:
+      'mo'  — written by the Marketing Officer on the Missed Commercials page
+      'ops' — written by Operations Staff on the Verify Ads / Not Aired tab
+
+    Linked to ScheduleRow (not MatchResult) so notes survive reconciliation resets.
+    """
+    NOTE_ROLES = [
+        ('mo',  'Marketing Officer'),
+        ('ops', 'Operations'),
+    ]
+
+    schedule_row = models.ForeignKey(
+        ScheduleRow, on_delete=models.CASCADE, related_name='spot_notes',
+    )
+    role         = models.CharField(max_length=10, choices=NOTE_ROLES)
+    text         = models.TextField()
+    created_by   = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='spot_notes',
+    )
+    created_at   = models.DateTimeField(auto_now_add=True)
+    updated_at   = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('schedule_row', 'role')]
+        ordering = ['schedule_row', 'role']
+
+    def __str__(self):
+        return f'SpotNote({self.role}) — {self.schedule_row_id}'
+
+
 # ── System Settings ───────────────────────────────────────────────────────────
 
 SETTING_DEFAULTS = [

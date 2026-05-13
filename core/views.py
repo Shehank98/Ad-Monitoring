@@ -27,7 +27,7 @@ from .forms import AccountForm, ChannelForm, MonitoringUploadForm, ScheduleUploa
 from .models import (
     Account, AuditLog, BrandMapping, Channel, ChannelOfficer, Client,
     LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow,
-    SponsorshipLmrbAssignment, SummaryReportMeta, SystemSetting,
+    SpotNote, SponsorshipLmrbAssignment, SummaryReportMeta, SystemSetting,
     TCRow, TransmissionReport,
     _ensure_defaults, get_setting, get_setting_list,
 )
@@ -2436,13 +2436,24 @@ def monitoring_dashboard(request):
                     'lmrb_row':       None,
                 })
 
+        not_aired_rows = list(qs.filter(status__in=['not_aired', 'no_mapping']).order_by('scheduled_date', 'brand'))
+
+        # Build notes_map for the Not Aired tab so MO notes are visible to ops
+        _na_sr_ids = [mr.schedule_row_id for mr in not_aired_rows if mr.schedule_row_id]
+        _notes_qs  = SpotNote.objects.filter(schedule_row_id__in=_na_sr_ids)
+        not_aired_notes_map = {}
+        for _n in _notes_qs:
+            not_aired_notes_map.setdefault(_n.schedule_row_id, {})
+            not_aired_notes_map[_n.schedule_row_id][_n.role] = _n
+
         tab_data = {
-            'full':     _full_rows,
+            'full':      _full_rows,
             # Programme mismatch = valid match (same day, brand, theme - time offset only)
-            'matched':  list(qs.filter(status__in=['matched', 'programme_mismatch']).select_related('lmrb_row').order_by('scheduled_date', 'brand')),
-            'not_aired': list(qs.filter(status__in=['not_aired', 'no_mapping']).order_by('scheduled_date', 'brand')),
-            'prog_mis': list(qs.filter(status='programme_mismatch').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
-            'late':     list(qs.filter(status='late_telecast').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
+            'matched':   list(qs.filter(status__in=['matched', 'programme_mismatch']).select_related('lmrb_row').order_by('scheduled_date', 'brand')),
+            'not_aired': not_aired_rows,
+            'prog_mis':  list(qs.filter(status='programme_mismatch').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
+            'late':      list(qs.filter(status='late_telecast').select_related('lmrb_row').order_by('scheduled_date', 'brand')),
+            'not_aired_notes_map': not_aired_notes_map,
         }
 
         # Channel summary (only one channel in this scope)
@@ -8808,6 +8819,177 @@ def channel_officer_dashboard(request):
         'tc_spot_summary':      tc_spot_summary,
         'tc_summary_report':    tc_summary_report,
         'is_new_tc_upload':     is_new_tc_upload,
+    })
+
+
+@login_required
+@role_required(['channel_officer'])
+def channel_officer_missed_commercials(request):
+    """Missed Commercials tab for the Marketing Officer.
+
+    Shows Not Aired spots grouped by schedule number.  The MO can add/edit
+    a per-spot note inline; Operations Staff notes are displayed read-only here.
+    """
+    from core.models import SpotNote
+
+    user = request.user
+
+    # Reuse account/channel resolution from the dashboard
+    profiles = list(
+        ChannelOfficer.objects.filter(user=user).select_related('account').order_by('account__name', 'channel')
+    )
+    user_accounts = user.accounts.all().order_by('name')
+    if not user_accounts.exists() and profiles:
+        for p in profiles:
+            user.accounts.add(p.account)
+        user_accounts = user.accounts.all().order_by('name')
+
+    filter_account_id = request.GET.get('account_id', '').strip()
+    selected_account = None
+    if filter_account_id:
+        selected_account = user_accounts.filter(pk=filter_account_id).first()
+    if selected_account is None and user_accounts.exists():
+        selected_account = user_accounts.first()
+
+    account_channels = []
+    if selected_account:
+        account_channels = [p.channel for p in profiles if p.account_id == selected_account.id]
+
+    filter_channel = request.GET.get('channel', '').strip()
+    selected_channel = filter_channel if filter_channel in account_channels else (account_channels[0] if account_channels else '')
+
+    profile = next((p for p in profiles if p.account_id == (selected_account.id if selected_account else None) and p.channel == selected_channel), None)
+    if profile is None and profiles:
+        profile = profiles[0]
+
+    # Build schedule groups with their not-aired spots
+    schedule_groups = []
+
+    if selected_account and selected_channel:
+        schedules = list(
+            Schedule.objects.filter(account=selected_account, channel=selected_channel)
+            .order_by('schedule_number', '-version')
+        )
+        # Deduplicate: keep only the highest-version schedule per schedule_number
+        seen_nums = set()
+        unique_schedules = []
+        for s in schedules:
+            if s.schedule_number not in seen_nums:
+                seen_nums.add(s.schedule_number)
+                unique_schedules.append(s)
+
+        for sched in unique_schedules:
+            not_aired_qs = list(
+                MatchResult.objects.filter(
+                    account=selected_account,
+                    channel=selected_channel,
+                    month=sched.month,
+                    schedule_row__schedule=sched,
+                    status__in=['not_aired', 'no_mapping'],
+                ).select_related('schedule_row').order_by('scheduled_date', 'brand')
+            )
+
+            if not not_aired_qs:
+                schedule_groups.append({
+                    'schedule': sched,
+                    'rows': [],
+                    'count': 0,
+                })
+                continue
+
+            # Prefetch notes for all schedule_row ids in this batch
+            sr_ids = [mr.schedule_row_id for mr in not_aired_qs if mr.schedule_row_id]
+            notes_qs = SpotNote.objects.filter(schedule_row_id__in=sr_ids)
+            notes_map = {}  # {sr_id: {'mo': SpotNote|None, 'ops': SpotNote|None}}
+            for note in notes_qs:
+                notes_map.setdefault(note.schedule_row_id, {})
+                notes_map[note.schedule_row_id][note.role] = note
+
+            rows = []
+            for mr in not_aired_qs:
+                sr_notes = notes_map.get(mr.schedule_row_id, {})
+                rows.append({
+                    'mr':         mr,
+                    'sr_id':      mr.schedule_row_id,
+                    'mo_note':    sr_notes.get('mo'),
+                    'ops_note':   sr_notes.get('ops'),
+                })
+
+            schedule_groups.append({
+                'schedule': sched,
+                'rows':     rows,
+                'count':    len(rows),
+            })
+
+    return render(request, 'channel_officers/missed_commercials.html', {
+        'profile':          profile,
+        'user_accounts':    user_accounts,
+        'selected_account': selected_account,
+        'account_channels': account_channels,
+        'selected_channel': selected_channel,
+        'schedule_groups':  schedule_groups,
+        'total_missed':     sum(g['count'] for g in schedule_groups),
+    })
+
+
+@login_required
+@require_POST
+def spot_note_save(request):
+    """AJAX: create or update a SpotNote.
+
+    Channel officers may only write role='mo' notes on schedule rows that
+    belong to their own accounts/channels.
+    Operations staff may write role='ops' notes on any accessible row.
+    Returns JSON {ok, note_id, text, updated_at}.
+    """
+    from core.models import SpotNote
+
+    user     = request.user
+    sr_id    = request.POST.get('schedule_row_id', '').strip()
+    text     = request.POST.get('text', '').strip()
+
+    # Determine role from the caller's role
+    if user.role == 'channel_officer':
+        role = 'mo'
+    elif user.role in ('operations', 'admin', 'super_admin', 'team_head', 'planner'):
+        role = request.POST.get('role', 'ops').strip()
+        if role not in ('mo', 'ops'):
+            role = 'ops'
+    else:
+        return JsonResponse({'ok': False, 'error': 'Not authorised'}, status=403)
+
+    if not sr_id:
+        return JsonResponse({'ok': False, 'error': 'schedule_row_id required'}, status=400)
+
+    try:
+        sr = ScheduleRow.objects.select_related('schedule', 'account').get(pk=sr_id)
+    except ScheduleRow.DoesNotExist:
+        return JsonResponse({'ok': False, 'error': 'Row not found'}, status=404)
+
+    # Access check
+    if user.role == 'channel_officer':
+        allowed_accounts = list(ChannelOfficer.objects.filter(user=user).values_list('account_id', flat=True))
+        allowed_channels = list(ChannelOfficer.objects.filter(user=user).values_list('channel', flat=True))
+        if sr.account_id not in allowed_accounts or sr.schedule.channel not in allowed_channels:
+            return JsonResponse({'ok': False, 'error': 'Access denied'}, status=403)
+    elif not _account_access(user, sr.account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied'}, status=403)
+
+    if not text:
+        # Delete note if text is cleared
+        SpotNote.objects.filter(schedule_row_id=sr_id, role=role).delete()
+        return JsonResponse({'ok': True, 'deleted': True})
+
+    note, _ = SpotNote.objects.update_or_create(
+        schedule_row_id=sr_id,
+        role=role,
+        defaults={'text': text, 'created_by': user},
+    )
+    return JsonResponse({
+        'ok':         True,
+        'note_id':    note.pk,
+        'text':       note.text,
+        'updated_at': note.updated_at.strftime('%d %b %Y %H:%M'),
     })
 
 

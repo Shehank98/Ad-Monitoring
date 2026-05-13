@@ -736,7 +736,7 @@
 
     <!-- ── Not Aired Tab ─────────────────────────────────── -->
     <div id="tab-not_aired" class="tab-pane">
-      {% include "monitoring/_match_table.html" with rows=tab_data.not_aired show_status=True tbody_id="tab-not-aired-body" %}
+      {% include "monitoring/_match_table.html" with rows=tab_data.not_aired show_status=True tbody_id="tab-not-aired-body" notes_map=tab_data.not_aired_notes_map %}
     </div>
 
     <!-- ── Programme Mismatch Tab ────────────────────────── -->

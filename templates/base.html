@@ -509,10 +509,13 @@
       {% endif %}
 
       {% if ur == 'channel_officer' %}
-        <!-- Channel officer: dashboard + TC upload only -->
+        <!-- Channel officer: dashboard + TC upload + missed commercials -->
         <p class="nav-label"><span class="nav-text">My Portal</span></p>
-        <a href="/dashboard/channel-officer/" class="nav-item {% if 'channel-officer' in path %}active{% endif %}">
+        <a href="/dashboard/channel-officer/" class="nav-item {% if 'channel-officer' in path and 'missed-commercials' not in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-text">My Schedules</span>
+        </a>
+        <a href="/dashboard/channel-officer/missed-commercials/" class="nav-item {% if 'missed-commercials' in path %}active{% endif %}">
+          <i class="nav-icon fa-solid fa-circle-xmark"></i><span class="nav-text">Missed Commercials</span>
         </a>
         <a href="/dashboard/tc/upload/" class="nav-item {% if 'tc/upload' in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload TC</span>
