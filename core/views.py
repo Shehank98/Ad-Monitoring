@@ -5088,7 +5088,7 @@ def summary_report(request):
 
             if schedules_deduped:
                 # MatchResult counts per schedule PK (via schedule_row → schedule).
-                # schedule_row is nullable; skip rows where it's NULL.
+                # Used as fallback when no TC data exists for the scope.
                 mr_map = {}  # schedule_id -> {'n_matched': int, 'n_missed': int, 'total': int}
                 for row in (MatchResult.objects
                         .filter(account_id=account_id, schedule_row__isnull=False)
@@ -5125,15 +5125,89 @@ def summary_report(request):
                         .annotate(n=Count('id'))):
                     planned_map[row['schedule_id']] = row['n']
 
+                # ── TC-based aired counts (mirrors build_summary_data()) ──────
+                # When TC data exists the Summary Sheet counts "aired" as
+                # TCRows that are both LMRB-confirmed AND schedule-matched.
+                # The cards must use the same source so the numbers stay in sync
+                # after TC reconciliation (MatchResult.status is NOT updated by
+                # the TC engine, causing the old stale "missed" count on cards).
+
+                # Linked TC reports (tc_report.schedule_id = schedule.id)
+                tc_aired_linked = {}   # schedule_id → count
+                for r in (TCRow.objects
+                        .filter(account_id=account_id,
+                                is_lmrb_confirmed=True, is_schedule_matched=True,
+                                tc_report__schedule__isnull=False)
+                        .values('tc_report__schedule_id')
+                        .annotate(n=Count('id'))):
+                    tc_aired_linked[r['tc_report__schedule_id']] = r['n']
+
+                # Unlinked TC reports (no schedule FK — match by channel+month)
+                tc_aired_unlinked = {}  # (channel, month) → count
+                for r in (TCRow.objects
+                        .filter(account_id=account_id,
+                                is_lmrb_confirmed=True, is_schedule_matched=True,
+                                tc_report__schedule__isnull=True)
+                        .values('tc_report__channel', 'tc_report__month')
+                        .annotate(n=Count('id'))):
+                    tc_aired_unlinked[(r['tc_report__channel'], r['tc_report__month'])] = r['n']
+
+                # TC reconciliation "run" indicator: any TCRow processed for scope
+                # (is_schedule_matched or is_extra set). Needed to distinguish
+                # "TC uploaded but not yet reconciled" from "reconciled, all missed".
+                tc_processed_linked = set(
+                    TCRow.objects
+                    .filter(account_id=account_id, tc_report__schedule__isnull=False)
+                    .filter(Q(is_schedule_matched=True) | Q(is_extra=True))
+                    .values_list('tc_report__schedule_id', flat=True)
+                    .distinct()
+                )
+                tc_processed_unlinked = set(
+                    TCRow.objects
+                    .filter(account_id=account_id, tc_report__schedule__isnull=True)
+                    .filter(Q(is_schedule_matched=True) | Q(is_extra=True))
+                    .values_list('tc_report__channel', 'tc_report__month')
+                    .distinct()
+                )
+
+                # ManualMatch commercial aired per schedule
+                # (schedule_lmrb and 3way modes both count as a confirmed aired spot)
+                manual_aired_map = {}  # schedule_id → count
+                for r in (ManualMatch.objects
+                        .filter(account_id=account_id, schedule_row__isnull=False,
+                                schedule_row__ad_type='COMMERCIAL BENEFITS',
+                                match_mode__in=['schedule_lmrb', '3way'])
+                        .values('schedule_row__schedule_id')
+                        .annotate(n=Count('id'))):
+                    manual_aired_map[r['schedule_row__schedule_id']] = r['n']
+
                 cards_raw = []
                 for sched in schedules_deduped:
                     ch, mo = sched.channel or '', sched.month or ''
-                    mr      = mr_map.get(sched.id, {})
-                    planned = planned_map.get(sched.id, 0)
-                    aired   = mr.get('n_matched', 0)
-                    missed  = mr.get('n_missed', 0)
-                    has_tc         = (sched.id in per_schedule_tc_ids) or ((ch, mo) in unlinked_tc_scopes)
-                    has_reconciled = mr.get('total', 0) > 0
+                    planned      = planned_map.get(sched.id, 0)
+                    manual_aired = manual_aired_map.get(sched.id, 0)
+
+                    has_tc = (sched.id in per_schedule_tc_ids) or ((ch, mo) in unlinked_tc_scopes)
+
+                    if sched.id in per_schedule_tc_ids:
+                        # TC linked to this schedule: use TC reconciliation counts
+                        tc_aired       = tc_aired_linked.get(sched.id, 0)
+                        aired          = tc_aired + manual_aired
+                        missed         = max(0, planned - aired)
+                        has_reconciled = (sched.id in tc_processed_linked) or manual_aired > 0
+                    elif (ch, mo) in unlinked_tc_scopes:
+                        # TC uploaded for this channel+month (no schedule link)
+                        tc_aired       = tc_aired_unlinked.get((ch, mo), 0)
+                        aired          = tc_aired + manual_aired
+                        missed         = max(0, planned - aired)
+                        has_reconciled = ((ch, mo) in tc_processed_unlinked) or manual_aired > 0
+                    else:
+                        # No TC yet: fall back to MatchResult (Schedule↔LMRB engine)
+                        mr             = mr_map.get(sched.id, {})
+                        aired          = mr.get('n_matched', 0) + manual_aired
+                        missed         = max(0, planned - aired)
+                        has_reconciled = mr.get('total', 0) > 0 or manual_aired > 0
+
                     pct = min(int(aired / planned * 100), 100) if planned else 0
 
                     if not has_tc:
