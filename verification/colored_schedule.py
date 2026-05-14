@@ -452,13 +452,23 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
 
     # Load the original file bytes from storage (works for local + Firebase).
     # Never fall back to DB reconstruction — it produces wrong programme names and order.
+    if not schedule.file or not schedule.file.name:
+        raise FileNotFoundError(
+            f'No file is linked to schedule "{schedule.original_filename}". '
+            f'Please re-upload the schedule to generate a colored export.'
+        )
     try:
         raw_bytes = schedule.file.read()
     except Exception as exc:
+        logger.error(
+            'build_colored_schedule_wb: failed to read schedule pk=%s '
+            'file="%s" from storage: %s',
+            schedule_pk, schedule.file.name, exc,
+        )
         raise FileNotFoundError(
-            f'The original schedule file "{schedule.original_filename}" is no longer '
-            f'available in storage. Please re-upload the schedule to generate a '
-            f'colored export.'
+            f'The original schedule file "{schedule.original_filename}" '
+            f'(stored as "{schedule.file.name}") could not be read from storage. '
+            f'Please re-upload the schedule.'
         ) from exc
 
     if not raw_bytes:

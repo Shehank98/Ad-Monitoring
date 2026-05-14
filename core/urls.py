@@ -115,6 +115,7 @@ urlpatterns = [
     path('spot/mark-aired/',                    views.mark_spot_aired,                      name='mark_spot_aired'),
     path('spot/mark-notes-read/',               views.mark_notes_read,                      name='mark_notes_read'),
     path('spot/notifications/',                 views.spot_notifications,                   name='spot_notifications'),
+    path('notifications/send/',                 views.admin_send_notification,              name='admin_send_notification'),
     path('tc/<int:pk>/download/',               views.tc_report_download,                   name='tc_report_download'),
 
     # Channel Officers (admin management)

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block page_title %}Send Notification{% endblock %}
+{% block page_subtitle %}Broadcast a message to users{% endblock %}
+
+{% block content %}
+<div class="p-6 max-w-2xl mx-auto space-y-6">
+
+  <!-- Header -->
+  <div class="flex items-center gap-3">
+    <div class="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center">
+      <i class="fa-solid fa-bell text-violet-600"></i>
+    </div>
+    <div>
+      <h2 class="text-base font-bold text-slate-800">Send Notification</h2>
+      <p class="text-xs text-slate-500">Notifications appear instantly in users' bell icon.</p>
+    </div>
+  </div>
+
+  <!-- Form -->
+  <form method="post" class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
+    {% csrf_token %}
+
+    <!-- Message -->
+    <div>
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Message <span class="text-red-500">*</span></label>
+      <textarea name="message" rows="3" required
+                class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                placeholder="Enter your notification message…"></textarea>
+    </div>
+
+    <!-- Recipients -->
+    <div>
+      <label class="block text-xs font-semibold text-slate-600 mb-2">Send to</label>
+      <div class="space-y-2">
+        <label class="flex items-center gap-2.5 cursor-pointer">
+          <input type="radio" name="target" value="all" checked
+                 class="accent-violet-600" onchange="updateTargetUI(this.value)">
+          <span class="text-sm text-slate-700">All users</span>
+        </label>
+        <label class="flex items-center gap-2.5 cursor-pointer">
+          <input type="radio" name="target" value="role"
+                 class="accent-violet-600" onchange="updateTargetUI(this.value)">
+          <span class="text-sm text-slate-700">Specific role</span>
+        </label>
+        <label class="flex items-center gap-2.5 cursor-pointer">
+          <input type="radio" name="target" value="user"
+                 class="accent-violet-600" onchange="updateTargetUI(this.value)">
+          <span class="text-sm text-slate-700">Specific users</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Role picker (hidden by default) -->
+    <div id="role-picker" class="hidden">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Role</label>
+      <select name="target_role"
+              class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-400">
+        <option value="">— select role —</option>
+        {% for val, label in role_choices %}
+        <option value="{{ val }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- User picker (hidden by default) -->
+    <div id="user-picker" class="hidden">
+      <label class="block text-xs font-semibold text-slate-600 mb-1.5">Users</label>
+      <div class="border border-slate-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto divide-y divide-slate-100">
+        {% for u in all_users %}
+        <label class="flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 cursor-pointer">
+          <input type="checkbox" name="target_users" value="{{ u.pk }}"
+                 class="accent-violet-600 rounded">
+          <span class="text-sm text-slate-700">{{ u.name }}</span>
+          <span class="ml-auto text-[10px] text-slate-400">{{ u.get_role_display }}</span>
+        </label>
+        {% empty %}
+        <p class="px-3 py-3 text-xs text-slate-400">No users found.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Submit -->
+    <div class="flex justify-end pt-2">
+      <button type="submit"
+              class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold transition-colors">
+        <i class="fa-solid fa-paper-plane text-xs"></i>
+        Send Notification
+      </button>
+    </div>
+  </form>
+
+</div>
+
+<script>
+function updateTargetUI(val) {
+  document.getElementById('role-picker').classList.toggle('hidden', val !== 'role');
+  document.getElementById('user-picker').classList.toggle('hidden', val !== 'user');
+}
+</script>
+{% endblock %}

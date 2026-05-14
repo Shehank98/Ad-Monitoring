@@ -712,7 +712,12 @@ def schedule_upload(request):
             _acct_slug   = _slugify(account.name)
             _num_slug    = _slugify(sched_number)
             storage_filename = f'{_acct_slug}_{_chan_slug}_{_month_slug}_{_num_slug}.xlsx'
-            schedule.file.save(storage_filename, excel_file)
+            try:
+                schedule.file.save(storage_filename, excel_file)
+            except Exception as e:
+                logger.error('Schedule Firebase upload failed for "%s": %s', storage_filename, e)
+                messages.error(request, f'File could not be saved to storage: {e}')
+                return render(request, 'schedules/upload.html', {'form': form})
             schedule.save()
 
             # ── Parse Schedule rows into DB ────────────────────────────────────
@@ -4500,6 +4505,11 @@ def tc_delete(request, pk):
 
     channel = report.channel
     month   = report.month
+    try:
+        if report.file:
+            report.file.delete(save=False)
+    except Exception:
+        logger.warning('Could not delete TC file from Firebase Storage: %s', report.file.name)
     report.delete()
     messages.success(request, f'TC report for {channel} / {month} deleted.')
     if user.role == 'channel_officer':
@@ -9236,6 +9246,51 @@ def spot_notifications(request):
     if request.GET.get('mark_read') == '1':
         SpotNotification.objects.filter(recipient=user, is_read=False).update(is_read=True)
     return JsonResponse({'ok': True, 'notifications': items, 'count': len(items)})
+
+
+@login_required
+@role_required(['super_admin', 'admin'])
+def admin_send_notification(request):
+    """Admin panel: send a notification to all users, a specific role, or specific users."""
+    from accounts.models import User as _User
+    from core.models import SpotNotification as _SN
+
+    if request.method == 'POST':
+        message  = request.POST.get('message', '').strip()
+        target   = request.POST.get('target', 'all')
+        role_val = request.POST.get('target_role', '').strip()
+        user_ids = request.POST.getlist('target_users')
+
+        if not message:
+            messages.error(request, 'Message cannot be empty.')
+        else:
+            qs = _User.objects.filter(is_active=True).exclude(pk=request.user.pk)
+            if target == 'role' and role_val:
+                qs = qs.filter(role=role_val)
+            elif target == 'user' and user_ids:
+                qs = qs.filter(pk__in=user_ids)
+
+            notifs = [
+                _SN(recipient=u, message=message, created_by=request.user)
+                for u in qs
+            ]
+            _SN.objects.bulk_create(notifs)
+            messages.success(request, f'Notification sent to {len(notifs)} user(s).')
+            return redirect('/dashboard/notifications/send/')
+
+    role_choices = [
+        ('super_admin', 'Super Admin'),
+        ('admin', 'Admin'),
+        ('team_head', 'Team Head'),
+        ('planner', 'Planner'),
+        ('operations', 'Operations'),
+        ('channel_officer', 'Channel Officer'),
+    ]
+    all_users = User.objects.filter(is_active=True).exclude(pk=request.user.pk).order_by('name')
+    return render(request, 'notifications/send.html', {
+        'all_users':    all_users,
+        'role_choices': role_choices,
+    })
 
 
 @login_required

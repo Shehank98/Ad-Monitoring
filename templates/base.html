@@ -484,6 +484,9 @@
         <a href="/dashboard/settings/" class="nav-item {% if '/settings/' in path %}active{% endif %}">
           <i class="nav-icon fa-solid fa-sliders"></i><span class="nav-text">Settings</span>
         </a>
+        <a href="/dashboard/notifications/send/" class="nav-item {% if '/notifications/send/' in path %}active{% endif %}">
+          <i class="nav-icon fa-solid fa-bell"></i><span class="nav-text">Send Notification</span>
+        </a>
         <a href="/dashboard/channel-officers/" class="nav-item {% if '/channel-officers/' in path %}active{% endif %}">
           <i class="nav-icon fa-brands fa-whatsapp"></i><span class="nav-text">Marketing Officers</span>
         </a>
@@ -624,6 +627,31 @@
         <p class="text-[11px] text-slate-400 mt-0.5">{% block page_subtitle %}{% endblock %}</p>
       </div>
       <div class="flex items-center gap-2">
+        {% if request.user.is_authenticated %}
+        <!-- Notification bell (all authenticated users) -->
+        <div class="relative" id="notif-wrapper">
+          <button id="notif-btn" onclick="toggleNotifDropdown()"
+                  class="relative w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-500 transition-colors"
+                  title="Notifications">
+            <i class="fa-solid fa-bell text-sm"></i>
+            <span id="notif-badge"
+                  class="hidden absolute -top-1 -right-1 min-w-[16px] h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center px-1">
+              0
+            </span>
+          </button>
+          <div id="notif-dropdown"
+               class="hidden absolute right-0 top-10 w-80 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50">
+              <span class="text-xs font-semibold text-slate-600">Notifications</span>
+              <button onclick="markAllNotifRead()"
+                      class="text-[11px] text-blue-600 hover:underline">Mark all read</button>
+            </div>
+            <ul id="notif-list" class="divide-y divide-slate-50 max-h-72 overflow-y-auto">
+              <li class="px-4 py-3 text-xs text-slate-400">Loading…</li>
+            </ul>
+          </div>
+        </div>
+        {% endif %}
         <div class="w-7 h-7 rounded-lg flex items-center justify-center text-white font-bold text-[10px] flex-shrink-0
           {% if request.user.role == 'super_admin' %}bg-gradient-to-br from-purple-500 to-purple-700
           {% elif request.user.role == 'admin' %}bg-gradient-to-br from-blue-500 to-blue-700
@@ -747,29 +775,84 @@
     });
   })();
 </script>
-{% if request.user.is_authenticated and request.user.role == 'channel_officer' %}
+{% if request.user.is_authenticated %}
 <script>
-// Poll for unread notifications and update the Missed Commercials badge
-(function pollMCBadge() {
+// Poll for unread notifications — bell icon for all users, MC badge for channel officers
+(function pollNotifications() {
   function update() {
     fetch('/dashboard/spot/notifications/')
       .then(r => r.json())
       .then(data => {
-        const badge = document.getElementById('mc-notif-badge');
-        if (!badge) return;
-        if (data.count > 0) {
-          badge.textContent = data.count;
-          badge.classList.remove('hidden');
-        } else {
-          badge.classList.add('hidden');
+        // Bell badge
+        const badge = document.getElementById('notif-badge');
+        if (badge) {
+          if (data.count > 0) {
+            badge.textContent = data.count;
+            badge.classList.remove('hidden');
+          } else {
+            badge.classList.add('hidden');
+          }
         }
+        // Populate dropdown list
+        const list = document.getElementById('notif-list');
+        if (list) {
+          if (!data.notifications || data.notifications.length === 0) {
+            list.innerHTML = '<li class="px-4 py-3 text-xs text-slate-400">No new notifications</li>';
+          } else {
+            list.innerHTML = data.notifications.map(n => {
+              const link = n.sr_id
+                ? `<a href="/dashboard/schedules/?sr=${n.sr_id}" class="text-blue-600 hover:underline text-[10px]">View spot</a>`
+                : '';
+              return `<li class="px-4 py-3 hover:bg-slate-50">
+                <p class="text-xs text-slate-700 leading-snug">${n.message}</p>
+                <div class="flex items-center justify-between mt-1">
+                  <span class="text-[10px] text-slate-400">${n.created_at}</span>
+                  ${link}
+                </div>
+              </li>`;
+            }).join('');
+          }
+        }
+        {% if request.user.role == 'channel_officer' %}
+        // Keep legacy Missed Commercials badge in sync
+        const mcBadge = document.getElementById('mc-notif-badge');
+        if (mcBadge) {
+          if (data.count > 0) { mcBadge.textContent = data.count; mcBadge.classList.remove('hidden'); }
+          else { mcBadge.classList.add('hidden'); }
+        }
+        {% endif %}
       })
       .catch(() => {});
   }
   update();
-  // Refresh every 2 minutes
   setInterval(update, 120000);
 })();
+
+function toggleNotifDropdown() {
+  const dd = document.getElementById('notif-dropdown');
+  if (dd) dd.classList.toggle('hidden');
+}
+function markAllNotifRead() {
+  fetch('/dashboard/spot/notifications/?mark_read=1')
+    .then(r => r.json())
+    .then(() => {
+      const badge = document.getElementById('notif-badge');
+      if (badge) badge.classList.add('hidden');
+      const list = document.getElementById('notif-list');
+      if (list) list.innerHTML = '<li class="px-4 py-3 text-xs text-slate-400">No new notifications</li>';
+      const dd = document.getElementById('notif-dropdown');
+      if (dd) dd.classList.add('hidden');
+    })
+    .catch(() => {});
+}
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+  const wrapper = document.getElementById('notif-wrapper');
+  if (wrapper && !wrapper.contains(e.target)) {
+    const dd = document.getElementById('notif-dropdown');
+    if (dd) dd.classList.add('hidden');
+  }
+});
 </script>
 {% endif %}
 {% block extra_scripts %}{% endblock %}
