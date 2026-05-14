@@ -439,14 +439,17 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
                 for s in valid:
                     start_s = _time_to_secs(s.start_time)
                     end_s   = _time_to_secs(s.end_time)
-                    # Treat 00:00:00 end as midnight when start is in the evening
-                    if end_s == 0 and start_s and start_s > 43200:
-                        end_s = 86400
-                    if start_s is not None and end_s is not None:
-                        if start_s <= lmrb_secs <= end_s + 600:
-                            matched_sr  = s
-                            matched_key = pool_key
-                            break
+                    if start_s is None or end_s is None:
+                        continue
+                    # Midnight-crossing window: end before start (e.g. 22:30–00:30)
+                    if end_s < start_s and start_s > 43200:
+                        end_s += 86400
+                    # Post-midnight LMRB time (e.g. 00:53) needs the same shift
+                    cmp_lmrb = lmrb_secs + 86400 if end_s > 86400 and lmrb_secs < start_s else lmrb_secs
+                    if start_s <= cmp_lmrb <= end_s + 600:
+                        matched_sr  = s
+                        matched_key = pool_key
+                        break
 
             # Pass 2: proximity match — closest window centre within ±2 hours
             # Only attempted when LMRB time is known but no exact window matched.
@@ -455,15 +458,17 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
                 for s in valid:
                     start_s = _time_to_secs(s.start_time)
                     end_s   = _time_to_secs(s.end_time)
-                    if end_s == 0 and start_s and start_s > 43200:
-                        end_s = 86400
-                    if start_s is not None and end_s is not None:
-                        centre_s = (start_s + end_s) / 2
-                        diff = abs(lmrb_secs - centre_s)
-                        if diff < best_diff and diff <= 7200:
-                            best_diff  = diff
-                            matched_sr  = s
-                            matched_key = pool_key
+                    if start_s is None or end_s is None:
+                        continue
+                    if end_s < start_s and start_s > 43200:
+                        end_s += 86400
+                    cmp_lmrb = lmrb_secs + 86400 if end_s > 86400 and lmrb_secs < start_s else lmrb_secs
+                    centre_s = (start_s + end_s) / 2
+                    diff = abs(cmp_lmrb - centre_s)
+                    if diff < best_diff and diff <= 7200:
+                        best_diff  = diff
+                        matched_sr  = s
+                        matched_key = pool_key
 
             # Pass 3: fallback to earliest valid date — only when no LMRB time
             # is available (e.g. unconfirmed TC row that still reaches Step 2).
