@@ -4234,7 +4234,7 @@ def tc_pdf_convert(request):
                 account           = account,
                 channel           = channel,
                 month             = month,
-                file              = None,
+                file              = '',
                 original_filename = f'PDF_Converted_{channel}_{month}.xlsx',
                 row_count         = 0,
                 start_date        = start_date,
