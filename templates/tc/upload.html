@@ -4,108 +4,95 @@
 {% block page_subtitle %}Upload the channel's TC file received after schedule completion - aired spots are auto-parsed{% endblock %}
 
 {% block content %}
-<div class="max-w-2xl officer-page-content">
+<div class="max-w-3xl space-y-5">
 
   {% if is_officer %}
   <a href="/dashboard/channel-officer/"
-     class="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 mb-5 transition-colors">
+     class="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 transition-colors">
     <i class="fa-solid fa-arrow-left text-xs"></i> Back to My Dashboard
   </a>
   {% else %}
   <a href="/dashboard/tc/"
-     class="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 mb-5 transition-colors">
+     class="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 transition-colors">
     <i class="fa-solid fa-arrow-left text-xs"></i> Back to TC Reports
   </a>
   {% endif %}
 
   <!-- Supported channels banner (hidden for channel officers) -->
   {% if not is_officer %}
-  <div class="mb-4 p-4 bg-slate-800 border border-slate-700 rounded-xl shadow-sm" style="border-top:2px solid #10b981;">
-    <p class="text-xs font-bold text-slate-300 uppercase tracking-widest mb-3">
-      <i class="fa-solid fa-satellite-dish mr-1.5 text-emerald-400"></i> Supported Channels — PDF Parsing
-    </p>
-    <div class="flex flex-wrap gap-2 mb-2">
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700"><i class="fa-solid fa-circle-check text-emerald-400 text-[9px]"></i> TV Derana</span>
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700"><i class="fa-solid fa-circle-check text-emerald-400 text-[9px]"></i> Sirasa TV</span>
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700"><i class="fa-solid fa-circle-check text-emerald-400 text-[9px]"></i> Swarnawahini TV</span>
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700"><i class="fa-solid fa-circle-check text-emerald-400 text-[9px]"></i> ITN</span>
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700"><i class="fa-solid fa-circle-check text-emerald-400 text-[9px]"></i> Vasantham TV</span>
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700"><i class="fa-solid fa-circle-check text-emerald-400 text-[9px]"></i> Hiru TV</span>
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700"><i class="fa-solid fa-circle-check text-emerald-400 text-[9px]"></i> Shakthi TV</span>
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700"><i class="fa-solid fa-circle-check text-emerald-400 text-[9px]"></i> Star Tamil</span>
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700"><i class="fa-solid fa-circle-check text-emerald-400 text-[9px]"></i> Siyatha TV</span>
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700"><i class="fa-solid fa-circle-check text-emerald-400 text-[9px]"></i> Supreme TV</span>
+  <details class="group bg-white border border-slate-200 rounded-2xl shadow-sm">
+    <summary class="flex items-center gap-2 px-5 py-4 cursor-pointer select-none text-slate-700 font-bold text-sm">
+      <i class="fa-solid fa-satellite-dish text-emerald-500"></i>
+      PDF-Supported Channels &amp; Column Guide
+      <i class="fa-solid fa-chevron-down text-slate-400 ml-auto group-open:rotate-180 transition-transform"></i>
+    </summary>
+    <div class="px-5 pb-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <!-- Supported channels -->
+      <div>
+        <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">PDF Auto-Parse</p>
+        <div class="flex flex-wrap gap-1.5">
+          {% for ch in "TV Derana,Sirasa TV,Swarnawahini TV,ITN,Vasantham TV,Hiru TV,Shakthi TV,Star Tamil,Siyatha TV,Supreme TV"|split:"," %}
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <i class="fa-solid fa-circle-check text-emerald-500 text-[9px]"></i> {{ ch }}
+          </span>
+          {% endfor %}
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-500 border border-slate-200">
+            <i class="fa-solid fa-clock text-slate-400 text-[9px]"></i> Rupavahini
+          </span>
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-500 border border-slate-200">
+            <i class="fa-solid fa-clock text-slate-400 text-[9px]"></i> Channel Eye
+          </span>
+        </div>
+        <p class="text-[10px] text-slate-400 mt-2">Excel (.xlsx / .xls) works for any channel.</p>
+      </div>
+      <!-- Column guide -->
+      <div>
+        <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Detected Columns</p>
+        <ul class="text-xs text-slate-600 space-y-1">
+          <li><span class="font-semibold text-slate-700">Date</span> — Date / Aired Date / Prg Date</li>
+          <li><span class="font-semibold text-slate-700">Programme</span> — Programme / Program / Prg Name</li>
+          <li><span class="font-semibold text-slate-700">TC Theme</span> — Theme / Product / Description / Ad Name</li>
+          <li><span class="font-semibold text-slate-700">Duration</span> — Duration / Dur / Seconds / Ad Dur</li>
+          <li><span class="font-semibold text-slate-700">Aired Time</span> — Time / Aired Time / Advt_time / Ad Start</li>
+        </ul>
+      </div>
     </div>
-    <div class="flex flex-wrap gap-2 mb-2">
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-700 text-slate-400 border border-slate-600"><i class="fa-solid fa-clock text-slate-500 text-[9px]"></i> Rupavahini</span>
-      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-700 text-slate-400 border border-slate-600"><i class="fa-solid fa-clock text-slate-500 text-[9px]"></i> Channel Eye</span>
-    </div>
-    <p class="text-[10px] text-slate-500 mt-1">
-      <i class="fa-solid fa-circle-check text-emerald-400 mr-0.5"></i> Supported &nbsp;
-      <i class="fa-solid fa-clock text-slate-500 mr-0.5 ml-2"></i> Coming soon &nbsp;&middot;&nbsp;
-      Excel uploads work for any channel.
-    </p>
-  </div>
+  </details>
   {% endif %}
 
-  <!-- Info cards — stack on mobile, 2-col on sm+ -->
-  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
-    <div class="p-4 bg-slate-800 border border-slate-700 rounded-xl" style="border-left:4px solid #f59e0b;">
-      <p class="text-sm font-bold text-amber-400 mb-2.5"><i class="fa-solid fa-table-columns mr-1.5"></i> TC File Columns Detected</p>
-      <ul class="text-xs text-slate-300 space-y-1.5">
-        <li><span class="font-semibold text-slate-200">Date</span> <span class="text-slate-500">—</span> Aired date (Date / Aired Date)</li>
-        <li><span class="font-semibold text-slate-200">Programme</span> <span class="text-slate-500">—</span> Programme / Program / Prg Name</li>
-        <li><span class="font-semibold text-slate-200">TC Theme</span> <span class="text-slate-500">—</span> Theme / Product / Description / Ad Name</li>
-        <li><span class="font-semibold text-slate-200">Duration</span> <span class="text-slate-500">—</span> Duration / Dur / Seconds / Ad Dur</li>
-        <li><span class="font-semibold text-slate-200">Aired Time</span> <span class="text-slate-500">—</span> Time / Aired Time / Advt_time / Ad Start</li>
-      </ul>
-    </div>
-    <div class="p-4 bg-slate-800 border border-slate-700 rounded-xl" style="border-left:4px solid #0d9488;">
-      <p class="text-sm font-bold text-teal-400 mb-2.5"><i class="fa-solid fa-diagram-project mr-1.5"></i> How TC Reconciliation Works</p>
-      <ul class="text-xs text-slate-300 space-y-1.5">
-        <li>TC rows matched to Schedule using <span class="font-semibold text-slate-200">TC Theme</span> (via Brand Mappings)</li>
-        <li><span class="font-semibold text-slate-200">Late-aired rule:</span> TC date must be ≥ planned date</li>
-        <li>TC vs LMRB cross-check within <span class="font-semibold text-slate-200">±5 seconds</span> tolerance</li>
-        <li>Unmatched TC rows → <span class="font-semibold text-amber-400">EXTRA</span> spots</li>
-      </ul>
-    </div>
-  </div>
-
   <!-- Upload form card -->
-  <div class="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
-    <div class="px-6 py-5 flex items-center gap-3" style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">
-      <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style="background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);">
-        <i class="fa-solid fa-file-invoice text-amber-400"></i>
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-file-invoice text-amber-600"></i>
       </div>
       <div>
-        <h2 class="font-bold text-white">Upload TC File</h2>
+        <h2 class="font-bold text-slate-800 text-sm">Upload TC File</h2>
         <p class="text-xs text-slate-400">Excel (.xlsx / .xls) or PDF — columns detected automatically</p>
       </div>
-      <div class="ml-auto">
-        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30">
-          <i class="fa-solid fa-bolt text-[8px]"></i> AUTO-PARSE
-        </span>
-      </div>
+      <span class="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-50 text-teal-600 border border-teal-200">
+        <i class="fa-solid fa-bolt text-[8px]"></i> AUTO-PARSE
+      </span>
     </div>
 
-    <form method="post" enctype="multipart/form-data" class="px-4 sm:px-6 py-5 space-y-5" id="tc-upload-form">
+    <form method="post" enctype="multipart/form-data" class="px-5 py-5 space-y-4" id="tc-upload-form">
       {% csrf_token %}
 
       {% if is_officer %}
-      <div class="bg-teal-50 border border-teal-200 rounded-2xl px-4 py-4 text-sm text-teal-800">
-        <i class="fa-solid fa-tv mr-2 text-teal-600"></i>
+      <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700">
+        <i class="fa-solid fa-tv mr-1.5 text-blue-500"></i>
         Upload the Transmission Certificate for your channel.
       </div>
       {% endif %}
 
       <!-- Account -->
       <div>
-        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-          <i class="fa-solid fa-building mr-1 text-slate-400"></i> Account <span class="text-red-400">*</span>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">
+          Account <span class="text-red-500">*</span>
         </label>
         <select name="account_id" id="selAccount"
-                class="{% if is_officer %}text-base py-4{% else %}select-field{% endif %} w-full border-2 border-slate-200 rounded-xl px-4 bg-white text-slate-700 font-medium focus:outline-none focus:border-teal-400 appearance-none"
+                class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
                 required onchange="loadSchedules()">
           <option value="">Select account…</option>
           {% for acc in accounts %}
@@ -116,31 +103,31 @@
 
       <!-- Channel -->
       <div>
-        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-          <i class="fa-solid fa-tv mr-1 text-slate-400"></i> Channel <span class="text-red-400">*</span>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">
+          Channel <span class="text-red-500">*</span>
         </label>
         <input type="text" name="channel" id="inpChannel" placeholder="e.g. Sirasa TV"
-               class="w-full {% if is_officer %}text-base py-4 border-2{% else %}{% endif %} border-slate-200 rounded-xl px-4 bg-white text-slate-700 font-medium focus:outline-none focus:border-teal-400 {% if is_officer %}bg-teal-50{% endif %}"
+               class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 {% if is_officer %}bg-slate-50{% else %}bg-white{% endif %}"
                required value="{{ prefill.channel }}" {% if is_officer %}readonly{% endif %}>
       </div>
 
       <!-- Month -->
       <div>
-        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-          <i class="fa-solid fa-calendar mr-1 text-slate-400"></i> Month <span class="text-red-400">*</span>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">
+          Month <span class="text-red-500">*</span>
         </label>
         <input type="text" name="month" id="inpMonth" placeholder="e.g. June 2025"
-               class="w-full {% if is_officer %}text-base py-4 border-2{% endif %} border-slate-200 rounded-xl px-4 bg-white text-slate-700 font-medium focus:outline-none focus:border-teal-400"
+               class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
                required value="{{ prefill.month }}">
       </div>
 
       <!-- Linked Schedule -->
       <div>
-        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-          <i class="fa-solid fa-link mr-1 text-slate-400"></i> Link to Schedule <span class="text-red-400">*</span>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">
+          Link to Schedule <span class="text-red-500">*</span>
         </label>
         <select name="schedule_id" id="selSchedule"
-                class="{% if is_officer %}text-base py-4{% else %}select-field{% endif %} w-full border-2 border-slate-200 rounded-xl px-4 bg-white text-slate-700 font-medium focus:outline-none focus:border-teal-400 appearance-none"
+                class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
                 onchange="scheduleSelected(this)" required>
           <option value="">Select schedule…</option>
           {% for sch in schedules %}
@@ -157,34 +144,36 @@
 
       <!-- File upload -->
       <div>
-        <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-          <i class="fa-solid fa-file-arrow-up mr-1 text-slate-400"></i> TC File <span class="text-red-400">*</span>
+        <label class="block text-xs font-semibold text-slate-600 mb-1.5">
+          TC File <span class="text-red-500">*</span>
         </label>
         <label for="tcFile"
-               class="flex flex-col items-center justify-center w-full min-h-[120px] border-2 border-dashed
-                      border-teal-300 rounded-2xl cursor-pointer bg-teal-50 hover:bg-teal-100
-                      active:bg-teal-200 transition-colors p-5 gap-2">
-          <i class="fa-solid fa-file-arrow-up text-teal-500 text-3xl"></i>
-          <p class="text-base font-bold text-teal-700">Tap to choose TC file</p>
-          <p class="text-sm text-teal-500">Excel (.xlsx / .xls) or PDF</p>
-          <p id="tcFileName" class="text-sm text-teal-800 font-semibold hidden mt-1"></p>
+               class="flex items-center gap-3 w-full border-2 border-dashed border-slate-300 rounded-xl
+                      cursor-pointer bg-slate-50 hover:bg-slate-100 hover:border-slate-400
+                      transition-colors px-4 py-4">
+          <i class="fa-solid fa-file-arrow-up text-slate-400 text-lg shrink-0"></i>
+          <div>
+            <p class="text-sm font-semibold text-slate-600">Click to choose TC file</p>
+            <p class="text-xs text-slate-400">Excel (.xlsx / .xls) or PDF</p>
+          </div>
+          <p id="tcFileName" class="ml-auto text-xs text-slate-600 font-medium hidden truncate max-w-[160px]"></p>
         </label>
         <input type="file" name="tc_file" id="tcFile" accept=".xlsx,.xls,.pdf"
                class="sr-only" onchange="onFileChange(this)" required>
       </div>
 
       <!-- Excel detect result -->
-      <div id="detectResult" class="hidden p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-sm text-emerald-800">
-        <p class="font-semibold mb-1"><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> File detected</p>
-        <p id="detectText"></p>
+      <div id="detectResult" class="hidden p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800">
+        <p class="font-semibold mb-0.5"><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> File detected</p>
+        <p id="detectText" class="text-emerald-700"></p>
       </div>
 
-      <!-- Preview button -->
-      <button type="button" id="btnPreview" onclick="runPreview()"
-              class="w-full flex items-center justify-center gap-3 py-4 bg-amber-500 hover:bg-amber-600
-                     active:scale-95 text-white text-base font-bold rounded-2xl shadow-md transition-all">
-        <i class="fa-solid fa-magnifying-glass text-lg"></i> Preview &amp; Verify Data
-      </button>
+      <!-- Action row -->
+      <div class="flex justify-end pt-1">
+        <button type="button" id="btnPreview" onclick="runPreview()" class="btn-primary">
+          <i class="fa-solid fa-magnifying-glass"></i> Preview &amp; Verify Data
+        </button>
+      </div>
     </form>
 
     <!-- Hidden PDF-upload form (posts parsed JSON, no file) -->
@@ -200,10 +189,10 @@
   </div>
 
   <!-- ── Preview Panel ──────────────────────────────────────────────────────── -->
-  <div id="previewPanel" class="hidden mt-6">
+  <div id="previewPanel" class="hidden">
 
     <!-- Loading -->
-    <div id="previewLoading" class="hidden bg-white rounded-2xl border border-slate-100 shadow-sm p-8 text-center">
+    <div id="previewLoading" class="hidden bg-white rounded-2xl border border-slate-200 shadow-sm p-8 text-center">
       <div class="inline-flex items-center gap-3 text-slate-500">
         <svg class="animate-spin h-5 w-5 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -215,30 +204,30 @@
 
     <!-- Error -->
     <div id="previewError" class="hidden bg-red-50 border border-red-200 rounded-2xl p-5">
-      <p class="font-semibold text-red-700 flex items-center gap-2 mb-1">
+      <p class="font-semibold text-red-700 flex items-center gap-2 mb-1 text-sm">
         <i class="fa-solid fa-circle-xmark"></i> Could not parse file
       </p>
-      <p id="previewErrorMsg" class="text-sm text-red-600"></p>
+      <p id="previewErrorMsg" class="text-xs text-red-600"></p>
     </div>
 
     <!-- Content -->
-    <div id="previewContent" class="hidden bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+    <div id="previewContent" class="hidden bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
-      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+      <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="w-9 h-9 bg-emerald-100 rounded-xl flex items-center justify-center">
             <i class="fa-solid fa-table-list text-emerald-600 text-sm"></i>
           </div>
           <div>
-            <h3 class="font-bold text-slate-800">Data Preview</h3>
+            <h3 class="font-bold text-slate-800 text-sm">Data Preview</h3>
             <p class="text-xs text-slate-400">Review the parsed data before uploading</p>
           </div>
         </div>
-        <span id="previewBadge" class="text-xs font-bold bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full"></span>
+        <span id="previewBadge" class="text-xs font-semibold bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full"></span>
       </div>
 
       <!-- Stats -->
-      <div class="px-6 py-4 grid grid-cols-3 gap-4 border-b border-slate-50">
+      <div class="px-5 py-4 grid grid-cols-3 gap-4 border-b border-slate-100">
         <div class="text-center">
           <p class="text-2xl font-bold text-slate-800" id="pRowCount">-</p>
           <p class="text-[11px] text-slate-400 mt-0.5">Valid Rows</p>
@@ -254,14 +243,14 @@
       </div>
 
       <!-- Duration breakdown -->
-      <div class="px-6 py-4 border-b border-slate-50">
-        <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Duration Breakdown</p>
+      <div class="px-5 py-4 border-b border-slate-100">
+        <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5">Duration Breakdown</p>
         <div id="durBreakdown" class="flex flex-wrap gap-2"></div>
       </div>
 
       <!-- Theme table -->
-      <div class="px-6 py-4 border-b border-slate-50">
-        <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Themes / Ad Names</p>
+      <div class="px-5 py-4 border-b border-slate-100">
+        <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5">Themes / Ad Names</p>
         <div class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead>
@@ -277,8 +266,8 @@
       </div>
 
       <!-- Sample rows -->
-      <div class="px-6 py-4 border-b border-slate-50">
-        <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Sample Rows (first 10)</p>
+      <div class="px-5 py-4 border-b border-slate-100">
+        <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5">Sample Rows (first 10)</p>
         <div class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead>
@@ -296,16 +285,12 @@
       </div>
 
       <!-- Action buttons -->
-      <div class="px-5 py-5 bg-slate-50 flex flex-col gap-3">
-        <button type="button" id="btnConfirmUpload" onclick="confirmUpload()"
-                class="w-full flex items-center justify-center gap-3 py-4 bg-teal-600 hover:bg-teal-700
-                       active:scale-95 text-white text-base font-bold rounded-2xl shadow-md transition-all">
-          <i class="fa-solid fa-cloud-arrow-up text-lg"></i> Confirm Upload
-        </button>
-        <button type="button" onclick="cancelPreview()"
-                class="w-full flex items-center justify-center gap-2 py-3.5 border-2 border-slate-200
-                       text-slate-600 text-base font-semibold rounded-2xl hover:bg-slate-100 active:scale-95 transition-all">
+      <div class="px-5 py-4 bg-slate-50 flex items-center justify-end gap-3">
+        <button type="button" onclick="cancelPreview()" class="btn-secondary">
           <i class="fa-solid fa-arrow-left"></i> Back &amp; Edit
+        </button>
+        <button type="button" id="btnConfirmUpload" onclick="confirmUpload()" class="btn-primary">
+          <i class="fa-solid fa-cloud-arrow-up"></i> Confirm Upload
         </button>
       </div>
     </div>
@@ -425,13 +410,13 @@ if (dropLabel) {
   ['dragenter','dragover'].forEach(ev => {
     dropLabel.addEventListener(ev, e => {
       e.preventDefault();
-      dropLabel.classList.add('border-teal-500', 'bg-teal-100');
+      dropLabel.classList.add('border-blue-400', 'bg-blue-50');
     });
   });
   ['dragleave','drop'].forEach(ev => {
     dropLabel.addEventListener(ev, e => {
       e.preventDefault();
-      dropLabel.classList.remove('border-teal-500', 'bg-teal-100');
+      dropLabel.classList.remove('border-blue-400', 'bg-blue-50');
       if (ev === 'drop' && e.dataTransfer.files.length) {
         const dt = e.dataTransfer;
         const input = document.getElementById('tcFile');
