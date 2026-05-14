@@ -21,6 +21,7 @@ from verification.tc_converters import sirasa_tv, generic
 # Channels not listed here fall back to the generic heuristic parser.
 CHANNEL_CONVERTERS = {
     'sirasa': sirasa_tv,
+    'itn':    generic,
     # 'rupavahini': rupavahini,   # future
 }
 

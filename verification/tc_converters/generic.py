@@ -23,7 +23,7 @@ import pandas as pd
 
 # ── Patterns ───────────────────────────────────────────────────────────────────
 
-DATE_RE     = re.compile(r'\b(\d{1,2}[-/]\d{1,2}[-/]\d{4})\b')
+DATE_RE     = re.compile(r'\b(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\b')
 TIME_RE     = re.compile(r'\b(\d{2}:\d{2}:\d{2}(?::\d{2})?)\b')
 
 SKIP_RE = re.compile(
@@ -61,7 +61,7 @@ def _detect_date_fmt(date_strings) -> str:
            Otherwise default to DD/MM/YYYY.
     """
     for ds in date_strings:
-        parts = re.split(r'[-/]', ds)
+        parts = re.split(r'[-/.]', ds)
         if len(parts) != 3:
             continue
         try:
@@ -76,13 +76,17 @@ def _detect_date_fmt(date_strings) -> str:
 
 
 def _parse_date(raw: str, fmt: str = '%d/%m/%Y'):
-    parts = re.split(r'[-/]', raw)
+    parts = re.split(r'[-/.]', raw)
     if len(parts) != 3:
         return None
+    # Expand 2-digit years before parsing
+    if len(parts[2]) == 2:
+        parts[2] = '20' + parts[2]
+    normalized = '/'.join(parts)
     alt = '%m/%d/%Y' if fmt == '%d/%m/%Y' else '%d/%m/%Y'
     for f in (fmt, alt):
         try:
-            return datetime.strptime(raw, f).date()
+            return datetime.strptime(normalized, f).date()
         except ValueError:
             pass
     return None

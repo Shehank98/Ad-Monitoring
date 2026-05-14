@@ -35,7 +35,7 @@ const ACCOUNTS = [
   {% endfor %}
 ];
 
-const ACTIVE_CHANNELS   = ["TV Derana","Sirasa TV","Swarnawahini TV","ITN","Vasantham TV","Hiru TV","Shakthi TV","Star Tamil","Siyatha TV","Supreme TV"];
+const ACTIVE_CHANNELS   = ["Tv - Derana","Tv - Sirasa TV","Tv - Swarnavahini","Tv - ITN","Tv - Vasantham TV","Tv - Hiru TV","Tv - Shakthi TV","Star Tamil","Tv - Siyatha Tv","TV - Supreme TV"];
 const DISABLED_CHANNELS = ["Rupavahini","Channel Eye"];
 
 /* ── Icons ─────────────────────────────────────────────────────── */
@@ -72,7 +72,7 @@ async function parsePDF(file, selectedChannel) {
     items.forEach(item => {
       const y = item.transform[5], x = item.transform[4];
       let str = item.str;
-      if (selectedChannel === 'Supreme TV') str = str.replace(/\$/g, '');
+      if (selectedChannel === 'TV - Supreme TV') str = str.replace(/\$/g, '');
       if (!str.trim()) return;
       const charWidth = item.width / Math.max(1, str.length);
       const parts = str.split(/(\s{2,})/);
@@ -146,12 +146,12 @@ async function parsePDF(file, selectedChannel) {
     } else {
       const parts = rawDate.split(/[-/]/);
       let year = parts[2]; if (year.length === 2) year = '20' + year;
-      if (['Sirasa TV','Hiru TV','Shakthi TV'].includes(selectedChannel)) {
-        // DD/MM/YYYY
-        date = `${parseInt(parts[0],10)}/${parseInt(parts[1],10)}/${year}`;
-      } else {
-        // MM/DD/YYYY (TV Derana, Swarnawahini, ITN, Vasantham, Supreme TV, …)
+      if (selectedChannel === 'TV - Supreme TV') {
+        // Supreme TV PDFs use MM/DD/YYYY
         date = `${parseInt(parts[1],10)}/${parseInt(parts[0],10)}/${year}`;
+      } else {
+        // All other channels use DD/MM/YYYY → send as D/M/YYYY to server
+        date = `${parseInt(parts[0],10)}/${parseInt(parts[1],10)}/${year}`;
       }
     }
 
@@ -159,12 +159,12 @@ async function parsePDF(file, selectedChannel) {
     let time = '', duration = '';
     let durationTime, advtTime;
 
-    if (selectedChannel === 'Supreme TV') {
+    if (selectedChannel === 'TV - Supreme TV') {
       durationTime = allTimes.find(t => t.startsWith('0:00:'));
       advtTime     = allTimes.find(t => !t.startsWith('0:00:')) || allTimes[0];
     } else {
       durationTime = allTimes.find(t => t.startsWith('00:00:'));
-      if (selectedChannel === 'Star Tamil' || selectedChannel === 'Siyatha TV') {
+      if (selectedChannel === 'Star Tamil' || selectedChannel === 'Tv - Siyatha Tv') {
         // Prefer actual HH:MM:SS over scheduled AM/PM time
         advtTime = allTimes.find(t => /\d{2}[:.]\d{2}[:.]\d{2}/.test(t) && !t.startsWith('00:00:'))
                 || allTimes.find(t => /[AP]M/i.test(t))
@@ -190,7 +190,7 @@ async function parsePDF(file, selectedChannel) {
     }
 
     if (durationTime) {
-      if (selectedChannel === 'Supreme TV') {
+      if (selectedChannel === 'TV - Supreme TV') {
         duration = parseInt(durationTime.replace('0:00:',''), 10).toString();
       } else {
         duration = durationTime.substring(0, 8).replace('00:00:','');
@@ -232,7 +232,7 @@ async function parsePDF(file, selectedChannel) {
 
     // ── Split Programme vs Theme via largest horizontal gap ───────────────
     let program = '', commercial = '';
-    if (selectedChannel === 'Supreme TV') {
+    if (selectedChannel === 'TV - Supreme TV') {
       commercial = remainingItems.map(i => i.text).join(' ').trim();
     } else if (remainingItems.length > 0) {
       const sorted = [...remainingItems].sort((a,b) => a.x - b.x);
@@ -266,7 +266,7 @@ async function parsePDF(file, selectedChannel) {
     if (program || commercial) {
       parsedData.push({
         DATE:       date,
-        PROGRAMME:  selectedChannel === 'Supreme TV' ? 'N/A' : program.trim(),
+        PROGRAMME:  selectedChannel === 'TV - Supreme TV' ? 'N/A' : program.trim(),
         Advt_time:  time,
         Advt_theme: commercial.trim(),
         Duration:   duration,
@@ -279,7 +279,7 @@ async function parsePDF(file, selectedChannel) {
 /* ── Main App ───────────────────────────────────────────────────── */
 function App() {
   const [accountId,      setAccountId]      = useState(ACCOUNTS.length ? ACCOUNTS[0].id : '');
-  const [selectedChannel,setSelectedChannel] = useState('TV Derana');
+  const [selectedChannel,setSelectedChannel] = useState('Tv - Derana');
   const [file,           setFile]           = useState(null);
   const [isConverting,   setIsConverting]   = useState(false);
   const [isUploading,    setIsUploading]    = useState(false);
