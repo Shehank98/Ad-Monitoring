@@ -9,7 +9,7 @@ from datetime import date as date_cls, datetime
 from django.conf import settings as django_settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Max, Min, Count
+from django.db.models import Max, Min, Count, Q
 from django.http import FileResponse, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -26,7 +26,7 @@ from accounts.views import create_user, edit_user, user_list
 from .forms import AccountForm, ChannelForm, MonitoringUploadForm, ScheduleUploadForm
 from .models import (
     Account, AuditLog, BrandMapping, Channel, ChannelOfficer, Client,
-    LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow,
+    LMRBRow, ManualMatch, MatchResult, MonitoringData, Schedule, ScheduleRow,
     SpotNote, SponsorshipLmrbAssignment, SummaryReportMeta, SystemSetting,
     TCRow, TransmissionReport,
     _ensure_defaults, get_setting, get_setting_list,
