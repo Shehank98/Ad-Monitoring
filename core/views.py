@@ -4645,6 +4645,8 @@ def tc_three_way(request):
     months             = []
     schedules_in_scope = []
     rows               = []
+    live_cover_sr      = {}      # tc_id -> ScheduleRow resolved live (engine left it unlinked)
+    covered_sched_ids  = set()   # ScheduleRow ids covered by a live TC match
 
     if account_id:
         try:
@@ -4709,19 +4711,76 @@ def tc_three_way(request):
         if schedule_id:
             tc_qs = tc_qs.filter(tc_report__schedule_id=schedule_id)
 
+        # ── Live schedule coverage ────────────────────────────────────────────
+        # A TC spot the engine left unlinked (matched_schedule is NULL) but which
+        # falls inside an unmatched planned commercial slot's date + time-window +
+        # duration is really that planned spot airing.  Resolve it live so the row
+        # shows its Schedule (Planned) details and the slot is not double-reported
+        # as missed.  Greedy one-to-one; mirrors the TC engine's window (+10 min).
+        from verification.tc_engine import _time_to_secs as _tts3w2
+
+        cover_sched_qs = ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+            ad_type='COMMERCIAL BENEFITS', tc_matches__isnull=True,
+        )
+        if schedule_id:
+            cover_sched_qs = cover_sched_qs.filter(schedule_id=schedule_id)
+        cover_sched = list(cover_sched_qs.order_by('date', 'start_time'))
+        unlinked_tc = list(
+            tc_qs.filter(matched_schedule__isnull=True).order_by('date', 'aired_time')
+        )
+        _used_tc_ids: set = set()
+        for srow in cover_sched:
+            s_s = _tts3w2(srow.start_time)
+            e_s = _tts3w2(srow.end_time)
+            if s_s is None or e_s is None:
+                continue
+            if e_s < s_s and s_s > 43200:   # midnight-crossing window
+                e_s += 86400
+            for tcr in unlinked_tc:
+                if tcr.id in _used_tc_ids or tcr.date != srow.date:
+                    continue
+                if (srow.duration is not None and tcr.duration is not None
+                        and tcr.duration != srow.duration):
+                    continue
+                a_s = _tts3w2(tcr.aired_time)
+                if a_s is None:
+                    continue
+                cmp_s = a_s + 86400 if e_s > 86400 and a_s < s_s else a_s
+                if s_s <= cmp_s <= e_s + 600:
+                    live_cover_sr[tcr.id] = srow
+                    covered_sched_ids.add(srow.id)
+                    _used_tc_ids.add(tcr.id)
+                    break
+
         for tc in tc_qs:
             lmrb = tc.matched_lmrb  # None if not LMRB-confirmed
 
-            # Resolve brand: prefer matched schedule, fall back to BrandMapping reverse lookup
+            # Schedule row details — prefer the engine link, else the live-coverage
+            # resolution computed above.
             if tc.matched_schedule_id and tc.matched_schedule:
-                brand = tc.matched_schedule.brand
+                sr = tc.matched_schedule
+                live_covered = False
+            elif tc.id in live_cover_sr:
+                sr = live_cover_sr[tc.id]
+                live_covered = True
+            else:
+                sr = None
+                live_covered = False
+
+            is_sched_matched = bool(tc.is_schedule_matched or live_covered)
+            is_extra_display = bool(tc.is_extra and not live_covered)
+
+            # Resolve brand: prefer the (engine or live) schedule row, else reverse map
+            if sr is not None:
+                brand = sr.brand
             else:
                 brand = tc_theme_to_brand.get(tc.tc_theme.lower().strip(), '')
 
             # Status
             if tc.is_lmrb_confirmed:
                 status = 'confirmed'
-            elif tc.is_extra:
+            elif is_extra_display:
                 status = 'extra'
             else:
                 status = 'tc_only'
@@ -4733,17 +4792,12 @@ def tc_three_way(request):
             if tc_time_s is not None and lmrb_time_s is not None:
                 tc_lmrb_delta = abs(tc_time_s - lmrb_time_s)
 
-            # Schedule row details (for the detail panel)
-            sr = tc.matched_schedule if tc.matched_schedule_id else None
-
             # Aired in a different programme than planned? (matched, but the TC's
-            # aired programme differs from the booked schedule programme). This is
-            # the audit signal for spots picked up via the time-belt fallback or
-            # any spot the channel shifted to another show.
+            # aired programme differs from the booked schedule programme).
             def _np(s):
                 return str(s).strip().lower() if s else ''
             diff_programme = bool(
-                sr and tc.is_schedule_matched
+                sr and is_sched_matched
                 and _np(sr.programme) and _np(tc.programme)
                 and _np(sr.programme) != _np(tc.programme)
             )
@@ -4757,8 +4811,9 @@ def tc_three_way(request):
                 'tc_time':      tc.aired_time,
                 'tc_theme':     tc.tc_theme,
                 'tc_programme': tc.programme,
-                'is_extra':     tc.is_extra,
-                'is_schedule_matched': tc.is_schedule_matched,
+                'is_extra':     is_extra_display,
+                'is_schedule_matched': is_sched_matched,
+                'live_covered': live_covered,   # schedule resolved live (not by engine)
                 # Schedule (planned) — populated when is_schedule_matched=True
                 'sched_date':       sr.date        if sr else None,
                 'sched_start_time': sr.start_time  if sr else '',
@@ -4795,54 +4850,11 @@ def tc_three_way(request):
 
     # ── Missed ads: ScheduleRows with no matching TCRow ───────────────────────
     # A planned commercial spot is "Not Aired" only when the channel transmitted
-    # NOTHING in its slot.  We first take rows the engine left unlinked
-    # (tc_matches is empty), then defensively drop any whose date + time-window +
-    # duration is actually covered by a real TC spot the engine failed to formally
-    # link (e.g. a tc_theme mapping gap, or a spot that aired in a different
-    # programme).  This keeps the list correct even when reconciliation has not been
-    # re-run in 'reset' mode after a mapping fix.
+    # NOTHING in its slot.  Rows the engine left unlinked AND that no live TC spot
+    # covers (covered_sched_ids, computed above) are the genuinely missed ones.
     missed_ads = []
-    n_window_recovered = 0
+    n_window_recovered = len(covered_sched_ids)
     if selected_account and channel and month:
-        from verification.tc_engine import _time_to_secs as _tts_missed
-
-        # Pool of TC spots NOT formally linked to any schedule row (available to
-        # "cover" a planned slot).  Greedy one-to-one so one TC spot clears at most
-        # one planned row.
-        tc_pool_qs = TCRow.objects.filter(
-            account_id=account_id, channel__iexact=channel, tc_report__month=month,
-            matched_schedule__isnull=True,
-        )
-        if schedule_id:
-            tc_pool_qs = tc_pool_qs.filter(tc_report__schedule_id=schedule_id)
-        avail_tc = [
-            {'date': t.date, 'secs': _tts_missed(t.aired_time),
-             'dur': t.duration, 'used': False}
-            for t in tc_pool_qs
-        ]
-
-        def _covered_by_window_tc(sr):
-            """True if an unclaimed TC spot falls in sr's date + window + duration."""
-            start_s = _tts_missed(sr.start_time)
-            end_s   = _tts_missed(sr.end_time)
-            if start_s is None or end_s is None:
-                return False
-            # Midnight-crossing window (e.g. 23:30–00:30)
-            if end_s < start_s and start_s > 43200:
-                end_s += 86400
-            for cand in avail_tc:
-                if cand['used'] or cand['secs'] is None or cand['date'] != sr.date:
-                    continue
-                if (sr.duration is not None and cand['dur'] is not None
-                        and cand['dur'] != sr.duration):
-                    continue
-                cmp_s = (cand['secs'] + 86400
-                         if end_s > 86400 and cand['secs'] < start_s else cand['secs'])
-                if start_s <= cmp_s <= end_s + 600:   # +10 min grace, mirrors engine
-                    cand['used'] = True
-                    return True
-            return False
-
         missed_sch_qs = (
             ScheduleRow.objects
             .filter(
@@ -4850,14 +4862,12 @@ def tc_three_way(request):
                 ad_type='COMMERCIAL BENEFITS',
                 tc_matches__isnull=True,   # reverse relation: TCRow.matched_schedule
             )
+            .exclude(id__in=covered_sched_ids)
             .order_by('date', 'programme', 'start_time')
         )
         if schedule_id:
             missed_sch_qs = missed_sch_qs.filter(schedule_id=schedule_id)
         for sr in missed_sch_qs:
-            if _covered_by_window_tc(sr):
-                n_window_recovered += 1
-                continue   # a TC spot covers this slot — not genuinely missed
             missed_ads.append({
                 'brand':      sr.brand,
                 'programme':  sr.programme,
@@ -5280,31 +5290,40 @@ def summary_report(request):
                 cards_raw = []
                 for sched in schedules_deduped:
                     ch, mo = sched.channel or '', sched.month or ''
-                    planned      = planned_map.get(sched.id, 0)
                     manual_aired = manual_aired_map.get(sched.id, 0)
 
                     has_tc = (sched.id in per_schedule_tc_ids) or ((ch, mo) in unlinked_tc_scopes)
 
+                    # "Reconciled" indicator only — the actual numbers come from
+                    # build_summary_data() so the card always matches the Summary Sheet.
                     if sched.id in per_schedule_tc_ids:
-                        # TC linked to this schedule: use TC reconciliation counts
-                        tc_aired       = tc_aired_linked.get(sched.id, 0)
-                        aired          = tc_aired + manual_aired
-                        missed         = max(0, planned - aired)
                         has_reconciled = (sched.id in tc_processed_linked) or manual_aired > 0
                     elif (ch, mo) in unlinked_tc_scopes:
-                        # TC uploaded for this channel+month (no schedule link)
-                        tc_aired       = tc_aired_unlinked.get((ch, mo), 0)
-                        aired          = tc_aired + manual_aired
-                        missed         = max(0, planned - aired)
                         has_reconciled = ((ch, mo) in tc_processed_unlinked) or manual_aired > 0
                     else:
-                        # No TC yet: fall back to MatchResult (Schedule↔LMRB engine)
-                        mr             = mr_map.get(sched.id, {})
-                        aired          = mr.get('n_matched', 0) + manual_aired
-                        missed         = max(0, planned - aired)
-                        has_reconciled = mr.get('total', 0) > 0 or manual_aired > 0
+                        has_reconciled = mr_map.get(sched.id, {}).get('total', 0) > 0 or manual_aired > 0
 
-                    pct = min(int(aired / planned * 100), 100) if planned else 0
+                    # ── Numbers connected to the Summary Sheet, split by type ─────
+                    # Commercial and Sponsorship are counted separately so sponsorship
+                    # airings never inflate the commercial total (the cause of
+                    # "Aired 267 / Planned 48").
+                    try:
+                        _sd = build_summary_data(account_id, ch, mo, schedule_id=sched.id)
+                        _ct = _sd.get('commercial_total', {}) or {}
+                        _st = _sd.get('sponsorship_total', {}) or {}
+                    except Exception:
+                        logger.exception('card build_summary_data failed sched=%s', sched.id)
+                        _ct, _st = {}, {}
+
+                    comm_planned = _ct.get('planned', 0); comm_aired = _ct.get('aired', 0)
+                    comm_missed  = _ct.get('missed', 0)
+                    spon_planned = _st.get('planned', 0); spon_aired = _st.get('aired', 0)
+                    spon_missed  = _st.get('missed', 0)
+
+                    planned = comm_planned + spon_planned
+                    aired   = comm_aired + spon_aired
+                    missed  = comm_missed + spon_missed
+                    pct     = min(int(aired / planned * 100), 100) if planned else 0
 
                     if not has_tc:
                         sc = 'needs_tc'
@@ -5323,6 +5342,8 @@ def summary_report(request):
                         'version':           sched.version,
                         'original_filename': sched.original_filename,
                         'planned': planned, 'aired': aired, 'missed': missed,
+                        'comm_planned': comm_planned, 'comm_aired': comm_aired, 'comm_missed': comm_missed,
+                        'spon_planned': spon_planned, 'spon_aired': spon_aired, 'spon_missed': spon_missed,
                         'has_tc': has_tc, 'has_reconciled': has_reconciled,
                         'status': sc, 'percent': pct,
                     })

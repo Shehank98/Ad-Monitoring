@@ -31,20 +31,46 @@
       {% endif %}
     </span>
 
-    <!-- Metrics -->
-    <div class="grid grid-cols-3 gap-1.5 text-center">
-      <div class="bg-slate-50 rounded-xl py-2">
-        <p class="text-lg font-bold text-slate-800 leading-none">{{ card.planned }}</p>
-        <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-1">Plan</p>
+    <!-- Metrics: Commercial and Sponsorship counted separately (matches Summary Sheet) -->
+    <div class="space-y-1.5">
+      <!-- Commercial -->
+      <div class="flex items-center gap-2">
+        <span class="w-12 text-[10px] font-bold text-blue-600 uppercase tracking-wide flex-shrink-0">Comm.</span>
+        <div class="flex-1 grid grid-cols-3 gap-1 text-center">
+          <div class="bg-slate-50 rounded-lg py-1.5">
+            <span class="block text-sm font-bold text-slate-800 leading-none">{{ card.comm_planned }}</span>
+            <span class="block text-[9px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">Plan</span>
+          </div>
+          <div class="bg-emerald-50 rounded-lg py-1.5">
+            <span class="block text-sm font-bold text-emerald-700 leading-none">{{ card.comm_aired }}</span>
+            <span class="block text-[9px] text-emerald-600 font-semibold uppercase tracking-wide mt-0.5">Aired</span>
+          </div>
+          <div class="{% if card.comm_missed > 0 %}bg-amber-50{% else %}bg-slate-50{% endif %} rounded-lg py-1.5">
+            <span class="block text-sm font-bold {% if card.comm_missed > 0 %}text-amber-600{% else %}text-slate-300{% endif %} leading-none">{{ card.comm_missed }}</span>
+            <span class="block text-[9px] {% if card.comm_missed > 0 %}text-amber-500{% else %}text-slate-300{% endif %} font-semibold uppercase tracking-wide mt-0.5">Miss</span>
+          </div>
+        </div>
       </div>
-      <div class="bg-emerald-50 rounded-xl py-2">
-        <p class="text-lg font-bold text-emerald-700 leading-none">{{ card.aired }}</p>
-        <p class="text-[10px] text-emerald-600 font-semibold uppercase tracking-wide mt-1">Aired</p>
+      <!-- Sponsorship -->
+      {% if card.spon_planned > 0 %}
+      <div class="flex items-center gap-2">
+        <span class="w-12 text-[10px] font-bold text-purple-600 uppercase tracking-wide flex-shrink-0">Spon.</span>
+        <div class="flex-1 grid grid-cols-3 gap-1 text-center">
+          <div class="bg-slate-50 rounded-lg py-1.5">
+            <span class="block text-sm font-bold text-slate-800 leading-none">{{ card.spon_planned }}</span>
+            <span class="block text-[9px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">Plan</span>
+          </div>
+          <div class="bg-emerald-50 rounded-lg py-1.5">
+            <span class="block text-sm font-bold text-emerald-700 leading-none">{{ card.spon_aired }}</span>
+            <span class="block text-[9px] text-emerald-600 font-semibold uppercase tracking-wide mt-0.5">Aired</span>
+          </div>
+          <div class="{% if card.spon_missed > 0 %}bg-amber-50{% else %}bg-slate-50{% endif %} rounded-lg py-1.5">
+            <span class="block text-sm font-bold {% if card.spon_missed > 0 %}text-amber-600{% else %}text-slate-300{% endif %} leading-none">{{ card.spon_missed }}</span>
+            <span class="block text-[9px] {% if card.spon_missed > 0 %}text-amber-500{% else %}text-slate-300{% endif %} font-semibold uppercase tracking-wide mt-0.5">Miss</span>
+          </div>
+        </div>
       </div>
-      <div class="{% if card.missed > 0 %}bg-amber-50{% else %}bg-slate-50{% endif %} rounded-xl py-2">
-        <p class="text-lg font-bold {% if card.missed > 0 %}text-amber-600{% else %}text-slate-300{% endif %} leading-none">{{ card.missed }}</p>
-        <p class="text-[10px] {% if card.missed > 0 %}text-amber-500{% else %}text-slate-300{% endif %} font-semibold uppercase tracking-wide mt-1">Missed</p>
-      </div>
+      {% endif %}
     </div>
 
     <!-- Progress bar -->
