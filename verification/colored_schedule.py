@@ -174,6 +174,113 @@ def build_status_map(account_id, channel, month) -> dict:
     return dict(status_map)
 
 
+def build_status_map_from_tc(account_id, channel, month) -> dict:
+    """
+    Build the per-slot, per-date status map from TC ↔ LMRB reconciliation data.
+
+    Used to colour the schedule from the *channel certificate* ground truth once a
+    TC file has been reconciled (reconcile_tc).  A planned ScheduleRow is coloured:
+
+        matched (green)   – a TCRow links to it AND is LMRB-confirmed
+                            (TCRow.is_schedule_matched & is_lmrb_confirmed)
+        not_aired (red)   – no confirmed TCRow links to it
+        late_telecast     – confirmed TCRow links to it but aired on a LATER date
+                            (planned date shows red, actual aired date shows purple)
+
+    When the spot aired in a different programme than planned, a 'prog_note'
+    string is attached to that date cell so the colored export can surface it as a
+    cell comment.  Structure matches build_status_map() so the workbook builder is
+    unchanged.
+    """
+    from core.models import ScheduleRow, TCRow
+
+    # Map ScheduleRow.id → its confirmed matched TCRow (schedule-matched + LMRB-confirmed).
+    tc_by_sched: dict = {}
+    tc_qs = (
+        TCRow.objects
+        .filter(
+            account_id=account_id, channel__iexact=channel,
+            tc_report__month=month,
+            is_schedule_matched=True, is_lmrb_confirmed=True,
+            matched_schedule__isnull=False,
+        )
+        .select_related('matched_lmrb')
+    )
+    for tc in tc_qs:
+        tc_by_sched[tc.matched_schedule_id] = tc
+
+    status_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    late_actual_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    prog_notes: dict = defaultdict(dict)   # slot_key → {date_str: note}
+
+    for sr in ScheduleRow.objects.filter(
+        account_id=account_id, channel=channel, month=month,
+    ):
+        if not sr.date:
+            continue
+        prog     = _normalize(sr.programme)
+        start    = _normalize_time(sr.start_time)
+        dur      = sr.duration or 0
+        slot_key = (prog, start, dur)
+        date_str = sr.date.strftime('%Y-%m-%d')
+
+        tc = tc_by_sched.get(sr.id)
+        if tc is None:
+            status_map[slot_key][date_str]['not_aired'] += 1
+            continue
+
+        if tc.date and tc.date > sr.date:
+            # Late telecast: planned date red, actual aired date purple
+            status_map[slot_key][date_str]['not_aired'] += 1
+            late_actual_map[slot_key][date_str][tc.date.strftime('%Y-%m-%d')] += 1
+        else:
+            status_map[slot_key][date_str]['matched'] += 1
+
+        # Aired in a different programme than planned?
+        aired_prog_raw = tc.programme or (tc.matched_lmrb.program if tc.matched_lmrb else '')
+        if prog and _normalize(aired_prog_raw) and _normalize(aired_prog_raw) != prog:
+            prog_notes[slot_key][date_str] = (
+                f'Planned in "{sr.programme}" but aired in "{aired_prog_raw}".'
+            )
+
+    for slot_key, date_dict in late_actual_map.items():
+        for date_str, actual_dict in date_dict.items():
+            status_map[slot_key][date_str]['late_actual'] = dict(actual_dict)
+            status_map[slot_key][date_str]['late_to'] = dict(actual_dict)
+
+    for slot_key, date_dict in prog_notes.items():
+        for date_str, note in date_dict.items():
+            status_map[slot_key][date_str]['prog_note'] = note
+
+    return dict(status_map)
+
+
+def build_status_map_auto(account_id, channel, month):
+    """
+    Pick the colour source automatically:
+
+      1. If TC reconciliation data exists for the scope (any LMRB-confirmed TCRow),
+         colour from TC ↔ LMRB matched data (the channel-certificate ground truth).
+      2. Else if Schedule ↔ LMRB MatchResult records exist, colour from those.
+      3. Else return None (all date cells fall back to the 'planned' colour).
+    """
+    from core.models import MatchResult, TCRow
+
+    tc_exists = TCRow.objects.filter(
+        account_id=account_id, channel__iexact=channel,
+        tc_report__month=month, is_lmrb_confirmed=True,
+    ).exists()
+    if tc_exists:
+        return build_status_map_from_tc(account_id, channel, month)
+
+    if MatchResult.objects.filter(
+        account_id=account_id, channel=channel, month=month,
+    ).exists():
+        return build_status_map(account_id, channel, month)
+
+    return None
+
+
 # ── Pivot structure detection (openpyxl-based) ───────────────────────────────
 
 def _detect_pivot_openpyxl(ws):
@@ -251,6 +358,42 @@ def _detect_pivot_openpyxl(ws):
                 pass
 
     return header_row_idx, col_map, date_col_map
+
+
+def _detect_pivot_via_converter(raw_bytes):
+    """
+    Detect the pivot structure using the SAME logic as the upload parser
+    (verification/schedule_converter), so any file that imported as a pivot at
+    upload time is detected here identically.  This is the user's chosen source of
+    truth for the colored export.
+
+    Returns (header_row_idx, col_map, date_col_map) with 1-based indices to match
+    the openpyxl convention used by build_colored_schedule_wb, or (None, {}, {}).
+    """
+    import pandas as pd
+    from verification.schedule_converter import (
+        _build_col_map, _detect_header_row, _find_date_columns,
+    )
+
+    try:
+        raw = pd.read_excel(io.BytesIO(raw_bytes), header=None)
+    except Exception:
+        return None, {}, {}
+
+    header_row, prog_col = _detect_header_row(raw)
+    if header_row is None:
+        return None, {}, {}
+
+    col_map0   = _build_col_map(raw, header_row, prog_col)        # 0-based
+    date_cols0 = _find_date_columns(raw, header_row, col_map0)    # {0-based col: 'YYYY-MM-DD'}
+
+    if any(k not in col_map0 for k in ('day', 'start_time', 'duration')) or not date_cols0:
+        return None, {}, {}
+
+    # openpyxl uses 1-based row/column indices.
+    col_map      = {k: v + 1 for k, v in col_map0.items()}
+    date_col_map = {c + 1: d for c, d in date_cols0.items()}
+    return header_row + 1, col_map, date_col_map
 
 
 def _is_skip_row(val_str: str) -> bool:
@@ -479,15 +622,30 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
 
     wb_src = openpyxl.load_workbook(io.BytesIO(raw_bytes), data_only=True)
     ws_src = wb_src.active
-    header_row_idx, col_map, date_col_map = _detect_pivot_openpyxl(ws_src)
+    # Detect the pivot structure. Prefer the upload parser's proven (pandas-based)
+    # detection so any file that imported as a pivot at upload is detected here
+    # too; fall back to the openpyxl-based detector for extra leniency.
+    header_row_idx, col_map, date_col_map = _detect_pivot_via_converter(raw_bytes)
     if not header_row_idx or not date_col_map:
-        # Pivot structure not detected in the uploaded file — fall back to
-        # rebuilding from DB records so colours are always applied.
+        header_row_idx, col_map, date_col_map = _detect_pivot_openpyxl(ws_src)
+    if not header_row_idx or not date_col_map:
+        # Pivot structure genuinely not detectable. NEVER silently rebuild from the
+        # database — that produces a system-generated layout, not the user's file.
+        # Return the original uploaded file unchanged, with a clear warning row.
         logger.warning(
             'build_colored_schedule_wb: pivot structure not detected for schedule pk=%s; '
-            'falling back to DB-based builder.', schedule_pk
+            'returning the original file unchanged (no DB rebuild).', schedule_pk
         )
-        return _build_wb_from_db(schedule, colors, status_map)
+        wb_orig = openpyxl.load_workbook(io.BytesIO(raw_bytes))
+        ws_orig = wb_orig.active
+        ws_orig.insert_rows(1)
+        warn = ws_orig.cell(
+            1, 1,
+            'NOTE: Could not auto-detect the schedule layout, so status colours were '
+            'not applied. This is your original uploaded file, unchanged.',
+        )
+        warn.font = Font(bold=True, color='B91C1C')
+        return wb_orig
 
     # Build colour fills
     fills = {
@@ -654,6 +812,8 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
                         per_date[date_str]['late_actual'] = date_data['late_actual']
                     if 'late_to' in date_data:
                         per_date[date_str]['late_to'] = dict(date_data['late_to'])
+                    if 'prog_note' in date_data:
+                        per_date[date_str]['prog_note'] = date_data['prog_note']
 
         # Skip rows where every date column is zero (hidden / unused template rows).
         total_planned = sum(
@@ -686,7 +846,7 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
 
         # Determine maximum number of sub-rows needed across all dates
         # (e.g. 3 statuses in one date → 2 sub-rows in addition to main)
-        _META_KEYS = {'late_actual', 'late_to', 'late_from'}
+        _META_KEYS = {'late_actual', 'late_to', 'late_from', 'prog_note'}
         max_sub_rows = 0
         for date_str, counts in per_date.items():
             statuses = [s for s in counts if s not in _META_KEYS and isinstance(counts[s], int) and counts[s] > 0]
@@ -703,6 +863,7 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
             """Build a comment string for a date cell, or None if not needed."""
             late_to   = counts.get('late_to',   {})
             late_from = counts.get('late_from', {})
+            prog_note = counts.get('prog_note')
             parts = []
             if late_to:
                 for actual, n in sorted(late_to.items()):
@@ -716,6 +877,8 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
                     parts.append(
                         f'Includes {n} delayed spot(s) originally planned for {d}.'
                     )
+            if prog_note:
+                parts.append(f'⚠ {prog_note}')
             return '\n'.join(parts) if parts else None
 
         for src_col, date_str in all_date_cols.items():
@@ -881,7 +1044,7 @@ _STATUS_ORDER = [
 ]
 
 
-_META_KEYS_GLOBAL = {'late_actual', 'late_to', 'late_from'}
+_META_KEYS_GLOBAL = {'late_actual', 'late_to', 'late_from', 'prog_note'}
 
 
 def _ordered_statuses(counts: dict) -> list:

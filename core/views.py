@@ -4703,6 +4703,18 @@ def tc_three_way(request):
             # Schedule row details (for the detail panel)
             sr = tc.matched_schedule if tc.matched_schedule_id else None
 
+            # Aired in a different programme than planned? (matched, but the TC's
+            # aired programme differs from the booked schedule programme). This is
+            # the audit signal for spots picked up via the time-belt fallback or
+            # any spot the channel shifted to another show.
+            def _np(s):
+                return str(s).strip().lower() if s else ''
+            diff_programme = bool(
+                sr and tc.is_schedule_matched
+                and _np(sr.programme) and _np(tc.programme)
+                and _np(sr.programme) != _np(tc.programme)
+            )
+
             rows.append({
                 'tc_row_id': tc.id,
                 'brand':    brand,
@@ -4728,6 +4740,7 @@ def tc_three_way(request):
                 'lmrb_programme': lmrb.program  if lmrb else '',
                 # Status
                 'status':           status,
+                'diff_programme':   diff_programme,
                 'tc_lmrb_delta_secs': tc_lmrb_delta,
             })
 
@@ -4789,6 +4802,7 @@ def tc_three_way(request):
         'n_confirmed':        sum(1 for r in rows if r['status'] == 'confirmed'),
         'n_tc_only':          sum(1 for r in rows if r['status'] == 'tc_only'),
         'n_extra':            sum(1 for r in rows if r['status'] == 'extra'),
+        'n_diff_prog':        sum(1 for r in rows if r['diff_programme']),
     })
 
 
@@ -6471,7 +6485,7 @@ def colored_schedule_export(request, pk):
     If reconciliation (MatchResult) data exists for the schedule's scope it is used
     to colour cells. Otherwise all date cells are coloured in the 'planned' colour.
     """
-    from verification.colored_schedule import build_colored_schedule_wb, build_status_map
+    from verification.colored_schedule import build_colored_schedule_wb, build_status_map_auto
 
     schedule = get_object_or_404(Schedule, pk=pk)
     if not _account_access(request.user, schedule.account_id):
@@ -6486,20 +6500,13 @@ def colored_schedule_export(request, pk):
         'planned':            get_setting('schedule_color_planned',            '#94a3b8'),
     }
 
-    # Use reconciliation data if it exists for this scope
-    from core.models import MatchResult
-    has_results = MatchResult.objects.filter(
-        account_id=schedule.account_id,
-        channel=schedule.channel,
-        month=schedule.month,
-    ).exists()
-
+    # Colour source: TC ↔ LMRB matched data when a TC file has been reconciled,
+    # otherwise Schedule ↔ LMRB MatchResult records, otherwise plain 'planned'.
     status_map = None
-    if has_results:
-        try:
-            status_map = build_status_map(schedule.account_id, schedule.channel, schedule.month)
-        except Exception:
-            logger.exception('build_status_map failed for schedule pk=%s', pk)
+    try:
+        status_map = build_status_map_auto(schedule.account_id, schedule.channel, schedule.month)
+    except Exception:
+        logger.exception('build_status_map_auto failed for schedule pk=%s', pk)
 
     try:
         wb = build_colored_schedule_wb(schedule.pk, colors, status_map)
@@ -6528,7 +6535,7 @@ def colored_schedule_export(request, pk):
 @login_required
 def summary_colored_schedule(request):
     """Download colored schedule from the Summary Sheet page (always uses reconciliation data)."""
-    from verification.colored_schedule import build_colored_schedule_wb, build_status_map
+    from verification.colored_schedule import build_colored_schedule_wb, build_status_map_auto
 
     account_id  = request.GET.get('account_id', '')
     channel     = request.GET.get('channel', '')
@@ -6563,7 +6570,7 @@ def summary_colored_schedule(request):
     }
 
     try:
-        status_map = build_status_map(account_id, channel, month)
+        status_map = build_status_map_auto(account_id, channel, month)
         wb = build_colored_schedule_wb(schedule.pk, colors, status_map)
     except FileNotFoundError as exc:
         messages.error(request, str(exc))

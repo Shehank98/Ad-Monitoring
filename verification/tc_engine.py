@@ -545,6 +545,81 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
     logger.debug("Step 3 complete: %d unconfirmed TC rows matched to Schedule via tc_theme",
                  len(tc_matched_fallback))
 
+    # ── STEP 3b: Time-belt fallback (LMRB-confirmed TC rows with no brand match) ──
+    # When a confirmed TC row could not be linked to a ScheduleRow via its
+    # tc_theme → BrandMapping → brand chain (e.g. the channel certificate names the
+    # spot differently from the booked brand and no mapping resolves it), fall back
+    # to matching purely on date + time-belt + duration using the confirmed LMRB
+    # row's air time.  This catches spots that genuinely aired (LMRB-confirmed) but
+    # whose tc_theme mapping is missing/incorrect, so the planned slot is no longer
+    # reported as "Not Aired".  The aired programme may differ from the planned one —
+    # that is surfaced separately (tc_three_way / colored schedule) rather than
+    # blocking the match.
+    confirmed_unmatched = [r for r in confirmed_tc if not r.is_schedule_matched]
+    tc_matched_timebelt: list = []
+    if confirmed_unmatched:
+        # Flatten remaining (unconsumed) ScheduleRows from the shared pool,
+        # remembering each row's pool key so we can remove it on match.
+        # Only commercial slots are eligible — sponsorship has its own engine and
+        # must not be claimed purely by a time-belt coincidence.
+        remaining_pool = []  # list of (sr, pool_key)
+        for pool_key, pool_rows in sch_pool.items():
+            for sr in pool_rows:
+                if sr.ad_type == 'COMMERCIAL BENEFITS':
+                    remaining_pool.append((sr, pool_key))
+        remaining_pool.sort(key=lambda pr: pr[0].date)
+
+        used_sr_ids: set = set()
+        for tcrow in sorted(confirmed_unmatched, key=lambda r: r.date):
+            lr_obj     = tc_lmrb_pairs[tcrow.id]
+            dur        = int(tcrow.duration) if tcrow.duration is not None else None
+            aired_secs = _time_to_secs(lr_obj.advt_time)
+            if aired_secs is None:
+                aired_secs = _time_to_secs(tcrow.aired_time)
+            if aired_secs is None:
+                continue
+
+            best_sr   = None
+            best_key  = None
+            best_diff = float('inf')
+            for sr, pool_key in remaining_pool:
+                if id(sr) in used_sr_ids:
+                    continue
+                sr_dur = int(sr.duration) if sr.duration is not None else None
+                if sr_dur != dur:
+                    continue
+                # Late-aired rule: TCRow.date >= ScheduleRow.date
+                if tcrow.date < sr.date:
+                    continue
+                start_s = _time_to_secs(sr.start_time)
+                end_s   = _time_to_secs(sr.end_time)
+                if start_s is None or end_s is None:
+                    continue
+                # Midnight-crossing window (e.g. 22:30–00:30)
+                if end_s < start_s and start_s > 43200:
+                    end_s += 86400
+                cmp_secs = aired_secs + 86400 if end_s > 86400 and aired_secs < start_s else aired_secs
+                # Exact window (+10 min grace) wins immediately
+                if start_s <= cmp_secs <= end_s + 600:
+                    best_sr, best_key, best_diff = sr, pool_key, -1.0
+                    break
+                # Otherwise keep the closest window-centre within ±2h as a soft match
+                centre = (start_s + end_s) / 2
+                diff   = abs(cmp_secs - centre)
+                if diff < best_diff and diff <= 7200:
+                    best_sr, best_key, best_diff = sr, pool_key, diff
+
+            if best_sr is not None:
+                used_sr_ids.add(id(best_sr))
+                sch_pool[best_key].remove(best_sr)
+                tcrow.is_schedule_matched = True
+                tcrow.matched_schedule    = best_sr
+                tc_matched_via_lmrb.append(tcrow)
+                tc_matched_timebelt.append(tcrow)
+
+    logger.debug("Step 3b complete: %d confirmed TC rows matched to Schedule via time-belt",
+                 len(tc_matched_timebelt))
+
     # ── STEP 4: Remaining TCRows → EXTRA ─────────────────────────────────────
     tc_extra: list = []
     for rows in available_unconfirmed.values():
@@ -571,7 +646,8 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
 
     print(
         f"[reconcile_tc] Done — matched: {len(tc_matched)} "
-        f"(via LMRB: {len(tc_matched_via_lmrb)}, fallback: {len(tc_matched_fallback)}), "
+        f"(via LMRB: {len(tc_matched_via_lmrb)} [incl. time-belt: {len(tc_matched_timebelt)}], "
+        f"fallback: {len(tc_matched_fallback)}), "
         f"extra: {len(tc_extra)}, lmrb_confirmed: {len(tc_lmrb_updates)}"
     )
 
