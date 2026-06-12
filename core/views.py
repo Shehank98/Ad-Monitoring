@@ -1839,14 +1839,28 @@ def brand_mapping_list(request):
                     messages.error(request, 'No access to that account.')
                 else:
                     created = 0
+                    updated = 0
                     skipped = 0
                     for theme in theme_list:
-                        exists = BrandMapping.objects.filter(
+                        existing = BrandMapping.objects.filter(
                             account=account, brand=brand, theme=theme,
                             duration=duration, product=product,
-                        ).exists()
-                        if exists:
-                            skipped += 1
+                        ).first()
+                        if existing:
+                            # Enrich an existing mapping instead of silently dropping
+                            # the TC / MapOnline themes the user just picked.
+                            changed_fields = []
+                            if tc_theme and existing.tc_theme != tc_theme:
+                                existing.tc_theme = tc_theme
+                                changed_fields.append('tc_theme')
+                            if maponline_theme and existing.maponline_theme != maponline_theme:
+                                existing.maponline_theme = maponline_theme
+                                changed_fields.append('maponline_theme')
+                            if changed_fields:
+                                existing.save(update_fields=changed_fields)
+                                updated += 1
+                            else:
+                                skipped += 1
                         else:
                             BrandMapping.objects.create(
                                 account=account, brand=brand, theme=theme,
@@ -1856,8 +1870,10 @@ def brand_mapping_list(request):
                     dur_str = f' ({duration}s)' if duration else ''
                     if created:
                         messages.success(request, f'{created} mapping{"s" if created > 1 else ""} added for {brand}{dur_str}.')
+                    if updated:
+                        messages.success(request, f'{updated} existing mapping{"s" if updated > 1 else ""} updated for {brand}{dur_str}.')
                     if skipped:
-                        messages.warning(request, f'{skipped} mapping{"s" if skipped > 1 else ""} already existed (skipped).')
+                        messages.warning(request, f'{skipped} mapping{"s" if skipped > 1 else ""} already existed (no changes).')
             _qs = f'/dashboard/brand-mappings/?account={acc_id}'
             if product:
                 from urllib.parse import quote
@@ -1874,10 +1890,19 @@ def brand_mapping_list(request):
                 mapping = get_object_or_404(BrandMapping, id=mapping_id)
                 if not _is_admin(user) and mapping.account not in account_qs:
                     messages.error(request, 'No access to that mapping.')
+                elif field_name == 'theme':
+                    # Theme is per-row (one row per LMRB theme variant).
+                    mapping.theme = new_value
+                    mapping.save(update_fields=['theme'])
+                    messages.success(request, f'Updated LMRB theme for {mapping.brand}.')
                 else:
-                    setattr(mapping, field_name, new_value)
-                    mapping.save(update_fields=[field_name])
-                    messages.success(request, f'Updated {field_name} for mapping #{mapping_id}.')
+                    # Brand / product are brand-group concepts: rename every
+                    # variant row in the group so the group stays intact.
+                    n = BrandMapping.objects.filter(
+                        account=mapping.account, brand=mapping.brand,
+                        duration=mapping.duration, product=mapping.product,
+                    ).update(**{field_name: new_value})
+                    messages.success(request, f'Updated {field_name} for {mapping.brand} ({n} row{"s" if n != 1 else ""}).')
             return redirect(f'/dashboard/brand-mappings/?account={account_id or mapping.account_id}')
 
         elif action == 'edit_tc_theme':
@@ -1887,9 +1912,14 @@ def brand_mapping_list(request):
             if not _is_admin(user) and mapping.account not in account_qs:
                 messages.error(request, 'No access to that mapping.')
             else:
-                mapping.tc_theme = tc_theme
-                mapping.save(update_fields=['tc_theme'])
-                messages.success(request, f'TC Theme updated for {mapping.brand}.')
+                # TC theme is a brand-group concept; apply it to every LMRB-theme
+                # variant row in the same (brand, duration, product) group so the
+                # rows never silently diverge from the value shown in the table.
+                n = BrandMapping.objects.filter(
+                    account=mapping.account, brand=mapping.brand,
+                    duration=mapping.duration, product=mapping.product,
+                ).update(tc_theme=tc_theme)
+                messages.success(request, f'TC Theme updated for {mapping.brand} ({n} row{"s" if n != 1 else ""}).')
             return redirect(f'/dashboard/brand-mappings/?account={account_id or mapping.account_id}')
 
         elif action == 'edit_maponline_theme':
@@ -1899,9 +1929,12 @@ def brand_mapping_list(request):
             if not _is_admin(user) and mapping.account not in account_qs:
                 messages.error(request, 'No access to that mapping.')
             else:
-                mapping.maponline_theme = maponline_theme
-                mapping.save(update_fields=['maponline_theme'])
-                messages.success(request, f'MapOnline Theme updated for {mapping.brand}.')
+                # Same brand-group semantics as TC theme above.
+                n = BrandMapping.objects.filter(
+                    account=mapping.account, brand=mapping.brand,
+                    duration=mapping.duration, product=mapping.product,
+                ).update(maponline_theme=maponline_theme)
+                messages.success(request, f'MapOnline Theme updated for {mapping.brand} ({n} row{"s" if n != 1 else ""}).')
             return redirect(f'/dashboard/brand-mappings/?account={account_id or mapping.account_id}')
 
         elif action == 'delete':

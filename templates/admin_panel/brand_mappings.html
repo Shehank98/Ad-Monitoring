@@ -1294,13 +1294,35 @@ function handleTcInputKey(e, ctx) {
   if (e.key === 'Enter') { e.preventDefault(); addTcChip(ctx); }
 }
 
+// Commit any text still sitting in a picker input (typed or chosen from the
+// datalist but never confirmed with Enter / a quick-pick click) so it is NOT
+// lost on submit. This was the cause of "I picked it but it didn't save".
+function _flushPending(inputId, selected) {
+  const inp = document.getElementById(inputId);
+  if (!inp) return;
+  const val = (inp.value || '').trim();
+  if (val && !selected.map(s => s.toLowerCase()).includes(val.toLowerCase())) {
+    selected.push(val);
+  }
+  inp.value = '';
+}
+
 function prepareAddSubmit()  {
+  _flushPending('addTcInput',        _addTcSelected);
+  _flushPending('themeInput',        _addLmrbSelected);
+  _flushPending('addMaponlineInput', _addMaponlineSelected);
   document.getElementById('addTcHidden').value         = _addTcSelected.join('|');
   document.getElementById('addLmrbHidden').value       = _addLmrbSelected.join('|');
   document.getElementById('addMaponlineHidden').value  = _addMaponlineSelected.join('|');
 }
-function prepareEditSubmit()         { document.getElementById('editTcHidden').value         = _editTcSelected.join('|'); }
-function prepareMaponlineEditSubmit(){ document.getElementById('editMaponlineHidden').value  = _editMaponlineSelected.join('|'); }
+function prepareEditSubmit() {
+  _flushPending('editTcInput', _editTcSelected);
+  document.getElementById('editTcHidden').value = _editTcSelected.join('|');
+}
+function prepareMaponlineEditSubmit(){
+  _flushPending('editMaponlineInput', _editMaponlineSelected);
+  document.getElementById('editMaponlineHidden').value = _editMaponlineSelected.join('|');
+}
 
 // ── Edit Field modal (Product / Brand / LMRB Theme) ───────────────────────────
 const _fieldMeta = {
