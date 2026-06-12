@@ -4761,10 +4761,55 @@ def tc_three_way(request):
         r['manual_match_id'] = mm_by_tc.get(r['tc_row_id'])
 
     # ── Missed ads: ScheduleRows with no matching TCRow ───────────────────────
-    # These are planned spots the channel never transmitted (no TCRow has
-    # matched_schedule pointing to them). Displayed in the "Not Aired" section.
+    # A planned commercial spot is "Not Aired" only when the channel transmitted
+    # NOTHING in its slot.  We first take rows the engine left unlinked
+    # (tc_matches is empty), then defensively drop any whose date + time-window +
+    # duration is actually covered by a real TC spot the engine failed to formally
+    # link (e.g. a tc_theme mapping gap, or a spot that aired in a different
+    # programme).  This keeps the list correct even when reconciliation has not been
+    # re-run in 'reset' mode after a mapping fix.
     missed_ads = []
+    n_window_recovered = 0
     if selected_account and channel and month:
+        from verification.tc_engine import _time_to_secs as _tts_missed
+
+        # Pool of TC spots NOT formally linked to any schedule row (available to
+        # "cover" a planned slot).  Greedy one-to-one so one TC spot clears at most
+        # one planned row.
+        tc_pool_qs = TCRow.objects.filter(
+            account_id=account_id, channel__iexact=channel, tc_report__month=month,
+            matched_schedule__isnull=True,
+        )
+        if schedule_id:
+            tc_pool_qs = tc_pool_qs.filter(tc_report__schedule_id=schedule_id)
+        avail_tc = [
+            {'date': t.date, 'secs': _tts_missed(t.aired_time),
+             'dur': t.duration, 'used': False}
+            for t in tc_pool_qs
+        ]
+
+        def _covered_by_window_tc(sr):
+            """True if an unclaimed TC spot falls in sr's date + window + duration."""
+            start_s = _tts_missed(sr.start_time)
+            end_s   = _tts_missed(sr.end_time)
+            if start_s is None or end_s is None:
+                return False
+            # Midnight-crossing window (e.g. 23:30–00:30)
+            if end_s < start_s and start_s > 43200:
+                end_s += 86400
+            for cand in avail_tc:
+                if cand['used'] or cand['secs'] is None or cand['date'] != sr.date:
+                    continue
+                if (sr.duration is not None and cand['dur'] is not None
+                        and cand['dur'] != sr.duration):
+                    continue
+                cmp_s = (cand['secs'] + 86400
+                         if end_s > 86400 and cand['secs'] < start_s else cand['secs'])
+                if start_s <= cmp_s <= end_s + 600:   # +10 min grace, mirrors engine
+                    cand['used'] = True
+                    return True
+            return False
+
         missed_sch_qs = (
             ScheduleRow.objects
             .filter(
@@ -4777,6 +4822,9 @@ def tc_three_way(request):
         if schedule_id:
             missed_sch_qs = missed_sch_qs.filter(schedule_id=schedule_id)
         for sr in missed_sch_qs:
+            if _covered_by_window_tc(sr):
+                n_window_recovered += 1
+                continue   # a TC spot covers this slot — not genuinely missed
             missed_ads.append({
                 'brand':      sr.brand,
                 'programme':  sr.programme,
@@ -4798,6 +4846,7 @@ def tc_three_way(request):
         'month':              month,
         'rows':               rows,
         'missed_ads':         missed_ads,
+        'n_window_recovered': n_window_recovered,
         'planned_count':      planned_count if (selected_account and channel and month) else 0,
         'n_confirmed':        sum(1 for r in rows if r['status'] == 'confirmed'),
         'n_tc_only':          sum(1 for r in rows if r['status'] == 'tc_only'),

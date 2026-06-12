@@ -450,6 +450,13 @@
     </span>
     <div class="flex-1 h-px bg-amber-200"></div>
   </div>
+  {% if n_window_recovered %}
+  <p class="text-xs text-slate-500 mb-3 -mt-1">
+    <i class="fa-solid fa-circle-info mr-1 text-green-600"></i>
+    {{ n_window_recovered }} other planned spot{{ n_window_recovered|pluralize }} had a TC spot
+    within their time window and are <b>not</b> listed here as missed.
+  </p>
+  {% endif %}
   <div class="overflow-x-auto rounded-xl border border-amber-200">
     <table class="w-full text-xs border-collapse">
       <thead>
