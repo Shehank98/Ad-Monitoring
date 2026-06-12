@@ -5752,8 +5752,8 @@ def summary_pdf(request):
     LAND_W, LAND_H = rl_landscape(A4)
     MARGIN  = 1.5 * cm
     FOOT_H  = 0.85 * cm
-    # Cover: navy band occupies top 40% of page
-    BAND_H  = PORT_H * 0.40
+    # Cover: a slim navy header band at the very top (simple, not full-bleed)
+    BAND_H  = 3.2 * cm
 
     # ── Logo path ────────────────────────────────────────────────────────────
     logo_path = None
@@ -5843,96 +5843,36 @@ def summary_pdf(request):
         canvas.saveState()
         W, H = PORT_W, PORT_H
 
-        # ── 1. Left gold accent stripe (full height) ─────────────────────────
+        # Left gold accent stripe (full height)
         canvas.setFillColor(GOLD)
-        canvas.rect(0, 0, 3.5, H, stroke=0, fill=1)
+        canvas.rect(0, 0, 4, H, stroke=0, fill=1)
 
-        # ── 2. Full-bleed navy band (top 40%) ────────────────────────────────
+        # Slim navy header band at the very top (simple, not full-bleed)
         canvas.setFillColor(NAVY)
         canvas.rect(0, H - BAND_H, W, BAND_H, stroke=0, fill=1)
-
-        # ── 3. Subtle diagonal accent inside navy band (bottom-right) ────────
-        canvas.setFillColor(NAVY_MID)
-        canvas.setStrokeColor(NAVY_MID)
-        path = canvas.beginPath()
-        path.moveTo(W * 0.55, H - BAND_H)
-        path.lineTo(W, H - BAND_H + BAND_H * 0.45)
-        path.lineTo(W, H - BAND_H)
-        path.close()
-        canvas.drawPath(path, stroke=0, fill=1)
-
-        # ── 4. Gold separator line beneath the navy band ─────────────────────
+        # Gold rule beneath the band
         canvas.setFillColor(GOLD)
-        canvas.rect(0, H - BAND_H - 3, W, 3, stroke=0, fill=1)
+        canvas.rect(0, H - BAND_H - 2, W, 2, stroke=0, fill=1)
 
-        # ── 5. Agency tag + report type label ────────────────────────────────
+        # Agency tag + report title inside the band
         canvas.setFont('Helvetica', 8)
-        canvas.setFillColor(SLATE_400)
-        canvas.drawString(1.2 * cm, H - 1.1 * cm,
-                          'PHOENIX O & M (PVT) LTD  \u2022  ADVERTISEMENT MONITORING')
-
-        # ── 6. Main title (two lines) ─────────────────────────────────────────
-        canvas.setFillColor(WHITE)
-        canvas.setFont('Helvetica-Bold', 34)
-        canvas.drawString(1.2 * cm, H - BAND_H + 5.5 * cm, 'RECONCILIATION')
-        canvas.setFont('Helvetica-Bold', 34)
-        canvas.drawString(1.2 * cm, H - BAND_H + 3.8 * cm, 'SUMMARY REPORT')
-        # Thin gold underline beneath title
-        canvas.setStrokeColor(GOLD)
-        canvas.setLineWidth(1.5)
-        canvas.line(1.2 * cm, H - BAND_H + 3.5 * cm, 10 * cm, H - BAND_H + 3.5 * cm)
-
-        # ── 7. Channel / Month pill in navy band ──────────────────────────────
-        pill_x = 1.2 * cm
-        pill_y = H - BAND_H + 2.3 * cm
-        canvas.setFillColor(NAVY_MID)
-        canvas.roundRect(pill_x, pill_y, 8 * cm, 0.65 * cm, 3, stroke=0, fill=1)
-        canvas.setFont('Helvetica-Bold', 8)
         canvas.setFillColor(GOLD_LITE)
-        canvas.drawString(pill_x + 0.3 * cm, pill_y + 0.18 * cm,
-                          f'{channel.upper()}   \u2022   {month.upper()}')
+        canvas.drawString(1.4 * cm, H - 1.05 * cm,
+                          'PHOENIX O & M (PVT) LTD  \u2022  ADVERTISEMENT MONITORING')
+        canvas.setFont('Helvetica-Bold', 22)
+        canvas.setFillColor(WHITE)
+        canvas.drawString(1.4 * cm, H - 2.35 * cm, 'Reconciliation Summary Report')
 
-        # ── 8. Logo in navy band (top-right) ─────────────────────────────────
+        # Logo inside the band (top-right)
         if logo_path:
             try:
                 _img = _IR(logo_path)
                 canvas.drawImage(_img,
-                                 W - MARGIN - 4 * cm, H - MARGIN - 1.8 * cm,
-                                 width=3.6 * cm, height=1.4 * cm,
+                                 W - MARGIN - 3.6 * cm, H - BAND_H + 0.55 * cm,
+                                 width=3.4 * cm, height=BAND_H - 1.1 * cm,
                                  preserveAspectRatio=True, mask='auto')
             except Exception:
                 pass
-
-        # ── 9. KPI metrics strip (bottom of white area) ──────────────────────
-        kpi_y   = FOOT_H + 0.8 * cm
-        kpi_h   = 2.4 * cm
-        kpi_w   = (W - 2 * MARGIN - 3 * 0.35 * cm) / 4
-        kpi_gap = 0.35 * cm
-
-        kpi_data = [
-            ('TOTAL PLANNED', str(total_planned), NAVY,  WHITE,    NAVY_MID),
-            ('TOTAL AIRED',   str(total_aired),   GREEN, GREEN_BG, GREEN),
-            ('TOTAL MISSED',  str(total_missed),  RED,   RED_BG,   RED),
-            ('EXTRA AIRED',   str(total_extra),   AMBER, AMBER_BG, AMBER),
-        ]
-        for i, (label, val, accent, bg, txt_color) in enumerate(kpi_data):
-            x = MARGIN + i * (kpi_w + kpi_gap)
-            # Box background
-            canvas.setFillColor(bg)
-            canvas.setStrokeColor(SLATE_200)
-            canvas.setLineWidth(0.4)
-            canvas.roundRect(x, kpi_y, kpi_w, kpi_h, 4, stroke=1, fill=1)
-            # Top accent bar
-            canvas.setFillColor(accent)
-            canvas.roundRect(x, kpi_y + kpi_h - 0.22 * cm, kpi_w, 0.22 * cm, 2, stroke=0, fill=1)
-            # Large value
-            canvas.setFont('Helvetica-Bold', 26)
-            canvas.setFillColor(txt_color)
-            canvas.drawCentredString(x + kpi_w / 2, kpi_y + 0.9 * cm, val)
-            # Label
-            canvas.setFont('Helvetica-Bold', 6.5)
-            canvas.setFillColor(SLATE_600)
-            canvas.drawCentredString(x + kpi_w / 2, kpi_y + 0.3 * cm, label)
 
         _footer(canvas, W, doc.page)
         canvas.restoreState()
@@ -5950,9 +5890,9 @@ def summary_pdf(request):
         canvas.restoreState()
 
     # ── Frames ───────────────────────────────────────────────────────────────
-    # Cover frame: the white area below the band, above KPIs
-    _cover_content_top    = PORT_H - BAND_H - 4 * mm      # just below gold line
-    _cover_content_bottom = FOOT_H + 3.4 * cm             # above KPI strip
+    # Cover frame: the whole white area below the band, down to the footer.
+    _cover_content_top    = PORT_H - BAND_H - 6 * mm      # just below gold rule
+    _cover_content_bottom = FOOT_H + 0.6 * cm             # down to the footer
     _cover_frame = Frame(
         MARGIN, _cover_content_bottom,
         PORT_W - 2 * MARGIN,
@@ -6059,7 +5999,9 @@ def summary_pdf(request):
     _info_style.append(('LINEBEFORE', (0, 0), (0, -1), 2, GOLD))
     info_tbl.setStyle(TableStyle(_info_style))
 
-    story.append(Spacer(1, 0.4 * cm))
+    story.append(Spacer(1, 0.6 * cm))
+    story.append(Paragraph('REPORT DETAILS', S['section']))
+    story.append(Spacer(1, 0.2 * cm))
     story.append(info_tbl)
 
     # Signature block
