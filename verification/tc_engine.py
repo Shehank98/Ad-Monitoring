@@ -893,6 +893,74 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
             'third_party': third_party,
         })
 
+    # ── Window-coverage fallback ──────────────────────────────────────────────
+    # A planned commercial spot whose slot is covered by a REAL TC spot that the
+    # tc_theme path could not attribute (no BrandMapping.tc_theme resolves it) is
+    # still a genuine airing.  Credit it here so Aired/Missed agree with the TC
+    # three-way "Not Aired" list, which applies the same window rule.
+    #
+    # No double counting: the pool is restricted to confirmed TC spots whose
+    # tc_theme resolves to NO brand, so they are never part of any brand's
+    # tc_theme-based 'third_party' count above.  The per-group cap (aired never
+    # exceeds planned via coverage) bounds the credit to filling missed slots.
+    from collections import defaultdict as _dd
+    reverse_tc_map = _build_reverse_tc_theme_map(account_id)
+
+    cov_pool = []
+    cov_q = TCRow.objects.filter(
+        account_id=account_id, channel__iexact=channel, tc_report__month=month,
+        is_lmrb_confirmed=True,
+    )
+    if schedule_id:
+        cov_q = cov_q.filter(tc_report__schedule_id=schedule_id)
+    for t in cov_q:
+        dur_t = int(t.duration) if t.duration is not None else None
+        if _brands_for_tc_theme(t.tc_theme, dur_t, reverse_tc_map):
+            continue   # attributable via tc_theme → already in third_party
+        cov_pool.append({'date': t.date, 'secs': _time_to_secs(t.aired_time),
+                         'dur': dur_t, 'used': False})
+
+    if cov_pool:
+        row_by_key = {(_normalize(r['product']), r['dur']): r for r in commercial_rows}
+        added: dict = _dd(int)
+        cov_sr_qs = _sch_qs(ad_type='COMMERCIAL BENEFITS').order_by('date', 'start_time')
+        for sr in cov_sr_qs:
+            key = (_normalize(sr.brand),
+                   int(sr.duration) if sr.duration is not None else None)
+            row = row_by_key.get(key)
+            if not row:
+                continue
+            # Only fill genuinely-missed planned rows (cap aired at planned).
+            if row['aired'] + added[key] >= row['planned']:
+                continue
+            start_s = _time_to_secs(sr.start_time)
+            end_s   = _time_to_secs(sr.end_time)
+            if start_s is None or end_s is None:
+                continue
+            if end_s < start_s and start_s > 43200:
+                end_s += 86400
+            for cand in cov_pool:
+                if cand['used'] or cand['secs'] is None or cand['date'] != sr.date:
+                    continue
+                if (key[1] is not None and cand['dur'] is not None
+                        and cand['dur'] != key[1]):
+                    continue
+                cmp_s = (cand['secs'] + 86400
+                         if end_s > 86400 and cand['secs'] < start_s else cand['secs'])
+                if start_s <= cmp_s <= end_s + 600:
+                    cand['used'] = True
+                    added[key] += 1
+                    break
+
+        for key, n in added.items():
+            if not n:
+                continue
+            row = row_by_key[key]
+            row['aired']       += n
+            row['third_party'] += n
+            row['missed'] = max(0, row['planned'] - row['third_party'])
+            row['extra']  = max(0, row['third_party'] - row['planned'])
+
     # Commercial totals
     com_total = {
         'planned':     sum(r['planned']     for r in commercial_rows),
