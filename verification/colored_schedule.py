@@ -215,25 +215,24 @@ def build_status_map_from_tc(account_id, channel, month) -> dict:
             account_id=account_id, channel=channel, month=month,
         ) if sr.date
     ]
+    commercial_rows  = [sr for sr in rows if sr.ad_type == 'COMMERCIAL BENEFITS']
+    sponsorship_rows = [sr for sr in rows if sr.ad_type == 'SPONSORSHIP']
 
-    # Per-row tentative status: {'sr', 'status', 'actual', 'note'}
+    status_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    late_actual_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+
+    # ══ COMMERCIAL: per-row matched / late / not-aired, reconciled to Summary ══
     per_row: list = []
-    for sr in rows:
+    for sr in commercial_rows:
         tc = tc_by_sched.get(sr.id)
         if tc is None:
-            per_row.append({'sr': sr, 'status': 'not_aired', 'actual': None, 'note': None})
-            continue
-        if tc.date and tc.date > sr.date:
-            st, actual = 'late', tc.date
+            per_row.append({'sr': sr, 'status': 'not_aired', 'actual': None})
+        elif tc.date and tc.date > sr.date:
+            per_row.append({'sr': sr, 'status': 'late', 'actual': tc.date})
         else:
-            st, actual = 'matched', None
-        aired_prog = tc.programme or (tc.matched_lmrb.program if tc.matched_lmrb else '')
-        note = None
-        if _normalize(sr.programme) and _normalize(aired_prog) and _normalize(aired_prog) != _normalize(sr.programme):
-            note = f'Planned in "{sr.programme}" but aired in "{aired_prog}".'
-        per_row.append({'sr': sr, 'status': st, 'actual': actual, 'note': note})
+            per_row.append({'sr': sr, 'status': 'matched', 'actual': None})
 
-    # ── 2. Window coverage for commercial rows the engine left unlinked ───────
+    # Window coverage: unclaimed confirmed TCRow inside the row's date+window+dur.
     avail = [
         {'date': t.date, 'secs': _time_to_secs(t.aired_time), 'dur': t.duration, 'used': False}
         for t in TCRow.objects.filter(
@@ -260,61 +259,39 @@ def build_status_map_from_tc(account_id, channel, month) -> dict:
                 return True
         return False
 
-    for e in sorted(
-        [x for x in per_row
-         if x['status'] == 'not_aired' and x['sr'].ad_type == 'COMMERCIAL BENEFITS'],
-        key=lambda x: x['sr'].date,
-    ):
+    for e in sorted([x for x in per_row if x['status'] == 'not_aired'],
+                    key=lambda x: x['sr'].date):
         if _window_covers(e['sr']):
             e['status'] = 'matched'
 
-    # ── 3. Brand-level alignment with the Summary aired count ─────────────────
+    # Align commercial green count to the Summary aired number.
     try:
         sd = build_summary_data(account_id, channel, month)
     except Exception:
         logger.exception('build_status_map_from_tc: summary alignment failed')
         sd = None
-
     if sd:
         comm_aired = {
             (_normalize(r['product']), r.get('dur')): r.get('aired', 0)
             for r in sd.get('commercial', [])
         }
-        spon_aired = {}
-        for sec in sd.get('sponsorship', []):
-            for r in sec.get('rows', []):
-                spon_aired[(_normalize(sec['programme']), _normalize(r['product']), r.get('dur'))] = r.get('aired', 0)
-
         groups: dict = _dd(list)
         for e in per_row:
             sr = e['sr']
-            dur = sr.duration if sr.duration is not None else None
-            if sr.ad_type == 'COMMERCIAL BENEFITS':
-                groups[('c', _normalize(sr.brand), dur)].append(e)
-            else:
-                groups[('s', _normalize(sr.programme), _normalize(sr.brand), dur)].append(e)
-
+            groups[(_normalize(sr.brand), sr.duration if sr.duration is not None else None)].append(e)
         for key, entries in groups.items():
-            target = (comm_aired.get((key[1], key[2])) if key[0] == 'c'
-                      else spon_aired.get((key[1], key[2], key[3])))
+            target = comm_aired.get(key)
             if target is None:
                 continue
-            target = min(target, len(entries))             # never green more than planned
+            target = min(target, len(entries))
             greened = sum(1 for e in entries if e['status'] in ('matched', 'late'))
             need = target - greened
-            if need <= 0:
-                continue
             for e in sorted([x for x in entries if x['status'] == 'not_aired'],
                             key=lambda x: x['sr'].date):
                 if need <= 0:
                     break
                 e['status'] = 'matched'
                 need -= 1
-
-    # ── 4. Aggregate per-row statuses into the slot/date map ──────────────────
-    status_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
-    late_actual_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
-    prog_notes: dict = defaultdict(dict)
 
     for e in per_row:
         sr = e['sr']
@@ -328,17 +305,83 @@ def build_status_map_from_tc(account_id, channel, month) -> dict:
             status_map[slot_key][date_str]['matched'] += 1
         else:
             status_map[slot_key][date_str]['not_aired'] += 1
-        if e['note']:
-            prog_notes[slot_key][date_str] = e['note']
 
+    # ══ SPONSORSHIP: per-day tag count (planned vs LMRB-observed that day) ══════
+    # For each sponsorship slot/date compare the planned tag count with the number
+    # of LMRB tag observations on that day for the brand:
+    #   aired >= planned          → green   (note "N extra aired" if aired > planned)
+    #   0 < aired < planned        → under   (note "N missed")
+    #   aired == 0                 → red     (note "N missed")
+    if sponsorship_rows:
+        from core.models import Schedule as _Sch, LMRBRow as _LR
+        from django.db.models import Min as _Min, Max as _Max
+        from verification.tc_engine import (
+            _build_lmrb_theme_map, _lmrb_themes_for_brand, _lmrb_channel_q,
+        )
+        lmrb_theme_map = _build_lmrb_theme_map(account_id)
+        _dd2 = _Sch.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+        ).aggregate(s=_Min('start_date'), e=_Max('end_date'))
+        dmin, dmax = _dd2.get('s'), _dd2.get('e')
+
+        brand_themes = {}
+        for sr in sponsorship_rows:
+            nb = _normalize(sr.brand)
+            if nb not in brand_themes:
+                brand_themes[nb] = _lmrb_themes_for_brand(sr.brand, sr.duration, lmrb_theme_map)
+
+        # Observed LMRB tag count per (brand, date).
+        aired_bd: dict = _dd(lambda: _dd(int))
+        lq = _LR.objects.filter(_lmrb_channel_q(channel), account_id=account_id).exclude(advt_theme='')
+        if dmin and dmax:
+            lq = lq.filter(date__range=(dmin, dmax))
+        for lr in lq.values('advt_theme', 'product', 'date'):
+            if not lr['date']:
+                continue
+            ds = lr['date'].strftime('%Y-%m-%d')
+            lt = _normalize(lr['advt_theme'])
+            lp = _normalize(lr['product']) if lr['product'] else ''
+            for nb, themes in brand_themes.items():
+                hit = False
+                for entry in themes:
+                    t = entry[0]
+                    p = entry[1] if len(entry) > 1 else ''
+                    tmatch = lt.startswith(t[:-1]) if t.endswith('*') else (lt == t)
+                    if tmatch and (not p or lp == p):
+                        hit = True
+                        break
+                if hit:
+                    aired_bd[nb][ds] += 1
+
+        spon_planned: dict = _dd(lambda: _dd(int))
+        slot_brands: dict = _dd(set)
+        for sr in sponsorship_rows:
+            sk = (_normalize(sr.programme), _normalize_time(sr.start_time), sr.duration or 0)
+            ds = sr.date.strftime('%Y-%m-%d')
+            spon_planned[sk][ds] += 1
+            slot_brands[sk].add(_normalize(sr.brand))
+
+        for sk, by_date in spon_planned.items():
+            brands = slot_brands[sk]
+            for ds, planned in by_date.items():
+                aired = sum(aired_bd[nb].get(ds, 0) for nb in brands)
+                cell = status_map[sk][ds]
+                if planned > 0 and aired >= planned:
+                    cell['matched'] += planned
+                    if aired > planned:
+                        cell['extra_note'] = f'{aired - planned} extra aired (observed {aired}, planned {planned}).'
+                elif aired > 0:
+                    cell['aired_less'] += planned
+                    cell['miss_note'] = f'{planned - aired} missed (aired {aired} of {planned}).'
+                else:
+                    cell['not_aired'] += planned
+                    cell['miss_note'] = f'{planned} missed (none aired).'
+
+    # Embed late-telecast metadata (commercial different-date arrivals).
     for slot_key, date_dict in late_actual_map.items():
         for date_str, actual_dict in date_dict.items():
             status_map[slot_key][date_str]['late_actual'] = dict(actual_dict)
             status_map[slot_key][date_str]['late_to'] = dict(actual_dict)
-
-    for slot_key, date_dict in prog_notes.items():
-        for date_str, note in date_dict.items():
-            status_map[slot_key][date_str]['prog_note'] = note
 
     return dict(status_map)
 
@@ -1093,6 +1136,7 @@ def _write_legend(ws, start_row: int, fills: dict):
         ('late_telecast',      'Late Arrival',       'This date received spots that were originally planned for an earlier date (hover cell for details)'),
         ('programme_mismatch', 'Programme Mismatch', 'Ad aired after the planned time window (same date)'),
         ('extra_aired',        'Extra Aired',        'Ad detected by monitoring but not present in the schedule'),
+        ('aired_less',         'Aired Under Planned','Sponsorship: fewer aired than planned that day (hover cell for the missed count)'),
         ('manual_override',    'Manual Override',    'Match confirmed manually by an operator'),
         ('planned',            'Planned Only',       'Scheduled but no reconciliation data available yet'),
     ]
@@ -1132,12 +1176,13 @@ def _write_legend(ws, start_row: int, fills: dict):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 _STATUS_ORDER = [
-    'matched', 'manual_match', 'not_aired', 'late_telecast',
+    'matched', 'manual_match', 'aired_less', 'not_aired', 'late_telecast',
     'programme_mismatch', 'extra_aired', 'planned',
 ]
 
 
-_META_KEYS_GLOBAL = {'late_actual', 'late_to', 'late_from', 'prog_note'}
+_META_KEYS_GLOBAL = {'late_actual', 'late_to', 'late_from', 'prog_note',
+                     'miss_note', 'extra_note'}
 
 
 def _ordered_statuses(counts: dict) -> list:
@@ -1231,12 +1276,14 @@ def build_original_and_colored_wb(schedule_pk, colors: dict, status_map=None):
         'extra_aired':        _hex_to_fill(colors.get('extra_aired',        '#3b82f6')),
         'planned':            _hex_to_fill(colors.get('planned',            '#94a3b8')),
         'manual_override':    _hex_to_fill(colors.get('manual_override',    '#14b8a6')),
+        'aired_less':         _hex_to_fill(colors.get('aired_less',         '#f59e0b')),
     }
     status_to_fill = {
         'matched': fills['aired'], 'manual_match': fills['manual_override'],
         'not_aired': fills['not_aired'], 'late_telecast': fills['late_telecast'],
         'programme_mismatch': fills['programme_mismatch'],
         'extra_aired': fills['extra_aired'], 'planned': fills['planned'],
+        'aired_less': fills['aired_less'],
     }
 
     header_row_idx, col_map, date_col_map = _detect_pivot_via_converter(raw_bytes)
@@ -1304,12 +1351,12 @@ def build_original_and_colored_wb(schedule_pk, colors: dict, status_map=None):
             if statuses:
                 primary = statuses[0][0]
                 cell.fill = status_to_fill.get(primary, fills['planned'])
-                if len(statuses) > 1:
-                    parts.append('Mixed: ' + ', '.join(f'{s} ({c})' for s, c in statuses))
                 for actual, n in sorted((date_data.get('late_to') or {}).items()):
                     parts.append(f'{n} spot(s) not aired on this date — aired on {_fmt_date(actual)} instead.')
-                if date_data.get('prog_note'):
-                    parts.append(date_data['prog_note'])
+                if date_data.get('miss_note'):
+                    parts.append(date_data['miss_note'])
+                if date_data.get('extra_note'):
+                    parts.append(date_data['extra_note'])
             elif planned > 0:
                 cell.fill = fills['planned']
 
