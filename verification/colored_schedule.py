@@ -1067,3 +1067,170 @@ def _fmt_date(date_str: str) -> str:
         return _date.fromisoformat(date_str).strftime('%d %b %Y')
     except Exception:
         return date_str
+
+
+# ── Combined export: Original + Colored sheets from the uploaded file ──────────
+
+def build_original_and_colored_wb(schedule_pk, colors: dict, status_map=None):
+    """
+    Build a workbook whose FIRST sheet is the user's original uploaded schedule
+    (exact copy — all formatting, merged cells, column widths, row heights and
+    formulas preserved) and SECOND sheet is the same layout with reconciliation
+    status colours applied IN-PLACE.
+
+    The original Firebase file is the single source of truth for visual
+    presentation; sheets are never rebuilt from database rows.  openpyxl's
+    copy_worksheet() preserves cell styles, merged cells and dimensions — only
+    fills + cell comments are added to the colored copy.
+
+    Returns (workbook, detected) where `detected` is True when the pivot layout
+    was recognised and colours were applied; False means the Colored sheet is an
+    uncoloured (but still exact) copy of the original.
+    """
+    import io as _io
+    import openpyxl
+    from openpyxl.styles import Font, Alignment
+    from openpyxl.comments import Comment
+    from datetime import time as _t, datetime as _dtt
+    from core.models import Schedule
+
+    schedule = Schedule.objects.get(pk=schedule_pk)
+    if not schedule.file or not schedule.file.name:
+        raise FileNotFoundError(
+            f'No file is linked to schedule "{schedule.original_filename}". '
+            f'Please re-upload the schedule to generate the export.'
+        )
+    try:
+        raw_bytes = schedule.file.read()
+    except Exception as exc:
+        raise FileNotFoundError(
+            f'The original schedule file "{schedule.original_filename}" could not be '
+            f'read from storage. Please re-upload the schedule.'
+        ) from exc
+    if not raw_bytes:
+        raise FileNotFoundError(
+            f'The original schedule file "{schedule.original_filename}" is empty. '
+            f'Please re-upload the schedule.'
+        )
+
+    # Base workbook preserves formulas + all formatting.
+    wb = openpyxl.load_workbook(_io.BytesIO(raw_bytes))
+    # The schedule lives on the first sheet (matches the upload parser, sheet 0).
+    ws_orig = wb.worksheets[0]
+    for extra in wb.worksheets[1:]:
+        wb.remove(extra)              # keep the clean 4-sheet output structure
+    ws_orig.title = 'Original Schedule'
+
+    # A data_only copy is used purely to read numeric cell values for detection
+    # and per-cell planned counts (formula cells would otherwise be strings).
+    wb_vals = openpyxl.load_workbook(_io.BytesIO(raw_bytes), data_only=True)
+    ws_vals = wb_vals.worksheets[0]
+
+    # Exact-formatting copy that we colour.
+    ws_color = wb.copy_worksheet(ws_orig)
+    ws_color.title = 'Colored Schedule'
+
+    fills = {
+        'aired':              _hex_to_fill(colors.get('aired',              '#22c55e')),
+        'not_aired':          _hex_to_fill(colors.get('not_aired',          '#ef4444')),
+        'late_telecast':      _hex_to_fill(colors.get('late_telecast',      '#a855f7')),
+        'programme_mismatch': _hex_to_fill(colors.get('programme_mismatch', '#f97316')),
+        'extra_aired':        _hex_to_fill(colors.get('extra_aired',        '#3b82f6')),
+        'planned':            _hex_to_fill(colors.get('planned',            '#94a3b8')),
+    }
+    status_to_fill = {
+        'matched': fills['aired'], 'manual_match': fills['aired'],
+        'not_aired': fills['not_aired'], 'late_telecast': fills['late_telecast'],
+        'programme_mismatch': fills['programme_mismatch'],
+        'extra_aired': fills['extra_aired'], 'planned': fills['planned'],
+    }
+
+    header_row_idx, col_map, date_col_map = _detect_pivot_via_converter(raw_bytes)
+    if not header_row_idx or not date_col_map:
+        header_row_idx, col_map, date_col_map = _detect_pivot_openpyxl(ws_vals)
+
+    if not header_row_idx or not date_col_map:
+        # Layout not recognised — return the exact copy uncoloured rather than
+        # rebuilding anything from the database.
+        logger.warning(
+            'build_original_and_colored_wb: pivot not detected for schedule pk=%s; '
+            'Colored sheet is an uncoloured copy.', schedule_pk
+        )
+        return wb, False
+
+    # Per-slot late arrivals INTO each date (planned date is RED, actual date PURPLE).
+    late_in: dict = {}
+    if status_map:
+        for slot_key, date_dict in status_map.items():
+            for planned_date, d in date_dict.items():
+                for actual, n in (d.get('late_actual') or {}).items():
+                    if n <= 0:
+                        continue
+                    entry = late_in.setdefault(slot_key, {}).setdefault(
+                        actual, {'n': 0, 'from': {}})
+                    entry['n'] += n
+                    entry['from'][planned_date] = entry['from'].get(planned_date, 0) + n
+
+    for r in range(header_row_idx + 1, ws_vals.max_row + 1):
+        prog_str = str(ws_vals.cell(r, col_map['programme']).value or '').strip()
+        if _is_skip_row(prog_str):
+            continue
+        day_val  = ws_vals.cell(r, col_map['day']).value
+        time_val = ws_vals.cell(r, col_map['start_time']).value
+        day_ok  = bool(day_val and str(day_val).strip())
+        time_ok = isinstance(time_val, (_t, _dtt)) or bool(time_val and str(time_val).strip())
+        if not (day_ok and time_ok):
+            continue   # brand / section header row — leave untouched
+
+        prog  = _normalize(prog_str)
+        start = _normalize_time(time_val)
+        try:
+            dur = int(float(ws_vals.cell(r, col_map['duration']).value or 0))
+        except (ValueError, TypeError):
+            dur = 0
+        slot_key      = (prog, start, dur)
+        slot_data     = (status_map or {}).get(slot_key, {})
+        slot_late_in  = late_in.get(slot_key, {})
+
+        for src_col, date_str in date_col_map.items():
+            raw_v = ws_vals.cell(r, src_col).value
+            try:
+                planned = int(float(raw_v)) if raw_v not in (None, '') else 0
+            except (ValueError, TypeError):
+                planned = 0
+
+            date_data = slot_data.get(date_str, {})
+            statuses  = _ordered_statuses({
+                k: v for k, v in date_data.items() if k not in _META_KEYS_GLOBAL
+            })
+            late_here = slot_late_in.get(date_str)
+            cell      = ws_color.cell(r, src_col)
+            parts     = []
+
+            if statuses:
+                primary = statuses[0][0]
+                cell.fill = status_to_fill.get(primary, fills['planned'])
+                if len(statuses) > 1:
+                    parts.append('Mixed: ' + ', '.join(f'{s} ({c})' for s, c in statuses))
+                for actual, n in sorted((date_data.get('late_to') or {}).items()):
+                    parts.append(f'{n} spot(s) not aired on this date — aired on {_fmt_date(actual)} instead.')
+                if date_data.get('prog_note'):
+                    parts.append(date_data['prog_note'])
+            elif planned > 0:
+                cell.fill = fills['planned']
+
+            if late_here:
+                if not statuses:
+                    cell.fill = fills['late_telecast']
+                    if raw_v in (None, ''):
+                        cell.value = late_here['n']
+                        cell.font = Font(bold=True, size=9)
+                        cell.alignment = Alignment(horizontal='center', vertical='center')
+                for orig, n in sorted(late_here['from'].items()):
+                    parts.append(f'Includes {n} delayed spot(s) planned for {_fmt_date(orig)}.')
+
+            if parts:
+                cell.comment = Comment('\n'.join(parts), 'Ad Monitor')
+
+    _write_legend(ws_color, ws_vals.max_row + 3, fills)
+    return wb, True

@@ -5392,48 +5392,14 @@ def summary_report(request):
     })
 
 
-@login_required
-def summary_excel(request):
-    """Download Summary Sheet as a formatted Excel workbook."""
-    import openpyxl
-    from openpyxl.styles import (
-        Alignment, Border, Font, PatternFill, Side,
-    )
-    from openpyxl.utils import get_column_letter
-    from verification.tc_engine import build_summary_data
-
-    account_id  = request.GET.get('account_id', '')
-    channel     = request.GET.get('channel', '')
-    month       = request.GET.get('month', '')
-    schedule_id = request.GET.get('schedule_id', '').strip()
-
-    if not (account_id and channel and month):
-        messages.error(request, 'Incomplete parameters.')
-        return redirect('/dashboard/summary/')
-
-    if not _account_access(request.user, account_id):
-        messages.error(request, 'Access denied.')
-        return redirect('/dashboard/summary/')
-
-    account  = get_object_or_404(Account, id=account_id)
-    sid      = int(schedule_id) if schedule_id else None
-    data     = build_summary_data(account_id, channel, month, schedule_id=sid)
-    meta     = SummaryReportMeta.objects.filter(
-        account_id=account_id, channel=channel, month=month
-    ).first()
-    sched    = (
-        Schedule.objects.filter(id=sid).first() if sid else
-        Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
-        .order_by('-uploaded_at').first()
-    )
-
-    estimate_no = sched.schedule_number if sched else ''
-
-    # ── Workbook setup ────────────────────────────────────────────────────────
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = 'Summary'
-
+def _write_summary_sheet(ws, account, channel, month, data, meta, estimate_no):
+    """Write the Summary Sheet content into `ws`.
+    Shared by summary_excel() and the combined colored-schedule export so both
+    produce an identical Summary tab."""
+    import openpyxl  # noqa: F401
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter  # noqa: F401
+    from verification.special_notes import SpecialNotesService  # noqa: F401
     # Styles
     NAVY  = PatternFill('solid', fgColor='0F2340')
     LBLUE = PatternFill('solid', fgColor='DBEAFE')
@@ -5668,6 +5634,51 @@ def summary_excel(request):
             end_row=row+1,   end_column=end_col,
         )
         c = ws.cell(row+1, start_col, lbl); c.font = bold10; c.alignment = centre
+
+
+@login_required
+def summary_excel(request):
+    """Download Summary Sheet as a formatted Excel workbook."""
+    import openpyxl
+    from openpyxl.styles import (
+        Alignment, Border, Font, PatternFill, Side,
+    )
+    from openpyxl.utils import get_column_letter
+    from verification.tc_engine import build_summary_data
+
+    account_id  = request.GET.get('account_id', '')
+    channel     = request.GET.get('channel', '')
+    month       = request.GET.get('month', '')
+    schedule_id = request.GET.get('schedule_id', '').strip()
+
+    if not (account_id and channel and month):
+        messages.error(request, 'Incomplete parameters.')
+        return redirect('/dashboard/summary/')
+
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return redirect('/dashboard/summary/')
+
+    account  = get_object_or_404(Account, id=account_id)
+    sid      = int(schedule_id) if schedule_id else None
+    data     = build_summary_data(account_id, channel, month, schedule_id=sid)
+    meta     = SummaryReportMeta.objects.filter(
+        account_id=account_id, channel=channel, month=month
+    ).first()
+    sched    = (
+        Schedule.objects.filter(id=sid).first() if sid else
+        Schedule.objects.filter(account_id=account_id, channel=channel, month=month)
+        .order_by('-uploaded_at').first()
+    )
+
+    estimate_no = sched.schedule_number if sched else ''
+
+    # ── Workbook setup ────────────────────────────────────────────────────────
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Summary'
+
+    _write_summary_sheet(ws, account, channel, month, data, meta, estimate_no)
 
     # ── Matched LMRB sheet (second sheet) ────────────────────────────────────
     ws_lmrb = wb.create_sheet('Matched LMRB')
@@ -6523,14 +6534,46 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
     return len(combined)
 
 
+def _build_combined_export_wb(schedule, colors, status_map):
+    """Assemble the 4-sheet reconciliation export workbook:
+
+      1) Original Schedule    — exact copy of the uploaded file (formatting preserved)
+      2) Colored Schedule     — same layout with reconciliation colours applied
+      3) Summary              — same content as the Summary Sheet Excel download
+      4) Matched LMRB Cuts    — matched LMRB records
+
+    Sheets 1–2 come from the original Firebase file (never rebuilt from the DB);
+    sheets 3–4 come from reconciliation data.
+    """
+    from verification.colored_schedule import build_original_and_colored_wb
+    from verification.tc_engine import build_summary_data
+
+    wb, _detected = build_original_and_colored_wb(schedule.pk, colors, status_map)
+
+    account = schedule.account
+    channel = schedule.channel
+    month   = schedule.month
+    data    = build_summary_data(schedule.account_id, channel, month, schedule_id=schedule.pk)
+    meta    = SummaryReportMeta.objects.filter(
+        account_id=schedule.account_id, channel=channel, month=month
+    ).first()
+    estimate_no = schedule.schedule_number or ''
+
+    ws_sum = wb.create_sheet('Summary')
+    _write_summary_sheet(ws_sum, account, channel, month, data, meta, estimate_no)
+
+    ws_lmrb = wb.create_sheet('Matched LMRB Cuts')
+    _write_matched_lmrb_sheet(ws_lmrb, schedule.account_id, channel, month, schedule_id=schedule.pk)
+
+    return wb
+
+
 @login_required
 def colored_schedule_export(request, pk):
-    """Download the original schedule in pivot format with status-coloured date cells.
-
-    If reconciliation (MatchResult) data exists for the schedule's scope it is used
-    to colour cells. Otherwise all date cells are coloured in the 'planned' colour.
+    """Download the full reconciliation workbook based on the ORIGINAL uploaded
+    file: Original Schedule + Colored Schedule + Summary + Matched LMRB Cuts.
     """
-    from verification.colored_schedule import build_colored_schedule_wb, build_status_map_auto
+    from verification.colored_schedule import build_status_map_auto
 
     schedule = get_object_or_404(Schedule, pk=pk)
     if not _account_access(request.user, schedule.account_id):
@@ -6554,21 +6597,20 @@ def colored_schedule_export(request, pk):
         logger.exception('build_status_map_auto failed for schedule pk=%s', pk)
 
     try:
-        wb = build_colored_schedule_wb(schedule.pk, colors, status_map)
+        wb = _build_combined_export_wb(schedule, colors, status_map)
     except FileNotFoundError as exc:
         messages.error(request, str(exc))
         return redirect(f'/dashboard/schedules/')
     except Exception as exc:
-        logger.exception('build_colored_schedule_wb failed for schedule pk=%s', pk)
-        messages.error(request, f'Could not generate colored schedule: {exc}')
+        logger.exception('combined export failed for schedule pk=%s', pk)
+        messages.error(request, f'Could not generate the export: {exc}')
         return redirect(f'/dashboard/schedules/')
 
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    suffix = '_colored.xlsx'
     base   = (schedule.original_filename or f'schedule_{pk}').rsplit('.', 1)[0]
-    fname  = base + suffix
+    fname  = base + '_reconciliation.xlsx'
     resp   = HttpResponse(
         buf.read(),
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -6579,8 +6621,8 @@ def colored_schedule_export(request, pk):
 
 @login_required
 def summary_colored_schedule(request):
-    """Download colored schedule from the Summary Sheet page (always uses reconciliation data)."""
-    from verification.colored_schedule import build_colored_schedule_wb, build_status_map_auto
+    """Download the full reconciliation workbook from the Summary Sheet page."""
+    from verification.colored_schedule import build_status_map_auto
 
     account_id  = request.GET.get('account_id', '')
     channel     = request.GET.get('channel', '')
@@ -6616,20 +6658,20 @@ def summary_colored_schedule(request):
 
     try:
         status_map = build_status_map_auto(account_id, channel, month)
-        wb = build_colored_schedule_wb(schedule.pk, colors, status_map)
+        wb = _build_combined_export_wb(schedule, colors, status_map)
     except FileNotFoundError as exc:
         messages.error(request, str(exc))
         return redirect(f'/dashboard/summary/?account_id={account_id}&channel={channel}&month={month}')
     except Exception as exc:
         logger.exception('summary_colored_schedule failed for %s/%s/%s', account_id, channel, month)
-        messages.error(request, f'Could not generate colored schedule: {exc}')
+        messages.error(request, f'Could not generate the export: {exc}')
         return redirect(f'/dashboard/summary/?account_id={account_id}&channel={channel}&month={month}')
 
     account = get_object_or_404(Account, id=account_id)
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    fname = f'ColoredSchedule_{account.name}_{channel}_{month}.xlsx'.replace(' ', '_')
+    fname = f'Reconciliation_{account.name}_{channel}_{month}.xlsx'.replace(' ', '_')
     resp  = HttpResponse(
         buf.read(),
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
