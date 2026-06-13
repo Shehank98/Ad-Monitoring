@@ -4267,6 +4267,58 @@ def tc_pdf_convert(request):
         import json as _json
         from datetime import datetime as _dt
 
+        # ── Mode A: multipart with a PDF file → parse SERVER-SIDE using the
+        # channel-specific converters (verification/tc_converters), return rows
+        # for preview. This replaces in-browser PDF.js parsing so the same
+        # channel logic is used everywhere. ──────────────────────────────────────
+        if request.FILES.get('file'):
+            account_id = request.POST.get('account_id', '').strip()
+            channel    = request.POST.get('channel', '').strip()
+            tc_file    = request.FILES['file']
+            if not (account_id and channel):
+                return JsonResponse({'ok': False, 'error': 'Missing account or channel.'})
+            if not _account_access(user, account_id):
+                return JsonResponse({'ok': False, 'error': 'Access denied.'})
+
+            from verification.tc_converters.dispatch import get_converter
+            import tempfile, os as _os
+            converter = get_converter(channel)
+            tmp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                    for chunk in tc_file.chunks():
+                        tmp.write(chunk)
+                    tmp_path = tmp.name
+                df = converter.parse_pdf(tmp_path)
+            except Exception as e:
+                return JsonResponse({'ok': False, 'error': f'Could not parse PDF: {e}'})
+            finally:
+                if tmp_path:
+                    try: _os.unlink(tmp_path)
+                    except Exception: pass
+
+            if df is None or df.empty:
+                return JsonResponse({'ok': False, 'error': 'No rows could be extracted from this PDF.'})
+
+            out_rows = []
+            for _, rr in df.iterrows():
+                theme      = _safe_str(rr.get('TC_Theme', ''))
+                aired_time = _safe_str(rr.get('Aired_Time', ''))
+                date_val   = _safe_date(rr.get('Date'))
+                if not (theme and aired_time and date_val):
+                    continue
+                out_rows.append({
+                    'Date':       f'{date_val.day}/{date_val.month}/{date_val.year}',
+                    'Programme':  _safe_str(rr.get('Programme', '')),
+                    'Aired Time': aired_time,
+                    'TC Theme':   theme,
+                    'Duration':   _safe_int(rr.get('Duration')) or '',
+                })
+            if not out_rows:
+                return JsonResponse({'ok': False, 'error': 'No valid rows (missing Theme, Time, or Date).'})
+            return JsonResponse({'ok': True, 'parsed': True, 'rows': out_rows, 'row_count': len(out_rows)})
+
+        # ── Mode B: JSON rows → save to DB ──────────────────────────────────────
         try:
             body       = _json.loads(request.body)
             account_id = body.get('account_id', '').strip()
@@ -4296,11 +4348,14 @@ def tc_pdf_convert(request):
             valid_dates = []
             parsed_rows = []
             for r in rows:
-                raw_date = _rget(r, 'Date', 'Aired Date', 'Prg Date', 'DATE')
+                raw_date = str(_rget(r, 'Date', 'Aired Date', 'Prg Date', 'DATE')).strip()
                 try:
-                    # Converter outputs D/M/YYYY
-                    parts = raw_date.split('/')
-                    d = _date_t(int(parts[2]), int(parts[1]), int(parts[0]))
+                    if '/' in raw_date:          # D/M/YYYY (converter / preview output)
+                        parts = raw_date.split('/')
+                        d = _date_t(int(parts[2]), int(parts[1]), int(parts[0]))
+                    else:                         # ISO YYYY-MM-DD
+                        p = raw_date.split('-')
+                        d = _date_t(int(p[0]), int(p[1]), int(p[2]))
                     valid_dates.append(d)
                     parsed_rows.append({**r, '_date': d})
                 except Exception:
