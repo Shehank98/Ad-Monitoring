@@ -176,72 +176,160 @@ def build_status_map(account_id, channel, month) -> dict:
 
 def build_status_map_from_tc(account_id, channel, month) -> dict:
     """
-    Build the per-slot, per-date status map from TC ↔ LMRB reconciliation data.
+    Build the per-slot, per-date status map from TC ↔ LMRB reconciliation data,
+    reconciled so the colours AGREE with the Summary Sheet's aired/missed numbers.
 
-    Used to colour the schedule from the *channel certificate* ground truth once a
-    TC file has been reconciled (reconcile_tc).  A planned ScheduleRow is coloured:
+    Per planned ScheduleRow:
+        matched (green)   – aired (see below)
+        late_telecast     – aired on a LATER date (planned cell red, actual purple)
+        not_aired (red)   – genuinely missed
 
-        matched (green)   – a TCRow links to it AND is LMRB-confirmed
-                            (TCRow.is_schedule_matched & is_lmrb_confirmed)
-        not_aired (red)   – no confirmed TCRow links to it
-        late_telecast     – confirmed TCRow links to it but aired on a LATER date
-                            (planned date shows red, actual aired date shows purple)
-
-    When the spot aired in a different programme than planned, a 'prog_note'
-    string is attached to that date cell so the colored export can surface it as a
-    cell comment.  Structure matches build_status_map() so the workbook builder is
-    unchanged.
+    A row is treated as aired when ANY of these hold, in order:
+      1. A confirmed TCRow is one-to-one linked to it (is_schedule_matched +
+         is_lmrb_confirmed).
+      2. An unclaimed confirmed TCRow falls within its date + time-window + duration
+         (window coverage — same rule as the TC three-way "Not Aired" list).
+      3. Brand-level alignment: the Summary counts this brand/programme as aired
+         (by tc_theme / assignment) more than the rows greened by 1–2, so the
+         remaining red rows are promoted to green up to the Summary's aired count.
+    This guarantees the coloured sheet's green/red totals match the Summary card
+    (e.g. "48 aired / 0 missed" → no red cells).
     """
+    from collections import defaultdict as _dd
     from core.models import ScheduleRow, TCRow
+    from verification.tc_engine import _time_to_secs, build_summary_data
 
-    # Map ScheduleRow.id → its confirmed matched TCRow (schedule-matched + LMRB-confirmed).
+    # ── 1. Confirmed TCRow linked one-to-one to each ScheduleRow ──────────────
     tc_by_sched: dict = {}
-    tc_qs = (
-        TCRow.objects
-        .filter(
-            account_id=account_id, channel__iexact=channel,
-            tc_report__month=month,
+    for tc in (
+        TCRow.objects.filter(
+            account_id=account_id, channel__iexact=channel, tc_report__month=month,
             is_schedule_matched=True, is_lmrb_confirmed=True,
             matched_schedule__isnull=False,
-        )
-        .select_related('matched_lmrb')
-    )
-    for tc in tc_qs:
+        ).select_related('matched_lmrb')
+    ):
         tc_by_sched[tc.matched_schedule_id] = tc
 
-    status_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
-    late_actual_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
-    prog_notes: dict = defaultdict(dict)   # slot_key → {date_str: note}
+    rows = [
+        sr for sr in ScheduleRow.objects.filter(
+            account_id=account_id, channel=channel, month=month,
+        ) if sr.date
+    ]
 
-    for sr in ScheduleRow.objects.filter(
-        account_id=account_id, channel=channel, month=month,
-    ):
-        if not sr.date:
-            continue
-        prog     = _normalize(sr.programme)
-        start    = _normalize_time(sr.start_time)
-        dur      = sr.duration or 0
-        slot_key = (prog, start, dur)
-        date_str = sr.date.strftime('%Y-%m-%d')
-
+    # Per-row tentative status: {'sr', 'status', 'actual', 'note'}
+    per_row: list = []
+    for sr in rows:
         tc = tc_by_sched.get(sr.id)
         if tc is None:
-            status_map[slot_key][date_str]['not_aired'] += 1
+            per_row.append({'sr': sr, 'status': 'not_aired', 'actual': None, 'note': None})
             continue
-
         if tc.date and tc.date > sr.date:
-            # Late telecast: planned date red, actual aired date purple
-            status_map[slot_key][date_str]['not_aired'] += 1
-            late_actual_map[slot_key][date_str][tc.date.strftime('%Y-%m-%d')] += 1
+            st, actual = 'late', tc.date
         else:
-            status_map[slot_key][date_str]['matched'] += 1
+            st, actual = 'matched', None
+        aired_prog = tc.programme or (tc.matched_lmrb.program if tc.matched_lmrb else '')
+        note = None
+        if _normalize(sr.programme) and _normalize(aired_prog) and _normalize(aired_prog) != _normalize(sr.programme):
+            note = f'Planned in "{sr.programme}" but aired in "{aired_prog}".'
+        per_row.append({'sr': sr, 'status': st, 'actual': actual, 'note': note})
 
-        # Aired in a different programme than planned?
-        aired_prog_raw = tc.programme or (tc.matched_lmrb.program if tc.matched_lmrb else '')
-        if prog and _normalize(aired_prog_raw) and _normalize(aired_prog_raw) != prog:
-            prog_notes[slot_key][date_str] = (
-                f'Planned in "{sr.programme}" but aired in "{aired_prog_raw}".'
-            )
+    # ── 2. Window coverage for commercial rows the engine left unlinked ───────
+    avail = [
+        {'date': t.date, 'secs': _time_to_secs(t.aired_time), 'dur': t.duration, 'used': False}
+        for t in TCRow.objects.filter(
+            account_id=account_id, channel__iexact=channel, tc_report__month=month,
+            is_lmrb_confirmed=True, matched_schedule__isnull=True,
+        )
+    ]
+
+    def _window_covers(sr):
+        ss = _time_to_secs(sr.start_time)
+        ee = _time_to_secs(sr.end_time)
+        if ss is None or ee is None:
+            return False
+        if ee < ss and ss > 43200:
+            ee += 86400
+        for c in avail:
+            if c['used'] or c['secs'] is None or c['date'] != sr.date:
+                continue
+            if sr.duration is not None and c['dur'] is not None and c['dur'] != sr.duration:
+                continue
+            cs = c['secs'] + 86400 if ee > 86400 and c['secs'] < ss else c['secs']
+            if ss <= cs <= ee + 600:
+                c['used'] = True
+                return True
+        return False
+
+    for e in sorted(
+        [x for x in per_row
+         if x['status'] == 'not_aired' and x['sr'].ad_type == 'COMMERCIAL BENEFITS'],
+        key=lambda x: x['sr'].date,
+    ):
+        if _window_covers(e['sr']):
+            e['status'] = 'matched'
+
+    # ── 3. Brand-level alignment with the Summary aired count ─────────────────
+    try:
+        sd = build_summary_data(account_id, channel, month)
+    except Exception:
+        logger.exception('build_status_map_from_tc: summary alignment failed')
+        sd = None
+
+    if sd:
+        comm_aired = {
+            (_normalize(r['product']), r.get('dur')): r.get('aired', 0)
+            for r in sd.get('commercial', [])
+        }
+        spon_aired = {}
+        for sec in sd.get('sponsorship', []):
+            for r in sec.get('rows', []):
+                spon_aired[(_normalize(sec['programme']), _normalize(r['product']), r.get('dur'))] = r.get('aired', 0)
+
+        groups: dict = _dd(list)
+        for e in per_row:
+            sr = e['sr']
+            dur = sr.duration if sr.duration is not None else None
+            if sr.ad_type == 'COMMERCIAL BENEFITS':
+                groups[('c', _normalize(sr.brand), dur)].append(e)
+            else:
+                groups[('s', _normalize(sr.programme), _normalize(sr.brand), dur)].append(e)
+
+        for key, entries in groups.items():
+            target = (comm_aired.get((key[1], key[2])) if key[0] == 'c'
+                      else spon_aired.get((key[1], key[2], key[3])))
+            if target is None:
+                continue
+            target = min(target, len(entries))             # never green more than planned
+            greened = sum(1 for e in entries if e['status'] in ('matched', 'late'))
+            need = target - greened
+            if need <= 0:
+                continue
+            for e in sorted([x for x in entries if x['status'] == 'not_aired'],
+                            key=lambda x: x['sr'].date):
+                if need <= 0:
+                    break
+                e['status'] = 'matched'
+                need -= 1
+
+    # ── 4. Aggregate per-row statuses into the slot/date map ──────────────────
+    status_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    late_actual_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    prog_notes: dict = defaultdict(dict)
+
+    for e in per_row:
+        sr = e['sr']
+        slot_key = (_normalize(sr.programme), _normalize_time(sr.start_time), sr.duration or 0)
+        date_str = sr.date.strftime('%Y-%m-%d')
+        if e['status'] == 'late':
+            status_map[slot_key][date_str]['not_aired'] += 1
+            if e['actual']:
+                late_actual_map[slot_key][date_str][e['actual'].strftime('%Y-%m-%d')] += 1
+        elif e['status'] == 'matched':
+            status_map[slot_key][date_str]['matched'] += 1
+        else:
+            status_map[slot_key][date_str]['not_aired'] += 1
+        if e['note']:
+            prog_notes[slot_key][date_str] = e['note']
 
     for slot_key, date_dict in late_actual_map.items():
         for date_str, actual_dict in date_dict.items():
