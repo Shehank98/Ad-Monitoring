@@ -874,6 +874,12 @@ def schedule_upload_multi(request):
     if not account_id:
         return JsonResponse({'ok': False, 'error': 'Account is required'})
 
+    # Keep the ORIGINAL workbook bytes so each schedule can store its own sheet
+    # with formatting preserved (never the converted dataframe).
+    excel_file.seek(0)
+    _orig_bytes = excel_file.read()
+    excel_file.seek(0)
+
     try:
         sheets_config = json.loads(sheets_config_raw)
     except (json.JSONDecodeError, ValueError):
@@ -948,10 +954,26 @@ def schedule_upload_multi(request):
             )
             version = last_ver + 1
 
-            # Save this sheet's data as a standalone Excel file
+            # Store the ORIGINAL sheet (all formatting preserved), NOT the converted
+            # dataframe, so the colored-schedule export reproduces the user's exact
+            # uploaded file. Database rows (parsed below) are used only for matching.
             from django.core.files.base import ContentFile
             sheet_buf = io.BytesIO()
-            df.to_excel(sheet_buf, index=False)
+            try:
+                import openpyxl as _opx
+                _src_wb = _opx.load_workbook(io.BytesIO(_orig_bytes))
+                if sname in _src_wb.sheetnames:
+                    for _sn in list(_src_wb.sheetnames):
+                        if _sn != sname:
+                            del _src_wb[_sn]
+                    _src_wb.save(sheet_buf)
+                else:
+                    raise KeyError(sname)
+            except Exception:
+                # Fallback (e.g. legacy .xls that openpyxl can't open): keep the
+                # converted data so the upload still succeeds.
+                sheet_buf = io.BytesIO()
+                df.to_excel(sheet_buf, index=False)
             sheet_buf.seek(0)
 
             schedule = Schedule(
