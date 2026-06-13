@@ -3937,7 +3937,7 @@ def _parse_tc_rows(df, account, tc_report):
     _ci_rename('Date',      ['Aired Date', 'Prg Date', 'aired_date', 'AiredDate', 'Prg_Date',
                               *_tc_ex_date])
     _ci_rename('Programme', ['Program', 'Prg Name', 'PrgName', 'programme', *_tc_ex_prog])
-    _ci_rename('TC_Theme',  ['Advt_Theme', 'Advt_theme', 'Theme', 'theme',
+    _ci_rename('TC_Theme',  ['TC Theme', 'TC_Theme', 'Advt_Theme', 'Advt_theme', 'Theme', 'theme',
                               'Product', 'Description', 'Ad Name', 'AdName', 'Ad_Name',
                               *_tc_ex_theme])
     _ci_rename('Duration',  ['Dur', 'Seconds', 'Ad Dur', 'Duration_Sec', *_tc_ex_dur])
@@ -4280,12 +4280,23 @@ def tc_pdf_convert(request):
             if not _account_access(user, account_id):
                 return JsonResponse({'ok': False, 'error': 'Access denied.'})
 
+            # Read a row field by any of the accepted aliases (case-insensitive),
+            # so converted rows work whether they use the standard headers
+            # (Date / Programme / Aired Time / TC Theme / Duration) or older keys.
+            def _rget(row, *aliases):
+                lower = {str(k).lower().strip(): v for k, v in row.items()}
+                for a in aliases:
+                    v = lower.get(a.lower().strip())
+                    if v not in (None, ''):
+                        return v
+                return ''
+
             # Parse dates and derive month / date range
             from datetime import date as _date_t
             valid_dates = []
             parsed_rows = []
             for r in rows:
-                raw_date = r.get('DATE', '')
+                raw_date = _rget(r, 'Date', 'Aired Date', 'Prg Date', 'DATE')
                 try:
                     # Converter outputs D/M/YYYY
                     parts = raw_date.split('/')
@@ -4316,9 +4327,11 @@ def tc_pdf_convert(request):
 
             new_rows = []
             for r in parsed_rows:
-                theme      = (r.get('Advt_theme') or '').strip()
-                aired_time = (r.get('Advt_time')  or '').strip()
-                dur        = _safe_int(r.get('Duration'))
+                theme      = str(_rget(r, 'TC Theme', 'TC_Theme', 'Theme', 'Product',
+                                       'Description', 'Ad Name', 'Advt_theme', 'Advt_Theme')).strip()
+                aired_time = str(_rget(r, 'Aired Time', 'Aired_Time', 'Time',
+                                       'Advt_time', 'Advt_Time', 'Ad Start')).strip()
+                dur        = _safe_int(_rget(r, 'Duration', 'Dur', 'Seconds', 'Ad Dur'))
                 date_val   = r['_date']
                 if not (theme and aired_time):
                     continue
@@ -4328,7 +4341,7 @@ def tc_pdf_convert(request):
                     tc_report  = tc_report,
                     channel    = channel,
                     date       = date_val,
-                    programme  = (r.get('PROGRAMME') or '').strip(),
+                    programme  = str(_rget(r, 'Programme', 'Program', 'Prg Name', 'PROGRAMME')).strip(),
                     tc_theme   = theme,
                     duration   = dur,
                     aired_time = aired_time,
