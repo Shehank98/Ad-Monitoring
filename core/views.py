@@ -4831,16 +4831,6 @@ def tc_three_way(request):
             if tc_time_s is not None and lmrb_time_s is not None:
                 tc_lmrb_delta = abs(tc_time_s - lmrb_time_s)
 
-            # Aired in a different programme than planned? (matched, but the TC's
-            # aired programme differs from the booked schedule programme).
-            def _np(s):
-                return str(s).strip().lower() if s else ''
-            diff_programme = bool(
-                sr and is_sched_matched
-                and _np(sr.programme) and _np(tc.programme)
-                and _np(sr.programme) != _np(tc.programme)
-            )
-
             rows.append({
                 'tc_row_id': tc.id,
                 'brand':    brand,
@@ -4867,7 +4857,6 @@ def tc_three_way(request):
                 'lmrb_programme': lmrb.program  if lmrb else '',
                 # Status
                 'status':           status,
-                'diff_programme':   diff_programme,
                 'tc_lmrb_delta_secs': tc_lmrb_delta,
             })
 
@@ -4933,7 +4922,6 @@ def tc_three_way(request):
         'n_confirmed':        sum(1 for r in rows if r['status'] == 'confirmed'),
         'n_tc_only':          sum(1 for r in rows if r['status'] == 'tc_only'),
         'n_extra':            sum(1 for r in rows if r['status'] == 'extra'),
-        'n_diff_prog':        sum(1 for r in rows if r['diff_programme']),
     })
 
 
