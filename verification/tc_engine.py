@@ -1067,7 +1067,34 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
             # Union LMRB row IDs from both sources; len() gives unique aired count.
             tc_lmrb_ids   = set(tc_spon_q.values_list('matched_lmrb_id', flat=True))
             spon_lmrb_ids  = set(spon_asgn_q.values_list('lmrb_row_id', flat=True))
-            all_aired_ids  = tc_lmrb_ids | spon_lmrb_ids
+
+            # c) TC ↔ LMRB confirmed by tc_theme for this sponsorship brand, even
+            #    when the spot was not formally linked to a sponsorship schedule
+            #    row. If TC and LMRB both recorded the spot it aired, so count it
+            #    (deduped by LMRB row) — genuine tag airings are no longer reported
+            #    as missed just because the engine could not pin them to a row.
+            tc_theme_ids: set = set()
+            tc_themes_spon = _tc_themes_for_brand(brand, dur, tc_theme_map)
+            if tc_themes_spon:
+                _tcq = TCRow.objects.filter(
+                    account_id=account_id, channel=channel,
+                    tc_report__month=month,
+                    is_lmrb_confirmed=True, matched_lmrb__isnull=False,
+                )
+                if schedule_id:
+                    _tcq = _tcq.filter(tc_report__schedule_id=schedule_id)
+                _tq = Q()
+                for t in tc_themes_spon:
+                    if t.endswith('*'):
+                        _tq |= Q(tc_theme__istartswith=t[:-1])
+                    else:
+                        _tq |= Q(tc_theme__iexact=t)
+                _tcq = _tcq.filter(_tq)
+                if dur_int is not None:
+                    _tcq = _tcq.filter(duration=dur_int)
+                tc_theme_ids = set(_tcq.values_list('matched_lmrb_id', flat=True))
+
+            all_aired_ids  = tc_lmrb_ids | spon_lmrb_ids | tc_theme_ids
             aired          = len(all_aired_ids)
 
             # Status
