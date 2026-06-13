@@ -38,6 +38,33 @@ const ACCOUNTS = [
 const ACTIVE_CHANNELS   = ["Tv - Derana","Tv - Sirasa TV","Tv - Swarnavahini","Tv - ITN","Tv - Vasantham TV","Tv - Hiru TV","Tv - Shakthi TV","Star Tamil","Tv - Siyatha Tv","TV - Supreme TV"];
 const DISABLED_CHANNELS = ["Rupavahini","Channel Eye"];
 
+/* ── Channel normalization ─────────────────────────────────────────────────
+   The Nova Channel Management system stores channel names with a "Tv - " prefix
+   (and inconsistent spacing/spelling). Channel-specific PARSING rules below key
+   off canonical names, so every selected channel is normalized once here before
+   parsing. Only the parsing logic uses the normalized name — the value sent to
+   the server keeps the original (it must match the stored Schedule channel). */
+const CHANNEL_MAP = {
+  "Tv - Derana":               "TV Derana",
+  "Tv - Hiru TV":              "Hiru TV",
+  "Tv - Sirasa TV":            "Sirasa TV",
+  "Tv - Shakthi TV":           "Shakthi TV",
+  "Tv - Siyatha Tv":           "Siyatha TV",
+  "TV -Supreme TV":            "Supreme TV",
+  "TV - Supreme TV":           "Supreme TV",
+  "Tv - ITN":                  "ITN",
+  "Tv - Vasantham TV":         "Vasantham TV",
+  "Tv - Swarnavahini":         "Swarnawahini TV",
+  "Tv - Channel Eye - Nethra": "Channel Eye",
+  "Tv - Rupavahini":           "Rupavahini",
+};
+function normalizeChannel(name) {
+  if (!name) return name;
+  if (CHANNEL_MAP[name]) return CHANNEL_MAP[name];
+  const collapsed = String(name).replace(/\s+/g, ' ').trim();   // tolerate spacing
+  return CHANNEL_MAP[collapsed] || name;
+}
+
 /* ── Icons ─────────────────────────────────────────────────────── */
 const Ico = ({ d, size=16 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -53,6 +80,12 @@ const IcoUpload   = ({size=16}) => <svg width={size} height={size} viewBox="0 0 
 
 /* ── PDF heuristic parser ─────────────────────────────────────────────────── */
 async function parsePDF(file, selectedChannel) {
+  // Normalize once so channel-specific parsing rules fire regardless of the
+  // Nova-prefixed name that was selected.
+  const normalizedChannel = normalizeChannel(selectedChannel);
+  console.log("Selected Channel:", selectedChannel);
+  console.log("Normalized Channel:", normalizedChannel);
+
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const extractedRows = [];
@@ -72,7 +105,7 @@ async function parsePDF(file, selectedChannel) {
     items.forEach(item => {
       const y = item.transform[5], x = item.transform[4];
       let str = item.str;
-      if (selectedChannel === 'TV - Supreme TV') str = str.replace(/\$/g, '');
+      if (normalizedChannel === 'Supreme TV') str = str.replace(/\$/g, '');
       if (!str.trim()) return;
       const charWidth = item.width / Math.max(1, str.length);
       const parts = str.split(/(\s{2,})/);
@@ -146,7 +179,7 @@ async function parsePDF(file, selectedChannel) {
     } else {
       const parts = rawDate.split(/[-/]/);
       let year = parts[2]; if (year.length === 2) year = '20' + year;
-      if (selectedChannel === 'TV - Supreme TV') {
+      if (normalizedChannel === 'Supreme TV') {
         // Supreme TV PDFs use MM/DD/YYYY
         date = `${parseInt(parts[1],10)}/${parseInt(parts[0],10)}/${year}`;
       } else {
@@ -159,12 +192,12 @@ async function parsePDF(file, selectedChannel) {
     let time = '', duration = '';
     let durationTime, advtTime;
 
-    if (selectedChannel === 'TV - Supreme TV') {
+    if (normalizedChannel === 'Supreme TV') {
       durationTime = allTimes.find(t => t.startsWith('0:00:'));
       advtTime     = allTimes.find(t => !t.startsWith('0:00:')) || allTimes[0];
     } else {
       durationTime = allTimes.find(t => t.startsWith('00:00:'));
-      if (selectedChannel === 'Star Tamil' || selectedChannel === 'Tv - Siyatha Tv') {
+      if (normalizedChannel === 'Star Tamil' || normalizedChannel === 'Siyatha TV') {
         // Prefer actual HH:MM:SS over scheduled AM/PM time
         advtTime = allTimes.find(t => /\d{2}[:.]\d{2}[:.]\d{2}/.test(t) && !t.startsWith('00:00:'))
                 || allTimes.find(t => /[AP]M/i.test(t))
@@ -190,7 +223,7 @@ async function parsePDF(file, selectedChannel) {
     }
 
     if (durationTime) {
-      if (selectedChannel === 'TV - Supreme TV') {
+      if (normalizedChannel === 'Supreme TV') {
         duration = parseInt(durationTime.replace('0:00:',''), 10).toString();
       } else {
         duration = durationTime.substring(0, 8).replace('00:00:','');
@@ -232,7 +265,7 @@ async function parsePDF(file, selectedChannel) {
 
     // ── Split Programme vs Theme via largest horizontal gap ───────────────
     let program = '', commercial = '';
-    if (selectedChannel === 'TV - Supreme TV') {
+    if (normalizedChannel === 'Supreme TV') {
       commercial = remainingItems.map(i => i.text).join(' ').trim();
     } else if (remainingItems.length > 0) {
       const sorted = [...remainingItems].sort((a,b) => a.x - b.x);
@@ -266,7 +299,7 @@ async function parsePDF(file, selectedChannel) {
     if (program || commercial) {
       parsedData.push({
         DATE:       date,
-        PROGRAMME:  selectedChannel === 'TV - Supreme TV' ? 'N/A' : program.trim(),
+        PROGRAMME:  normalizedChannel === 'Supreme TV' ? 'N/A' : program.trim(),
         Advt_time:  time,
         Advt_theme: commercial.trim(),
         Duration:   duration,
