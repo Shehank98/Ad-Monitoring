@@ -298,12 +298,12 @@ async function parsePDF(file, selectedChannel) {
 
     if (program || commercial) {
       parsedData.push({
-        DATE:       date,
-        PROGRAMME:  normalizedChannel === 'Supreme TV' ? 'N/A' : program.trim(),
-        Advt_time:  time,
-        Advt_theme: commercial.trim(),
-        Duration:   duration,
-      });
+      "Date":       date,
+      "Programme":  normalizedChannel === 'Supreme TV' ? 'N/A' : program.trim(),
+      "Aired Time": time,
+      "Theme":      commercial.trim(),
+      "Duration":   duration,
+    });
     }
   });
   return parsedData;
@@ -345,7 +345,14 @@ function App() {
 
   const downloadExcel = () => {
     if (!rows.length) return;
-    const ws = window.XLSX.utils.json_to_sheet(rows);
+    const ordered = rows.map(r => ({
+      "Date":       r["Date"],
+      "Programme":  r["Programme"],
+      "Theme":      r["Theme"],
+      "Duration":   r["Duration"],
+      "Aired Time": r["Aired Time"],
+    }));
+    const ws = window.XLSX.utils.json_to_sheet(ordered);
     const wb = window.XLSX.utils.book_new();
     window.XLSX.utils.book_append_sheet(wb, ws, 'TC Data');
     window.XLSX.writeFile(wb, `${selectedChannel}_TC_Converted.xlsx`);
@@ -493,18 +500,18 @@ function App() {
                   <th className="px-4 py-2 border-b border-slate-200">Date</th>
                   <th className="px-4 py-2 border-b border-slate-200">Programme</th>
                   <th className="px-4 py-2 border-b border-slate-200 whitespace-nowrap">Aired Time</th>
-                  <th className="px-4 py-2 border-b border-slate-200">Advt Theme</th>
+                  <th className="px-4 py-2 border-b border-slate-200">Theme</th>
                   <th className="px-4 py-2 border-b border-slate-200 text-center">Dur (s)</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r,i) => (
                   <tr key={i} className="border-b last:border-0 hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-2 whitespace-nowrap text-slate-600">{r.DATE}</td>
-                    <td className="px-4 py-2 text-slate-700">{r.PROGRAMME}</td>
-                    <td className="px-4 py-2 whitespace-nowrap text-slate-600">{r.Advt_time}</td>
-                    <td className="px-4 py-2 text-slate-800 font-medium">{r.Advt_theme}</td>
-                    <td className="px-4 py-2 text-center text-slate-600">{r.Duration}</td>
+                    <td className="px-4 py-2 whitespace-nowrap text-slate-600">{r["Date"]}</td>
+                    <td className="px-4 py-2 text-slate-700">{r["Programme"]}</td>
+                    <td className="px-4 py-2 whitespace-nowrap text-slate-600">{r["Aired Time"]}</td>
+                    <td className="px-4 py-2 text-slate-800 font-medium">{r["Theme"]}</td>
+                    <td className="px-4 py-2 text-center text-slate-600">{r["Duration"]}</td>
                   </tr>
                 ))}
               </tbody>
