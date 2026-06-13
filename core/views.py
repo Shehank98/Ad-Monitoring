@@ -5447,6 +5447,10 @@ def _write_summary_sheet(ws, account, channel, month, data, meta, estimate_no):
     GOLD  = PatternFill('solid', fgColor='FEF9C3')
     GRNFILL = PatternFill('solid', fgColor='DCFCE7')
     REDFILL  = PatternFill('solid', fgColor='FEE2E2')
+    # Configurable Summary colours: "Aired Less Than Planned" (missed) and
+    # "Aired More Than Planned" (extra) — editable in Reconciliation Colour Settings.
+    AIRED_LESS_FILL = PatternFill('solid', fgColor=get_setting('schedule_color_aired_less', '#f59e0b').lstrip('#').upper())
+    AIRED_MORE_FILL = PatternFill('solid', fgColor=get_setting('schedule_color_aired_more', '#0ea5e9').lstrip('#').upper())
 
     hdr_font  = Font(bold=True, color='FFFFFF', size=11)
     bold11    = Font(bold=True, size=11)
@@ -5525,14 +5529,16 @@ def _write_summary_sheet(ws, account, channel, month, data, meta, estimate_no):
         for item in data['commercial']:
             vals = [item['product'], item['dur'], item['planned'], item['aired'],
                     item['missed'], item['extra'], item['third_party']]
-            fill = REDFILL if item['missed'] > 0 else None
             for col_i, v in enumerate(vals, start=1):
                 c = ws.cell(row, col_i, v)
                 c.font = norm10
                 c.alignment = centre if col_i > 1 else left
                 c.border = border()
-                if fill:
-                    c.fill = fill
+            # Highlight the Missed cell (aired-less) and Extra cell (aired-more)
+            if item['missed'] > 0:
+                ws.cell(row, 5).fill = AIRED_LESS_FILL
+            if item['extra'] > 0:
+                ws.cell(row, 6).fill = AIRED_MORE_FILL
             row += 1
 
         # Grand Total
@@ -5569,6 +5575,10 @@ def _write_summary_sheet(ws, account, channel, month, data, meta, estimate_no):
                     c.font = norm10
                     c.alignment = centre if col_i > 1 else left
                     c.border = border()
+                if item['missed'] > 0:
+                    ws.cell(row, 5).fill = AIRED_LESS_FILL
+                if item['extra'] > 0:
+                    ws.cell(row, 6).fill = AIRED_MORE_FILL
                 row += 1
             # No per-programme subtotal - only grand total at end
 
@@ -6573,6 +6583,23 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
     return len(combined)
 
 
+def _reconciliation_colors():
+    """Return the configurable reconciliation colour palette from SystemSettings,
+    with sensible defaults. Used by the colored-schedule export and summary sheets."""
+    return {
+        'aired':              get_setting('schedule_color_aired',              '#22c55e'),
+        'not_aired':          get_setting('schedule_color_not_aired',          '#ef4444'),
+        'extra_aired':        get_setting('schedule_color_extra_aired',        '#3b82f6'),
+        'aired_less':         get_setting('schedule_color_aired_less',         '#f59e0b'),
+        'aired_more':         get_setting('schedule_color_aired_more',         '#0ea5e9'),
+        'partial_match':      get_setting('schedule_color_partial_match',      '#fb923c'),
+        'manual_override':    get_setting('schedule_color_manual_override',    '#14b8a6'),
+        'late_telecast':      get_setting('schedule_color_late_telecast',      '#a855f7'),
+        'programme_mismatch': get_setting('schedule_color_programme_mismatch', '#f97316'),
+        'planned':            get_setting('schedule_color_planned',            '#94a3b8'),
+    }
+
+
 def _build_combined_export_wb(schedule, colors, status_map):
     """Assemble the 4-sheet reconciliation export workbook:
 
@@ -6618,14 +6645,7 @@ def colored_schedule_export(request, pk):
     if not _account_access(request.user, schedule.account_id):
         return HttpResponse('Access denied', status=403)
 
-    colors = {
-        'aired':              get_setting('schedule_color_aired',              '#22c55e'),
-        'not_aired':          get_setting('schedule_color_not_aired',          '#ef4444'),
-        'late_telecast':      get_setting('schedule_color_late_telecast',      '#a855f7'),
-        'programme_mismatch': get_setting('schedule_color_programme_mismatch', '#f97316'),
-        'extra_aired':        get_setting('schedule_color_extra_aired',        '#3b82f6'),
-        'planned':            get_setting('schedule_color_planned',            '#94a3b8'),
-    }
+    colors = _reconciliation_colors()
 
     # Colour source: TC ↔ LMRB matched data when a TC file has been reconciled,
     # otherwise Schedule ↔ LMRB MatchResult records, otherwise plain 'planned'.
@@ -6686,14 +6706,7 @@ def summary_colored_schedule(request):
         messages.error(request, 'No schedule found for this scope.')
         return redirect('/dashboard/summary/')
 
-    colors = {
-        'aired':              get_setting('schedule_color_aired',              '#22c55e'),
-        'not_aired':          get_setting('schedule_color_not_aired',          '#ef4444'),
-        'late_telecast':      get_setting('schedule_color_late_telecast',      '#a855f7'),
-        'programme_mismatch': get_setting('schedule_color_programme_mismatch', '#f97316'),
-        'extra_aired':        get_setting('schedule_color_extra_aired',        '#3b82f6'),
-        'planned':            get_setting('schedule_color_planned',            '#94a3b8'),
-    }
+    colors = _reconciliation_colors()
 
     try:
         status_map = build_status_map_auto(account_id, channel, month)
@@ -7288,9 +7301,10 @@ def system_settings(request):
 
     # Group settings by their category display label
     from collections import OrderedDict
-    CATEGORY_ORDER = ['reconciliation', 'tc_parsing', 'lmrb_parsing', 'whatsapp', 'email']
+    CATEGORY_ORDER = ['reconciliation', 'display', 'tc_parsing', 'lmrb_parsing', 'whatsapp', 'email']
     CATEGORY_LABELS = {
         'reconciliation': 'Reconciliation',
+        'display':        'Reconciliation Colours',
         'tc_parsing':     'TC File Parsing',
         'lmrb_parsing':   'LMRB / MapOnline File Parsing',
         'whatsapp':       'WhatsApp Notifications',

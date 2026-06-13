@@ -531,9 +531,10 @@ def _build_wb_from_db(schedule, colors: dict, status_map=None):
         'programme_mismatch':  _hex_to_fill(colors.get('programme_mismatch',  '#f97316')),
         'extra_aired':         _hex_to_fill(colors.get('extra_aired',         '#3b82f6')),
         'planned':             _hex_to_fill(colors.get('planned',             '#94a3b8')),
+        'manual_override':     _hex_to_fill(colors.get('manual_override',     '#14b8a6')),
     }
     status_to_fill = {
-        'matched': fills['aired'], 'manual_match': fills['aired'],
+        'matched': fills['aired'], 'manual_match': fills['manual_override'],
         'not_aired': fills['not_aired'], 'late_telecast': fills['late_telecast'],
         'programme_mismatch': fills['programme_mismatch'],
         'extra_aired': fills['extra_aired'], 'planned': fills['planned'],
@@ -743,11 +744,12 @@ def build_colored_schedule_wb(schedule_pk, colors: dict, status_map=None):
         'programme_mismatch':  _hex_to_fill(colors.get('programme_mismatch',  '#f97316')),
         'extra_aired':         _hex_to_fill(colors.get('extra_aired',         '#3b82f6')),
         'planned':             _hex_to_fill(colors.get('planned',             '#94a3b8')),
+        'manual_override':     _hex_to_fill(colors.get('manual_override',     '#14b8a6')),
     }
     # matched/manual_match both use 'aired' fill
     status_to_fill = {
         'matched':             fills['aired'],
-        'manual_match':        fills['aired'],
+        'manual_match':        fills['manual_override'],
         'not_aired':           fills['not_aired'],
         'late_telecast':       fills['late_telecast'],
         'programme_mismatch':  fills['programme_mismatch'],
@@ -1091,8 +1093,11 @@ def _write_legend(ws, start_row: int, fills: dict):
         ('late_telecast',      'Late Arrival',       'This date received spots that were originally planned for an earlier date (hover cell for details)'),
         ('programme_mismatch', 'Programme Mismatch', 'Ad aired after the planned time window (same date)'),
         ('extra_aired',        'Extra Aired',        'Ad detected by monitoring but not present in the schedule'),
+        ('manual_override',    'Manual Override',    'Match confirmed manually by an operator'),
         ('planned',            'Planned Only',       'Scheduled but no reconciliation data available yet'),
     ]
+    # Only render legend rows for colours that exist in the fills map.
+    legend_items = [it for it in legend_items if it[0] in fills]
 
     # Header
     hdr = ws.cell(start_row, 1, 'COLOUR LEGEND')
@@ -1225,9 +1230,10 @@ def build_original_and_colored_wb(schedule_pk, colors: dict, status_map=None):
         'programme_mismatch': _hex_to_fill(colors.get('programme_mismatch', '#f97316')),
         'extra_aired':        _hex_to_fill(colors.get('extra_aired',        '#3b82f6')),
         'planned':            _hex_to_fill(colors.get('planned',            '#94a3b8')),
+        'manual_override':    _hex_to_fill(colors.get('manual_override',    '#14b8a6')),
     }
     status_to_fill = {
-        'matched': fills['aired'], 'manual_match': fills['aired'],
+        'matched': fills['aired'], 'manual_match': fills['manual_override'],
         'not_aired': fills['not_aired'], 'late_telecast': fills['late_telecast'],
         'programme_mismatch': fills['programme_mismatch'],
         'extra_aired': fills['extra_aired'], 'planned': fills['planned'],

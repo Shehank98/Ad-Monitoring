@@ -982,47 +982,78 @@ SETTING_DEFAULTS = [
         ),
         'category': 'whatsapp',
     },
-    # ── Schedule Export Colours ───────────────────────────────────────────────
+    # ── Reconciliation / Schedule Export Colours ─────────────────────────────
     {
         'key': 'schedule_color_aired',
         'value': '#22c55e',
-        'label': 'Colour: Aired as Planned',
-        'description': 'Cell fill colour for spots that aired on the scheduled date within the planned window.',
+        'label': 'Aired / Matched',
+        'description': '',
         'category': 'display',
     },
     {
         'key': 'schedule_color_not_aired',
         'value': '#ef4444',
-        'label': 'Colour: Not Aired',
-        'description': 'Cell fill colour for spots that were not found in the monitoring data.',
-        'category': 'display',
-    },
-    {
-        'key': 'schedule_color_late_telecast',
-        'value': '#a855f7',
-        'label': 'Colour: Late / Different Date',
-        'description': 'Cell fill colour for spots that aired on a date different from the scheduled date.',
-        'category': 'display',
-    },
-    {
-        'key': 'schedule_color_programme_mismatch',
-        'value': '#f97316',
-        'label': 'Colour: Programme Mismatch',
-        'description': 'Cell fill colour for spots that aired just after the planned window (different programme).',
+        'label': 'Not Aired',
+        'description': '',
         'category': 'display',
     },
     {
         'key': 'schedule_color_extra_aired',
         'value': '#3b82f6',
-        'label': 'Colour: Extra Aired',
-        'description': 'Cell fill colour for monitoring rows not linked to any scheduled spot.',
+        'label': 'Extra Aired',
+        'description': ('Note: spots found in monitoring (LMRB / TC) that were NOT part of '
+                        'the booking plan — aired but never scheduled.'),
+        'category': 'display',
+    },
+    {
+        'key': 'schedule_color_aired_less',
+        'value': '#f59e0b',
+        'label': 'Aired Less Than Planned',
+        'description': ('Note: summary indicator for a brand that aired FEWER spots than '
+                        'planned (a shortfall / under-delivery).'),
+        'category': 'display',
+    },
+    {
+        'key': 'schedule_color_aired_more',
+        'value': '#0ea5e9',
+        'label': 'Aired More Than Planned',
+        'description': ('Note: summary indicator for a brand that aired MORE spots than '
+                        'planned (over-delivery / bonus airings).'),
+        'category': 'display',
+    },
+    {
+        'key': 'schedule_color_partial_match',
+        'value': '#fb923c',
+        'label': 'Partial Match',
+        'description': '',
+        'category': 'display',
+    },
+    {
+        'key': 'schedule_color_manual_override',
+        'value': '#14b8a6',
+        'label': 'Manual Override',
+        'description': '',
+        'category': 'display',
+    },
+    {
+        'key': 'schedule_color_late_telecast',
+        'value': '#a855f7',
+        'label': 'Late / Different Date',
+        'description': '',
+        'category': 'display',
+    },
+    {
+        'key': 'schedule_color_programme_mismatch',
+        'value': '#f97316',
+        'label': 'Programme Mismatch',
+        'description': '',
         'category': 'display',
     },
     {
         'key': 'schedule_color_planned',
         'value': '#94a3b8',
-        'label': 'Colour: Planned (no reconciliation yet)',
-        'description': 'Cell fill colour when exporting a schedule that has not yet been reconciled.',
+        'label': 'Planned (not yet reconciled)',
+        'description': '',
         'category': 'display',
     },
     # ── Email Notifications ───────────────────────────────────────────────────
@@ -1141,9 +1172,14 @@ class SystemSetting(models.Model):
 # ── Setting helpers ───────────────────────────────────────────────────────────
 
 def _ensure_defaults():
-    """Create any missing SystemSetting rows from SETTING_DEFAULTS."""
+    """Create any missing SystemSetting rows from SETTING_DEFAULTS.
+
+    Also keeps each row's metadata (label / description / category) in sync with
+    the defaults so renamed labels and new help-notes appear even for settings that
+    were created by an earlier version. The user-editable `value` is never touched.
+    """
     for d in SETTING_DEFAULTS:
-        SystemSetting.objects.get_or_create(
+        obj, created = SystemSetting.objects.get_or_create(
             key=d['key'],
             defaults={
                 'value':       d.get('value', ''),
@@ -1152,6 +1188,13 @@ def _ensure_defaults():
                 'category':    d.get('category', 'reconciliation'),
             },
         )
+        if not created:
+            label    = d['label']
+            desc     = d.get('description', '')
+            category = d.get('category', 'reconciliation')
+            if (obj.label, obj.description, obj.category) != (label, desc, category):
+                obj.label, obj.description, obj.category = label, desc, category
+                obj.save(update_fields=['label', 'description', 'category'])
 
 
 def get_setting(key: str, default: str = '') -> str:

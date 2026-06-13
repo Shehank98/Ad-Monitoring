@@ -15,9 +15,10 @@
       <!-- Category header -->
       <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
         <div class="w-8 h-8 rounded-lg flex items-center justify-center
-          {% if 'Reconciliation' in category_label %}bg-blue-100{% elif 'TC' in category_label %}bg-emerald-100{% elif 'WhatsApp' in category_label %}bg-green-100{% elif 'Display' in category_label %}bg-violet-100{% else %}bg-amber-100{% endif %}">
+          {% if 'Colour' in category_label or 'Color' in category_label %}bg-violet-100{% elif 'Reconciliation' in category_label %}bg-blue-100{% elif 'TC' in category_label %}bg-emerald-100{% elif 'WhatsApp' in category_label %}bg-green-100{% elif 'Display' in category_label %}bg-violet-100{% else %}bg-amber-100{% endif %}">
           <i class="text-sm
-            {% if 'Reconciliation' in category_label %}fa-solid fa-scale-balanced text-blue-600
+            {% if 'Colour' in category_label or 'Color' in category_label %}fa-solid fa-palette text-violet-600
+            {% elif 'Reconciliation' in category_label %}fa-solid fa-scale-balanced text-blue-600
             {% elif 'TC' in category_label %}fa-solid fa-file-invoice text-emerald-600
             {% elif 'WhatsApp' in category_label %}fa-brands fa-whatsapp text-green-600
             {% elif 'Display' in category_label %}fa-solid fa-palette text-violet-600
