@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load static %}
 {% block title %}Upload TC Report{% endblock %}
 {% block page_title %}Upload Transmission Certificate{% endblock %}
 {% block page_subtitle %}Upload the channel's TC file received after schedule completion - aired spots are auto-parsed{% endblock %}
@@ -301,8 +302,9 @@
 {% endblock %}
 
 {% block extra_js %}
-<!-- PDF.js -->
+<!-- PDF.js + shared channel-aware TC parser (same code as the TC Converter page) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+<script src="{% static 'js/tc_pdf_parser.js' %}"></script>
 <script>
 window.pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
@@ -455,185 +457,30 @@ function showError(msg) {
   document.getElementById('btnPreview').disabled = false;
 }
 
-// ── PDF.js heuristic parser (same logic as standalone TC Converter) ────────────
+// ── PDF parsing ───────────────────────────────────────────────────────────────
+// PDFs are parsed in the browser by the shared channel-aware parser
+// (static/js/tc_pdf_parser.js → window.TCPDFParser), the exact same code used by
+// the standalone TC Converter page. It returns rows keyed:
+//   { "Date":"D/M/YYYY", "Programme", "Aired Time", "TC Theme", "Duration" }
+// We map those to the {date, programme, time, theme, duration} shape that
+// tc_upload_parsed expects, converting D/M/YYYY → ISO YYYY-MM-DD.
 
-const PDF_SKIP_RE = /\b(VAT No|Invoice No|Invoice Details|Date\s*:|From\s*:|To\s*:|Contractor Number|Contract No|Schedule No|Client\s*:|Agent\s*:|Ref No|Client Code|Agent Code|Total Value|Certified By|Checked By|Prepared By|POWER HOUSE|UNLESS OBJECTIONS|Page \d+ of \d+|Prog\. Date|Caption\/Copy Title|Duration \(sec\)|Channel\s*:|Sr\.No\.|MTV Channel|Braybrooke|TELECAST CERTIFICATE|Advertiser\s*:|Address\s*:|Campaign Period|Account Executive|Co\/Agency|Release Order Ref|Traffic Order No|Brand\s*:|TOTAL SPOTS|AUTHORISED SIGNATORY|System Generated|Digitally Signed|Day Time|Duration Lan Mat|Cut No|Product Details|Posi|Net Rate|Remarks|Bill Number|Booking Number|Deal Number|Total Spot|We certify|Net Rate 1|Agency Name|Printed Date|Printed Time|Printed By|Client Name|Agent Name|Client \/ Contract Debits)\b/i;
+function dmyToIso(dmy) {
+  if (!dmy) return '';
+  const p = String(dmy).split(/[-/]/);
+  if (p.length !== 3) return '';
+  return `${p[2]}-${String(p[1]).padStart(2,'0')}-${String(p[0]).padStart(2,'0')}`;
+}
 
-async function parsePdfClientSide(file) {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const extractedRows = [];
-
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const textContent = await page.getTextContent();
-    const items = textContent.items;
-
-    items.sort((a, b) => {
-      const yDiff = b.transform[5] - a.transform[5];
-      if (Math.abs(yDiff) > 5) return yDiff;
-      return a.transform[4] - b.transform[4];
-    });
-
-    let currentLine = [], currentY = null, lastEndX = null;
-    items.forEach(item => {
-      const y = item.transform[5], x = item.transform[4], str = item.str;
-      if (!str.trim()) return;
-      const charWidth = item.width / Math.max(1, str.length);
-      const parts = str.split(/(\s{2,})/);
-      let cursorX = x;
-      parts.forEach(part => {
-        if (part.trim() === '') { cursorX += part.length * charWidth; return; }
-        const chunkX = cursorX, text = part.trim(), chunkWidth = text.length * charWidth;
-        cursorX += part.length * charWidth;
-        if (currentY === null || Math.abs(currentY - y) > 5) {
-          if (currentLine.length > 0) extractedRows.push(currentLine);
-          currentLine = [{ text, x: chunkX, endX: chunkX + chunkWidth }];
-          currentY = y; lastEndX = chunkX + chunkWidth;
-        } else {
-          const gap = chunkX - lastEndX;
-          if (gap > 4) {
-            currentLine.push({ text, x: chunkX, endX: chunkX + chunkWidth });
-          } else {
-            const addSpace = (gap > 1.5 && !currentLine[currentLine.length-1].text.endsWith(' ')) ? ' ' : '';
-            currentLine[currentLine.length-1].text += addSpace + text;
-            currentLine[currentLine.length-1].endX = chunkX + chunkWidth;
-          }
-          lastEndX = currentLine[currentLine.length-1].endX;
-        }
-      });
-    });
-    if (currentLine.length > 0) extractedRows.push(currentLine);
-  }
-
-  // Group by date-containing lines
-  const records = [];
-  extractedRows.forEach(line => {
-    const textLine = line.map(i => i.text).join(' ');
-    if (PDF_SKIP_RE.test(textLine) || /Rs\s*:/i.test(textLine) || /\.{4,}/.test(textLine) || /^\s*[\d,]+\.\d{2}\s*$/.test(textLine)) return;
-    if (/\b(\d{1,2}[-/]\d{1,2}[-/]\d{4})\b/.test(textLine)) {
-      records.push({ mainLine: line, allItems: [...line] });
-    } else if (records.length > 0 && textLine.length > 2) {
-      records[records.length-1].allItems.push(...line);
-    }
-  });
-
-  // ── Detect date format (DD/MM/YYYY vs MM/DD/YYYY) from unambiguous dates ──
-  const DATE_RE_JS = /\b(\d{1,2}[-/]\d{1,2}[-/]\d{4})\b/;
-  const TIME_RE_JS = /\b\d{2}:\d{2}:\d{2}(?::\d{2})?\b/g;
-  function detectDateFmt(recs) {
-    for (const rec of recs) {
-      const m = rec.mainLine.map(i => i.text).join(' ').match(DATE_RE_JS);
-      if (!m) continue;
-      const parts = m[1].split(/[-/]/);
-      const p1 = parseInt(parts[0], 10), p2 = parseInt(parts[1], 10);
-      if (p2 > 12) return 'mdy';   // second part can't be a month
-      if (p1 > 12) return 'dmy';   // first part can't be a month
-    }
-    return 'dmy';   // default DD/MM/YYYY
-  }
-  function toIsoDate(rawDate, fmt) {
-    const p = rawDate.split(/[-/]/);
-    return fmt === 'mdy'
-      ? `${p[2]}-${p[0].padStart(2,'0')}-${p[1].padStart(2,'0')}`  // MM/DD/YYYY
-      : `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; // DD/MM/YYYY
-  }
-  const dateFmt = detectDateFmt(records);
-
-  const parsedData = [];
-  records.forEach(record => {
-    const mainText = record.mainLine.map(i => i.text).join(' ');
-    const allText  = record.allItems.map(i => i.text).join(' ');
-    const dateMatch = mainText.match(DATE_RE_JS);
-    const allTimes = [...allText.matchAll(/\b(\d{2}:\d{2}:\d{2}(?::\d{2})?)\b/g)].map(m => m[1]);
-
-    if (!dateMatch || !allTimes.length) return;
-
-    const rawDate = dateMatch[1];
-    const isoDate = toIsoDate(rawDate, dateFmt);
-
-    const durationTime = allTimes.find(t => t.startsWith('00:00:'));
-    const advtTime     = allTimes.find(t => !t.startsWith('00:00:')) || allTimes[0];
-    const time = advtTime ? advtTime.split(':').slice(0,3).join(':') : '';
-
-    let duration = '';
-    if (durationTime) {
-      duration = parseInt(durationTime.split(':')[2], 10).toString();
-    } else {
-      const ti = allText.search(/\b\d{2}:\d{2}:\d{2}/);
-      if (ti > 0) {
-        const before = allText.substring(0, ti).trim();
-        const lw = before.match(/\b(\d+)\b$/);
-        if (lw && ['5','10','15','20','25','30','45','60'].includes(lw[1])) duration = lw[1];
-      }
-      if (!duration) {
-        // Strip time patterns first to avoid matching the hour (e.g. "10" in "10:25:38:20")
-        const textNoTimes = allText.replace(TIME_RE_JS, ' ');
-        const dm = textNoTimes.match(/\b(10|15|20|25|30|45|60)\b/);
-        if (dm) duration = dm[1];
-      }
-    }
-
-    // Filter out noise items
-    const keepItems = record.allItems.filter(item => {
-      const c = item.text.trim();
-      return c.length > 1
-        && !c.includes(rawDate)
-        && !/\b\d{2}:\d{2}:\d{2}(?::\d{2})?\b/.test(c)
-        && !/^(Mon|Tue|Wed|We|Thu|Fri|Sat|Sun|BS|PO|PD|OTHERS|Rs\.?:?|[STE])$/i.test(c)
-        && !/^CB\s*\d*$/i.test(c)
-        && !/^[\d,]+\.\d+$/.test(c)
-        && !/^\.+$/.test(c)
-        && c !== duration
-        && (!durationTime || c !== durationTime)
-        && !(/^\d{1,4}$/.test(c) && item.x < 50)
-        && !/^(ITNCOMM|VTVCOMM|ITNOPCL)\w+$/i.test(c)
-        && !/^\d{5,}$/.test(c);
-    });
-
-    if (!keepItems.length) return;
-
-    // Split programme (left column) vs theme (right column) by largest gap
-    const sorted = [...keepItems].sort((a,b) => a.x - b.x);
-    let maxGap = 0, splitIdx = -1;
-    for (let i = 0; i < sorted.length-1; i++) {
-      const gap = sorted[i+1].x - sorted[i].endX;
-      if (gap > maxGap) { maxGap = gap; splitIdx = i; }
-    }
-    const threshold = (maxGap > 4 && splitIdx !== -1)
-      ? sorted[splitIdx].endX + maxGap / 2
-      : 9999;
-
-    const progParts = [], themeParts = [];
-    keepItems.forEach(item => {
-      if (item.x >= threshold) { themeParts.push(item.text); return; }
-      const isCrossed = threshold !== 9999 && item.endX > threshold + 5;
-      const sm = item.text.match(/^(.*?)\s+-\s*(.*)$/);
-      if (sm && (threshold === 9999 || isCrossed) && sm[1].trim().length > 2 && sm[2].trim().length > 2) {
-        progParts.push(sm[1].trim()); themeParts.push(sm[2].trim());
-      } else {
-        progParts.push(item.text);
-      }
-    });
-
-    let programme = progParts.join(' ').trim().replace(/-\s*$/, '').trim();
-    let theme     = themeParts.join(' ').trim().replace(/^-\s*/, '').trim();
-
-    if (programme && !theme) {
-      const sm = programme.match(/^(.*?)\s+-\s+(.+)$/);
-      if (sm && sm[1].trim().length > 2) { programme = sm[1].trim(); theme = sm[2].trim(); }
-    } else if (!programme && theme) {
-      const sm = theme.match(/^(.*?)\s+-\s+(.+)$/);
-      if (sm && sm[1].trim().length > 2) { programme = sm[1].trim(); theme = sm[2].trim(); }
-    }
-    if (duration && theme.endsWith(duration)) theme = theme.slice(0, -duration.length).trim();
-
-    if (programme || theme) {
-      parsedData.push({ date: isoDate, programme, time, theme, duration: duration ? parseInt(duration,10) : null });
-    }
-  });
-
-  return parsedData;
+async function parsePdfClientSide(file, channel) {
+  const raw = await window.TCPDFParser.parsePDF(file, channel);
+  return raw.map(r => ({
+    date:      dmyToIso(r["Date"]),
+    programme: r["Programme"] || '',
+    time:      r["Aired Time"] || '',
+    theme:     r["TC Theme"] || '',
+    duration:  r["Duration"] ? parseInt(r["Duration"], 10) : null,
+  }));
 }
 
 // ── Main preview trigger ──────────────────────────────────────────────────────
@@ -654,10 +501,30 @@ async function runPreview() {
   const file  = fileInput.files[0];
   const isPdf = file.name.toLowerCase().endsWith('.pdf');
 
-  // Both PDF and Excel go through the server so the channel-specific
-  // parser (e.g. sirasa_tv.py) is selected via get_converter(channel).
   pdfParsedRows = null;
-  showLoading(isPdf ? 'Parsing PDF on server using channel converter…' : 'Reading TC file…');
+
+  if (isPdf) {
+    // PDF: parse in the browser using the shared channel-aware parser, then
+    // submit the parsed rows as JSON on confirm (tc_upload_parsed).
+    showLoading('Parsing PDF in your browser using the channel converter…');
+    try {
+      const rows = await parsePdfClientSide(file, channel);
+      document.getElementById('btnPreview').disabled = false;
+      if (!rows.length) {
+        showError('Could not find tabular data. Check the PDF is a valid TC and the channel is correct.');
+        return;
+      }
+      pdfParsedRows = rows;
+      renderPreview(buildPreviewSummary(rows), 'pdf');
+    } catch (err) {
+      document.getElementById('btnPreview').disabled = false;
+      showError('Error reading PDF: ' + err.message);
+    }
+    return;
+  }
+
+  // Excel: server-side read so column aliases are applied consistently.
+  showLoading('Reading TC file…');
   const fd = new FormData();
   fd.append('tc_file', file);
   fd.append('account_id', accountId);
@@ -669,7 +536,7 @@ async function runPreview() {
     .then(data => {
       document.getElementById('btnPreview').disabled = false;
       if (!data.ok) { showError(data.error || 'Unknown error.'); return; }
-      renderPreview(data, isPdf ? 'pdf' : 'excel');
+      renderPreview(data, 'excel');
     })
     .catch(err => showError('Network error: ' + err.message));
 }
