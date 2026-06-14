@@ -321,6 +321,23 @@ function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// The page scrolls inside the main content container (an .overflow-y-auto div in
+// base.html), NOT window — so window.scrollTo is a no-op here. Walk up to the
+// nearest scrollable ancestor and scroll that instead.
+function getScrollParent(el) {
+  let node = el ? el.parentElement : null;
+  while (node) {
+    const oy = getComputedStyle(node).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight) return node;
+    node = node.parentElement;
+  }
+  return document.scrollingElement || document.documentElement;
+}
+function scrollContentToTop() {
+  getScrollParent(document.getElementById('tc-upload-form'))
+    .scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function dateToMonthStr(dateStr) {
   if (!dateStr) return '';
   const d = new Date(dateStr + 'T00:00:00');
@@ -606,7 +623,7 @@ function cancelPreview() {
   pdfParsedRows = null;
   hidePreview();
   document.getElementById('btnPreview').disabled = false;
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  scrollContentToTop();
 }
 
 function confirmUpload() {

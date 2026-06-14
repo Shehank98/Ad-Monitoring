@@ -4567,7 +4567,22 @@ def tc_upload(request):
         )
         if officer_channels:
             schedules_qs = schedules_qs.filter(channel__in=officer_channels)
-    schedules = schedules_qs.order_by('-uploaded_at')
+
+    # Hide schedules that already have a TC uploaded for them. A TC counts as
+    # "uploaded" for a schedule if it is directly linked (schedule FK) OR a TC
+    # exists for the same account + channel + month scope. Keep any schedule the
+    # form is pre-filling so a re-link via WhatsApp link still works.
+    tc_qs = TransmissionReport.objects.filter(account__in=account_qs)
+    linked_ids   = set(tc_qs.values_list('schedule_id', flat=True))
+    tc_scopes    = set(tc_qs.values_list('account_id', 'channel', 'month'))
+    prefill_pk   = request.GET.get('schedule_pk', '')
+
+    schedules = [
+        s for s in schedules_qs.order_by('-uploaded_at')
+        if str(s.id) == prefill_pk
+        or (s.id not in linked_ids
+            and (s.account_id, s.channel, s.month) not in tc_scopes)
+    ]
     prefill = {
         'account_id':  request.GET.get('account_id', ''),
         'channel':     request.GET.get('channel', ''),
