@@ -5186,7 +5186,9 @@ def tc_lmrb_match(request):
       • Unmatched TC   — TC rows with no LMRB confirmation
       • Unmatched LMRB — leftover LMRB rows not claimed by any engine
     """
-    from verification.tc_lmrb_engine import build_tc_lmrb_data, scope_date_range
+    from verification.tc_lmrb_engine import (
+        build_tc_lmrb_data, build_theme_mapping, scope_date_range,
+    )
 
     user       = request.user
     account_qs = _account_qs(user)
@@ -5198,6 +5200,7 @@ def tc_lmrb_match(request):
     selected_account = None
     channels, months = [], []
     data = None
+    theme_map = None
     date_min = date_max = None
 
     if account_id:
@@ -5214,6 +5217,7 @@ def tc_lmrb_match(request):
             messages.error(request, 'Access denied.')
             return redirect('/dashboard/tc/lmrb-match/')
         data = build_tc_lmrb_data(account_id, channel, month)
+        theme_map = build_theme_mapping(account_id, channel, month)
         date_min, date_max = scope_date_range(account_id, channel, month)
 
     return render(request, 'tc/lmrb_match.html', {
@@ -5225,6 +5229,7 @@ def tc_lmrb_match(request):
         'channels':         channels,
         'months':           months,
         'data':             data,
+        'theme_map':        theme_map,
         'date_min':         date_min,
         'date_max':         date_max,
         'tolerance':        get_setting_int('tc_lmrb_time_tolerance', 5),
@@ -5349,6 +5354,45 @@ def tc_lmrb_match_remove(request, pk):
         f'/dashboard/tc/lmrb-match/?account_id={account_id}'
         f'&channel={quote(channel)}&month={quote(month)}'
     )
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head'])
+@require_POST
+def tc_lmrb_map_save(request):
+    """Map a TC theme to an LMRB theme, stored in the main BrandMapping table.
+
+    Creates (or updates) a BrandMapping row so the mapping is shared across the
+    whole system.  The TC↔LMRB matcher then pairs only brand-consistent spots.
+    A 'brand' name groups the pair; when blank it defaults to the LMRB theme.
+    """
+    account_id = request.POST.get('account_id', '').strip()
+    tc_theme   = request.POST.get('tc_theme', '').strip()
+    lmrb_theme = request.POST.get('lmrb_theme', '').strip()
+    brand      = request.POST.get('brand', '').strip()
+    if not (account_id and tc_theme and lmrb_theme):
+        return JsonResponse({'ok': False, 'error': 'TC theme and LMRB theme are required.'})
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied.'})
+
+    # CharField limits: brand/theme are max_length=200.
+    lmrb_theme = lmrb_theme[:200]
+    brand      = (brand or lmrb_theme)[:200]
+
+    # Update an existing row that maps exactly this tc_theme, else create one.
+    bm = BrandMapping.objects.filter(
+        account_id=account_id, tc_theme__iexact=tc_theme,
+    ).first()
+    if bm:
+        bm.theme = lmrb_theme
+        if not bm.brand:
+            bm.brand = brand
+        bm.save(update_fields=['theme', 'brand'])
+    else:
+        BrandMapping.objects.create(
+            account_id=account_id, brand=brand, theme=lmrb_theme, tc_theme=tc_theme,
+        )
+    return JsonResponse({'ok': True, 'lmrb_theme': lmrb_theme, 'brand': brand})
 
 
 @login_required

@@ -69,6 +69,7 @@ urlpatterns = [
     path('tc/lmrb-match/run/',                  views.tc_lmrb_match_run,        name='tc_lmrb_match_run'),
     path('tc/lmrb-match/candidates/',           views.tc_lmrb_match_candidates, name='tc_lmrb_match_candidates'),
     path('tc/lmrb-match/assign/',               views.tc_lmrb_match_assign,     name='tc_lmrb_match_assign'),
+    path('tc/lmrb-match/map-save/',             views.tc_lmrb_map_save,         name='tc_lmrb_map_save'),
     path('tc/lmrb-match/remove/<int:pk>/',      views.tc_lmrb_match_remove,     name='tc_lmrb_match_remove'),
     path('tc/lmrb-match/download/',             views.tc_lmrb_match_download,   name='tc_lmrb_match_download'),
     path('tc/pdf-convert/',                     views.tc_pdf_convert,    name='tc_pdf_convert'),

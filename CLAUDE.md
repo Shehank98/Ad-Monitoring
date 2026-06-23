@@ -125,6 +125,7 @@ Wrong role → HTTP 403 (renders `403.html`), not a redirect.
 /tc/lmrb-match/run/                       → tc_lmrb_match_run         (POST: auto-match / reset)
 /tc/lmrb-match/candidates/                → tc_lmrb_match_candidates  (AJAX: LMRB pool for a TC row)
 /tc/lmrb-match/assign/                    → tc_lmrb_match_assign      (POST: manual pair)
+/tc/lmrb-match/map-save/                  → tc_lmrb_map_save          (POST: save TC↔LMRB theme → BrandMapping)
 /tc/lmrb-match/remove/<pk>/               → tc_lmrb_match_remove      (POST: unmatch + unlock)
 /tc/lmrb-match/download/                  → tc_lmrb_match_download    (Excel: 3 sheets)
 
@@ -360,6 +361,16 @@ Created by `verification/tc_lmrb_engine.py`:
 > resolves to a brand via `BrandMapping.tc_theme` and the LMRB `advt_theme` must
 > resolve to the *same* brand via `BrandMapping.theme` — so only brand-consistent
 > spots are paired. When a `tc_theme` has no mapping, it falls back to time-only.
+
+**Page workflow (`/dashboard/tc/lmrb-match/`):**
+1. **Step 1 — Map themes:** the page lists every distinct `tc_theme` in the scope and
+   flags which are not yet mapped to an LMRB theme. The user maps each via a picker
+   (LMRB themes found in the scope, or free text). Saving writes to the **main
+   `BrandMapping`** table (`tc_theme` ↔ `theme`; `brand` defaults to the LMRB theme),
+   so the mapping is shared system-wide and shown as "mapped" on the next TC upload.
+   Built by `build_theme_mapping()`; saved by `tc_lmrb_map_save`.
+2. **Step 2 — Match:** "Auto-match TC ↔ LMRB" runs `reconcile_tc_lmrb`, then the three
+   lists (Matched / Unmatched TC / Unmatched LMRB) render and are downloadable.
 
 ### `SummaryReportMeta`
 User-editable fields for the printed summary. Unique per (account, channel, month).

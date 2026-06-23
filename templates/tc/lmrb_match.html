@@ -70,7 +70,77 @@
 
 {% if data %}
 
-<!-- ── Action bar ─────────────────────────────────────────────── -->
+<!-- ── Step 1: TC Theme → LMRB Theme mapping ──────────────────── -->
+<div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-5">
+  <div class="px-5 pt-4 pb-2 flex items-center justify-between flex-wrap gap-2">
+    <div class="font-bold text-slate-700 text-sm">
+      <i class="fa-solid fa-diagram-project text-indigo-600 mr-1"></i>
+      Step 1 — Map TC themes to LMRB themes
+      <span class="text-slate-400 font-normal ml-1">({{ theme_map.total }} TC theme{{ theme_map.total|pluralize }})</span>
+    </div>
+    {% if theme_map.unmapped %}
+      <span class="badge" style="background:#fee2e2;color:#991b1b">
+        <i class="fa-solid fa-triangle-exclamation"></i> {{ theme_map.unmapped }} unmapped — map these before matching
+      </span>
+    {% else %}
+      <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> All TC themes mapped</span>
+    {% endif %}
+  </div>
+  <p class="px-5 pb-2 text-xs text-slate-400">
+    Saved mappings are stored in the main Brand Mappings table and reused everywhere.
+    Pick an existing LMRB theme or type a new one, then run the match below.
+  </p>
+  <div class="overflow-x-auto" style="max-height:340px;overflow-y:auto">
+    <table class="tl-table">
+      <thead>
+        <tr>
+          <th>TC Theme</th><th># TC</th><th>Status</th>
+          <th>Mapped LMRB Theme</th><th>Brand (optional)</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in theme_map.theme_rows %}
+        <tr>
+          <td class="font-semibold text-purple-700 max-w-[220px] truncate" title="{{ row.tc_theme }}">{{ row.tc_theme }}</td>
+          <td class="font-mono text-slate-500">{{ row.count }}</td>
+          <td>
+            {% if row.mapped %}
+              <span class="badge badge-green"><i class="fa-solid fa-check"></i> mapped</span>
+            {% else %}
+              <span class="badge" style="background:#fee2e2;color:#991b1b"><i class="fa-solid fa-xmark"></i> unmapped</span>
+            {% endif %}
+          </td>
+          <td>
+            <input type="hidden" id="map-tc-{{ forloop.counter }}" value="{{ row.tc_theme }}">
+            <input list="lmrbThemes" id="map-lmrb-{{ forloop.counter }}"
+                   class="select-field !py-1 !text-xs" style="min-width:180px"
+                   value="{% if row.lmrb_themes %}{{ row.lmrb_themes.0 }}{% endif %}"
+                   placeholder="LMRB theme…">
+          </td>
+          <td>
+            <input id="map-brand-{{ forloop.counter }}"
+                   class="select-field !py-1 !text-xs" style="min-width:120px"
+                   value="{{ row.brand }}" placeholder="defaults to LMRB theme">
+          </td>
+          <td>
+            <button type="button" class="btn-primary text-[11px] py-0.5 px-2"
+                    onclick="tlMapSave({{ forloop.counter }})">
+              <i class="fa-solid fa-floppy-disk"></i> Save
+            </button>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="text-center text-slate-400 py-6">No TC themes found in this scope.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <datalist id="lmrbThemes">
+    {% for opt in theme_map.lmrb_theme_options %}<option value="{{ opt }}">{% endfor %}
+  </datalist>
+</div>
+
+<!-- ── Step 2: Action bar ─────────────────────────────────────── -->
 <div class="flex flex-wrap items-center gap-2 mb-4">
   <form method="post" action="/dashboard/tc/lmrb-match/run/">
     {% csrf_token %}
@@ -235,8 +305,26 @@
 </div>
 
 <script>
+  const TL_ACCOUNT_ID = '{{ account_id }}';
+
   function tlCsrf() {
     return document.querySelector('input[name=csrfmiddlewaretoken]').value;
+  }
+
+  function tlMapSave(i) {
+    const tc    = document.getElementById('map-tc-' + i).value;
+    const lmrb  = document.getElementById('map-lmrb-' + i).value.trim();
+    const brand = document.getElementById('map-brand-' + i).value.trim();
+    if (!lmrb) { alert('Enter or pick an LMRB theme first.'); return; }
+    const fd = new FormData();
+    fd.append('account_id', TL_ACCOUNT_ID);
+    fd.append('tc_theme', tc);
+    fd.append('lmrb_theme', lmrb);
+    fd.append('brand', brand);
+    fd.append('csrfmiddlewaretoken', tlCsrf());
+    fetch('/dashboard/tc/lmrb-match/map-save/', { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(d => { if (d.ok) { location.reload(); } else { alert(d.error || 'Failed'); } });
   }
 
   function tlFind(tcId) {

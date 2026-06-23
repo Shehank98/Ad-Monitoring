@@ -251,6 +251,81 @@ def reconcile_tc_lmrb(account_id, channel, month, mode='smart', user=None):
     }
 
 
+# ── Theme-mapping panel (TC theme ↔ LMRB theme, stored in BrandMapping) ─────────
+
+def build_theme_mapping(account_id, channel, month):
+    """Data for the "map TC theme → LMRB theme" panel.
+
+    Returns:
+      theme_rows : [{tc_theme, count, mapped (bool), lmrb_themes: [..], brand}]
+                   one row per distinct tc_theme found in the scope's TC rows.
+      lmrb_theme_options : sorted distinct LMRB advt_theme values in the scope
+                   (used to populate the datalist so the user can pick or type).
+
+    'mapped' is True when a BrandMapping for the account resolves this tc_theme to
+    at least one non-empty LMRB theme (exact or '*' prefix, pipe-aware).  Mappings
+    created here are written straight to the main BrandMapping table.
+    """
+    from core.models import BrandMapping
+
+    # Distinct tc_theme + counts from the scope's TC rows.
+    tc_counts: dict = {}
+    for t in _scope_tc_qs(account_id, channel, month).values_list('tc_theme', flat=True):
+        key = (t or '').strip()
+        if key:
+            tc_counts[key] = tc_counts.get(key, 0) + 1
+
+    # All BrandMapping rows with a tc_theme for this account.
+    bm_list = list(
+        BrandMapping.objects.filter(account_id=account_id).exclude(tc_theme='')
+    )
+
+    def _mapping_for(tc_theme_norm):
+        """Return (lmrb_themes, brand) resolved for a normalised tc_theme."""
+        themes, brand = [], ''
+        for bm in bm_list:
+            for raw in bm.tc_theme.split('|'):
+                st = raw.lower().strip()
+                if not st:
+                    continue
+                hit = (st == tc_theme_norm
+                       or (st.endswith('*') and tc_theme_norm.startswith(st[:-1])))
+                if hit and bm.theme.strip():
+                    themes.append(bm.theme.strip())
+                    brand = brand or bm.brand
+        # de-dup preserving order
+        seen, uniq = set(), []
+        for th in themes:
+            if th.lower() not in seen:
+                seen.add(th.lower())
+                uniq.append(th)
+        return uniq, brand
+
+    theme_rows = []
+    for tc_theme, cnt in sorted(tc_counts.items(), key=lambda x: x[0].lower()):
+        lmrb_themes, brand = _mapping_for(tc_theme.lower().strip())
+        theme_rows.append({
+            'tc_theme':    tc_theme,
+            'count':       cnt,
+            'mapped':      bool(lmrb_themes),
+            'lmrb_themes': lmrb_themes,
+            'brand':       brand,
+        })
+
+    lmrb_theme_options = sorted(set(
+        v.strip() for v in
+        _scope_lmrb_qs(account_id, channel, month).values_list('advt_theme', flat=True)
+        if v and v.strip()
+    ))
+
+    return {
+        'theme_rows':         theme_rows,
+        'lmrb_theme_options': lmrb_theme_options,
+        'unmapped':           sum(1 for r in theme_rows if not r['mapped']),
+        'total':              len(theme_rows),
+    }
+
+
 # ── Manual assignment / removal ────────────────────────────────────────────────
 
 @transaction.atomic
