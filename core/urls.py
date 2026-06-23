@@ -66,6 +66,7 @@ urlpatterns = [
 
     # Standalone TC ↔ LMRB reconciliation (no schedule required)
     path('tc/lmrb-match/',                      views.tc_lmrb_match,            name='tc_lmrb_match'),
+    path('tc/lmrb-match/upload/',               views.tc_lmrb_upload,           name='tc_lmrb_upload'),
     path('tc/lmrb-match/run/',                  views.tc_lmrb_match_run,        name='tc_lmrb_match_run'),
     path('tc/lmrb-match/candidates/',           views.tc_lmrb_match_candidates, name='tc_lmrb_match_candidates'),
     path('tc/lmrb-match/assign/',               views.tc_lmrb_match_assign,     name='tc_lmrb_match_assign'),

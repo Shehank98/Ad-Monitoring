@@ -5239,6 +5239,130 @@ def tc_lmrb_match(request):
 @login_required
 @role_required(['super_admin', 'admin', 'operations', 'team_head'])
 @require_POST
+def tc_lmrb_upload(request):
+    """Upload a TC file directly from the TC↔LMRB tab — no schedule required.
+
+    Channel and month are auto-detected from the file when left blank (month is
+    derived from the earliest TC date as e.g. "January 2025").  Creates a
+    TransmissionReport with no linked schedule, parses rows, then returns to the
+    tab with the new scope selected so the user can map themes and match.
+    """
+    user       = request.user
+    account_id = request.POST.get('account_id', '').strip()
+    channel    = request.POST.get('channel', '').strip()
+    month      = request.POST.get('month', '').strip()
+    tc_file    = request.FILES.get('tc_file')
+
+    def _back(extra=''):
+        from urllib.parse import quote
+        url = '/dashboard/tc/lmrb-match/'
+        if account_id:
+            url += f'?account_id={account_id}'
+            if channel:
+                url += f'&channel={quote(channel)}'
+        return redirect(url)
+
+    if not (account_id and tc_file):
+        messages.error(request, 'Account and TC file are required.')
+        return _back()
+    if not _account_access(user, account_id):
+        messages.error(request, 'Access denied.')
+        return _back()
+
+    account = get_object_or_404(Account, id=account_id)
+    is_pdf  = tc_file.name.lower().endswith('.pdf')
+
+    if is_pdf:
+        if not channel:
+            messages.error(request, 'For PDF TC files, type the Channel name first, then re-upload.')
+            return _back()
+        from verification.tc_converters.dispatch import get_converter
+        converter = get_converter(channel)
+        if converter is None:
+            messages.error(
+                request,
+                f'No PDF converter is configured for channel "{channel}". '
+                f'Please upload an Excel file instead.'
+            )
+            return _back()
+        import tempfile, os
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                for chunk in tc_file.chunks():
+                    tmp.write(chunk)
+                tmp_path = tmp.name
+            df = converter.parse_pdf(tmp_path)
+        except Exception as e:
+            messages.error(request, f'Could not parse PDF TC file: {e}')
+            return _back()
+        finally:
+            if tmp_path:
+                try: os.unlink(tmp_path)
+                except Exception: pass
+        if df is None or df.empty:
+            messages.error(request, 'No data rows could be extracted from the PDF.')
+            return _back()
+        df['Channel'] = channel
+    else:
+        try:
+            df = pd.read_excel(tc_file, header=0)
+        except Exception as e:
+            messages.error(request, f'Could not read TC file: {e}')
+            return _back()
+
+    meta = _detect_tc_meta(df)
+    if not channel:
+        channel = _safe_str(meta.get('channel'))
+    if not channel:
+        messages.error(request, 'Could not detect the Channel — type it in and re-upload.')
+        return _back()
+    if not month:
+        if meta.get('start_date'):
+            month = meta['start_date'].strftime('%B %Y')
+        else:
+            messages.error(request, 'Could not detect the Month — type it (e.g. "January 2025") and re-upload.')
+            return _back()
+
+    tc_report = TransmissionReport.objects.create(
+        account           = account,
+        channel           = channel,
+        month             = month,
+        schedule          = None,
+        file              = tc_file,
+        original_filename = tc_file.name,
+        row_count         = 0,
+        start_date        = meta.get('start_date'),
+        end_date          = meta.get('end_date'),
+        uploaded_by       = user,
+    )
+    count = _parse_tc_rows(df, account, tc_report)
+    tc_report.row_count = count
+    tc_report.save(update_fields=['row_count'])
+
+    if count == 0:
+        messages.warning(
+            request,
+            'TC uploaded but 0 rows were parsed — check the file has TC Theme, '
+            'Aired Time and Date columns (add column aliases in Settings if needed).'
+        )
+    else:
+        messages.success(
+            request,
+            f'TC uploaded: {count} rows for {channel} / {month}. '
+            f'Now map any unmapped themes, then run the match.'
+        )
+
+    from urllib.parse import quote
+    return redirect(
+        f'/dashboard/tc/lmrb-match/?account_id={account_id}'
+        f'&channel={quote(channel)}&month={quote(month)}'
+    )
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head'])
+@require_POST
 def tc_lmrb_match_run(request):
     """Run (or reset) standalone TC ↔ LMRB reconciliation for a scope."""
     from verification.tc_lmrb_engine import reconcile_tc_lmrb

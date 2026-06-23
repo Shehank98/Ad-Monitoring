@@ -122,6 +122,7 @@ Wrong role → HTTP 403 (renders `403.html`), not a redirect.
 /tc/pdf-convert/                          → tc_pdf_convert            (PDF TC file → Excel preview)
 
 /tc/lmrb-match/                           → tc_lmrb_match             (standalone TC↔LMRB, no schedule)
+/tc/lmrb-match/upload/                    → tc_lmrb_upload            (POST: upload TC, no schedule)
 /tc/lmrb-match/run/                       → tc_lmrb_match_run         (POST: auto-match / reset)
 /tc/lmrb-match/candidates/                → tc_lmrb_match_candidates  (AJAX: LMRB pool for a TC row)
 /tc/lmrb-match/assign/                    → tc_lmrb_match_assign      (POST: manual pair)
@@ -363,6 +364,10 @@ Created by `verification/tc_lmrb_engine.py`:
 > spots are paired. When a `tc_theme` has no mapping, it falls back to time-only.
 
 **Page workflow (`/dashboard/tc/lmrb-match/`):**
+0. **Upload TC (in-tab):** an upload card on the page (`tc_lmrb_upload`) accepts an
+   Excel/PDF TC file with **no schedule** — Channel and Month are auto-detected from
+   the file (Month derived from the earliest TC date) when left blank. Creates a
+   `TransmissionReport` with `schedule=None`, then reloads the tab with the new scope.
 1. **Step 1 — Map themes:** the page lists every distinct `tc_theme` in the scope and
    flags which are not yet mapped to an LMRB theme. The user maps each via a picker
    (LMRB themes found in the scope, or free text). Saving writes to the **main
