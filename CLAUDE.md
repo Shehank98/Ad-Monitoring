@@ -346,8 +346,9 @@ matched_at, matched_by (FK → User, nullable)
 ```
 
 Created by `verification/tc_lmrb_engine.py`:
-- `reconcile_tc_lmrb()` → `match_type='auto'` (greedy date + duration + air-time within
-  `tc_lmrb_time_tolerance`, one-to-one)
+- `reconcile_tc_lmrb()` → `match_type='auto'` (greedy, one-to-one: same date +
+  duration + air-time within `tc_lmrb_time_tolerance`, AND brand agreement via
+  BrandMapping)
 - Operations user via the "Find LMRB" picker on `/dashboard/tc/lmrb-match/` → `'manual'`
 
 > **CRITICAL — global lock:** once matched, `LMRBRow.is_tc_lmrb_matched=True` and
@@ -355,8 +356,10 @@ Created by `verification/tc_lmrb_engine.py`:
 > engine, and the schedule-based TC engine (`tc_engine.py`) all skip LMRB rows where
 > `is_tc_lmrb_matched=True`, so a row claimed here can never be reused elsewhere.
 > Removing the `TcLmrbMatch` (unmatch / reset) clears both flags.
-> This feature is schedule-agnostic: **no BrandMapping is required** — matching is on
-> date + duration + air-time proximity only.
+> **Brand mapping (no schedule needed):** like reconcile_tc Step 1, the TC `tc_theme`
+> resolves to a brand via `BrandMapping.tc_theme` and the LMRB `advt_theme` must
+> resolve to the *same* brand via `BrandMapping.theme` — so only brand-consistent
+> spots are paired. When a `tc_theme` has no mapping, it falls back to time-only.
 
 ### `SummaryReportMeta`
 User-editable fields for the printed summary. Unique per (account, channel, month).

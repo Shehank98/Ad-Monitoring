@@ -8,11 +8,16 @@ NO booking schedule uploaded.  The normal Summary reconciliation (which is drive
 by ScheduleRows) cannot run, but the user still wants to verify the TC against the
 independent LMRB monitoring data — i.e. take the "LMRB cut of the TC".
 
-This engine pairs each TCRow with an LMRBRow purely on:
+This engine pairs each TCRow with an LMRBRow on:
     same channel  +  same date  +  same duration  +  |aired_time − advt_time| ≤ tol
+    +  brand agreement via BrandMapping (when the tc_theme is mapped)
 
-It is intentionally schedule-agnostic: no BrandMapping is required.  The result of
-each pairing is stored in a TcLmrbMatch record, and BOTH rows are locked:
+It is schedule-agnostic — no ScheduleRow is needed — but it DOES use BrandMapping
+the same way the schedule-based engine does: the TC row's tc_theme resolves to a
+brand (BrandMapping.tc_theme) and the LMRB row's advt_theme must resolve to the
+same brand (BrandMapping.theme).  When a tc_theme has no mapping, matching falls
+back to time-only (mirrors reconcile_tc Step 1).  The result of each pairing is
+stored in a TcLmrbMatch record, and BOTH rows are locked:
     LMRBRow.is_tc_lmrb_matched = True   (global lock — every other engine skips it)
     TCRow.is_tc_lmrb_matched   = True
 
@@ -131,6 +136,19 @@ def reconcile_tc_lmrb(account_id, channel, month, mode='smart', user=None):
 
     tolerance = get_setting_int('tc_lmrb_time_tolerance', 5)
 
+    # ── BrandMapping theme validation (same chain as the schedule-based engine) ─
+    # Resolve TC tc_theme → brand (BrandMapping.tc_theme) and brand → expected LMRB
+    # themes (BrandMapping.theme).  A TC row only pairs with an LMRB row whose
+    # advt_theme resolves to the same brand.  When a tc_theme has NO mapping we
+    # fall back to time-only matching, mirroring reconcile_tc Step 1.
+    from verification.tc_engine import (
+        _normalize as _norm,
+        _build_reverse_tc_theme_map, _brands_for_tc_theme,
+        _build_lmrb_theme_map, _lmrb_themes_for_brand,
+    )
+    reverse_tc_theme_map = _build_reverse_tc_theme_map(account_id)
+    lmrb_theme_map       = _build_lmrb_theme_map(account_id)
+
     # ── Candidate TC rows: not yet matched here (and not locked elsewhere) ─────
     tc_rows = list(
         _scope_tc_qs(account_id, channel, month)
@@ -168,11 +186,30 @@ def reconcile_tc_lmrb(account_id, channel, month, mode='smart', user=None):
         dur = int(tc.duration) if tc.duration is not None else None
         candidates = index.get((tc.date, dur), [])
 
+        # Expected LMRB (theme, product) pairs via tc_theme → brand → lmrb_theme.
+        # Empty list = tc_theme has no BrandMapping → skip theme validation.
+        brands = _brands_for_tc_theme(tc.tc_theme, dur, reverse_tc_theme_map)
+        expected_lmrb_pairs = []
+        for brand in brands:
+            expected_lmrb_pairs.extend(_lmrb_themes_for_brand(brand, dur, lmrb_theme_map))
+
         best = None
         best_diff = tolerance + 1
         for lmrb_secs, lr in candidates:
             if lr.id in used_lmrb_ids or lmrb_secs is None:
                 continue
+            # Brand validation: the LMRB row's theme/product must resolve to the
+            # same brand as the TC row (when a mapping exists).  '*' suffix = prefix
+            # match; '' product = match any (non-TAG brands).
+            if expected_lmrb_pairs:
+                lr_theme   = _norm(lr.advt_theme)
+                lr_product = _norm(lr.product) if lr.product else ''
+                if not any(
+                    (lr_theme.startswith(t[:-1]) if t.endswith('*') else lr_theme == t)
+                    and (not p or lr_product == p)
+                    for t, p in expected_lmrb_pairs
+                ):
+                    continue
             diff = abs(tc_secs - lmrb_secs)
             if diff <= tolerance and diff < best_diff:
                 best_diff = diff
