@@ -296,6 +296,12 @@ class LMRBRow(models.Model):
     # Manual reconciliation lock — permanently locked once a ManualMatch is created
     is_manual_matched = models.BooleanField(default=False, db_index=True)
 
+    # Standalone TC ↔ LMRB reconciliation lock — set when this row is matched to a
+    # TCRow by the schedule-less TC↔LMRB engine (verification/tc_lmrb_engine.py).
+    # Acts as a global lock: the commercial, sponsorship and schedule-based TC
+    # engines all skip rows where this is True so a row claimed here is never reused.
+    is_tc_lmrb_matched = models.BooleanField(default=False, db_index=True)
+
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -434,6 +440,11 @@ class TCRow(models.Model):
     )
     is_extra            = models.BooleanField(default=False, db_index=True)
 
+    # Standalone TC ↔ LMRB reconciliation lock — set when this TC row is matched to
+    # an LMRBRow by the schedule-less TC↔LMRB engine (verification/tc_lmrb_engine.py).
+    # Independent of is_lmrb_confirmed (which is owned by the schedule-based engine).
+    is_tc_lmrb_matched  = models.BooleanField(default=False, db_index=True)
+
     class Meta:
         ordering = ['date', 'aired_time']
         indexes = [
@@ -555,6 +566,58 @@ class SponsorshipLmrbAssignment(models.Model):
         return (
             f'Spon | {self.account} | {self.schedule_row.brand} '
             f'| {self.schedule_row.date} | {self.match_type}'
+        )
+
+
+class TcLmrbMatch(models.Model):
+    """A stored TC ↔ LMRB match created without any schedule (standalone path).
+
+    Use case: the channel sends a Transmission Certificate (TC) but no booking
+    schedule exists for that period, so the normal Summary reconciliation cannot
+    run.  The schedule-less engine (verification/tc_lmrb_engine.py) pairs each
+    TCRow with an LMRBRow on date + duration + air-time proximity and stores the
+    result here.
+
+    Locking:
+    - LMRBRow.is_tc_lmrb_matched = True  → globally locks the LMRB row so no other
+      engine (commercial / sponsorship / schedule-based TC) can reuse it.
+    - TCRow.is_tc_lmrb_matched   = True  → marks the TC row as consumed here.
+
+    Constraints (one-to-one): each TCRow and each LMRBRow can take part in at most
+    one TcLmrbMatch.  Removing the record unlocks both rows.
+    """
+    MATCH_TYPE_CHOICES = [
+        ('auto',   'Auto'),
+        ('manual', 'Manual'),
+    ]
+    account      = models.ForeignKey(Account, on_delete=models.CASCADE,
+                                     related_name='tc_lmrb_matches')
+    channel      = models.CharField(max_length=200)
+    month        = models.CharField(max_length=50)
+    tc_row       = models.OneToOneField(
+        TCRow, on_delete=models.CASCADE, related_name='tc_lmrb_match',
+    )
+    lmrb_row     = models.OneToOneField(
+        LMRBRow, on_delete=models.CASCADE, related_name='tc_lmrb_match',
+    )
+    match_type   = models.CharField(max_length=10, choices=MATCH_TYPE_CHOICES,
+                                    default='auto')
+    matched_at   = models.DateTimeField(auto_now_add=True)
+    matched_by   = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='tc_lmrb_matches',
+    )
+
+    class Meta:
+        ordering = ['tc_row__date', 'tc_row__aired_time']
+        indexes = [
+            models.Index(fields=['account', 'channel', 'month']),
+        ]
+
+    def __str__(self):
+        return (
+            f'TCLMRB | {self.account} | {self.channel} | {self.month} '
+            f'| {self.tc_row.tc_theme} | {self.match_type}'
         )
 
 

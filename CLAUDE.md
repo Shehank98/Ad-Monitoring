@@ -121,6 +121,13 @@ Wrong role → HTTP 403 (renders `403.html`), not a redirect.
 /tc/detail/                               → tc_three_way              (three-way detail view)
 /tc/pdf-convert/                          → tc_pdf_convert            (PDF TC file → Excel preview)
 
+/tc/lmrb-match/                           → tc_lmrb_match             (standalone TC↔LMRB, no schedule)
+/tc/lmrb-match/run/                       → tc_lmrb_match_run         (POST: auto-match / reset)
+/tc/lmrb-match/candidates/                → tc_lmrb_match_candidates  (AJAX: LMRB pool for a TC row)
+/tc/lmrb-match/assign/                    → tc_lmrb_match_assign      (POST: manual pair)
+/tc/lmrb-match/remove/<pk>/               → tc_lmrb_match_remove      (POST: unmatch + unlock)
+/tc/lmrb-match/download/                  → tc_lmrb_match_download    (Excel: 3 sheets)
+
 /summary/                                 → summary_report            (GET=view, POST=save meta)
 /summary/excel/                           → summary_excel
 /summary/pdf/                             → summary_pdf
@@ -324,6 +331,32 @@ Created by:
 - Operations user via sponsorship picker in the Summary Sheet → `match_type='manual'`
 
 Once created, `LMRBRow.is_sponsorship_matched=True` acts as a permanent lock.
+
+### `TcLmrbMatch`
+A stored TC ↔ LMRB match made **without any schedule** (the "LMRB cut of TC" path).
+Use when a channel sends a TC but no booking schedule exists for that period, so the
+Summary Sheet reconciliation cannot run.
+```
+account (FK)
+channel, month            ← scope (taken from the TransmissionReport)
+tc_row   (OneToOne → TCRow)
+lmrb_row (OneToOne → LMRBRow)
+match_type: 'auto' | 'manual'
+matched_at, matched_by (FK → User, nullable)
+```
+
+Created by `verification/tc_lmrb_engine.py`:
+- `reconcile_tc_lmrb()` → `match_type='auto'` (greedy date + duration + air-time within
+  `tc_lmrb_time_tolerance`, one-to-one)
+- Operations user via the "Find LMRB" picker on `/dashboard/tc/lmrb-match/` → `'manual'`
+
+> **CRITICAL — global lock:** once matched, `LMRBRow.is_tc_lmrb_matched=True` and
+> `TCRow.is_tc_lmrb_matched=True`. The commercial engine (`engine.py`), sponsorship
+> engine, and the schedule-based TC engine (`tc_engine.py`) all skip LMRB rows where
+> `is_tc_lmrb_matched=True`, so a row claimed here can never be reused elsewhere.
+> Removing the `TcLmrbMatch` (unmatch / reset) clears both flags.
+> This feature is schedule-agnostic: **no BrandMapping is required** — matching is on
+> date + duration + air-time proximity only.
 
 ### `SummaryReportMeta`
 User-editable fields for the printed summary. Unique per (account, channel, month).
@@ -670,6 +703,7 @@ Function: `summary_pdf()` in `core/views.py`
 | `core/forms.py` | AccountForm, ChannelForm, upload forms |
 | `verification/engine.py` | Schedule ↔ LMRB four-pass matching engine |
 | `verification/tc_engine.py` | TC ↔ Schedule + TC ↔ LMRB reconciliation + summary data builder |
+| `verification/tc_lmrb_engine.py` | Standalone TC ↔ LMRB reconciliation (no schedule); stores `TcLmrbMatch`, locks both rows |
 | `verification/sponsorship_engine.py` | SPONSORSHIP ScheduleRow ↔ LMRBRow assignment engine |
 | `verification/processing.py` | Low-level helpers: normalize, lmrb_fingerprint, four-pass match_ads algorithm |
 | `verification/schedule_converter.py` | Pivot schedule format detection/conversion |

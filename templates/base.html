@@ -555,11 +555,14 @@
       </a>
 
       <p class="nav-label"><span class="nav-text">Transmission (TC)</span></p>
-      <a href="/dashboard/tc/" class="nav-item {% if '/tc/' in path and 'upload' not in path %}active{% endif %}">
+      <a href="/dashboard/tc/" class="nav-item {% if '/tc/' in path and 'upload' not in path and 'lmrb-match' not in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-file-invoice"></i><span class="nav-text">View TC Reports</span>
       </a>
       <a href="/dashboard/tc/upload/" class="nav-item {% if 'tc/upload' in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload TC</span>
+      </a>
+      <a href="/dashboard/tc/lmrb-match/" class="nav-item {% if 'lmrb-match' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-link"></i><span class="nav-text">TC ↔ LMRB (No Schedule)</span>
       </a>
 
       <p class="nav-label"><span class="nav-text">Reconciliation</span></p>

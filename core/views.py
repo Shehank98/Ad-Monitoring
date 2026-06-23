@@ -28,8 +28,8 @@ from .models import (
     Account, AuditLog, BrandMapping, Channel, ChannelOfficer, Client,
     LMRBRow, ManualMatch, MatchResult, MonitoringData, Schedule, ScheduleRow,
     SpotNote, SponsorshipLmrbAssignment, SummaryReportMeta, SystemSetting,
-    TCRow, TransmissionReport,
-    _ensure_defaults, get_setting, get_setting_list,
+    TCRow, TcLmrbMatch, TransmissionReport,
+    _ensure_defaults, get_setting, get_setting_int, get_setting_list,
 )
 
 
@@ -5149,6 +5149,282 @@ def lmrb_tc_section(request):
         'total_sched_match':  total_sched_match,
         'total_extra':        total_extra,
     })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Standalone TC ↔ LMRB Reconciliation  (no schedule required)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _tc_lmrb_scope_options(account_id, channel=''):
+    """Channels (and months for a channel) available from TC reports for an account.
+
+    Driven by TransmissionReport — works even when no schedule was ever uploaded.
+    """
+    channels = sorted(set(
+        TransmissionReport.objects.filter(account_id=account_id)
+        .values_list('channel', flat=True)
+    ))
+    months = []
+    if channel:
+        months = sorted(set(
+            TransmissionReport.objects.filter(account_id=account_id, channel=channel)
+            .values_list('month', flat=True)
+        ))
+    return channels, months
+
+
+@login_required
+def tc_lmrb_match(request):
+    """Standalone TC ↔ LMRB verification section.
+
+    Use case: a TC was uploaded with NO schedule, so the Summary Sheet cannot run.
+    This page pairs TC rows with LMRB rows (date + duration + air-time proximity),
+    stores the result (TcLmrbMatch) and locks both rows so they cannot be reused.
+
+    Shows three lists for the scope:
+      • Matched   — the 'LMRB cut': each TC spot beside its confirmed LMRB spot
+      • Unmatched TC   — TC rows with no LMRB confirmation
+      • Unmatched LMRB — leftover LMRB rows not claimed by any engine
+    """
+    from verification.tc_lmrb_engine import build_tc_lmrb_data, scope_date_range
+
+    user       = request.user
+    account_qs = _account_qs(user)
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+
+    selected_account = None
+    channels, months = [], []
+    data = None
+    date_min = date_max = None
+
+    if account_id:
+        try:
+            selected_account = account_qs.get(pk=account_id)
+        except Account.DoesNotExist:
+            selected_account = None
+
+    if selected_account:
+        channels, months = _tc_lmrb_scope_options(account_id, channel)
+
+    if selected_account and channel and month:
+        if not _account_access(user, account_id):
+            messages.error(request, 'Access denied.')
+            return redirect('/dashboard/tc/lmrb-match/')
+        data = build_tc_lmrb_data(account_id, channel, month)
+        date_min, date_max = scope_date_range(account_id, channel, month)
+
+    return render(request, 'tc/lmrb_match.html', {
+        'accounts':         account_qs,
+        'selected_account': selected_account,
+        'account_id':       account_id,
+        'channel':          channel,
+        'month':            month,
+        'channels':         channels,
+        'months':           months,
+        'data':             data,
+        'date_min':         date_min,
+        'date_max':         date_max,
+        'tolerance':        get_setting_int('tc_lmrb_time_tolerance', 5),
+    })
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head'])
+@require_POST
+def tc_lmrb_match_run(request):
+    """Run (or reset) standalone TC ↔ LMRB reconciliation for a scope."""
+    from verification.tc_lmrb_engine import reconcile_tc_lmrb
+
+    account_id = request.POST.get('account_id', '').strip()
+    channel    = request.POST.get('channel', '').strip()
+    month      = request.POST.get('month', '').strip()
+    mode       = request.POST.get('mode', 'smart')
+
+    if not (account_id and channel and month):
+        messages.error(request, 'Account, channel and month are required.')
+        return redirect('/dashboard/tc/lmrb-match/')
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return redirect('/dashboard/tc/lmrb-match/')
+
+    try:
+        res = reconcile_tc_lmrb(account_id, channel, month, mode=mode, user=request.user)
+        verb = 'Reset & re-matched' if mode == 'reset' else 'Matched'
+        messages.success(
+            request,
+            f'{verb}: {res["matched"]} TC↔LMRB confirmed, '
+            f'{res["unmatched_tc"]} TC unmatched, {res["unmatched_lmrb"]} LMRB unmatched.'
+        )
+    except Exception as e:
+        messages.error(request, f'TC↔LMRB reconciliation failed: {e}')
+
+    from urllib.parse import quote
+    return redirect(
+        f'/dashboard/tc/lmrb-match/?account_id={account_id}'
+        f'&channel={quote(channel)}&month={quote(month)}'
+    )
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head'])
+def tc_lmrb_match_candidates(request):
+    """AJAX: leftover LMRB rows that could pair with a given TC row.
+
+    Same channel + date + duration, not locked by any engine, sorted by time gap.
+    """
+    tc_row_id = request.GET.get('tc_row_id', '').strip()
+    if not tc_row_id:
+        return JsonResponse({'ok': False, 'error': 'tc_row_id required.'})
+    tr = get_object_or_404(TCRow, id=tc_row_id)
+    if not _account_access(request.user, tr.account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied.'})
+
+    qs = LMRBRow.objects.filter(
+        account_id=tr.account_id, channel__iexact=tr.channel,
+        date=tr.date, duration=tr.duration,
+        is_matched=False, is_sponsorship_matched=False,
+        is_manual_matched=False, is_tc_lmrb_matched=False,
+    ).order_by('advt_time')[:100]
+
+    tc_secs = _time_to_secs_local(tr.aired_time)
+    candidates = []
+    for lr in qs:
+        ls = _time_to_secs_local(lr.advt_time)
+        gap = abs(tc_secs - ls) if (tc_secs is not None and ls is not None) else None
+        candidates.append({
+            'id':        lr.id,
+            'date':      str(lr.date),
+            'time':      lr.advt_time,
+            'theme':     lr.advt_theme,
+            'duration':  lr.duration,
+            'programme': lr.program or '',
+            'gap_secs':  gap,
+        })
+    candidates.sort(key=lambda x: x['gap_secs'] if x['gap_secs'] is not None else 99999)
+    return JsonResponse({'ok': True, 'candidates': candidates})
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head'])
+@require_POST
+def tc_lmrb_match_assign(request):
+    """AJAX: manually pair a TC row with an LMRB row in the standalone section."""
+    from verification.tc_lmrb_engine import assign_tc_lmrb
+
+    tc_row_id   = request.POST.get('tc_row_id', '').strip()
+    lmrb_row_id = request.POST.get('lmrb_row_id', '').strip()
+    if not (tc_row_id and lmrb_row_id):
+        return JsonResponse({'ok': False, 'error': 'tc_row_id and lmrb_row_id required.'})
+    tr = get_object_or_404(TCRow, id=tc_row_id)
+    lr = get_object_or_404(LMRBRow, id=lmrb_row_id)
+    if not _account_access(request.user, tr.account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied.'})
+    try:
+        assign_tc_lmrb(tr, lr, user=request.user)
+    except ValueError as e:
+        return JsonResponse({'ok': False, 'error': str(e)})
+    return JsonResponse({'ok': True})
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head'])
+@require_POST
+def tc_lmrb_match_remove(request, pk):
+    """Remove a TcLmrbMatch and unlock both rows."""
+    from verification.tc_lmrb_engine import remove_tc_lmrb
+
+    m = get_object_or_404(TcLmrbMatch, pk=pk)
+    if not _account_access(request.user, m.account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied.'})
+    account_id, channel, month = m.account_id, m.channel, m.month
+    remove_tc_lmrb(m)
+
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({'ok': True})
+    from urllib.parse import quote
+    return redirect(
+        f'/dashboard/tc/lmrb-match/?account_id={account_id}'
+        f'&channel={quote(channel)}&month={quote(month)}'
+    )
+
+
+@login_required
+def tc_lmrb_match_download(request):
+    """Excel export of the standalone TC↔LMRB scope — three sheets:
+    Matched (LMRB cut), Unmatched TC, Unmatched LMRB.
+    """
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+
+    from verification.tc_lmrb_engine import build_tc_lmrb_data
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+    if not (account_id and channel and month):
+        return HttpResponse('Missing parameters: account_id, channel, month', status=400)
+    if not _account_access(request.user, account_id):
+        return HttpResponse('Access denied', status=403)
+
+    account = get_object_or_404(Account, id=account_id)
+    data    = build_tc_lmrb_data(account_id, channel, month)
+
+    hdr_fill = PatternFill('solid', fgColor='0F2340')
+    hdr_font = Font(bold=True, color='FFFFFF')
+
+    def _header(ws, cols):
+        ws.append(cols)
+        for c in ws[1]:
+            c.fill = hdr_fill
+            c.font = hdr_font
+
+    wb = openpyxl.Workbook()
+
+    # Sheet 1 — Matched (LMRB cut)
+    ws1 = wb.active
+    ws1.title = 'Matched (LMRB cut)'
+    _header(ws1, [
+        'TC Date', 'TC Time', 'TC Theme', 'TC Programme', 'Duration',
+        'LMRB Date', 'LMRB Time', 'LMRB Theme', 'LMRB Programme',
+        'Advertiser', 'Product', 'Gap (s)', 'Match Type',
+    ])
+    for r in data['matched']:
+        ws1.append([
+            str(r['tc_date']), r['tc_time'], r['tc_theme'], r['tc_programme'], r['duration'],
+            str(r['lmrb_date']), r['lmrb_time'], r['lmrb_theme'], r['lmrb_programme'],
+            r['lmrb_advertiser'], r['lmrb_product'], r['gap_secs'], r['match_type'],
+        ])
+
+    # Sheet 2 — Unmatched TC
+    ws2 = wb.create_sheet('Unmatched TC')
+    _header(ws2, ['Date', 'Time', 'TC Theme', 'Programme', 'Duration'])
+    for t in data['unmatched_tc']:
+        ws2.append([str(t.date), t.aired_time, t.tc_theme, t.programme, t.duration])
+
+    # Sheet 3 — Unmatched LMRB
+    ws3 = wb.create_sheet('Unmatched LMRB')
+    _header(ws3, [
+        'Date', 'Time', 'Theme', 'Programme', 'Duration',
+        'Advertiser', 'Product', 'Source',
+    ])
+    for l in data['unmatched_lmrb']:
+        ws3.append([
+            str(l.date), l.advt_time, l.advt_theme, l.program, l.duration,
+            l.advertiser, l.product, l.source,
+        ])
+
+    buf = io.BytesIO()
+    wb.save(buf); buf.seek(0)
+    fname = f'TC_LMRB_{account.name}_{channel}_{month}.xlsx'.replace(' ', '_')
+    resp = HttpResponse(
+        buf.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    resp['Content-Disposition'] = f'attachment; filename="{fname}"'
+    return resp
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

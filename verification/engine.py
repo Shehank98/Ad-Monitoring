@@ -471,7 +471,8 @@ def run_scope(account_id, channel, month, mode='smart'):
     )
     # Always exclude manually matched LMRB rows - permanently locked once a
     # ManualMatch record exists.  This filter applies in both smart and reset modes.
-    lmrb_qs = lmrb_qs.filter(is_manual_matched=False)
+    # Also exclude rows locked by the standalone TC↔LMRB engine (tc_lmrb_engine).
+    lmrb_qs = lmrb_qs.filter(is_manual_matched=False, is_tc_lmrb_matched=False)
     if mode == 'smart':
         lmrb_qs = lmrb_qs.filter(is_matched=False)
     if date_start:

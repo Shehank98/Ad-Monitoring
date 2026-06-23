@@ -1,0 +1,298 @@
+{% extends 'base.html' %}
+{% block title %}TC ↔ LMRB Match{% endblock %}
+{% block page_title %}TC ↔ LMRB Match (No Schedule){% endblock %}
+{% block page_subtitle %}Verify a Transmission Certificate against LMRB monitoring data when no schedule exists — stored & locked{% endblock %}
+
+{% block extra_head %}
+<style>
+  .tl-table { width: 100%; border-collapse: collapse; font-size: .76rem; }
+  .tl-table th {
+    background: #0f2340; color: #fff; font-weight: 700; font-size: .66rem;
+    text-transform: uppercase; letter-spacing: .05em;
+    padding: .4rem .55rem; white-space: nowrap; text-align: left;
+  }
+  .tl-table td { padding: .35rem .55rem; white-space: nowrap; border-bottom: 1px solid #f1f5f9; }
+  .th-tc   { background: #7c3aed !important; }
+  .th-lmrb { background: #065f46 !important; }
+  .group-sep { border-left: 2px solid #e2e8f0 !important; }
+  .stat-card { border-radius:1rem; padding:.75rem 1.25rem; min-width:140px; }
+  .badge { display:inline-flex; align-items:center; gap:.25rem;
+           padding:.15rem .45rem; border-radius:9999px; font-size:.62rem; font-weight:700; }
+  .badge-green  { background:#dcfce7; color:#166534; }
+  .badge-blue   { background:#dbeafe; color:#1e40af; }
+  .delta-pill { display:inline-block; font-size:.6rem; font-weight:700;
+                padding:.08rem .3rem; border-radius:4px; }
+  .delta-ok { background:#dcfce7; color:#166534; }
+  .delta-near { background:#fef9c3; color:#92400e; }
+  .delta-far { background:#fee2e2; color:#991b1b; }
+  .cand-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:.6rem; padding:.5rem .65rem; margin-top:.35rem; }
+  .cand-row { display:flex; align-items:center; gap:.5rem; padding:.2rem 0; font-size:.72rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── Filter bar ─────────────────────────────────────────────── -->
+<div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-4 mb-5">
+  <form method="get" class="flex flex-wrap gap-3 items-end">
+    <div class="flex-1 min-w-[160px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Account</label>
+      <select name="account_id" class="select-field" onchange="this.form.submit()">
+        <option value="">Select account…</option>
+        {% for acc in accounts %}
+          <option value="{{ acc.id }}" {% if acc.id|stringformat:"s" == account_id %}selected{% endif %}>{{ acc.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex-1 min-w-[130px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel</label>
+      <select name="channel" class="select-field" onchange="this.form.submit()" {% if not channels %}disabled{% endif %}>
+        <option value="">Select channel…</option>
+        {% for ch in channels %}
+          <option value="{{ ch }}" {% if ch == channel %}selected{% endif %}>{{ ch }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex-1 min-w-[130px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Month</label>
+      <select name="month" class="select-field" onchange="this.form.submit()" {% if not months %}disabled{% endif %}>
+        <option value="">Select month…</option>
+        {% for mo in months %}
+          <option value="{{ mo }}" {% if mo == month %}selected{% endif %}>{{ mo }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+  <p class="text-xs text-slate-400 mt-2">
+    Channels and months are drawn from uploaded TC reports — no schedule is required.
+  </p>
+</div>
+
+{% if data %}
+
+<!-- ── Action bar ─────────────────────────────────────────────── -->
+<div class="flex flex-wrap items-center gap-2 mb-4">
+  <form method="post" action="/dashboard/tc/lmrb-match/run/">
+    {% csrf_token %}
+    <input type="hidden" name="account_id" value="{{ account_id }}">
+    <input type="hidden" name="channel" value="{{ channel }}">
+    <input type="hidden" name="month" value="{{ month }}">
+    <input type="hidden" name="mode" value="smart">
+    <button type="submit" class="btn-primary text-xs">
+      <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-match TC ↔ LMRB
+    </button>
+  </form>
+  <form method="post" action="/dashboard/tc/lmrb-match/run/"
+        onsubmit="return confirm('Reset will delete ALL stored TC↔LMRB matches for this scope and unlock the rows. Continue?');">
+    {% csrf_token %}
+    <input type="hidden" name="account_id" value="{{ account_id }}">
+    <input type="hidden" name="channel" value="{{ channel }}">
+    <input type="hidden" name="month" value="{{ month }}">
+    <input type="hidden" name="mode" value="reset">
+    <button type="submit" class="btn-secondary text-xs">
+      <i class="fa-solid fa-rotate-left text-rose-600"></i> Reset
+    </button>
+  </form>
+  <a href="/dashboard/tc/lmrb-match/download/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
+     class="btn-secondary text-xs">
+    <i class="fa-solid fa-file-excel text-green-600"></i> Download (3 sheets)
+  </a>
+  {% if date_min %}
+  <span class="text-xs text-slate-400 ml-2">
+    Scope window: {{ date_min|date:"d M Y" }} – {{ date_max|date:"d M Y" }} · tolerance ±{{ tolerance }}s
+  </span>
+  {% endif %}
+</div>
+
+<!-- ── Stat cards ─────────────────────────────────────────────── -->
+<div class="flex flex-wrap gap-3 mb-5">
+  <div class="stat-card bg-green-50 border border-green-100">
+    <div class="text-xs font-bold text-green-600 uppercase tracking-wider mb-0.5">
+      <i class="fa-solid fa-circle-check mr-1"></i>Matched (LMRB cut)
+    </div>
+    <div class="text-2xl font-extrabold text-green-700">{{ data.matched|length }}</div>
+  </div>
+  <div class="stat-card bg-violet-50 border border-violet-100">
+    <div class="text-xs font-bold text-violet-600 uppercase tracking-wider mb-0.5">Unmatched TC</div>
+    <div class="text-2xl font-extrabold text-violet-700">{{ data.unmatched_tc|length }}</div>
+  </div>
+  <div class="stat-card bg-emerald-50 border border-emerald-100">
+    <div class="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-0.5">Unmatched LMRB</div>
+    <div class="text-2xl font-extrabold text-emerald-700">{{ data.unmatched_lmrb|length }}</div>
+  </div>
+</div>
+
+<!-- ── Matched (LMRB cut) ─────────────────────────────────────── -->
+<div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto mb-6">
+  <div class="px-5 pt-4 pb-2 font-bold text-slate-700 text-sm">
+    <i class="fa-solid fa-link text-green-600 mr-1"></i> Matched — TC confirmed by LMRB
+    <span class="text-slate-400 font-normal">({{ data.matched|length }})</span>
+  </div>
+  <table class="tl-table">
+    <thead>
+      <tr>
+        <th colspan="5" class="text-center th-tc"><i class="fa-solid fa-file-certificate mr-1"></i>TC (Certificate)</th>
+        <th colspan="5" class="text-center th-lmrb group-sep"><i class="fa-solid fa-eye mr-1"></i>LMRB (3rd-Party)</th>
+        <th class="text-center">Gap</th>
+        <th></th>
+      </tr>
+      <tr>
+        <th>Date</th><th>Time</th><th>Theme</th><th>Programme</th><th>Dur</th>
+        <th class="group-sep">Date</th><th>Time</th><th>Theme</th><th>Advertiser</th><th>Product</th>
+        <th>Gap (s)</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in data.matched %}
+      <tr id="match-{{ r.match_id }}">
+        <td class="font-mono">{{ r.tc_date|date:"d M Y" }}</td>
+        <td class="font-mono text-purple-700">{{ r.tc_time }}</td>
+        <td class="text-slate-600 max-w-[150px] truncate" title="{{ r.tc_theme }}">{{ r.tc_theme|default:"-" }}</td>
+        <td class="text-slate-700 max-w-[150px] truncate" title="{{ r.tc_programme }}">{{ r.tc_programme|default:"-" }}</td>
+        <td class="font-mono text-slate-600">{{ r.duration }}</td>
+        <td class="font-mono group-sep {% if r.lmrb_date == r.tc_date %}text-green-700{% else %}text-amber-600{% endif %}">{{ r.lmrb_date|date:"d M Y" }}</td>
+        <td class="font-mono text-green-700">{{ r.lmrb_time }}</td>
+        <td class="text-slate-600 max-w-[150px] truncate" title="{{ r.lmrb_theme }}">{{ r.lmrb_theme|default:"-" }}</td>
+        <td class="text-slate-600 max-w-[130px] truncate" title="{{ r.lmrb_advertiser }}">{{ r.lmrb_advertiser|default:"-" }}</td>
+        <td class="text-slate-600 max-w-[130px] truncate" title="{{ r.lmrb_product }}">{{ r.lmrb_product|default:"-" }}</td>
+        <td class="font-mono">
+          {% if r.gap_secs is not None %}
+            {% if r.gap_secs <= 5 %}<span class="delta-pill delta-ok">{{ r.gap_secs }}s</span>
+            {% elif r.gap_secs <= 30 %}<span class="delta-pill delta-near">{{ r.gap_secs }}s</span>
+            {% else %}<span class="delta-pill delta-far">{{ r.gap_secs }}s</span>{% endif %}
+          {% else %}<span class="text-slate-300">—</span>{% endif %}
+        </td>
+        <td>
+          <span class="badge {% if r.match_type == 'manual' %}badge-blue{% else %}badge-green{% endif %}">{{ r.match_type }}</span>
+          <button type="button" class="text-rose-500 hover:text-rose-700 ml-1" title="Unmatch"
+                  onclick="tlRemove({{ r.match_id }})"><i class="fa-solid fa-link-slash"></i></button>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="12" class="text-center text-slate-400 py-6">No matches yet — click “Auto-match TC ↔ LMRB”.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- ── Unmatched TC ───────────────────────────────────────────── -->
+<div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto mb-6">
+  <div class="px-5 pt-4 pb-2 font-bold text-slate-700 text-sm">
+    <i class="fa-solid fa-file-certificate text-violet-600 mr-1"></i> Unmatched TC rows
+    <span class="text-slate-400 font-normal">({{ data.unmatched_tc|length }})</span>
+  </div>
+  <table class="tl-table">
+    <thead>
+      <tr><th>Date</th><th>Time</th><th>Theme</th><th>Programme</th><th>Dur</th><th>Find LMRB</th></tr>
+    </thead>
+    <tbody>
+      {% for t in data.unmatched_tc %}
+      <tr id="tc-{{ t.id }}">
+        <td class="font-mono">{{ t.date|date:"d M Y" }}</td>
+        <td class="font-mono text-purple-700">{{ t.aired_time }}</td>
+        <td class="text-slate-600 max-w-[180px] truncate" title="{{ t.tc_theme }}">{{ t.tc_theme|default:"-" }}</td>
+        <td class="text-slate-700 max-w-[180px] truncate" title="{{ t.programme }}">{{ t.programme|default:"-" }}</td>
+        <td class="font-mono text-slate-600">{{ t.duration }}</td>
+        <td>
+          <button type="button" class="btn-secondary text-[11px] py-0.5 px-2"
+                  onclick="tlFind({{ t.id }})"><i class="fa-solid fa-magnifying-glass"></i> Find</button>
+          <div id="cand-{{ t.id }}"></div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="text-center text-slate-400 py-6">No unmatched TC rows.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- ── Unmatched LMRB ─────────────────────────────────────────── -->
+<div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+  <div class="px-5 pt-4 pb-2 font-bold text-slate-700 text-sm">
+    <i class="fa-solid fa-eye text-emerald-600 mr-1"></i> Unmatched LMRB rows
+    <span class="text-slate-400 font-normal">({{ data.unmatched_lmrb|length }})</span>
+  </div>
+  <table class="tl-table">
+    <thead>
+      <tr><th>Date</th><th>Time</th><th>Theme</th><th>Programme</th><th>Dur</th><th>Advertiser</th><th>Product</th></tr>
+    </thead>
+    <tbody>
+      {% for l in data.unmatched_lmrb %}
+      <tr>
+        <td class="font-mono">{{ l.date|date:"d M Y" }}</td>
+        <td class="font-mono text-emerald-700">{{ l.advt_time }}</td>
+        <td class="text-slate-600 max-w-[180px] truncate" title="{{ l.advt_theme }}">{{ l.advt_theme|default:"-" }}</td>
+        <td class="text-slate-700 max-w-[160px] truncate" title="{{ l.program }}">{{ l.program|default:"-" }}</td>
+        <td class="font-mono text-slate-600">{{ l.duration }}</td>
+        <td class="text-slate-600 max-w-[150px] truncate" title="{{ l.advertiser }}">{{ l.advertiser|default:"-" }}</td>
+        <td class="text-slate-600 max-w-[150px] truncate" title="{{ l.product }}">{{ l.product|default:"-" }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7" class="text-center text-slate-400 py-6">No unmatched LMRB rows.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+  function tlCsrf() {
+    return document.querySelector('input[name=csrfmiddlewaretoken]').value;
+  }
+
+  function tlFind(tcId) {
+    const box = document.getElementById('cand-' + tcId);
+    if (box.dataset.open === '1') { box.innerHTML = ''; box.dataset.open = '0'; return; }
+    box.innerHTML = '<div class="cand-box text-slate-400 text-xs">Loading…</div>';
+    box.dataset.open = '1';
+    fetch('/dashboard/tc/lmrb-match/candidates/?tc_row_id=' + tcId)
+      .then(r => r.json())
+      .then(d => {
+        if (!d.ok) { box.innerHTML = '<div class="cand-box text-rose-500 text-xs">' + d.error + '</div>'; return; }
+        if (!d.candidates.length) { box.innerHTML = '<div class="cand-box text-slate-400 text-xs">No matching LMRB rows (same date + duration).</div>'; return; }
+        let html = '<div class="cand-box">';
+        d.candidates.forEach(c => {
+          const gap = c.gap_secs === null ? '—' : c.gap_secs + 's';
+          html += '<div class="cand-row">'
+                + '<span class="font-mono text-emerald-700">' + c.time + '</span>'
+                + '<span class="text-slate-500 truncate" style="max-width:160px" title="' + c.theme + '">' + (c.theme || '-') + '</span>'
+                + '<span class="delta-pill delta-near">' + gap + '</span>'
+                + '<button class="btn-primary text-[11px] py-0.5 px-2" onclick="tlAssign(' + tcId + ',' + c.id + ')">Match</button>'
+                + '</div>';
+        });
+        html += '</div>';
+        box.innerHTML = html;
+      });
+  }
+
+  function tlAssign(tcId, lmrbId) {
+    const fd = new FormData();
+    fd.append('tc_row_id', tcId);
+    fd.append('lmrb_row_id', lmrbId);
+    fd.append('csrfmiddlewaretoken', tlCsrf());
+    fetch('/dashboard/tc/lmrb-match/assign/', { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(d => { if (d.ok) { location.reload(); } else { alert(d.error || 'Failed'); } });
+  }
+
+  function tlRemove(matchId) {
+    if (!confirm('Unmatch this TC↔LMRB pair and unlock both rows?')) return;
+    const fd = new FormData();
+    fd.append('csrfmiddlewaretoken', tlCsrf());
+    fetch('/dashboard/tc/lmrb-match/remove/' + matchId + '/',
+          { method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(r => r.json())
+      .then(d => { if (d.ok) { location.reload(); } else { alert(d.error || 'Failed'); } });
+  }
+</script>
+
+{% csrf_token %}
+
+{% elif selected_account and channel %}
+  <div class="text-slate-400 text-sm text-center py-12">Select a month to view the data.</div>
+{% elif selected_account %}
+  <div class="text-slate-400 text-sm text-center py-12">Select a channel to continue.</div>
+{% else %}
+  <div class="text-slate-400 text-sm text-center py-12">Select an account to get started.</div>
+{% endif %}
+
+{% endblock %}

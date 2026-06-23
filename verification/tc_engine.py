@@ -315,6 +315,7 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
             _lmrb_channel_q(channel), account_id=account_id,
             date__range=(sch_start, sch_end),
             is_manual_matched=False,    # never reclaim manually locked LMRB rows
+            is_tc_lmrb_matched=False,   # never reclaim standalone TC↔LMRB locked rows
         ):
             k = (_normalize(lr.channel), lr.date, int(lr.duration) if lr.duration else None)
             lmrb_index.setdefault(k, []).append((lr.id, _time_to_secs(lr.advt_time), lr))

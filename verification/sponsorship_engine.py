@@ -157,6 +157,7 @@ def reconcile_sponsorship(account_id: int, channel: str, month: str,
         channel__iexact=channel,
         is_matched=False,
         is_sponsorship_matched=False,
+        is_tc_lmrb_matched=False,   # locked by standalone TC↔LMRB engine
     )
     if d_min:
         lmrb_qs = lmrb_qs.filter(date__gte=d_min)

@@ -63,6 +63,14 @@ urlpatterns = [
     path('tc/lmrb-candidates/',                 views.tc_lmrb_candidates, name='tc_lmrb_candidates'),
     path('tc/lmrb-link/',                       views.tc_lmrb_link,       name='tc_lmrb_link'),
     path('tc/lmrb-unlink/<int:pk>/',            views.tc_lmrb_unlink,     name='tc_lmrb_unlink'),
+
+    # Standalone TC ↔ LMRB reconciliation (no schedule required)
+    path('tc/lmrb-match/',                      views.tc_lmrb_match,            name='tc_lmrb_match'),
+    path('tc/lmrb-match/run/',                  views.tc_lmrb_match_run,        name='tc_lmrb_match_run'),
+    path('tc/lmrb-match/candidates/',           views.tc_lmrb_match_candidates, name='tc_lmrb_match_candidates'),
+    path('tc/lmrb-match/assign/',               views.tc_lmrb_match_assign,     name='tc_lmrb_match_assign'),
+    path('tc/lmrb-match/remove/<int:pk>/',      views.tc_lmrb_match_remove,     name='tc_lmrb_match_remove'),
+    path('tc/lmrb-match/download/',             views.tc_lmrb_match_download,   name='tc_lmrb_match_download'),
     path('tc/pdf-convert/',                     views.tc_pdf_convert,    name='tc_pdf_convert'),
 
     # Summary Sheet Report
