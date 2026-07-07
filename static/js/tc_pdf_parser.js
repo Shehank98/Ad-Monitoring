@@ -244,7 +244,11 @@
         c = c.replace(/J Lanka Group Of Companies/gi, '').trim();
         c = c.replace(/Actual time/gi, '').trim();
         c = c.replace(/Time Belt/gi, '').trim();
+        // Stripping times above can leave empty "( )" behind, e.g. "TELE DRAMA (9:30 PM)"
+        c = c.replace(/\(\s*\)/g, '').trim();
         if (c.length <= 1) return;
+        // Standalone time-belt tokens like "9PM" (a separate column on some TCs)
+        if (/^\d{1,2}(?:[:.]\d{2})?\s*(?:AM|PM)$/i.test(c)) return;
         if (/^(Mon|Tue|Wed|We|Thu|Fri|Sat|Sun|BS|PO|PD|OTHERS|Rs\.?:?|[STE]|AM|PM)$/i.test(c)) return;
         if (/^(DATE|PROGRAMME|TIME|POSI|POSITION|PRODUCT|DURA\.?|TELECAST(?: T\/BELT)?|TC_TIME|REMARKS|DURATION|ACTUAL TIME|TIME BELT|\s)+$/i.test(c)) return;
         if (/^CB\s*\d*$/i.test(c)) return;
@@ -285,6 +289,11 @@
           if (sm && sm[1].trim().length > 2) { program = sm[1].trim(); commercial = sm[2].trim(); }
         }
         if (duration && commercial.endsWith(duration)) commercial = commercial.slice(0, -duration.length).trim();
+        // Belt token fused into the theme text ("9PM MOBITEL SLT - …")
+        commercial = commercial.replace(/^\d{1,2}(?:[:.]\d{2})?\s*(?:AM|PM)\b\s*/i, '').trim();
+        // Theme wrapped onto a lost continuation line leaves a dangling dash
+        // ("MOBITEL SLT -") — trim it so the theme still groups/maps cleanly.
+        if (commercial.endsWith('-')) commercial = commercial.slice(0, -1).trim();
       }
 
       if (program || commercial) {
