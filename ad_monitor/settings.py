@@ -106,6 +106,12 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 ALLOWED_EMAIL_DOMAIN = env('ALLOWED_EMAIL_DOMAIN', default='')
 SUPER_ADMIN_EMAILS    = env.list('SUPER_ADMIN_EMAILS', default=[])
 
+# ── Gemini AI TC conversion ───────────────────────────────────────────────────
+# When GEMINI_API_KEY is set, the TC PDF Converter parses PDFs with the Gemini
+# API (vision) instead of the layout heuristic. Empty = heuristic parsing only.
+GEMINI_API_KEY  = env('GEMINI_API_KEY', default='')
+GEMINI_TC_MODEL = env('GEMINI_TC_MODEL', default='gemini-2.5-flash')
+
 # 50 MB upload limit
 DATA_UPLOAD_MAX_MEMORY_SIZE = 52_428_800
 FILE_UPLOAD_MAX_MEMORY_SIZE = 52_428_800

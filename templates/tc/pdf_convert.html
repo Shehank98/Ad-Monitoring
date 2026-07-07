@@ -21,7 +21,7 @@
       </span>
       TC PDF Converter
     </h1>
-    <p class="text-sm text-slate-500 mt-1">Upload a TV station Transmission Certificate PDF, preview the parsed data, then upload to the system.</p>
+    <p class="text-sm text-slate-500 mt-1">Upload a TV station Transmission Certificate PDF - it is converted with Gemini AI (handles any TC layout), preview the rows, then download as Excel or upload to the system.</p>
   </div>
 
   <!-- React app mount point -->
@@ -80,6 +80,8 @@ function App() {
   const [rows,           setRows]           = useState([]);
   const [errorMsg,       setErrorMsg]       = useState('');
   const [uploadResult,   setUploadResult]   = useState(null);
+  const [engine,         setEngine]         = useState('');
+  const [engineNote,     setEngineNote]     = useState('');
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -90,16 +92,49 @@ function App() {
   const handleFile = (f) => {
     if (!f) return;
     if (f.type !== 'application/pdf') { setErrorMsg('Please upload a valid PDF file.'); return; }
-    setFile(f); setRows([]); setErrorMsg(''); setUploadResult(null);
+    setFile(f); setRows([]); setErrorMsg(''); setUploadResult(null); setEngine(''); setEngineNote('');
   };
 
   const convert = async () => {
     if (!file) return;
-    setIsConverting(true); setErrorMsg('');
+    setIsConverting(true); setErrorMsg(''); setEngine(''); setEngineNote('');
+
+    // 1) Server-side conversion: Gemini AI when configured, otherwise the
+    //    server falls back to the channel heuristic converters itself.
+    let serverNote = '';
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('account_id', accountId);
+      fd.append('channel', selectedChannel);
+      const res = await fetch('{% url "tc_pdf_convert" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF },
+        body: fd,
+      });
+      const data = await res.json();
+      if (data.ok && data.rows && data.rows.length) {
+        setRows(data.rows);
+        setEngine(data.engine || 'server');
+        setEngineNote(data.engine_note || '');
+        setIsConverting(false);
+        return;
+      }
+      serverNote = data.error || data.engine_note || '';
+    } catch(e) {
+      serverNote = 'Server conversion unavailable: ' + e.message;
+    }
+
+    // 2) Last resort: parse in the browser with the shared heuristic parser.
     try {
       const data = await parsePDF(file, selectedChannel);
-      if (!data.length) { setErrorMsg('Could not find tabular data. Check the PDF is a valid TC.'); }
-      else setRows(data);
+      if (!data.length) {
+        setErrorMsg('Could not find tabular data. Check the PDF is a valid TC.' + (serverNote ? ' (' + serverNote + ')' : ''));
+      } else {
+        setRows(data);
+        setEngine('browser');
+        setEngineNote(serverNote);
+      }
     } catch(e) { setErrorMsg('Error reading PDF: ' + e.message); }
     setIsConverting(false);
   };
@@ -143,7 +178,7 @@ function App() {
   /* ── Pill button ─────────────────────────────────────────────── */
   const ChannelBtn = ({ ch, disabled=false }) => (
     <button
-      onClick={() => { if(!disabled){ setSelectedChannel(ch); setRows([]); setUploadResult(null); }}}
+      onClick={() => { if(!disabled){ setSelectedChannel(ch); setRows([]); setUploadResult(null); setEngine(''); setEngineNote(''); }}}
       disabled={disabled}
       className={`relative px-2 py-3 rounded-lg text-xs font-bold border transition-all flex items-center justify-center text-center
         ${disabled ? 'bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed'
@@ -236,7 +271,7 @@ function App() {
           disabled={!file || isConverting}
           className="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 disabled:opacity-40 transition-colors"
         >
-          <IcoZap size={15}/> {isConverting ? 'Converting…' : 'Convert PDF'}
+          <IcoZap size={15}/> {isConverting ? 'Converting… (AI can take up to a minute)' : 'Convert PDF'}
         </button>
       </div>
 
@@ -249,6 +284,17 @@ function App() {
               <span className="bg-blue-50 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-full">
                 {rows.length} rows converted
               </span>
+              {engine === 'gemini' && (
+                <span className="ml-2 bg-violet-50 text-violet-700 text-xs font-bold px-2.5 py-1 rounded-full">
+                  <i className="fa-solid fa-wand-magic-sparkles mr-1"></i>Gemini AI
+                </span>
+              )}
+              {(engine === 'heuristic' || engine === 'browser') && (
+                <span className="ml-2 bg-slate-100 text-slate-600 text-xs font-bold px-2.5 py-1 rounded-full"
+                      title={engineNote}>
+                  Heuristic parser{engineNote ? ' - ' + engineNote : ''}
+                </span>
+              )}
             </div>
             <div className="flex gap-2">
               <button onClick={downloadExcel}

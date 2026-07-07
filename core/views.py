@@ -4267,10 +4267,10 @@ def tc_pdf_convert(request):
         import json as _json
         from datetime import datetime as _dt
 
-        # ── Mode A: multipart with a PDF file → parse SERVER-SIDE using the
-        # channel-specific converters (verification/tc_converters), return rows
-        # for preview. This replaces in-browser PDF.js parsing so the same
-        # channel logic is used everywhere. ──────────────────────────────────────
+        # ── Mode A: multipart with a PDF file → parse SERVER-SIDE, return rows
+        # for preview. Gemini AI is used when configured (GEMINI_API_KEY); on
+        # any AI failure it falls back to the channel-specific heuristic
+        # converters (verification/tc_converters). ───────────────────────────────
         if request.FILES.get('file'):
             account_id = request.POST.get('account_id', '').strip()
             channel    = request.POST.get('channel', '').strip()
@@ -4281,15 +4281,31 @@ def tc_pdf_convert(request):
                 return JsonResponse({'ok': False, 'error': 'Access denied.'})
 
             from verification.tc_converters.dispatch import get_converter
+            from verification.tc_converters import gemini_ai
             import tempfile, os as _os
-            converter = get_converter(channel)
             tmp_path = None
+            engine, engine_note = 'heuristic', ''
             try:
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
                     for chunk in tc_file.chunks():
                         tmp.write(chunk)
                     tmp_path = tmp.name
-                df = converter.parse_pdf(tmp_path)
+
+                df = None
+                if gemini_ai.is_configured():
+                    try:
+                        df = gemini_ai.parse_pdf(tmp_path, channel=channel)
+                        engine = 'gemini'
+                    except gemini_ai.GeminiError as e:
+                        engine_note = str(e)
+                else:
+                    engine_note = 'Gemini API key not configured.'
+
+                if df is None or df.empty:
+                    if engine == 'gemini':
+                        engine_note = 'Gemini found no rows in this PDF.'
+                    engine = 'heuristic'
+                    df = get_converter(channel).parse_pdf(tmp_path)
             except Exception as e:
                 return JsonResponse({'ok': False, 'error': f'Could not parse PDF: {e}'})
             finally:
@@ -4298,7 +4314,8 @@ def tc_pdf_convert(request):
                     except Exception: pass
 
             if df is None or df.empty:
-                return JsonResponse({'ok': False, 'error': 'No rows could be extracted from this PDF.'})
+                return JsonResponse({'ok': False, 'error': 'No rows could be extracted from this PDF.',
+                                     'engine': engine, 'engine_note': engine_note})
 
             out_rows = []
             for _, rr in df.iterrows():
@@ -4315,8 +4332,10 @@ def tc_pdf_convert(request):
                     'Duration':   _safe_int(rr.get('Duration')) or '',
                 })
             if not out_rows:
-                return JsonResponse({'ok': False, 'error': 'No valid rows (missing Theme, Time, or Date).'})
-            return JsonResponse({'ok': True, 'parsed': True, 'rows': out_rows, 'row_count': len(out_rows)})
+                return JsonResponse({'ok': False, 'error': 'No valid rows (missing Theme, Time, or Date).',
+                                     'engine': engine, 'engine_note': engine_note})
+            return JsonResponse({'ok': True, 'parsed': True, 'rows': out_rows, 'row_count': len(out_rows),
+                                 'engine': engine, 'engine_note': engine_note})
 
         # ── Mode B: JSON rows → save to DB ──────────────────────────────────────
         try:

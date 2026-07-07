@@ -51,6 +51,8 @@ ALLOWED_HOSTS                # list
 CSRF_TRUSTED_ORIGINS         # list
 ALLOWED_EMAIL_DOMAIN         # restrict signup to one domain
 SUPER_ADMIN_EMAILS           # auto-promote on login
+GEMINI_API_KEY               # enables Gemini AI TC PDF conversion (empty = heuristic only)
+GEMINI_TC_MODEL              # default "gemini-2.5-flash"
 ```
 
 **Upload limits:** 50 MB (`DATA_UPLOAD_MAX_MEMORY_SIZE`, `FILE_UPLOAD_MAX_MEMORY_SIZE`)
@@ -119,7 +121,7 @@ Wrong role → HTTP 403 (renders `403.html`), not a redirect.
 /tc/<pk>/delete/                          → tc_delete                 (POST)
 /tc/reconcile/                            → tc_reconcile              (GET or POST)
 /tc/detail/                               → tc_three_way              (three-way detail view)
-/tc/pdf-convert/                          → tc_pdf_convert            (PDF TC file → Excel preview)
+/tc/pdf-convert/                          → tc_pdf_convert            (PDF TC → rows: Gemini AI first, heuristic fallback)
 
 /tc/lmrb-match/                           → tc_lmrb_match             (standalone TC↔LMRB, no schedule)
 /tc/lmrb-match/upload/                    → tc_lmrb_upload            (POST: upload TC, no schedule)
@@ -729,6 +731,7 @@ Function: `summary_pdf()` in `core/views.py`
 | `verification/views.py` | Legacy verification tool UI + Excel export |
 | `verification/tc_converters/dispatch.py` | Router for channel-specific PDF TC parsers |
 | `verification/tc_converters/generic.py` | Heuristic PDF TC parser (fallback) |
+| `verification/tc_converters/gemini_ai.py` | Gemini AI PDF TC parser (used by `/tc/pdf-convert/` when `GEMINI_API_KEY` is set; raises `GeminiError` → caller falls back to heuristic) |
 | `verification/tc_converters/sirasa_tv.py` | Sirasa TV specific PDF TC parser |
 | `accounts/decorators.py` | `role_required` access control decorator |
 | `accounts/models.py` | Custom User model with `role` field and `CAN_CREATE` hierarchy |
