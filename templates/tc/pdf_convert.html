@@ -108,8 +108,17 @@ function App() {
     if (!rows.length) return;
     // Enforce the exact standard header order expected by the Nova reconciliation
     // upload: Date, Programme, Aired Time, TC Theme, Duration.
+    // Dates are written as ISO (YYYY-MM-DD): the parser emits day-first D/M/YYYY,
+    // which the server's Excel reader would misread month-first on re-upload.
     const HEADERS = ["Date", "Programme", "Aired Time", "TC Theme", "Duration"];
-    const ws = window.XLSX.utils.json_to_sheet(rows, { header: HEADERS });
+    const excelRows = rows.map(r => {
+      const p = String(r["Date"] || '').split(/[-/]/);
+      const iso = p.length === 3
+        ? `${p[2]}-${String(p[1]).padStart(2,'0')}-${String(p[0]).padStart(2,'0')}`
+        : r["Date"];
+      return { ...r, "Date": iso };
+    });
+    const ws = window.XLSX.utils.json_to_sheet(excelRows, { header: HEADERS });
     const wb = window.XLSX.utils.book_new();
     window.XLSX.utils.book_append_sheet(wb, ws, 'TC Data');
     window.XLSX.writeFile(wb, `${selectedChannel}_TC_Converted.xlsx`);

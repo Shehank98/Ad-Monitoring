@@ -18,9 +18,15 @@
 
   /* ── Channel normalization ────────────────────────────────────────────────
      The Nova system stores channel names with a "Tv - " prefix and varied
-     spelling/spacing. Parsing rules below key off canonical names, so the
-     selected channel is normalized once. The original (Nova) name is still
-     sent to the server so it matches the stored Schedule channel. */
+     spelling/spacing/casing ("Tv - Hiru TV", "TV - Hiru TV", "TV-Hiru TV"…).
+     Parsing rules below key off canonical names, so the selected channel is
+     normalized once. The original (Nova) name is still sent to the server so
+     it matches the stored Schedule channel.
+
+     Matching is deliberately forgiving: exact map hit first (any case), then
+     keyword matching on the name with the "Tv -" prefix stripped. Radio
+     channels are never normalized to a TV channel (they share keywords like
+     "Hiru"/"Sirasa"), so they keep the generic parsing rules. */
   const CHANNEL_MAP = {
     "Tv - Derana":               "TV Derana",
     "Tv - Hiru TV":              "Hiru TV",
@@ -37,11 +43,44 @@
     "Tv - Varnam TV":            "Varnam TV",
   };
 
+  /* Keyword → canonical TV channel. First hit wins. */
+  const CHANNEL_KEYWORDS = [
+    ["sirasa",      "Sirasa TV"],
+    ["hiru",        "Hiru TV"],
+    ["shakthi",     "Shakthi TV"],
+    ["derana",      "TV Derana"],
+    ["siyatha",     "Siyatha TV"],
+    ["supreme",     "Supreme TV"],
+    ["vasantham",   "Vasantham TV"],
+    ["swarna",      "Swarnawahini TV"],   // covers Swarnavahini / Swarnawahini
+    ["star tamil",  "Star Tamil"],
+    ["varnam",      "Varnam TV"],
+    ["rupavahini",  "Rupavahini"],
+    ["channel eye", "Channel Eye"],
+    ["nethra",      "Channel Eye"],
+  ];
+
   function normalizeChannel(name) {
     if (!name) return name;
-    if (CHANNEL_MAP[name]) return CHANNEL_MAP[name];
     const collapsed = String(name).replace(/\s+/g, ' ').trim();
-    return CHANNEL_MAP[collapsed] || name;
+    if (CHANNEL_MAP[collapsed]) return CHANNEL_MAP[collapsed];
+
+    const lower = collapsed.toLowerCase();
+
+    // Exact map hit, ignoring case ("TV - Hiru TV" vs map key "Tv - Hiru TV")
+    for (const key in CHANNEL_MAP) {
+      if (key.toLowerCase() === lower) return CHANNEL_MAP[key];
+    }
+
+    // Radio channels keep their own name → generic parsing rules
+    if (/\bradio\b|\bfm\b/.test(lower)) return collapsed;
+
+    for (const [kw, canonical] of CHANNEL_KEYWORDS) {
+      if (lower.includes(kw)) return canonical;
+    }
+    if (/\bitn\b/.test(lower)) return "ITN";
+
+    return collapsed;
   }
 
   /* ── In-browser PDF heuristic parser (channel-specific) ───────────────────
@@ -120,23 +159,24 @@
       const allTimes = [...allTextLine.matchAll(/(\d{1,2}[:.]\d{2}[:.]\d{2}(?:[:.\d]*)|\d{1,2}[:.]\d{2}\s*[APMampm]{2})/g)].map(m => m[1]);
       if (!(dateMatch && allTimes.length > 0)) return;
 
+      /* Canonical output is ALWAYS day-first "D/M/YYYY" — that is what
+         dmyToIso() on the Upload TC page and the tc_pdf_convert save endpoint
+         expect. Sri Lankan TCs print dates day-first (DD/MM or DD-Mon), so no
+         per-channel swapping; if a part can't be a month we swap as a
+         safety net (same inference the server-side generic converter does). */
       let rawDate = dateMatch[1], date = '';
       if (/[a-zA-ZЀ-ӿ]{3}/.test(rawDate)) {
         const monthMap = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12,'арг':4};
         let parts = rawDate.split(/[-/]/);
         let mStr = parts[1].toLowerCase();
         let yearStr = parts[2]; if (yearStr.length === 2) yearStr = '20' + yearStr;
-        date = `${monthMap[mStr] || 1}/${parseInt(parts[0], 10)}/${yearStr}`;
+        date = `${parseInt(parts[0], 10)}/${monthMap[mStr] || 1}/${yearStr}`;
       } else {
         let dp = rawDate.split(/[-/]/);
         let year = dp[2]; if (year.length === 2) year = '20' + year;
-        if (normalizedChannel === 'Sirasa TV' || normalizedChannel === 'Hiru TV' || normalizedChannel === 'Shakthi TV') {
-          date = `${parseInt(dp[0],10)}/${parseInt(dp[1],10)}/${year}`;
-        } else if (normalizedChannel === 'Supreme TV') {
-          date = `${parseInt(dp[1],10)}/${parseInt(dp[0],10)}/${year}`;
-        } else {
-          date = `${parseInt(dp[1],10)}/${parseInt(dp[0],10)}/${year}`;
-        }
+        let dayPart = parseInt(dp[0], 10), monPart = parseInt(dp[1], 10);
+        if (monPart > 12 && dayPart <= 12) { const t = dayPart; dayPart = monPart; monPart = t; }
+        date = `${dayPart}/${monPart}/${year}`;
       }
 
       let time = '', duration = '', durationTime, advtTime;
