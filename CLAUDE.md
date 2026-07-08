@@ -731,7 +731,7 @@ Function: `summary_pdf()` in `core/views.py`
 | `verification/views.py` | Legacy verification tool UI + Excel export |
 | `verification/tc_converters/dispatch.py` | Router for channel-specific PDF TC parsers |
 | `verification/tc_converters/generic.py` | Heuristic PDF TC parser (fallback) |
-| `verification/tc_converters/gemini_ai.py` | Gemini AI PDF TC parser (used by `/tc/pdf-convert/` when `GEMINI_API_KEY` is set; raises `GeminiError` → caller falls back to heuristic) |
+| `verification/tc_converters/gemini_ai.py` | Gemini AI PDF TC parser (used by `/tc/pdf-convert/` and `/tc/lmrb-match/upload/` when `GEMINI_API_KEY` is set; raises `GeminiError` → caller falls back to heuristic) |
 | `verification/tc_converters/sirasa_tv.py` | Sirasa TV specific PDF TC parser |
 | `accounts/decorators.py` | `role_required` access control decorator |
 | `accounts/models.py` | Custom User model with `role` field and `CAN_CREATE` hierarchy |

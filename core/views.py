@@ -5295,23 +5295,32 @@ def tc_lmrb_upload(request):
         if not channel:
             messages.error(request, 'For PDF TC files, type the Channel name first, then re-upload.')
             return _back()
+        # Same conversion pipeline as the main TC flow: Gemini AI when
+        # configured, channel-specific heuristic converter as fallback.
         from verification.tc_converters.dispatch import get_converter
-        converter = get_converter(channel)
-        if converter is None:
-            messages.error(
-                request,
-                f'No PDF converter is configured for channel "{channel}". '
-                f'Please upload an Excel file instead.'
-            )
-            return _back()
+        from verification.tc_converters import gemini_ai
         import tempfile, os
         tmp_path = None
+        engine, engine_note = 'heuristic', ''
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
                 for chunk in tc_file.chunks():
                     tmp.write(chunk)
                 tmp_path = tmp.name
-            df = converter.parse_pdf(tmp_path)
+
+            df = None
+            if gemini_ai.is_configured():
+                try:
+                    df = gemini_ai.parse_pdf(tmp_path, channel=channel)
+                    engine = 'gemini'
+                except gemini_ai.GeminiError as e:
+                    engine_note = str(e)
+
+            if df is None or df.empty:
+                if engine == 'gemini':
+                    engine_note = 'Gemini found no rows in this PDF.'
+                engine = 'heuristic'
+                df = get_converter(channel).parse_pdf(tmp_path)
         except Exception as e:
             messages.error(request, f'Could not parse PDF TC file: {e}')
             return _back()
@@ -5322,6 +5331,10 @@ def tc_lmrb_upload(request):
         if df is None or df.empty:
             messages.error(request, 'No data rows could be extracted from the PDF.')
             return _back()
+        if engine == 'gemini':
+            messages.info(request, 'PDF converted with Gemini AI.')
+        elif engine_note:
+            messages.info(request, f'PDF converted with the heuristic parser ({engine_note}).')
         df['Channel'] = channel
     else:
         try:
