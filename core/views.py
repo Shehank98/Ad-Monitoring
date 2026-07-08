@@ -5175,20 +5175,20 @@ def lmrb_tc_section(request):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _tc_lmrb_scope_options(account_id, channel=''):
-    """Channels (and months for a channel) available from TC reports for an account.
+    """Channels (and months for a channel) available from the client's LMRB data.
 
-    Driven by TransmissionReport — works even when no schedule was ever uploaded.
+    Driven by LMRBRow so the user sees every channel the monitoring data covers
+    — and picking from this list guarantees the channel string matches exactly
+    during TC↔LMRB pairing.  Months are the calendar months present in the LMRB
+    dates for the chosen channel, formatted like TransmissionReport.month
+    ("January 2025") so they line up with uploaded TCs.
     """
-    channels = sorted(set(
-        TransmissionReport.objects.filter(account_id=account_id)
-        .values_list('channel', flat=True)
-    ))
+    lmrb = LMRBRow.objects.filter(account_id=account_id)
+    channels = sorted(set(lmrb.values_list('channel', flat=True)), key=str.lower)
     months = []
     if channel:
-        months = sorted(set(
-            TransmissionReport.objects.filter(account_id=account_id, channel=channel)
-            .values_list('month', flat=True)
-        ))
+        month_starts = lmrb.filter(channel__iexact=channel).dates('date', 'month', order='ASC')
+        months = [d.strftime('%B %Y') for d in month_starts]
     return channels, months
 
 
@@ -5207,6 +5207,7 @@ def tc_lmrb_match(request):
     """
     from verification.tc_lmrb_engine import (
         build_tc_lmrb_data, build_theme_mapping, scope_date_range,
+        lmrb_availability, build_scope_cards,
     )
 
     user       = request.user
@@ -5221,6 +5222,9 @@ def tc_lmrb_match(request):
     data = None
     theme_map = None
     date_min = date_max = None
+    lmrb_avail = None
+    scope_cards = []
+    coverage_warning = ''
 
     if account_id:
         try:
@@ -5230,6 +5234,15 @@ def tc_lmrb_match(request):
 
     if selected_account:
         channels, months = _tc_lmrb_scope_options(account_id, channel)
+        # Keep a scope selectable even when it exists only on the TC side
+        # (e.g. TC uploaded before its LMRB data arrived).
+        if channel and channel not in channels:
+            channels = sorted(set(channels) | {channel}, key=str.lower)
+        if channel and month and month not in months:
+            months = months + [month]
+        scope_cards = build_scope_cards(account_id)
+        if channel:
+            lmrb_avail = lmrb_availability(account_id, channel)
 
     if selected_account and channel and month:
         if not _account_access(user, account_id):
@@ -5238,6 +5251,17 @@ def tc_lmrb_match(request):
         data = build_tc_lmrb_data(account_id, channel, month)
         theme_map = build_theme_mapping(account_id, channel, month)
         date_min, date_max = scope_date_range(account_id, channel, month)
+        # Warn when the LMRB data doesn't cover the whole TC period.
+        if date_min and date_max and lmrb_avail and lmrb_avail['date_min']:
+            if date_min < lmrb_avail['date_min'] or date_max > lmrb_avail['date_max']:
+                coverage_warning = (
+                    f"LMRB data ({lmrb_avail['date_min']:%d %b %Y} – "
+                    f"{lmrb_avail['date_max']:%d %b %Y}) does not cover the full "
+                    f"TC period ({date_min:%d %b %Y} – {date_max:%d %b %Y}) — "
+                    f"spots outside the LMRB range cannot match."
+                )
+        elif data is not None and lmrb_avail and not lmrb_avail['count']:
+            coverage_warning = 'No LMRB data uploaded for this channel yet — nothing to match against.'
 
     return render(request, 'tc/lmrb_match.html', {
         'accounts':         account_qs,
@@ -5251,6 +5275,9 @@ def tc_lmrb_match(request):
         'theme_map':        theme_map,
         'date_min':         date_min,
         'date_max':         date_max,
+        'lmrb_avail':       lmrb_avail,
+        'scope_cards':      scope_cards,
+        'coverage_warning': coverage_warning,
         'tolerance':        get_setting_int('tc_lmrb_time_tolerance', 5),
     })
 
@@ -5516,39 +5543,65 @@ def tc_lmrb_match_remove(request, pk):
 @role_required(['super_admin', 'admin', 'operations', 'team_head'])
 @require_POST
 def tc_lmrb_map_save(request):
-    """Map a TC theme to an LMRB theme, stored in the main BrandMapping table.
+    """Map a TC (theme, duration) pair to an LMRB (theme, duration) pair.
 
-    Creates (or updates) a BrandMapping row so the mapping is shared across the
-    whole system.  The TC↔LMRB matcher then pairs only brand-consistent spots.
-    A 'brand' name groups the pair; when blank it defaults to the LMRB theme.
+    Writes TWO tables:
+    - TcLmrbThemeMap — duration-aware, authoritative for the standalone
+      TC↔LMRB matcher (allows cross-duration pairs, e.g. TC 29s ↔ LMRB 30s).
+    - BrandMapping — theme-level, kept in sync so the mapping is shared with
+      the schedule-based engines as before ('brand' defaults to the LMRB theme).
     """
-    account_id = request.POST.get('account_id', '').strip()
-    tc_theme   = request.POST.get('tc_theme', '').strip()
-    lmrb_theme = request.POST.get('lmrb_theme', '').strip()
-    brand      = request.POST.get('brand', '').strip()
+    from core.models import TcLmrbThemeMap
+
+    def _int_or_none(v):
+        v = (v or '').strip()
+        try:
+            return int(v) if v else None
+        except ValueError:
+            return None
+
+    account_id    = request.POST.get('account_id', '').strip()
+    tc_theme      = request.POST.get('tc_theme', '').strip()
+    lmrb_theme    = request.POST.get('lmrb_theme', '').strip()
+    brand         = request.POST.get('brand', '').strip()
+    tc_duration   = _int_or_none(request.POST.get('tc_duration'))
+    lmrb_duration = _int_or_none(request.POST.get('lmrb_duration'))
     if not (account_id and tc_theme and lmrb_theme):
         return JsonResponse({'ok': False, 'error': 'TC theme and LMRB theme are required.'})
     if not _account_access(request.user, account_id):
         return JsonResponse({'ok': False, 'error': 'Access denied.'})
 
-    # CharField limits: brand/theme are max_length=200.
-    lmrb_theme = lmrb_theme[:200]
-    brand      = (brand or lmrb_theme)[:200]
+    # Same LMRB duration as the TC row → store NULL ("same duration" semantics),
+    # so the mapping keeps working if the theme later appears at other durations.
+    if lmrb_duration is not None and lmrb_duration == tc_duration:
+        lmrb_duration = None
 
-    # Update an existing row that maps exactly this tc_theme, else create one.
+    TcLmrbThemeMap.objects.update_or_create(
+        account_id=account_id, tc_theme=tc_theme[:300], tc_duration=tc_duration,
+        defaults={
+            'lmrb_theme':    lmrb_theme[:300],
+            'lmrb_duration': lmrb_duration,
+            'created_by':    request.user,
+        },
+    )
+
+    # Keep the shared BrandMapping in sync (theme-level, as before).
+    lmrb_theme_bm = lmrb_theme[:200]
+    brand         = (brand or lmrb_theme_bm)[:200]
     bm = BrandMapping.objects.filter(
         account_id=account_id, tc_theme__iexact=tc_theme,
     ).first()
     if bm:
-        bm.theme = lmrb_theme
+        bm.theme = lmrb_theme_bm
         if not bm.brand:
             bm.brand = brand
         bm.save(update_fields=['theme', 'brand'])
     else:
         BrandMapping.objects.create(
-            account_id=account_id, brand=brand, theme=lmrb_theme, tc_theme=tc_theme,
+            account_id=account_id, brand=brand, theme=lmrb_theme_bm, tc_theme=tc_theme,
         )
-    return JsonResponse({'ok': True, 'lmrb_theme': lmrb_theme, 'brand': brand})
+    return JsonResponse({'ok': True, 'lmrb_theme': lmrb_theme, 'brand': brand,
+                         'lmrb_duration': lmrb_duration})
 
 
 @login_required

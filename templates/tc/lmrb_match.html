@@ -64,9 +64,67 @@
     </div>
   </form>
   <p class="text-xs text-slate-400 mt-2">
-    Channels and months are drawn from uploaded TC reports — no schedule is required.
+    Channels and months are drawn from the client's LMRB monitoring data — no schedule is required.
+    {% if lmrb_avail and lmrb_avail.date_min %}
+      <span class="text-slate-500 font-semibold ml-1">
+        <i class="fa-solid fa-database text-emerald-500"></i>
+        LMRB data available: {{ lmrb_avail.date_min|date:"d M Y" }} – {{ lmrb_avail.date_max|date:"d M Y" }}
+        ({{ lmrb_avail.count }} rows)
+      </span>
+    {% elif channel and lmrb_avail %}
+      <span class="text-rose-500 font-semibold ml-1">
+        <i class="fa-solid fa-triangle-exclamation"></i> No LMRB data for this channel yet.
+      </span>
+    {% endif %}
   </p>
 </div>
+
+{% if coverage_warning %}
+<div class="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3 mb-5 text-xs text-amber-800 font-semibold">
+  <i class="fa-solid fa-triangle-exclamation mr-1"></i> {{ coverage_warning }}
+</div>
+{% endif %}
+
+{% if selected_account and scope_cards %}
+<!-- ── Saved results (live cards per scope) ───────────────────── -->
+<div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-4 mb-5">
+  <div class="font-bold text-slate-700 text-sm mb-3">
+    <i class="fa-solid fa-clock-rotate-left text-indigo-600 mr-1"></i>
+    Saved results for {{ selected_account.name }}
+    <span class="text-slate-400 font-normal">({{ scope_cards|length }} scope{{ scope_cards|length|pluralize }})</span>
+  </div>
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+    {% for c in scope_cards %}
+    <div class="border rounded-xl px-4 py-3 {% if c.channel == channel and c.month == month %}border-indigo-300 bg-indigo-50/40{% else %}border-slate-200{% endif %}">
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0">
+          <p class="text-sm font-bold text-slate-800 truncate" title="{{ c.channel }}">{{ c.channel }}</p>
+          <p class="text-xs text-slate-500">{{ c.month }}
+            {% if c.date_min %}<span class="text-slate-400">· {{ c.date_min|date:"d M" }} – {{ c.date_max|date:"d M Y" }}</span>{% endif %}
+          </p>
+        </div>
+        {% if c.has_run %}
+          <span class="badge badge-green shrink-0"><i class="fa-solid fa-check"></i> matched</span>
+        {% else %}
+          <span class="badge shrink-0" style="background:#fef9c3;color:#92400e">pending</span>
+        {% endif %}
+      </div>
+      <div class="flex gap-3 mt-2 text-xs">
+        <span class="text-green-700 font-bold">{{ c.matched }} <span class="font-normal text-slate-400">matched</span></span>
+        <span class="text-violet-700 font-bold">{{ c.unmatched_tc }} <span class="font-normal text-slate-400">TC left</span></span>
+        <span class="text-emerald-700 font-bold">{{ c.unmatched_lmrb }} <span class="font-normal text-slate-400">LMRB left</span></span>
+      </div>
+      <div class="flex gap-2 mt-2.5">
+        <a href="/dashboard/tc/lmrb-match/?account_id={{ account_id }}&channel={{ c.channel|urlencode }}&month={{ c.month|urlencode }}"
+           class="btn-secondary text-[11px] py-1 px-2.5"><i class="fa-solid fa-folder-open"></i> Open</a>
+        <a href="/dashboard/tc/lmrb-match/download/?account_id={{ account_id }}&channel={{ c.channel|urlencode }}&month={{ c.month|urlencode }}"
+           class="btn-secondary text-[11px] py-1 px-2.5"><i class="fa-solid fa-file-excel text-green-600"></i> Excel</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 
 <!-- ── Upload TC (no schedule) ────────────────────────────────── -->
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-4 mb-5">
@@ -85,13 +143,23 @@
         {% endfor %}
       </select>
     </div>
-    <div class="flex-1 min-w-[130px]">
-      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel</label>
-      <input name="channel" class="select-field" value="{{ channel }}" placeholder="auto-detect">
+    <div class="flex-1 min-w-[160px]">
+      <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel {% if channels %}*{% endif %}</label>
+      {% if channels %}
+      <select name="channel" class="select-field">
+        <option value="">Select channel…</option>
+        {% for ch in channels %}
+          <option value="{{ ch }}" {% if ch == channel %}selected{% endif %}>{{ ch }}</option>
+        {% endfor %}
+      </select>
+      {% else %}
+      <input name="channel" class="select-field" value="{{ channel }}"
+             placeholder="{% if selected_account %}no LMRB channels yet — type it{% else %}select a client first{% endif %}">
+      {% endif %}
     </div>
     <div class="flex-1 min-w-[130px]">
       <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Month</label>
-      <input name="month" class="select-field" value="{{ month }}" placeholder="e.g. January 2025">
+      <input name="month" class="select-field" value="{{ month }}" placeholder="auto-detect from file">
     </div>
     <div class="flex-1 min-w-[180px]">
       <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">TC File *</label>
@@ -103,8 +171,8 @@
     </button>
   </form>
   <p class="text-xs text-slate-400 mt-2">
-    Leave Channel / Month blank to auto-detect from the file. PDF files need the Channel typed in
-    (use the exact LMRB channel name, e.g. "Tv - Hiru TV") and are converted with Gemini AI when configured.
+    Pick the channel from the client's LMRB channels (guarantees an exact match for pairing).
+    Month is auto-detected from the file when left blank. PDFs are converted with Gemini AI when configured.
     Re-uploading the same spots replaces them.
   </p>
 </div>
@@ -128,21 +196,23 @@
     {% endif %}
   </div>
   <p class="px-5 pb-2 text-xs text-slate-400">
-    Saved mappings are stored in the main Brand Mappings table and reused everywhere.
-    Pick an existing LMRB theme or type a new one, then run the match below.
+    Map each TC theme + duration to the LMRB theme + duration it should pair with.
+    Durations may differ (e.g. TC 29s ↔ LMRB 30s). Mappings are remembered for this client
+    and reused on future uploads.
   </p>
   <div class="overflow-x-auto" style="max-height:340px;overflow-y:auto">
     <table class="tl-table">
       <thead>
         <tr>
-          <th>TC Theme</th><th># TC</th><th>Status</th>
-          <th>Mapped LMRB Theme</th><th>Brand (optional)</th><th></th>
+          <th>TC Theme</th><th>TC Dur</th><th># TC</th><th>Status</th>
+          <th>LMRB Theme</th><th>LMRB Dur</th><th></th>
         </tr>
       </thead>
       <tbody>
         {% for row in theme_map.theme_rows %}
         <tr>
           <td class="font-semibold text-purple-700 max-w-[220px] truncate" title="{{ row.tc_theme }}">{{ row.tc_theme }}</td>
+          <td class="font-mono text-slate-600">{{ row.tc_duration|default_if_none:"-" }}s</td>
           <td class="font-mono text-slate-500">{{ row.count }}</td>
           <td>
             {% if row.mapped %}
@@ -153,15 +223,17 @@
           </td>
           <td>
             <input type="hidden" id="map-tc-{{ forloop.counter }}" value="{{ row.tc_theme }}">
+            <input type="hidden" id="map-tcdur-{{ forloop.counter }}" value="{{ row.tc_duration|default_if_none:'' }}">
             <input list="lmrbThemes" id="map-lmrb-{{ forloop.counter }}"
                    class="select-field !py-1 !text-xs" style="min-width:180px"
-                   value="{% if row.lmrb_themes %}{{ row.lmrb_themes.0 }}{% endif %}"
+                   value="{{ row.lmrb_theme }}"
                    placeholder="LMRB theme…">
           </td>
           <td>
-            <input id="map-brand-{{ forloop.counter }}"
-                   class="select-field !py-1 !text-xs" style="min-width:120px"
-                   value="{{ row.brand }}" placeholder="defaults to LMRB theme">
+            <input type="number" id="map-lmrbdur-{{ forloop.counter }}" min="1" max="600"
+                   class="select-field !py-1 !text-xs" style="width:75px"
+                   value="{{ row.lmrb_duration|default_if_none:row.tc_duration|default_if_none:'' }}"
+                   list="lmrbDurations" placeholder="{{ row.tc_duration|default_if_none:'' }}">
           </td>
           <td>
             <button type="button" class="btn-primary text-[11px] py-0.5 px-2"
@@ -171,7 +243,7 @@
           </td>
         </tr>
         {% empty %}
-        <tr><td colspan="6" class="text-center text-slate-400 py-6">No TC themes found in this scope.</td></tr>
+        <tr><td colspan="7" class="text-center text-slate-400 py-6">No TC themes found in this scope.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -179,6 +251,25 @@
   <datalist id="lmrbThemes">
     {% for opt in theme_map.lmrb_theme_options %}<option value="{{ opt }}">{% endfor %}
   </datalist>
+  <datalist id="lmrbDurations">
+    {% for d in theme_map.lmrb_durations %}<option value="{{ d }}">{% endfor %}
+  </datalist>
+  {% if theme_map.lmrb_pairs %}
+  <details class="px-5 pb-4 pt-1">
+    <summary class="text-xs font-bold text-slate-500 cursor-pointer select-none">
+      <i class="fa-solid fa-eye text-emerald-500 mr-1"></i>
+      LMRB themes available in this scope ({{ theme_map.lmrb_pairs|length }} theme × duration combos)
+    </summary>
+    <div class="flex flex-wrap gap-1.5 mt-2">
+      {% for p in theme_map.lmrb_pairs %}
+        <span class="badge" style="background:#ecfdf5;color:#065f46" title="{{ p.theme }}">
+          {{ p.theme|truncatechars:40 }} · {{ p.duration|default_if_none:"?" }}s
+          <span class="text-emerald-500">×{{ p.count }}</span>
+        </span>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
 </div>
 
 <!-- ── Step 2: Action bar ─────────────────────────────────────── -->
@@ -353,15 +444,17 @@
   }
 
   function tlMapSave(i) {
-    const tc    = document.getElementById('map-tc-' + i).value;
-    const lmrb  = document.getElementById('map-lmrb-' + i).value.trim();
-    const brand = document.getElementById('map-brand-' + i).value.trim();
+    const tc      = document.getElementById('map-tc-' + i).value;
+    const tcDur   = document.getElementById('map-tcdur-' + i).value;
+    const lmrb    = document.getElementById('map-lmrb-' + i).value.trim();
+    const lmrbDur = document.getElementById('map-lmrbdur-' + i).value.trim();
     if (!lmrb) { alert('Enter or pick an LMRB theme first.'); return; }
     const fd = new FormData();
     fd.append('account_id', TL_ACCOUNT_ID);
     fd.append('tc_theme', tc);
+    fd.append('tc_duration', tcDur);
     fd.append('lmrb_theme', lmrb);
-    fd.append('brand', brand);
+    fd.append('lmrb_duration', lmrbDur);
     fd.append('csrfmiddlewaretoken', tlCsrf());
     fetch('/dashboard/tc/lmrb-match/map-save/', { method: 'POST', body: fd })
       .then(r => r.json())

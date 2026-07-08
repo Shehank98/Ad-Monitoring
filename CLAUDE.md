@@ -366,18 +366,43 @@ Created by `verification/tc_lmrb_engine.py`:
 > spots are paired. When a `tc_theme` has no mapping, it falls back to time-only.
 
 **Page workflow (`/dashboard/tc/lmrb-match/`):**
-0. **Upload TC (in-tab):** an upload card on the page (`tc_lmrb_upload`) accepts an
-   Excel/PDF TC file with **no schedule** — Channel and Month are auto-detected from
-   the file (Month derived from the earliest TC date) when left blank. Creates a
+0. **Scope from LMRB data:** the user selects a client (Account) — Channel and Month
+   dropdowns are drawn from the client's **LMRB monitoring data** (`LMRBRow`), so
+   picking from them guarantees exact channel-string matching. The page shows the
+   available LMRB date range for the channel, and warns when the LMRB data does not
+   cover the full TC period.
+0b. **Upload TC (in-tab):** an upload card on the page (`tc_lmrb_upload`) accepts an
+   Excel/PDF TC file with **no schedule** — Channel is picked from the client's LMRB
+   channels; Month is auto-detected from the file (earliest TC date) when left blank.
+   PDFs are converted with Gemini AI when configured (heuristic fallback). Creates a
    `TransmissionReport` with `schedule=None`, then reloads the tab with the new scope.
-1. **Step 1 — Map themes:** the page lists every distinct `tc_theme` in the scope and
-   flags which are not yet mapped to an LMRB theme. The user maps each via a picker
-   (LMRB themes found in the scope, or free text). Saving writes to the **main
-   `BrandMapping`** table (`tc_theme` ↔ `theme`; `brand` defaults to the LMRB theme),
-   so the mapping is shared system-wide and shown as "mapped" on the next TC upload.
+1. **Step 1 — Map themes + durations:** the page lists every distinct
+   `(tc_theme, duration)` pair in the scope and flags which are not yet mapped. The
+   user maps each to an LMRB `(theme, duration)` pair — durations may differ (TC 29s
+   ↔ LMRB 30s). Saving writes **`TcLmrbThemeMap`** (duration-aware, authoritative for
+   this engine) AND the main `BrandMapping` (theme-level, shared system-wide).
    Built by `build_theme_mapping()`; saved by `tc_lmrb_map_save`.
 2. **Step 2 — Match:** "Auto-match TC ↔ LMRB" runs `reconcile_tc_lmrb`, then the three
    lists (Matched / Unmatched TC / Unmatched LMRB) render and are downloadable.
+3. **Saved result cards:** the tab lists a live card per (channel, month) scope of the
+   client — matched / unmatched TC / unmatched LMRB counts, TC date range, Open and
+   Excel links. Cards reflect the current stored `TcLmrbMatch` state, so results are
+   viewable any time. Built by `build_scope_cards()`.
+
+### `TcLmrbThemeMap`
+Duration-aware TC → LMRB theme mapping used ONLY by `verification/tc_lmrb_engine.py`.
+```
+account (FK)
+tc_theme, tc_duration (int, nullable)      ← NULL = applies to any TC duration
+lmrb_theme, lmrb_duration (int, nullable)  ← NULL = same duration as the TC row
+created_at, created_by
+unique: (account, tc_theme, tc_duration)
+```
+> `reconcile_tc_lmrb` checks this table FIRST for each TC row (specific duration wins
+> over the any-duration row). When it hits, the LMRB candidate must have the mapped
+> theme (case-insensitive, `*` prefix supported) at the mapped duration — this is how
+> cross-duration pairs (TC 29s ↔ LMRB 30s) match. tc_themes with no row here fall back
+> to BrandMapping brand agreement, then time-only (legacy chain).
 
 ### `SummaryReportMeta`
 User-editable fields for the printed summary. Unique per (account, channel, month).

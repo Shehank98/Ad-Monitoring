@@ -41,7 +41,7 @@ from django.db import transaction
 from django.db.models import Max, Min, Q
 
 from core.models import (
-    LMRBRow, TCRow, TcLmrbMatch, TransmissionReport,
+    LMRBRow, TCRow, TcLmrbMatch, TcLmrbThemeMap, TransmissionReport,
     get_setting_int, parse_channel_media_type,
 )
 
@@ -136,6 +136,18 @@ def reconcile_tc_lmrb(account_id, channel, month, mode='smart', user=None):
 
     tolerance = get_setting_int('tc_lmrb_time_tolerance', 5)
 
+    # ── TcLmrbThemeMap: duration-aware pairs saved from the tab's Step 1 ────────
+    # (tc_theme, tc_duration) → (lmrb_theme, lmrb_duration).  Checked FIRST.
+    # tc_duration NULL = applies to any duration (specific duration wins).
+    # lmrb_duration NULL = pair with the same duration as the TC row.
+    tl_by_key: dict = {}
+    for m in TcLmrbThemeMap.objects.filter(account_id=account_id):
+        tl_by_key[((m.tc_theme or '').lower().strip(), m.tc_duration)] = m
+
+    def _tl_lookup(theme, dur):
+        key = (theme or '').lower().strip()
+        return tl_by_key.get((key, dur)) or tl_by_key.get((key, None))
+
     # ── BrandMapping theme validation (same chain as the schedule-based engine) ─
     # Resolve TC tc_theme → brand (BrandMapping.tc_theme) and brand → expected LMRB
     # themes (BrandMapping.theme).  A TC row only pairs with an LMRB row whose
@@ -184,24 +196,44 @@ def reconcile_tc_lmrb(account_id, channel, month, mode='smart', user=None):
         if tc_secs is None:
             continue
         dur = int(tc.duration) if tc.duration is not None else None
-        candidates = index.get((tc.date, dur), [])
 
-        # Expected LMRB (theme, product) pairs via tc_theme → brand → lmrb_theme.
-        # Empty list = tc_theme has no BrandMapping → skip theme validation.
-        brands = _brands_for_tc_theme(tc.tc_theme, dur, reverse_tc_theme_map)
-        expected_lmrb_pairs = []
-        for brand in brands:
-            expected_lmrb_pairs.extend(_lmrb_themes_for_brand(brand, dur, lmrb_theme_map))
+        # 1) Duration-aware TcLmrbThemeMap (saved from the tab's Step 1).
+        #    Pins the exact LMRB theme AND duration to pair with — allows
+        #    cross-duration pairs (TC 29s ↔ LMRB 30s).
+        tlm = _tl_lookup(tc.tc_theme, dur)
+        if tlm is not None:
+            target_dur = tlm.lmrb_duration if tlm.lmrb_duration is not None else dur
+            want_theme = (tlm.lmrb_theme or '').lower().strip()
+            candidates = index.get((tc.date, target_dur), [])
+            expected_lmrb_pairs = None   # theme filter applied directly below
+        else:
+            # 2) Legacy chain: same duration + BrandMapping brand agreement,
+            #    time-only when the tc_theme has no mapping at all.
+            candidates = index.get((tc.date, dur), [])
+            want_theme = None
+            brands = _brands_for_tc_theme(tc.tc_theme, dur, reverse_tc_theme_map)
+            expected_lmrb_pairs = []
+            for brand in brands:
+                expected_lmrb_pairs.extend(_lmrb_themes_for_brand(brand, dur, lmrb_theme_map))
 
         best = None
         best_diff = tolerance + 1
         for lmrb_secs, lr in candidates:
             if lr.id in used_lmrb_ids or lmrb_secs is None:
                 continue
-            # Brand validation: the LMRB row's theme/product must resolve to the
-            # same brand as the TC row (when a mapping exists).  '*' suffix = prefix
-            # match; '' product = match any (non-TAG brands).
-            if expected_lmrb_pairs:
+            if want_theme is not None:
+                # TcLmrbThemeMap: LMRB theme must equal the mapped theme
+                # ('*' suffix = prefix match, same convention as BrandMapping).
+                lr_theme = _norm(lr.advt_theme)
+                if want_theme.endswith('*'):
+                    if not lr_theme.startswith(want_theme[:-1]):
+                        continue
+                elif lr_theme != want_theme:
+                    continue
+            elif expected_lmrb_pairs:
+                # Brand validation: the LMRB row's theme/product must resolve to the
+                # same brand as the TC row (when a mapping exists).  '*' suffix = prefix
+                # match; '' product = match any (non-TAG brands).
                 lr_theme   = _norm(lr.advt_theme)
                 lr_product = _norm(lr.product) if lr.product else ''
                 if not any(
@@ -251,38 +283,49 @@ def reconcile_tc_lmrb(account_id, channel, month, mode='smart', user=None):
     }
 
 
-# ── Theme-mapping panel (TC theme ↔ LMRB theme, stored in BrandMapping) ─────────
+# ── Theme-mapping panel (TC theme+duration ↔ LMRB theme+duration) ───────────────
 
 def build_theme_mapping(account_id, channel, month):
-    """Data for the "map TC theme → LMRB theme" panel.
+    """Data for the "map TC theme + duration → LMRB theme + duration" panel.
 
     Returns:
-      theme_rows : [{tc_theme, count, mapped (bool), lmrb_themes: [..], brand}]
-                   one row per distinct tc_theme found in the scope's TC rows.
+      theme_rows : one row per distinct (tc_theme, duration) pair found in the
+                   scope's TC rows:
+                   {tc_theme, tc_duration, count, mapped (bool),
+                    lmrb_theme, lmrb_duration, source ('map'|'brand'|'')}
       lmrb_theme_options : sorted distinct LMRB advt_theme values in the scope
-                   (used to populate the datalist so the user can pick or type).
+                   (datalist so the user can pick or type).
+      lmrb_pairs : [{theme, duration, count}] distinct LMRB (theme, duration)
+                   combos in the scope — shown so the user sees what exists.
+      lmrb_durations : sorted distinct LMRB durations in the scope.
 
-    'mapped' is True when a BrandMapping for the account resolves this tc_theme to
-    at least one non-empty LMRB theme (exact or '*' prefix, pipe-aware).  Mappings
-    created here are written straight to the main BrandMapping table.
+    'mapped' is True when a TcLmrbThemeMap row covers the pair (exact duration or
+    any-duration), or — legacy fallback — a BrandMapping resolves the tc_theme
+    (then lmrb_duration = same as TC).  Mappings saved here write BOTH tables:
+    TcLmrbThemeMap (authoritative for this engine) and BrandMapping (theme-level,
+    shared system-wide).
     """
     from core.models import BrandMapping
 
-    # Distinct tc_theme + counts from the scope's TC rows.
+    # Distinct (tc_theme, duration) + counts from the scope's TC rows.
     tc_counts: dict = {}
-    for t in _scope_tc_qs(account_id, channel, month).values_list('tc_theme', flat=True):
-        key = (t or '').strip()
-        if key:
+    for t, d in _scope_tc_qs(account_id, channel, month).values_list('tc_theme', 'duration'):
+        key = ((t or '').strip(), d)
+        if key[0]:
             tc_counts[key] = tc_counts.get(key, 0) + 1
 
-    # All BrandMapping rows with a tc_theme for this account.
+    # Duration-aware maps for this account.
+    tl_by_key: dict = {}
+    for m in TcLmrbThemeMap.objects.filter(account_id=account_id):
+        tl_by_key[((m.tc_theme or '').lower().strip(), m.tc_duration)] = m
+
+    # Legacy BrandMapping rows with a tc_theme (theme-level fallback).
     bm_list = list(
         BrandMapping.objects.filter(account_id=account_id).exclude(tc_theme='')
     )
 
-    def _mapping_for(tc_theme_norm):
-        """Return (lmrb_themes, brand) resolved for a normalised tc_theme."""
-        themes, brand = [], ''
+    def _brand_mapping_for(tc_theme_norm):
+        """Return (lmrb_theme, brand) resolved via legacy BrandMapping."""
         for bm in bm_list:
             for raw in bm.tc_theme.split('|'):
                 st = raw.lower().strip()
@@ -291,39 +334,131 @@ def build_theme_mapping(account_id, channel, month):
                 hit = (st == tc_theme_norm
                        or (st.endswith('*') and tc_theme_norm.startswith(st[:-1])))
                 if hit and bm.theme.strip():
-                    themes.append(bm.theme.strip())
-                    brand = brand or bm.brand
-        # de-dup preserving order
-        seen, uniq = set(), []
-        for th in themes:
-            if th.lower() not in seen:
-                seen.add(th.lower())
-                uniq.append(th)
-        return uniq, brand
+                    return bm.theme.strip(), bm.brand
+        return '', ''
 
     theme_rows = []
-    for tc_theme, cnt in sorted(tc_counts.items(), key=lambda x: x[0].lower()):
-        lmrb_themes, brand = _mapping_for(tc_theme.lower().strip())
+    for (tc_theme, tc_dur), cnt in sorted(
+        tc_counts.items(), key=lambda x: (x[0][0].lower(), x[0][1] or 0)
+    ):
+        norm = tc_theme.lower().strip()
+        tlm = tl_by_key.get((norm, tc_dur)) or tl_by_key.get((norm, None))
+        if tlm is not None:
+            theme_rows.append({
+                'tc_theme':      tc_theme,
+                'tc_duration':   tc_dur,
+                'count':         cnt,
+                'mapped':        True,
+                'lmrb_theme':    tlm.lmrb_theme,
+                'lmrb_duration': tlm.lmrb_duration if tlm.lmrb_duration is not None else tc_dur,
+                'source':        'map',
+            })
+            continue
+        bm_theme, brand = _brand_mapping_for(norm)
         theme_rows.append({
-            'tc_theme':    tc_theme,
-            'count':       cnt,
-            'mapped':      bool(lmrb_themes),
-            'lmrb_themes': lmrb_themes,
-            'brand':       brand,
+            'tc_theme':      tc_theme,
+            'tc_duration':   tc_dur,
+            'count':         cnt,
+            'mapped':        bool(bm_theme),
+            'lmrb_theme':    bm_theme,
+            'lmrb_duration': tc_dur if bm_theme else None,
+            'source':        'brand' if bm_theme else '',
         })
 
-    lmrb_theme_options = sorted(set(
-        v.strip() for v in
-        _scope_lmrb_qs(account_id, channel, month).values_list('advt_theme', flat=True)
-        if v and v.strip()
+    # Distinct LMRB (theme, duration) combos + counts in the scope.
+    lmrb_pair_counts: dict = {}
+    for t, d in _scope_lmrb_qs(account_id, channel, month).values_list('advt_theme', 'duration'):
+        key = ((t or '').strip(), d)
+        if key[0]:
+            lmrb_pair_counts[key] = lmrb_pair_counts.get(key, 0) + 1
+    lmrb_pairs = [
+        {'theme': t, 'duration': d, 'count': c}
+        for (t, d), c in sorted(lmrb_pair_counts.items(),
+                                key=lambda x: (x[0][0].lower(), x[0][1] or 0))
+    ]
+    lmrb_theme_options = sorted(set(p['theme'] for p in lmrb_pairs))
+    lmrb_durations = sorted(set(
+        p['duration'] for p in lmrb_pairs if p['duration'] is not None
     ))
 
     return {
         'theme_rows':         theme_rows,
         'lmrb_theme_options': lmrb_theme_options,
+        'lmrb_pairs':         lmrb_pairs,
+        'lmrb_durations':     lmrb_durations,
         'unmapped':           sum(1 for r in theme_rows if not r['mapped']),
         'total':              len(theme_rows),
     }
+
+
+# ── Availability + saved-result cards ──────────────────────────────────────────
+
+def lmrb_availability(account_id, channel=''):
+    """Available LMRB data range for an account (optionally one channel).
+
+    Returns {'date_min', 'date_max', 'count'} — what monitoring data exists to
+    match against, shown on the tab as the "available data range".
+    """
+    qs = LMRBRow.objects.filter(account_id=account_id)
+    if channel:
+        cq = Q()
+        for f in _channel_forms(channel):
+            cq |= Q(channel__iexact=f)
+        qs = qs.filter(cq)
+    agg = qs.aggregate(d_min=Min('date'), d_max=Max('date'))
+    return {
+        'date_min': agg.get('d_min'),
+        'date_max': agg.get('d_max'),
+        'count':    qs.count(),
+    }
+
+
+def build_scope_cards(account_id):
+    """Live result cards: one per (channel, month) scope with TC data or matches.
+
+    Each card reflects the CURRENT stored state (TcLmrbMatch is persistent), so
+    the user can revisit results any time.  Sorted newest month first.
+    """
+    from datetime import datetime as _dt
+
+    scopes = set()
+    for ch, mo in (TcLmrbMatch.objects.filter(account_id=account_id)
+                   .values_list('channel', 'month').distinct()):
+        scopes.add((ch, mo))
+    for ch, mo in (TransmissionReport.objects
+                   .filter(account_id=account_id, schedule__isnull=True)
+                   .values_list('channel', 'month').distinct()):
+        scopes.add((ch, mo))
+
+    def _month_key(mo):
+        try:
+            return _dt.strptime(mo, '%B %Y')
+        except (ValueError, TypeError):
+            return _dt.min
+
+    cards = []
+    for ch, mo in sorted(scopes, key=lambda s: (_month_key(s[1]), s[0].lower()), reverse=True):
+        total_tc = _scope_tc_qs(account_id, ch, mo).count()
+        matched  = TcLmrbMatch.objects.filter(
+            account_id=account_id, channel__iexact=ch, month=mo,
+        ).count()
+        unmatched_lmrb = _scope_lmrb_qs(account_id, ch, mo).filter(
+            is_matched=False, is_sponsorship_matched=False,
+            is_manual_matched=False, is_tc_lmrb_matched=False,
+        ).count()
+        d_min, d_max = scope_date_range(account_id, ch, mo)
+        cards.append({
+            'channel':        ch,
+            'month':          mo,
+            'total_tc':       total_tc,
+            'matched':        matched,
+            'unmatched_tc':   max(0, total_tc - matched),
+            'unmatched_lmrb': unmatched_lmrb,
+            'date_min':       d_min,
+            'date_max':       d_max,
+            'has_run':        matched > 0,
+        })
+    return cards
 
 
 # ── Manual assignment / removal ────────────────────────────────────────────────

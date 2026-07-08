@@ -621,6 +621,49 @@ class TcLmrbMatch(models.Model):
         )
 
 
+class TcLmrbThemeMap(models.Model):
+    """Duration-aware TC → LMRB theme mapping for the standalone TC↔LMRB engine.
+
+    Maps a TC (theme, duration) pair to the LMRB (theme, duration) pair it should
+    match, per account.  Unlike BrandMapping (theme-level, same-duration only),
+    this allows cross-duration pairs — e.g. TC "DIALOG 5G/29SEC" @ 29s pairing
+    with LMRB "Dialog 5G Launch" @ 30s.
+
+    - tc_duration NULL   → the mapping applies to any TC duration of that theme
+                           (a row with a specific tc_duration takes precedence).
+    - lmrb_duration NULL → pair with the SAME duration as the TC row.
+
+    Saved from the TC↔LMRB tab's Step 1 and remembered for future months.
+    reconcile_tc_lmrb consults this table first; tc_themes without a row here
+    fall back to BrandMapping brand agreement, then time-only (legacy behavior).
+    """
+    account       = models.ForeignKey(Account, on_delete=models.CASCADE,
+                                      related_name='tc_lmrb_theme_maps')
+    tc_theme      = models.CharField(max_length=300)
+    tc_duration   = models.PositiveIntegerField(null=True, blank=True)
+    lmrb_theme    = models.CharField(max_length=300)
+    lmrb_duration = models.PositiveIntegerField(null=True, blank=True)
+    created_at    = models.DateTimeField(auto_now_add=True)
+    created_by    = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='tc_lmrb_theme_maps',
+    )
+
+    class Meta:
+        ordering = ['tc_theme', 'tc_duration']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['account', 'tc_theme', 'tc_duration'],
+                name='uniq_tclmrbthememap_scope',
+            ),
+        ]
+
+    def __str__(self):
+        td = f'@{self.tc_duration}s' if self.tc_duration is not None else ''
+        ld = f'@{self.lmrb_duration}s' if self.lmrb_duration is not None else ''
+        return f'{self.account}: TC "{self.tc_theme}"{td} → LMRB "{self.lmrb_theme}"{ld}'
+
+
 class SummaryReportMeta(models.Model):
     """User-fillable metadata for the Summary Sheet report.
     One record per (account, channel, month) scope.
