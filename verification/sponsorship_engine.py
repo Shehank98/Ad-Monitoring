@@ -152,12 +152,19 @@ def reconcile_sponsorship(account_id: int, channel: str, month: str,
                 'already_assigned': already_assigned}
 
     # ── Leftover (unmatched) LMRBRows for this scope ──────────────────────────
+    # Every lock flag must be honoured so a raw LMRB row can never be claimed by
+    # two engines at once:
+    #   is_matched              → commercial Schedule↔LMRB engine
+    #   is_sponsorship_matched  → this engine
+    #   is_manual_matched       → permanent ManualMatch lock
+    #   is_tc_lmrb_matched      → standalone TC↔LMRB engine
     lmrb_qs = LMRBRow.objects.filter(
         account_id=account_id,
         channel__iexact=channel,
         is_matched=False,
         is_sponsorship_matched=False,
-        is_tc_lmrb_matched=False,   # locked by standalone TC↔LMRB engine
+        is_manual_matched=False,
+        is_tc_lmrb_matched=False,
     )
     if d_min:
         lmrb_qs = lmrb_qs.filter(date__gte=d_min)
@@ -231,11 +238,15 @@ def lmrb_candidates(account_id: int, channel: str, month: str) -> list:
     """
     d_min, d_max = _scope_date_range(account_id, channel, month)
 
+    # Exclude every lock so the picker never offers an already-claimed row
+    # (commercial, sponsorship, permanent ManualMatch, or TC↔LMRB engine).
     qs = LMRBRow.objects.filter(
         account_id=account_id,
         channel__iexact=channel,
         is_matched=False,
         is_sponsorship_matched=False,
+        is_manual_matched=False,
+        is_tc_lmrb_matched=False,
     ).order_by('advt_theme', 'duration', 'date', 'advt_time')
 
     if d_min:
@@ -275,13 +286,13 @@ def manual_assign(account_id: int, channel: str, month: str,
             skipped += 1
             continue
 
-        # Guard: LMRB row must be unmatched, same account, not already locked,
-        # and not permanently claimed by a ManualMatch.
+        # Guard: LMRB row must be unmatched, same account, and not locked by any
+        # engine (commercial, sponsorship, permanent ManualMatch, or TC↔LMRB).
         try:
             lr = LMRBRow.objects.get(
                 id=lr_id, account_id=account_id,
                 is_matched=False, is_sponsorship_matched=False,
-                is_manual_matched=False,
+                is_manual_matched=False, is_tc_lmrb_matched=False,
             )
         except LMRBRow.DoesNotExist:
             skipped += 1

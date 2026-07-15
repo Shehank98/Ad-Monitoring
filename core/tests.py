@@ -34,6 +34,7 @@ from core.models import (
 )
 from verification.engine import run_scope
 from verification.sponsorship_engine import (
+    lmrb_candidates,
     manual_assign,
     reconcile_sponsorship,
     reset_sponsorship,
@@ -1240,6 +1241,82 @@ class SponsorshipManualAssignTest(TestCase):
             self.account.id, CHANNEL, MONTH,
             assignments=[(sr.id, lr.id)],
             user=self.user,
+        )
+
+        self.assertEqual(result["created"], 0)
+        self.assertEqual(result["skipped"], 1)
+
+
+class SponsorshipDoubleClaimLockTest(TestCase):
+    """
+    Regression: a raw LMRBRow already claimed by a ManualMatch or the standalone
+    TC↔LMRB engine must never be re-used by the sponsorship engine (auto pool,
+    manual picker, or manual assign) — otherwise one raw row is counted twice.
+    """
+
+    def setUp(self):
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        make_brand_mapping(self.account, brand="Brand A", theme="Spon Theme A", tc_theme="")
+        self.user = make_user()
+
+    def test_auto_skips_manual_matched_lmrb(self):
+        """reconcile_sponsorship must not claim an is_manual_matched LMRB row."""
+        sr = make_schedule_row(
+            self.account, self.schedule, ad_type="SPONSORSHIP", brand="Brand A",
+        )
+        lr = make_lmrb_row(self.account, advt_theme="Spon Theme A")
+        lr.is_manual_matched = True          # locked by a ManualMatch (is_matched stays False)
+        lr.save(update_fields=["is_manual_matched"])
+
+        result = reconcile_sponsorship(self.account.id, CHANNEL, MONTH, mode="reset")
+
+        self.assertEqual(result["assigned"], 0)
+        self.assertFalse(
+            SponsorshipLmrbAssignment.objects.filter(lmrb_row=lr).exists(),
+            "Manual-matched LMRB row was double-claimed by the sponsorship engine",
+        )
+
+    def test_auto_skips_tc_lmrb_matched_lmrb(self):
+        """reconcile_sponsorship must not claim an is_tc_lmrb_matched LMRB row."""
+        sr = make_schedule_row(
+            self.account, self.schedule, ad_type="SPONSORSHIP", brand="Brand A",
+        )
+        lr = make_lmrb_row(self.account, advt_theme="Spon Theme A")
+        lr.is_tc_lmrb_matched = True
+        lr.save(update_fields=["is_tc_lmrb_matched"])
+
+        result = reconcile_sponsorship(self.account.id, CHANNEL, MONTH, mode="reset")
+
+        self.assertEqual(result["assigned"], 0)
+        self.assertFalse(SponsorshipLmrbAssignment.objects.filter(lmrb_row=lr).exists())
+
+    def test_manual_picker_excludes_locked_rows(self):
+        """lmrb_candidates must hide rows locked by ManualMatch or TC↔LMRB."""
+        make_schedule_row(self.account, self.schedule, ad_type="SPONSORSHIP", brand="Brand A")
+        free = make_lmrb_row(self.account, advt_theme="Spon Theme A", advt_time="20:30:00")
+        manual = make_lmrb_row(self.account, advt_theme="Spon Theme A", advt_time="20:31:00")
+        tclmrb = make_lmrb_row(self.account, advt_theme="Spon Theme A", advt_time="20:32:00")
+        manual.is_manual_matched = True
+        manual.save(update_fields=["is_manual_matched"])
+        tclmrb.is_tc_lmrb_matched = True
+        tclmrb.save(update_fields=["is_tc_lmrb_matched"])
+
+        ids = {c["id"] for c in lmrb_candidates(self.account.id, CHANNEL, MONTH)}
+
+        self.assertIn(free.id, ids)
+        self.assertNotIn(manual.id, ids)
+        self.assertNotIn(tclmrb.id, ids)
+
+    def test_manual_assign_rejects_tc_lmrb_matched_lmrb(self):
+        """manual_assign must reject an is_tc_lmrb_matched LMRB row."""
+        sr = make_schedule_row(self.account, self.schedule, ad_type="SPONSORSHIP", brand="Brand A")
+        lr = make_lmrb_row(self.account, advt_theme="Spon Theme A")
+        lr.is_tc_lmrb_matched = True
+        lr.save(update_fields=["is_tc_lmrb_matched"])
+
+        result = manual_assign(
+            self.account.id, CHANNEL, MONTH, assignments=[(sr.id, lr.id)], user=self.user,
         )
 
         self.assertEqual(result["created"], 0)
