@@ -21,7 +21,7 @@
       </span>
       TC PDF Converter
     </h1>
-    <p class="text-sm text-slate-500 mt-1">Upload a TV station Transmission Certificate PDF - it is converted with Gemini AI (handles any TC layout), preview the rows, then download as Excel or upload to the system.</p>
+    <p class="text-sm text-slate-500 mt-1">Select the channel, upload its Transmission Certificate PDF, preview the parsed rows, then download as Excel or upload to the system.</p>
   </div>
 
   <!-- React app mount point -->
@@ -43,13 +43,6 @@ const ACTIVE_TV_CHANNELS = [
   "Tv - Vasantham TV", "Tv - Hiru TV", "Tv - Shakthi TV", "Tv - Siyatha Tv",
   "TV - Supreme TV", "Tv - Varnam TV", "Tv - Rupavahini",
   "Tv - Channel Eye - Nethra", "Star Tamil",
-];
-const ACTIVE_RADIO_CHANNELS = [
-  "Radio - E FM", "Radio - FM Derana", "Radio - Gold FM", "Radio - Hiru FM",
-  "Radio - Neth FM", "Radio - Ran Fm", "Radio - Shakthi FM", "Radio - Sirasa FM",
-  "Radio - Sitha FM", "Radio - Siyatha FM", "Radio - SLBC City",
-  "Radio - Sooriyan FM", "Radio - Sri FM", "Radio - Sun FM",
-  "Radio - Vasantham FM", "Radio - Yes FM", "Radio - Y FM",
 ];
 
 /* ── PDF parsing is provided by the shared module static/js/tc_pdf_parser.js,
@@ -99,8 +92,24 @@ function App() {
     if (!file) return;
     setIsConverting(true); setErrorMsg(''); setEngine(''); setEngineNote('');
 
-    // 1) Server-side conversion: Gemini AI when configured, otherwise the
-    //    server falls back to the channel heuristic converters itself.
+    // Listed channels have dedicated heuristic parsing rules → convert in the
+    // browser (no AI). AI (server, Gemini) is reserved for other schedules and
+    // is used only when the selected channel has no heuristic rules.
+    if (window.TCPDFParser.isHeuristicChannel(selectedChannel)) {
+      try {
+        const data = await parsePDF(file, selectedChannel);
+        if (!data.length) {
+          setErrorMsg('Could not find tabular data. Check the PDF is a valid TC for this channel.');
+        } else {
+          setRows(data);
+          setEngine('heuristic');
+        }
+      } catch(e) { setErrorMsg('Error reading PDF: ' + e.message); }
+      setIsConverting(false);
+      return;
+    }
+
+    // Other schedules → server-side Gemini AI (falls back to heuristic there).
     let serverNote = '';
     try {
       const fd = new FormData();
@@ -125,7 +134,7 @@ function App() {
       serverNote = 'Server conversion unavailable: ' + e.message;
     }
 
-    // 2) Last resort: parse in the browser with the shared heuristic parser.
+    // Last resort: browser heuristic parser.
     try {
       const data = await parsePDF(file, selectedChannel);
       if (!data.length) {
@@ -215,14 +224,8 @@ function App() {
         <p className="text-xs text-slate-400 mb-1 font-semibold">
           <i className="fa-solid fa-tv mr-1"></i> TV Channels
         </p>
-        <div className="grid grid-cols-5 gap-2 mb-4">
-          {ACTIVE_TV_CHANNELS.map(ch => <ChannelBtn key={ch} ch={ch} />)}
-        </div>
-        <p className="text-xs text-slate-400 mb-1 font-semibold">
-          <i className="fa-solid fa-radio mr-1"></i> Radio Channels
-        </p>
         <div className="grid grid-cols-5 gap-2">
-          {ACTIVE_RADIO_CHANNELS.map(ch => <ChannelBtn key={ch} ch={ch} />)}
+          {ACTIVE_TV_CHANNELS.map(ch => <ChannelBtn key={ch} ch={ch} />)}
         </div>
       </div>
 
@@ -271,7 +274,7 @@ function App() {
           disabled={!file || isConverting}
           className="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 disabled:opacity-40 transition-colors"
         >
-          <IcoZap size={15}/> {isConverting ? 'Converting… (AI can take up to a minute)' : 'Convert PDF'}
+          <IcoZap size={15}/> {isConverting ? 'Converting…' : 'Convert PDF'}
         </button>
       </div>
 

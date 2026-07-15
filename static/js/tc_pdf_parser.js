@@ -83,6 +83,18 @@
     return collapsed;
   }
 
+  /* Channels that have dedicated heuristic parsing rules in this module.
+     For these, the browser parser handles the TC directly (no AI needed). */
+  const HEURISTIC_CHANNELS = new Set([
+    "TV Derana", "Sirasa TV", "Swarnawahini TV", "ITN", "Vasantham TV",
+    "Hiru TV", "Shakthi TV", "Star Tamil", "Siyatha TV", "Supreme TV",
+    "Varnam TV", "Rupavahini", "Channel Eye",
+  ]);
+
+  function isHeuristicChannel(name) {
+    return HEURISTIC_CHANNELS.has(normalizeChannel(name));
+  }
+
   /* ── In-browser PDF heuristic parser (channel-specific) ───────────────────
      Returns rows keyed with the standard Nova columns:
        Date, Programme, Aired Time, TC Theme, Duration                        */
@@ -310,6 +322,6 @@
     return parsedData;
   }
 
-  global.TCPDFParser = { CHANNEL_MAP, normalizeChannel, parsePDF };
+  global.TCPDFParser = { CHANNEL_MAP, normalizeChannel, isHeuristicChannel, parsePDF };
 
 })(window);
