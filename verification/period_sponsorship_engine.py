@@ -37,7 +37,7 @@ from django.db.models import Q
 
 from core.models import (
     BrandMapping, LMRBRow, PeriodSponsorship, PeriodSponsorshipMatch,
-    ScheduleRow, parse_channel_media_type,
+    Schedule, ScheduleRow, parse_channel_media_type,
 )
 
 logger = logging.getLogger(__name__)
@@ -185,21 +185,33 @@ def import_from_schedule(account_id, channel, month, user=None) -> dict:
     """Create 'schedule'-sourced PeriodSponsorships by grouping SPONSORSHIP rows.
 
     Groups unimported SPONSORSHIP ScheduleRows for the scope by (brand, duration)
-    → one PeriodSponsorship with start=min date, end=max date,
-    planned_count=row count. Groups that already have a 'schedule' entry for the
-    same (brand, duration) are skipped so re-running does not duplicate.
+    → one PeriodSponsorship. The date window is the **Schedule header** span, not
+    the row dates: when a sponsorship is merged into a schedule its rows can all
+    carry a single date, so we use the widest span of the Schedule records that
+    contain those rows — min(Schedule.start_date) → max(Schedule.end_date) — with
+    the row date min/max as a fallback when a header date is blank. planned_count
+    is the row count. Groups already imported (same brand, duration) are skipped.
     """
     rows = ScheduleRow.objects.filter(
         account_id=account_id, channel=channel, month=month, ad_type='SPONSORSHIP',
-    ).values('brand', 'duration', 'date')
+    ).values('brand', 'duration', 'date', 'schedule_id')
 
     groups: dict = {}
     for r in rows:
         key = (r['brand'], r['duration'])
-        g = groups.setdefault(key, {'dates': [], 'count': 0})
+        g = groups.setdefault(key, {'dates': [], 'count': 0, 'sched_ids': set()})
         if r['date']:
             g['dates'].append(r['date'])
+        if r['schedule_id']:
+            g['sched_ids'].add(r['schedule_id'])
         g['count'] += 1
+
+    # Schedule header start/end dates for every schedule referenced above.
+    all_sched_ids = {sid for g in groups.values() for sid in g['sched_ids']}
+    sched_dates = {
+        s.id: (s.start_date, s.end_date)
+        for s in Schedule.objects.filter(id__in=all_sched_ids)
+    }
 
     existing = {
         (ps.brand, ps.duration)
@@ -210,14 +222,75 @@ def import_from_schedule(account_id, channel, month, user=None) -> dict:
 
     created = 0
     for (brand, duration), g in groups.items():
-        if (brand, duration) in existing or not g['dates']:
+        if (brand, duration) in existing:
+            continue
+        # Widest span across the Schedule headers containing this group's rows.
+        starts = [sched_dates[sid][0] for sid in g['sched_ids']
+                  if sched_dates.get(sid) and sched_dates[sid][0]]
+        ends = [sched_dates[sid][1] for sid in g['sched_ids']
+                if sched_dates.get(sid) and sched_dates[sid][1]]
+        start_date = min(starts) if starts else (min(g['dates']) if g['dates'] else None)
+        end_date = max(ends) if ends else (max(g['dates']) if g['dates'] else None)
+        if not (start_date and end_date):
             continue
         PeriodSponsorship.objects.create(
             account_id=account_id, channel=channel, month=month,
             brand=brand, duration=duration,
-            start_date=min(g['dates']), end_date=max(g['dates']),
+            start_date=start_date, end_date=end_date,
             planned_count=g['count'], source='schedule', created_by=user,
         )
         created += 1
 
     return {'created': created, 'groups': len(groups)}
+
+
+def unmatched_lmrb_groups(account_id, channel, month=''):
+    """Free (unclaimed) LMRB rows in scope grouped by (product, advt_theme, duration).
+
+    Lets the user see what monitoring data is still available and click a group to
+    pre-fill the Add form. Scope is the client's LMRB for the channel; when a month
+    is given the window is that calendar month, else all of the channel's LMRB.
+    Returns a list of dicts sorted by count desc:
+      {product, theme, duration, count, date_min, date_max}
+    Only rows free of every lock (is_matched / is_sponsorship_matched /
+    is_manual_matched / is_tc_lmrb_matched) are included.
+    """
+    from datetime import datetime as _dt
+
+    cq = Q()
+    for f in _channel_forms(channel):
+        cq |= Q(channel__iexact=f)
+    qs = LMRBRow.objects.filter(
+        cq, account_id=account_id,
+        is_matched=False, is_sponsorship_matched=False,
+        is_manual_matched=False, is_tc_lmrb_matched=False,
+    )
+    if month:
+        try:
+            d0 = _dt.strptime(month, '%B %Y').date()
+            nm = (d0.month % 12) + 1
+            ny = d0.year + (1 if d0.month == 12 else 0)
+            from datetime import date as _date, timedelta as _td
+            d1 = _date(ny, nm, 1) - _td(days=1)
+            qs = qs.filter(date__gte=d0, date__lte=d1)
+        except ValueError:
+            pass
+
+    groups: dict = {}
+    for lr in qs.values('product', 'advt_theme', 'duration', 'date'):
+        key = ((lr['product'] or '').strip(), (lr['advt_theme'] or '').strip(), lr['duration'])
+        g = groups.setdefault(key, {'count': 0, 'dmin': None, 'dmax': None})
+        g['count'] += 1
+        d = lr['date']
+        if d:
+            g['dmin'] = d if g['dmin'] is None or d < g['dmin'] else g['dmin']
+            g['dmax'] = d if g['dmax'] is None or d > g['dmax'] else g['dmax']
+
+    out = [
+        {'product': p, 'theme': t, 'duration': dur,
+         'count': g['count'], 'date_min': g['dmin'], 'date_max': g['dmax']}
+        for (p, t, dur), g in groups.items()
+        if t  # skip blank themes (nothing to map)
+    ]
+    out.sort(key=lambda x: (-x['count'], x['theme'].lower(), x['duration'] or 0))
+    return out

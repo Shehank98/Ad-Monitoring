@@ -72,38 +72,38 @@
         </button>
       </form>
     </div>
-    <form method="post" action="/dashboard/sponsorship/period/create/" class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
+    <form method="post" action="/dashboard/sponsorship/period/create/" id="psAddForm" class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
       {% csrf_token %}
       <input type="hidden" name="account_id" value="{{ account_id }}">
       <input type="hidden" name="channel" value="{{ channel }}">
       <input type="hidden" name="month" value="{{ month }}">
       <div class="sm:col-span-1">
         <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Brand *</label>
-        <input name="brand" class="select-field" required placeholder="Brand">
+        <input name="brand" id="ps-brand" class="select-field" required placeholder="Brand">
       </div>
       <div class="sm:col-span-1">
         <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">LMRB Theme</label>
-        <input name="theme" class="select-field" placeholder="blank = via brand map">
+        <input name="theme" id="ps-theme" class="select-field" placeholder="blank = via brand map">
       </div>
       <div>
         <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Duration</label>
-        <input name="duration" type="number" min="1" max="600" class="select-field" placeholder="any">
+        <input name="duration" id="ps-duration" type="number" min="1" max="600" class="select-field" placeholder="any">
       </div>
       <div>
         <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Start *</label>
-        <input name="start_date" type="date" class="select-field" required>
+        <input name="start_date" id="ps-start" type="date" class="select-field" required>
       </div>
       <div>
         <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">End *</label>
-        <input name="end_date" type="date" class="select-field" required>
+        <input name="end_date" id="ps-end" type="date" class="select-field" required>
       </div>
       <div>
         <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Planned</label>
-        <input name="planned_count" type="number" min="0" class="select-field" placeholder="0">
+        <input name="planned_count" id="ps-planned" type="number" min="0" class="select-field" placeholder="0">
       </div>
       <div class="sm:col-span-3 lg:col-span-5">
         <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Note</label>
-        <input name="note" class="select-field" placeholder="optional">
+        <input name="note" id="ps-note" class="select-field" placeholder="optional">
       </div>
       <div class="sm:col-span-3 lg:col-span-1">
         <button type="submit" class="btn-primary text-xs w-full"><i class="fa-solid fa-plus"></i> Add &amp; count</button>
@@ -113,6 +113,54 @@
       Leave <b>LMRB Theme</b> blank to resolve the brand through Brand Mappings, or type the exact LMRB Advt_Theme
       (a trailing <code>*</code> matches any suffix). Each counted LMRB row is locked so it can't be double-counted.
     </p>
+  </div>
+
+  <!-- ── Unmatched LMRB (group by product · theme · duration) ─── -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-4">
+    <div class="font-bold text-slate-700 text-sm mb-1">
+      <i class="fa-solid fa-eye text-emerald-600 mr-1"></i> Unmatched LMRB data
+      <span class="text-slate-400 font-normal">({{ lmrb_groups|length }} product · theme · duration group{{ lmrb_groups|length|pluralize }})</span>
+    </div>
+    <p class="text-xs text-slate-400 mb-3">
+      Free monitoring rows not claimed by any engine{% if month %} for {{ month }}{% endif %}.
+      Click <b>Use</b> to pre-fill the Add form above with that theme, duration and date range.
+    </p>
+    <div class="overflow-x-auto" style="max-height:320px;overflow-y:auto">
+      <table class="w-full text-xs">
+        <thead>
+          <tr class="border-b border-slate-100 text-slate-400">
+            <th class="text-left pb-2 font-semibold">Product</th>
+            <th class="text-left pb-2 font-semibold">Advt Theme</th>
+            <th class="text-center pb-2 font-semibold w-16">Dur</th>
+            <th class="text-center pb-2 font-semibold w-16">Count</th>
+            <th class="text-left pb-2 font-semibold">Date range</th>
+            <th class="pb-2 w-16"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-50">
+          {% for g in lmrb_groups %}
+          <tr class="hover:bg-slate-50">
+            <td class="py-1.5 pr-2 text-slate-500 max-w-[160px] truncate" title="{{ g.product }}">{{ g.product|default:"—" }}</td>
+            <td class="py-1.5 pr-2 text-slate-700 max-w-[220px] truncate" title="{{ g.theme }}">{{ g.theme }}</td>
+            <td class="py-1.5 text-center text-slate-600">{{ g.duration|default_if_none:"—" }}{% if g.duration %}s{% endif %}</td>
+            <td class="py-1.5 text-center font-bold text-emerald-700">{{ g.count }}</td>
+            <td class="py-1.5 pr-2 text-slate-500 whitespace-nowrap">{{ g.date_min|date:"d M" }} – {{ g.date_max|date:"d M Y" }}</td>
+            <td class="py-1.5 text-right">
+              <button type="button" class="btn-secondary text-[11px] py-0.5 px-2"
+                      onclick="psUse(this)"
+                      data-theme="{{ g.theme|escape }}"
+                      data-duration="{{ g.duration|default_if_none:'' }}"
+                      data-start="{{ g.date_min|date:'Y-m-d' }}"
+                      data-end="{{ g.date_max|date:'Y-m-d' }}"
+                      data-count="{{ g.count }}">Use</button>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="text-center text-slate-400 py-6">No unmatched LMRB rows in this scope.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <!-- ── Cards ─────────────────────────────────────────────── -->
@@ -192,4 +240,25 @@
   {% endif %}
 
 </div>
+
+<script>
+  function psUse(btn) {
+    const g = btn.dataset;
+    const theme = document.getElementById('ps-theme');
+    const dur   = document.getElementById('ps-duration');
+    const start = document.getElementById('ps-start');
+    const end   = document.getElementById('ps-end');
+    const plan  = document.getElementById('ps-planned');
+    const brand = document.getElementById('ps-brand');
+    if (theme) theme.value = g.theme || '';
+    if (dur)   dur.value   = g.duration || '';
+    if (start) start.value = g.start || '';
+    if (end)   end.value   = g.end || '';
+    if (plan)  plan.value  = g.count || '';
+    // Prompt for the brand next (theme is filled, brand is the human bit).
+    const form = document.getElementById('psAddForm');
+    if (form) form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (brand && !brand.value) brand.focus();
+  }
+</script>
 {% endblock %}

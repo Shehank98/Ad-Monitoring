@@ -8162,7 +8162,7 @@ def _period_sponsorship_redirect(account_id, channel='', month=''):
 def period_sponsorship_list(request):
     """Manage period (date-range) sponsorships for a client / channel / month."""
     from core.models import PeriodSponsorship, LMRBRow as _LR
-    from verification.period_sponsorship_engine import coverage
+    from verification.period_sponsorship_engine import coverage, unmatched_lmrb_groups
 
     user       = request.user
     account_qs = _account_qs(user)
@@ -8179,6 +8179,7 @@ def period_sponsorship_list(request):
 
     channels, months = [], []
     cards = []
+    lmrb_groups = []
     lmrb_min = lmrb_max = None
     if selected_account:
         # Channels/months from the client's LMRB data (guarantees exact match).
@@ -8190,6 +8191,7 @@ def period_sponsorship_list(request):
             agg = lmrb.filter(channel__iexact=channel).aggregate(
                 d_min=Min('date'), d_max=Max('date'))
             lmrb_min, lmrb_max = agg['d_min'], agg['d_max']
+            lmrb_groups = unmatched_lmrb_groups(account_id, channel, month)
 
         ps_qs = PeriodSponsorship.objects.filter(account_id=account_id)
         if channel:
@@ -8207,6 +8209,7 @@ def period_sponsorship_list(request):
         'channels':         channels,
         'months':           months,
         'cards':            cards,
+        'lmrb_groups':      lmrb_groups,
         'lmrb_min':         lmrb_min,
         'lmrb_max':         lmrb_max,
     })
