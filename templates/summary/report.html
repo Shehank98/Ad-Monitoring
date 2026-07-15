@@ -260,6 +260,11 @@
     <i class="fa-solid fa-file-excel text-teal-600"></i> Download Matched LMRB
   </a>
 
+  <a href="/dashboard/summary/unmatched-lmrb-excel/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
+     class="btn-secondary text-xs" title="Leftover 3rd-party LMRB spots for this client + channel that no engine matched">
+    <i class="fa-solid fa-file-excel text-amber-600"></i> Download Unmatched LMRB
+  </a>
+
   <a href="/dashboard/summary/colored-schedule/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
      class="btn-secondary text-xs">
     <i class="fa-solid fa-palette text-violet-600"></i> Colored Schedule

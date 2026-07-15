@@ -81,6 +81,7 @@ urlpatterns = [
     path('summary/pdf/',              views.summary_pdf,              name='summary_pdf'),
     path('summary/colored-schedule/', views.summary_colored_schedule, name='summary_colored_schedule'),
     path('monitoring/matched-lmrb-excel/',      views.matched_lmrb_excel,  name='matched_lmrb_excel'),
+    path('summary/unmatched-lmrb-excel/',       views.unmatched_lmrb_excel, name='unmatched_lmrb_excel'),
     path('admin-export/',                       views.admin_export,        name='admin_export'),
 
     # System Settings (super_admin only)

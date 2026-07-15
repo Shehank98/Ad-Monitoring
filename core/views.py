@@ -7183,6 +7183,107 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
     return len(combined)
 
 
+def _write_unmatched_lmrb_sheet(ws, account_id, channel, month):
+    """Write the UNMATCHED (leftover) LMRB rows for a scope into a worksheet.
+
+    Unmatched = LMRB rows for (account, channel) that no engine has claimed —
+    every lock flag is False (is_matched, is_sponsorship_matched,
+    is_manual_matched, is_tc_lmrb_matched). Scoped to the schedule's date window
+    for the month when a schedule exists (same window as the matched export);
+    otherwise all of the channel's unclaimed rows. Same column layout as
+    _write_matched_lmrb_sheet. Returns the row count written.
+    """
+    from openpyxl.styles import Font, Alignment, PatternFill
+    from django.db.models import Min, Max
+
+    sch_dates = Schedule.objects.filter(
+        account_id=account_id, channel=channel, month=month,
+    ).aggregate(d_min=Min('start_date'), d_max=Max('end_date'))
+    date_min = sch_dates.get('d_min')
+    date_max = sch_dates.get('d_max')
+
+    qs = LMRBRow.objects.filter(
+        account_id=account_id, channel__iexact=channel,
+        is_matched=False, is_sponsorship_matched=False,
+        is_manual_matched=False, is_tc_lmrb_matched=False,
+    )
+    if date_min and date_max:
+        qs = qs.filter(date__range=(date_min, date_max))
+    rows = list(qs.order_by('date', 'advt_time'))
+
+    HDR_FILL = PatternFill('solid', fgColor='0F2340')
+    hdr_font = Font(bold=True, color='FFFFFF', size=10)
+    norm     = Font(size=10)
+    centre   = Alignment(horizontal='center', vertical='center')
+
+    headers = [
+        'Product_Group', 'Advertiser', 'Product', 'Advt_Theme', 'Ads',
+        'Channel', 'Program',
+        'Dd', 'Mn', 'Yr', 'Day', 'Prog_time', 'Advt_time',
+        'AdPos', 'TotAds', 'BrkNo', 'PosinBrk', 'AdsinBrk',
+        'Lng', 'Dur', 'Cost',
+    ]
+    for col_i, h in enumerate(headers, start=1):
+        c = ws.cell(1, col_i, h)
+        c.font = hdr_font; c.fill = HDR_FILL; c.alignment = centre
+
+    for row_i, lr in enumerate(rows, start=2):
+        dd = lr.date.day   if lr.date else ''
+        mn = lr.date.month if lr.date else ''
+        yr = lr.date.year  if lr.date else ''
+        vals = [
+            lr.product_group or '', lr.advertiser or '', lr.product or '',
+            lr.advt_theme or '', lr.ads or '', lr.channel or '', lr.program or '',
+            dd, mn, yr, lr.day or '', lr.prog_time or '', lr.advt_time or '',
+            lr.ad_pos     if lr.ad_pos     is not None else '',
+            lr.tot_ads    if lr.tot_ads    is not None else '',
+            lr.brk_no     if lr.brk_no     is not None else '',
+            lr.pos_in_brk if lr.pos_in_brk is not None else '',
+            lr.ads_in_brk if lr.ads_in_brk is not None else '',
+            lr.lng or '',
+            lr.duration   if lr.duration   is not None else '',
+            float(lr.cost) if lr.cost is not None else '',
+        ]
+        for col_i, v in enumerate(vals, start=1):
+            ws.cell(row_i, col_i, v).font = norm
+
+    return len(rows)
+
+
+@login_required
+def unmatched_lmrb_excel(request):
+    """Export the UNMATCHED (leftover) LMRB spots for a client + channel + month.
+
+    The 3rd-party monitoring spots that no engine claimed — downloadable from the
+    Summary Sheet section.
+    """
+    import openpyxl
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+    if not (account_id and channel and month):
+        return HttpResponse('Missing parameters: account_id, channel, month', status=400)
+    if not _account_access(request.user, account_id):
+        return HttpResponse('Access denied', status=403)
+
+    account = get_object_or_404(Account, id=account_id)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Unmatched LMRB'
+    _write_unmatched_lmrb_sheet(ws, account_id, channel, month)
+
+    buf = io.BytesIO()
+    wb.save(buf); buf.seek(0)
+    fname = f'Unmatched_LMRB_{account.name}_{channel}_{month}.xlsx'.replace(' ', '_')
+    resp = HttpResponse(
+        buf.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    resp['Content-Disposition'] = f'attachment; filename="{fname}"'
+    return resp
+
+
 def _reconciliation_colors():
     """Return the configurable reconciliation colour palette from SystemSettings,
     with sensible defaults. Used by the colored-schedule export and summary sheets."""
