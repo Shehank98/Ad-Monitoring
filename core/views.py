@@ -8143,6 +8143,282 @@ def sponsorship_reset(request):
     )
 
 
+# ── Period (date-range) Sponsorships ──────────────────────────────────────────
+
+def _period_sponsorship_redirect(account_id, channel='', month=''):
+    from urllib.parse import quote
+    url = '/dashboard/sponsorship/period/'
+    if account_id:
+        url += f'?account_id={account_id}'
+        if channel:
+            url += f'&channel={quote(channel)}'
+        if month:
+            url += f'&month={quote(month)}'
+    return redirect(url)
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+def period_sponsorship_list(request):
+    """Manage period (date-range) sponsorships for a client / channel / month."""
+    from core.models import PeriodSponsorship, LMRBRow as _LR
+    from verification.period_sponsorship_engine import coverage
+
+    user       = request.user
+    account_qs = _account_qs(user)
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+
+    selected_account = None
+    if account_id:
+        try:
+            selected_account = account_qs.get(pk=account_id)
+        except Account.DoesNotExist:
+            selected_account = None
+
+    channels, months = [], []
+    cards = []
+    lmrb_min = lmrb_max = None
+    if selected_account:
+        # Channels/months from the client's LMRB data (guarantees exact match).
+        lmrb = _LR.objects.filter(account_id=account_id)
+        channels = sorted(set(lmrb.values_list('channel', flat=True)), key=str.lower)
+        if channel:
+            months = [d.strftime('%B %Y')
+                      for d in lmrb.filter(channel__iexact=channel).dates('date', 'month')]
+            agg = lmrb.filter(channel__iexact=channel).aggregate(
+                d_min=Min('date'), d_max=Max('date'))
+            lmrb_min, lmrb_max = agg['d_min'], agg['d_max']
+
+        ps_qs = PeriodSponsorship.objects.filter(account_id=account_id)
+        if channel:
+            ps_qs = ps_qs.filter(channel=channel)
+        if month:
+            ps_qs = ps_qs.filter(month=month)
+        cards = [coverage(ps) for ps in ps_qs]
+
+    return render(request, 'sponsorship/period.html', {
+        'accounts':         account_qs,
+        'selected_account': selected_account,
+        'account_id':       account_id,
+        'channel':          channel,
+        'month':            month,
+        'channels':         channels,
+        'months':           months,
+        'cards':            cards,
+        'lmrb_min':         lmrb_min,
+        'lmrb_max':         lmrb_max,
+    })
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+@require_POST
+def period_sponsorship_create(request):
+    """Create a manual period sponsorship, then reconcile it immediately."""
+    from core.models import PeriodSponsorship
+    from verification.period_sponsorship_engine import reconcile_period_sponsorship
+
+    account_id = request.POST.get('account_id', '').strip()
+    channel    = request.POST.get('channel', '').strip()
+    month      = request.POST.get('month', '').strip()
+    brand      = request.POST.get('brand', '').strip()
+    theme      = request.POST.get('theme', '').strip()
+    note       = request.POST.get('note', '').strip()
+    duration   = _safe_int(request.POST.get('duration'))
+    start_date = _safe_date(request.POST.get('start_date'))
+    end_date   = _safe_date(request.POST.get('end_date'))
+    planned    = _safe_int(request.POST.get('planned_count')) or 0
+
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return _period_sponsorship_redirect(account_id, channel, month)
+    if not (account_id and channel and month and brand and start_date and end_date):
+        messages.error(request, 'Client, channel, month, brand, start and end dates are required.')
+        return _period_sponsorship_redirect(account_id, channel, month)
+    if end_date < start_date:
+        messages.error(request, 'End date cannot be before start date.')
+        return _period_sponsorship_redirect(account_id, channel, month)
+
+    ps = PeriodSponsorship.objects.create(
+        account_id=account_id, channel=channel, month=month, brand=brand,
+        theme=theme, duration=duration, start_date=start_date, end_date=end_date,
+        planned_count=planned, note=note, source='manual', created_by=request.user,
+    )
+    cov = reconcile_period_sponsorship(ps, user=request.user)
+    if not cov['mapped'] and not theme:
+        messages.warning(request, f'Added "{brand}" but it has no brand mapping and no theme — '
+                                  f'found 0. Set a theme or map the brand, then reconcile.')
+    else:
+        messages.success(request, f'Added "{brand}" — found {cov["found"]} of {cov["planned"]} planned.')
+    return _period_sponsorship_redirect(account_id, channel, month)
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+@require_POST
+def period_sponsorship_import(request):
+    """Import period sponsorships by grouping SPONSORSHIP schedule rows."""
+    from verification.period_sponsorship_engine import import_from_schedule, reconcile_period_sponsorship
+    from core.models import PeriodSponsorship
+
+    account_id = request.POST.get('account_id', '').strip()
+    channel    = request.POST.get('channel', '').strip()
+    month      = request.POST.get('month', '').strip()
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return _period_sponsorship_redirect(account_id, channel, month)
+    if not (account_id and channel and month):
+        messages.error(request, 'Client, channel and month are required to import from the schedule.')
+        return _period_sponsorship_redirect(account_id, channel, month)
+
+    res = import_from_schedule(int(account_id), channel, month, user=request.user)
+    # Reconcile the freshly-imported ones so coverage shows immediately.
+    for ps in PeriodSponsorship.objects.filter(
+        account_id=account_id, channel=channel, month=month, source='schedule',
+    ):
+        reconcile_period_sponsorship(ps, user=request.user)
+
+    if res['created']:
+        messages.success(request, f'Imported {res["created"]} period sponsorship(s) from the schedule.')
+    else:
+        messages.info(request, 'No new sponsorship groups to import (all already imported or none in schedule).')
+    return _period_sponsorship_redirect(account_id, channel, month)
+
+
+def _get_period_sponsorship(request, pk):
+    from core.models import PeriodSponsorship
+    ps = get_object_or_404(PeriodSponsorship, pk=pk)
+    if not _account_access(request.user, ps.account_id):
+        return None
+    return ps
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+@require_POST
+def period_sponsorship_reconcile(request, pk):
+    from verification.period_sponsorship_engine import reconcile_period_sponsorship
+    ps = _get_period_sponsorship(request, pk)
+    if ps is None:
+        messages.error(request, 'Access denied.')
+        return _period_sponsorship_redirect('')
+    cov = reconcile_period_sponsorship(ps, user=request.user)
+    messages.success(request, f'"{ps.brand}" reconciled — found {cov["found"]} of {cov["planned"]}.')
+    return _period_sponsorship_redirect(ps.account_id, ps.channel, ps.month)
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+@require_POST
+def period_sponsorship_reconcile_all(request):
+    from core.models import PeriodSponsorship
+    from verification.period_sponsorship_engine import reconcile_period_sponsorship
+    account_id = request.POST.get('account_id', '').strip()
+    channel    = request.POST.get('channel', '').strip()
+    month      = request.POST.get('month', '').strip()
+    if not _account_access(request.user, account_id):
+        messages.error(request, 'Access denied.')
+        return _period_sponsorship_redirect(account_id, channel, month)
+    qs = PeriodSponsorship.objects.filter(account_id=account_id)
+    if channel:
+        qs = qs.filter(channel=channel)
+    if month:
+        qs = qs.filter(month=month)
+    n = 0
+    for ps in qs:
+        reconcile_period_sponsorship(ps, user=request.user)
+        n += 1
+    messages.success(request, f'Reconciled {n} period sponsorship(s).')
+    return _period_sponsorship_redirect(account_id, channel, month)
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+@require_POST
+def period_sponsorship_reset(request, pk):
+    from verification.period_sponsorship_engine import reset_period_sponsorship
+    ps = _get_period_sponsorship(request, pk)
+    if ps is None:
+        messages.error(request, 'Access denied.')
+        return _period_sponsorship_redirect('')
+    n = reset_period_sponsorship(ps)
+    messages.success(request, f'"{ps.brand}" reset — {n} LMRB row(s) unlocked.')
+    return _period_sponsorship_redirect(ps.account_id, ps.channel, ps.month)
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+@require_POST
+def period_sponsorship_delete(request, pk):
+    from verification.period_sponsorship_engine import delete_period_sponsorship
+    ps = _get_period_sponsorship(request, pk)
+    if ps is None:
+        messages.error(request, 'Access denied.')
+        return _period_sponsorship_redirect('')
+    acc, ch, mo, brand = ps.account_id, ps.channel, ps.month, ps.brand
+    delete_period_sponsorship(ps)
+    messages.success(request, f'Deleted period sponsorship "{brand}" and unlocked its LMRB rows.')
+    return _period_sponsorship_redirect(acc, ch, mo)
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+def period_sponsorship_download(request):
+    """Excel: one summary sheet + the matched LMRB appearances."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from core.models import PeriodSponsorship
+    from verification.period_sponsorship_engine import coverage
+
+    account_id = request.GET.get('account_id', '')
+    channel    = request.GET.get('channel', '')
+    month      = request.GET.get('month', '')
+    if not _account_access(request.user, account_id):
+        return HttpResponse('Access denied', status=403)
+    account = get_object_or_404(Account, id=account_id)
+
+    qs = PeriodSponsorship.objects.filter(account_id=account_id)
+    if channel:
+        qs = qs.filter(channel=channel)
+    if month:
+        qs = qs.filter(month=month)
+    covs = [coverage(ps) for ps in qs]
+
+    hdr_fill = PatternFill('solid', fgColor='0F2340')
+    hdr_font = Font(bold=True, color='FFFFFF')
+
+    def _hdr(ws, cols):
+        ws.append(cols)
+        for c in ws[1]:
+            c.fill = hdr_fill; c.font = hdr_font
+
+    wb = openpyxl.Workbook()
+    ws1 = wb.active; ws1.title = 'Period Sponsorships'
+    _hdr(ws1, ['Brand', 'Theme', 'Duration', 'Start', 'End', 'Planned', 'Found',
+               'Short', 'Extra', 'Days Covered', 'Source'])
+    for c in covs:
+        ws1.append([c['brand'], c['theme'], c['duration'], str(c['start_date']),
+                    str(c['end_date']), c['planned'], c['found'], c['short'],
+                    c['extra'], c['days_covered'], c['source']])
+
+    ws2 = wb.create_sheet('Matched LMRB')
+    _hdr(ws2, ['Brand', 'Date', 'Time', 'Theme', 'Duration', 'Programme', 'Advertiser', 'Product'])
+    for c in covs:
+        for m in c['matches']:
+            lr = m.lmrb_row
+            ws2.append([c['brand'], str(lr.date), lr.advt_time, lr.advt_theme,
+                        lr.duration, lr.program, lr.advertiser, lr.product])
+
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    fname = f'PeriodSponsorship_{account.name}_{channel}_{month}.xlsx'.replace(' ', '_')
+    resp = HttpResponse(buf.read(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    resp['Content-Disposition'] = f'attachment; filename="{fname}"'
+    return resp
+
+
 @login_required
 @role_required(['super_admin', 'admin', 'operations', 'team_head'])
 def sponsorship_unmatched_rows(request):

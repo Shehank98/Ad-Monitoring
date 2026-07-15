@@ -103,6 +103,16 @@ urlpatterns = [
     path('sponsorship/reset/',         views.sponsorship_reset,          name='sponsorship_reset'),
     path('sponsorship/unmatched-rows/',views.sponsorship_unmatched_rows, name='sponsorship_unmatched_rows'),
 
+    # Period (date-range) Sponsorships
+    path('sponsorship/period/',              views.period_sponsorship_list,     name='period_sponsorship_list'),
+    path('sponsorship/period/create/',       views.period_sponsorship_create,   name='period_sponsorship_create'),
+    path('sponsorship/period/import/',       views.period_sponsorship_import,   name='period_sponsorship_import'),
+    path('sponsorship/period/<int:pk>/reconcile/', views.period_sponsorship_reconcile, name='period_sponsorship_reconcile'),
+    path('sponsorship/period/<int:pk>/reset/',     views.period_sponsorship_reset,     name='period_sponsorship_reset'),
+    path('sponsorship/period/<int:pk>/delete/',    views.period_sponsorship_delete,    name='period_sponsorship_delete'),
+    path('sponsorship/period/reconcile-all/', views.period_sponsorship_reconcile_all, name='period_sponsorship_reconcile_all'),
+    path('sponsorship/period/download/',      views.period_sponsorship_download,  name='period_sponsorship_download'),
+
     # Manual Reconciliation
     path('manual/',                    views.manual_reconciliation, name='manual_reconciliation'),
     path('manual/match/',              views.manual_match_create,   name='manual_match_create'),

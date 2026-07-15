@@ -1,0 +1,195 @@
+{% extends 'base.html' %}
+{% block title %}Period Sponsorships{% endblock %}
+{% block page_title %}Period Sponsorships (date range){% endblock %}
+{% block page_subtitle %}For sponsorships that aren't single spots in the TC — verify them by counting LMRB appearances between a start and end date{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl space-y-5">
+
+  <a href="/dashboard/summary/{% if account_id %}?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% endif %}"
+     class="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700">
+    <i class="fa-solid fa-arrow-left text-xs"></i> Back to Summary
+  </a>
+
+  <!-- ── Scope ─────────────────────────────────────────────── -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-4">
+    <form method="get" class="flex flex-wrap gap-3 items-end">
+      <div class="flex-1 min-w-[160px]">
+        <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Client</label>
+        <select name="account_id" class="select-field" onchange="this.form.submit()">
+          <option value="">Select client…</option>
+          {% for acc in accounts %}
+            <option value="{{ acc.id }}" {% if acc.id|stringformat:"s" == account_id %}selected{% endif %}>{{ acc.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="flex-1 min-w-[150px]">
+        <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Channel</label>
+        <select name="channel" class="select-field" onchange="this.form.submit()" {% if not channels %}disabled{% endif %}>
+          <option value="">Select channel…</option>
+          {% for ch in channels %}
+            <option value="{{ ch }}" {% if ch == channel %}selected{% endif %}>{{ ch }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="flex-1 min-w-[130px]">
+        <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Month</label>
+        <select name="month" class="select-field" onchange="this.form.submit()" {% if not months %}disabled{% endif %}>
+          <option value="">All months</option>
+          {% for mo in months %}
+            <option value="{{ mo }}" {% if mo == month %}selected{% endif %}>{{ mo }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+    {% if channel and lmrb_min %}
+      <p class="text-xs text-slate-500 mt-2 font-semibold">
+        <i class="fa-solid fa-database text-emerald-500"></i>
+        LMRB data available: {{ lmrb_min|date:"d M Y" }} – {{ lmrb_max|date:"d M Y" }}
+      </p>
+    {% elif channel %}
+      <p class="text-xs text-rose-500 mt-2 font-semibold">
+        <i class="fa-solid fa-triangle-exclamation"></i> No LMRB data for this channel yet — nothing to count against.
+      </p>
+    {% endif %}
+  </div>
+
+  {% if selected_account and channel %}
+
+  <!-- ── Add period sponsorship ────────────────────────────── -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-4">
+    <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+      <div class="font-bold text-slate-700 text-sm">
+        <i class="fa-solid fa-calendar-plus text-indigo-600 mr-1"></i> Add a period sponsorship
+      </div>
+      <form method="post" action="/dashboard/sponsorship/period/import/">
+        {% csrf_token %}
+        <input type="hidden" name="account_id" value="{{ account_id }}">
+        <input type="hidden" name="channel" value="{{ channel }}">
+        <input type="hidden" name="month" value="{{ month }}">
+        <button type="submit" class="btn-secondary text-xs" {% if not month %}disabled title="Pick a month first"{% endif %}>
+          <i class="fa-solid fa-file-import"></i> Import from schedule
+        </button>
+      </form>
+    </div>
+    <form method="post" action="/dashboard/sponsorship/period/create/" class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
+      {% csrf_token %}
+      <input type="hidden" name="account_id" value="{{ account_id }}">
+      <input type="hidden" name="channel" value="{{ channel }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      <div class="sm:col-span-1">
+        <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Brand *</label>
+        <input name="brand" class="select-field" required placeholder="Brand">
+      </div>
+      <div class="sm:col-span-1">
+        <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">LMRB Theme</label>
+        <input name="theme" class="select-field" placeholder="blank = via brand map">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Duration</label>
+        <input name="duration" type="number" min="1" max="600" class="select-field" placeholder="any">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Start *</label>
+        <input name="start_date" type="date" class="select-field" required>
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">End *</label>
+        <input name="end_date" type="date" class="select-field" required>
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Planned</label>
+        <input name="planned_count" type="number" min="0" class="select-field" placeholder="0">
+      </div>
+      <div class="sm:col-span-3 lg:col-span-5">
+        <label class="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Note</label>
+        <input name="note" class="select-field" placeholder="optional">
+      </div>
+      <div class="sm:col-span-3 lg:col-span-1">
+        <button type="submit" class="btn-primary text-xs w-full"><i class="fa-solid fa-plus"></i> Add &amp; count</button>
+      </div>
+    </form>
+    <p class="text-xs text-slate-400 mt-2">
+      Leave <b>LMRB Theme</b> blank to resolve the brand through Brand Mappings, or type the exact LMRB Advt_Theme
+      (a trailing <code>*</code> matches any suffix). Each counted LMRB row is locked so it can't be double-counted.
+    </p>
+  </div>
+
+  <!-- ── Cards ─────────────────────────────────────────────── -->
+  <div class="flex items-center justify-between flex-wrap gap-2">
+    <div class="font-bold text-slate-700 text-sm">
+      {{ cards|length }} period sponsorship{{ cards|length|pluralize }}
+    </div>
+    {% if cards %}
+    <div class="flex gap-2">
+      <form method="post" action="/dashboard/sponsorship/period/reconcile-all/">
+        {% csrf_token %}
+        <input type="hidden" name="account_id" value="{{ account_id }}">
+        <input type="hidden" name="channel" value="{{ channel }}">
+        <input type="hidden" name="month" value="{{ month }}">
+        <button type="submit" class="btn-secondary text-xs"><i class="fa-solid fa-arrows-rotate"></i> Recount all</button>
+      </form>
+      <a href="/dashboard/sponsorship/period/download/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
+         class="btn-secondary text-xs"><i class="fa-solid fa-file-excel text-green-600"></i> Excel</a>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+    {% for c in cards %}
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-4">
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0">
+          <p class="text-sm font-bold text-slate-800 truncate">{{ c.brand }}
+            <span class="text-xs font-normal text-slate-400">
+              {% if c.theme %}· {{ c.theme }}{% endif %}{% if c.duration %} · {{ c.duration }}s{% endif %}
+            </span>
+          </p>
+          <p class="text-xs text-slate-500">{{ c.start_date|date:"d M Y" }} – {{ c.end_date|date:"d M Y" }}
+            <span class="badge {% if c.source == 'schedule' %}badge-blue{% else %}badge-green{% endif %} ml-1">{{ c.source }}</span>
+            {% if not c.mapped and not c.theme %}<span class="badge ml-1" style="background:#fee2e2;color:#991b1b">no mapping</span>{% endif %}
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-3 mt-2 text-sm">
+        <span class="text-slate-700 font-bold">{{ c.planned }} <span class="font-normal text-slate-400">planned</span></span>
+        <span class="text-green-700 font-bold">{{ c.found }} <span class="font-normal text-slate-400">found</span></span>
+        {% if c.short %}<span class="text-rose-600 font-bold">{{ c.short }} <span class="font-normal text-slate-400">short</span></span>{% endif %}
+        {% if c.extra %}<span class="text-amber-600 font-bold">{{ c.extra }} <span class="font-normal text-slate-400">extra</span></span>{% endif %}
+        <span class="text-slate-500 font-bold">{{ c.days_covered }} <span class="font-normal text-slate-400">days</span></span>
+      </div>
+      {% if c.note %}<p class="text-xs text-slate-400 mt-1 italic">{{ c.note }}</p>{% endif %}
+
+      <div class="flex gap-2 mt-3">
+        <form method="post" action="/dashboard/sponsorship/period/{{ c.id }}/reconcile/">
+          {% csrf_token %}
+          <button type="submit" class="btn-secondary text-[11px] py-1 px-2.5"><i class="fa-solid fa-arrows-rotate"></i> Recount</button>
+        </form>
+        <form method="post" action="/dashboard/sponsorship/period/{{ c.id }}/reset/"
+              onsubmit="return confirm('Reset unlocks the {{ c.found }} counted LMRB row(s). Continue?');">
+          {% csrf_token %}
+          <button type="submit" class="btn-secondary text-[11px] py-1 px-2.5"><i class="fa-solid fa-rotate-left text-rose-600"></i> Reset</button>
+        </form>
+        <form method="post" action="/dashboard/sponsorship/period/{{ c.id }}/delete/"
+              onsubmit="return confirm('Delete this period sponsorship and unlock its LMRB rows?');">
+          {% csrf_token %}
+          <button type="submit" class="btn-secondary text-[11px] py-1 px-2.5"><i class="fa-solid fa-trash text-rose-600"></i> Delete</button>
+        </form>
+      </div>
+    </div>
+    {% empty %}
+    <div class="text-center text-slate-400 py-8 lg:col-span-2 bg-white rounded-2xl border border-slate-100">
+      No period sponsorships yet. Add one above, or import from the schedule.
+    </div>
+    {% endfor %}
+  </div>
+
+  {% elif selected_account %}
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-8 text-center text-slate-400 text-sm">
+    Pick a channel to manage its period sponsorships.
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

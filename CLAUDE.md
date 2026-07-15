@@ -142,6 +142,15 @@ Wrong role → HTTP 403 (renders `403.html`), not a redirect.
 /sponsorship/reset/                       → sponsorship_reset         (POST: reset assignments)
 /sponsorship/unmatched-rows/              → sponsorship_unmatched_rows
 
+/sponsorship/period/                      → period_sponsorship_list           (date-range sponsorship UI)
+/sponsorship/period/create/               → period_sponsorship_create          (POST: add manual period sponsorship)
+/sponsorship/period/import/               → period_sponsorship_import          (POST: import from SPONSORSHIP schedule rows)
+/sponsorship/period/<pk>/reconcile/       → period_sponsorship_reconcile       (POST: recount one)
+/sponsorship/period/<pk>/reset/           → period_sponsorship_reset           (POST: unlock one)
+/sponsorship/period/<pk>/delete/          → period_sponsorship_delete          (POST)
+/sponsorship/period/reconcile-all/        → period_sponsorship_reconcile_all   (POST: recount scope)
+/sponsorship/period/download/             → period_sponsorship_download        (Excel: 2 sheets)
+
 /manual/                                  → manual_reconciliation     (manual match UI)
 /manual/match/                            → manual_match_create       (POST: create ManualMatch)
 /manual/dematch/<pk>/                     → manual_dematch            (POST: remove ManualMatch)
@@ -335,6 +344,36 @@ Created by:
 - Operations user via sponsorship picker in the Summary Sheet → `match_type='manual'`
 
 Once created, `LMRBRow.is_sponsorship_matched=True` acts as a permanent lock.
+
+> **CRITICAL — full lock set:** `reconcile_sponsorship`, `lmrb_candidates` (manual
+> picker) and `manual_assign` all exclude the **complete** lock set
+> (`is_matched`, `is_sponsorship_matched`, `is_manual_matched`, `is_tc_lmrb_matched`)
+> so one raw LMRB row can never be claimed by two engines at once. Any new LMRB
+> consumer MUST honour all four flags.
+
+### `PeriodSponsorship` / `PeriodSponsorshipMatch`
+For sponsorships that are **not a single spot in the TC** (e.g. a logo shown during a
+programme all month). They can't be reconciled one-to-one, so a `PeriodSponsorship`
+is defined over a **date range** and verified by **counting** LMRB appearances of its
+theme in that window (coverage count), via `verification/period_sponsorship_engine.py`.
+```
+PeriodSponsorship:
+  account (FK), channel, month, brand
+  theme (str, optional)  ← counts this LMRB Advt_Theme directly ('*' prefix ok);
+                            blank = resolve brand via BrandMapping.theme
+  duration (int, nullable)
+  start_date, end_date, planned_count
+  note, source ('manual' | 'schedule'), created_at, created_by
+PeriodSponsorshipMatch:
+  period_sponsorship (FK), lmrb_row (OneToOne)   ← one LMRB row counted once
+```
+> **Locking:** each counted LMRB row is locked with `is_sponsorship_matched=True`
+> (the same flag the spot engine uses), so commercial / TC↔LMRB / manual engines all
+> skip it. Deleting/resetting a PeriodSponsorship unlocks its rows.
+> **Sources (both supported):** manual entry form, or `import_from_schedule()` which
+> groups SPONSORSHIP ScheduleRows per (brand, duration) → start=min date, end=max
+> date, planned_count=row count. UI: `/dashboard/sponsorship/period/` (linked from the
+> Summary Sheet sponsorship controls).
 
 ### `TcLmrbMatch`
 A stored TC ↔ LMRB match made **without any schedule** (the "LMRB cut of TC" path).
@@ -750,7 +789,8 @@ Function: `summary_pdf()` in `core/views.py`
 | `verification/engine.py` | Schedule ↔ LMRB four-pass matching engine |
 | `verification/tc_engine.py` | TC ↔ Schedule + TC ↔ LMRB reconciliation + summary data builder |
 | `verification/tc_lmrb_engine.py` | Standalone TC ↔ LMRB reconciliation (no schedule); stores `TcLmrbMatch`, locks both rows |
-| `verification/sponsorship_engine.py` | SPONSORSHIP ScheduleRow ↔ LMRBRow assignment engine |
+| `verification/sponsorship_engine.py` | SPONSORSHIP ScheduleRow ↔ LMRBRow assignment engine (spot-based, one-to-one) |
+| `verification/period_sponsorship_engine.py` | Period (date-range) sponsorship engine: counts + locks LMRB appearances in a start→end window |
 | `verification/processing.py` | Low-level helpers: normalize, lmrb_fingerprint, four-pass match_ads algorithm |
 | `verification/schedule_converter.py` | Pivot schedule format detection/conversion |
 | `verification/views.py` | Legacy verification tool UI + Excel export |

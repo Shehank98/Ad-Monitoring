@@ -569,6 +569,84 @@ class SponsorshipLmrbAssignment(models.Model):
         )
 
 
+class PeriodSponsorship(models.Model):
+    """A sponsorship that runs over a DATE RANGE rather than as discrete spots.
+
+    Some sponsorships (e.g. a logo shown during a programme all month) never
+    appear as a matchable spot in the TC and cannot be reconciled one-to-one.
+    Instead the deal is defined over start_date → end_date and verified by
+    COUNTING LMRB appearances of its theme in that window (coverage count):
+    `planned_count` is what was booked, and the reconcile engine finds and
+    locks the actual LMRB appearances so they cannot be double-counted.
+
+    Source:
+    - 'manual'   — created via the Period Sponsorships form (may not be in the
+                   schedule/TC at all).
+    - 'schedule' — derived by grouping SPONSORSHIP ScheduleRows for a brand;
+                   start/end/planned_count come from that group.
+
+    Theme resolution: if `theme` is set it is matched directly against
+    LMRBRow.advt_theme (case-insensitive, '*' prefix supported); otherwise the
+    `brand` is resolved to LMRB themes via BrandMapping.theme (like the spot
+    sponsorship engine).
+    """
+    SOURCE_CHOICES = [
+        ('manual',   'Manual'),
+        ('schedule', 'From schedule'),
+    ]
+    account       = models.ForeignKey(Account, on_delete=models.CASCADE,
+                                      related_name='period_sponsorships')
+    channel       = models.CharField(max_length=200)
+    month         = models.CharField(max_length=50)
+    brand         = models.CharField(max_length=200)
+    theme         = models.CharField(
+        max_length=300, blank=True, default='',
+        help_text='LMRB Advt_Theme to count directly; blank = resolve via BrandMapping.brand',
+    )
+    duration      = models.PositiveIntegerField(null=True, blank=True)
+    start_date    = models.DateField()
+    end_date      = models.DateField()
+    planned_count = models.PositiveIntegerField(default=0)
+    note          = models.TextField(blank=True, default='')
+    source        = models.CharField(max_length=10, choices=SOURCE_CHOICES, default='manual')
+    created_at    = models.DateTimeField(auto_now_add=True)
+    created_by    = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='period_sponsorships',
+    )
+
+    class Meta:
+        ordering = ['channel', 'brand', 'start_date']
+        indexes = [models.Index(fields=['account', 'channel', 'month'])]
+
+    def __str__(self):
+        return (f'PeriodSpon | {self.account} | {self.channel} | {self.brand} '
+                f'| {self.start_date}→{self.end_date}')
+
+
+class PeriodSponsorshipMatch(models.Model):
+    """One LMRB appearance counted as coverage for a PeriodSponsorship.
+
+    One row per LMRBRow (OneToOne) so a raw LMRB row is counted at most once.
+    Creating it sets LMRBRow.is_sponsorship_matched=True (the same lock the spot
+    sponsorship engine uses), so commercial / TC↔LMRB / manual engines all skip
+    the row. Removing the parent PeriodSponsorship deletes these and unlocks.
+    """
+    period_sponsorship = models.ForeignKey(
+        PeriodSponsorship, on_delete=models.CASCADE, related_name='matches',
+    )
+    lmrb_row   = models.OneToOneField(
+        LMRBRow, on_delete=models.CASCADE, related_name='period_sponsorship_match',
+    )
+    matched_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['lmrb_row__date', 'lmrb_row__advt_time']
+
+    def __str__(self):
+        return f'PeriodSponMatch | {self.period_sponsorship_id} | lmrb={self.lmrb_row_id}'
+
+
 class TcLmrbMatch(models.Model):
     """A stored TC ↔ LMRB match created without any schedule (standalone path).
 
