@@ -22,7 +22,7 @@ class UserManager(BaseUserManager):
 
 class User(AbstractBaseUser, PermissionsMixin):
     ROLES = [
-        ('super_admin',     'Super Admin'),
+        ('super_admin',     'Admin'),
         ('admin',           'Admin'),
         ('team_head',       'Team Head'),
         ('planner',         'Planner'),

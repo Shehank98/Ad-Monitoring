@@ -470,6 +470,59 @@
       </a>
       {% endif %}
 
+      {% if ur == 'channel_officer' %}
+        <!-- Channel officer: dashboard + TC upload + missed commercials -->
+        <p class="nav-label"><span class="nav-text">My Portal</span></p>
+        <a href="/dashboard/channel-officer/" class="nav-item {% if 'channel-officer' in path and 'missed-commercials' not in path %}active{% endif %}">
+          <i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-text">My Schedules</span>
+        </a>
+        <a href="/dashboard/channel-officer/missed-commercials/" class="nav-item {% if 'missed-commercials' in path %}active{% endif %}" id="nav-missed-commercials">
+          <i class="nav-icon fa-solid fa-circle-xmark"></i>
+          <span class="nav-text">Missed Commercials</span>
+          <span id="mc-notif-badge" class="hidden ml-1 px-1.5 py-0.5 rounded-full bg-blue-500 text-white text-[9px] font-bold leading-none"></span>
+        </a>
+        <a href="/dashboard/tc/upload/" class="nav-item {% if 'tc/upload' in path %}active{% endif %}">
+          <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload TC</span>
+        </a>
+      {% else %}
+
+      <p class="nav-label"><span class="nav-text">Schedules</span></p>
+      <a href="/dashboard/schedules/" class="nav-item {% if '/schedules/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-text">Schedule</span>
+      </a>
+
+      <p class="nav-label"><span class="nav-text">LMRB Data</span></p>
+      <a href="/dashboard/monitoring/" class="nav-item {% if '/monitoring/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-chart-bar"></i><span class="nav-text">LMRB Data</span>
+      </a>
+
+      <p class="nav-label"><span class="nav-text">Transmission (TC)</span></p>
+      <a href="/dashboard/tc/" class="nav-item {% if '/tc/' in path and 'lmrb-match' not in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-file-invoice"></i><span class="nav-text">TC Reports</span>
+      </a>
+      <a href="/dashboard/tc/lmrb-match/" class="nav-item {% if 'lmrb-match' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-link"></i><span class="nav-text">TC ↔ LMRB (No Schedule)</span>
+      </a>
+
+      <p class="nav-label"><span class="nav-text">Monitoring</span></p>
+      <a href="/verify/" class="nav-item {% if '/verify/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-magnifying-glass-chart"></i><span class="nav-text">Verify Ads</span>
+      </a>
+      <a href="/dashboard/brand-mappings/" class="nav-item {% if '/brand-mappings/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-tags"></i><span class="nav-text">Brand Mappings</span>
+      </a>
+      <a href="/dashboard/monitor/" class="nav-item {% if '/monitor/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-gauge-high"></i><span class="nav-text">Monitoring Dashboard</span>
+      </a>
+
+      <p class="nav-label"><span class="nav-text">Reconciliation</span></p>
+      <a href="/dashboard/summary/" class="nav-item {% if '/summary/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-file-contract"></i><span class="nav-text">Summary Sheet</span>
+      </a>
+
+      {% endif %}{# end channel_officer else #}
+
+      {# ── Admin & management sections (moved to bottom) ── #}
       {% if ur in 'super_admin,admin' %}
         <p class="nav-label"><span class="nav-text">Admin</span></p>
         <a href="/dashboard/users/" class="nav-item {% if '/users/' in path %}active{% endif %}">
@@ -510,68 +563,6 @@
           <i class="nav-icon fa-solid fa-users"></i><span class="nav-text">Users</span>
         </a>
       {% endif %}
-
-      {% if ur == 'channel_officer' %}
-        <!-- Channel officer: dashboard + TC upload + missed commercials -->
-        <p class="nav-label"><span class="nav-text">My Portal</span></p>
-        <a href="/dashboard/channel-officer/" class="nav-item {% if 'channel-officer' in path and 'missed-commercials' not in path %}active{% endif %}">
-          <i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-text">My Schedules</span>
-        </a>
-        <a href="/dashboard/channel-officer/missed-commercials/" class="nav-item {% if 'missed-commercials' in path %}active{% endif %}" id="nav-missed-commercials">
-          <i class="nav-icon fa-solid fa-circle-xmark"></i>
-          <span class="nav-text">Missed Commercials</span>
-          <span id="mc-notif-badge" class="hidden ml-1 px-1.5 py-0.5 rounded-full bg-blue-500 text-white text-[9px] font-bold leading-none"></span>
-        </a>
-        <a href="/dashboard/tc/upload/" class="nav-item {% if 'tc/upload' in path %}active{% endif %}">
-          <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload TC</span>
-        </a>
-      {% else %}
-
-      <p class="nav-label"><span class="nav-text">Schedules</span></p>
-      <a href="/dashboard/schedules/" class="nav-item {% if '/schedules/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-text">Schedule</span>
-      </a>
-
-      <p class="nav-label"><span class="nav-text">LMRB Data</span></p>
-      <a href="/dashboard/monitoring/" class="nav-item {% if '/monitoring/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-chart-bar"></i><span class="nav-text">LMRB Data</span>
-      </a>
-
-      <p class="nav-label"><span class="nav-text">Monitoring</span></p>
-      <a href="/verify/" class="nav-item {% if '/verify/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-magnifying-glass-chart"></i><span class="nav-text">Verify Ads</span>
-      </a>
-      <a href="/dashboard/brand-mappings/" class="nav-item {% if '/brand-mappings/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-tags"></i><span class="nav-text">Brand Mappings</span>
-      </a>
-      <a href="/dashboard/monitor/" class="nav-item {% if '/monitor/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-gauge-high"></i><span class="nav-text">Monitoring Dashboard</span>
-      </a>
-
-      <p class="nav-label"><span class="nav-text">Transmission (TC)</span></p>
-      <a href="/dashboard/tc/" class="nav-item {% if '/tc/' in path and 'lmrb-match' not in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-file-invoice"></i><span class="nav-text">TC Reports</span>
-      </a>
-      <a href="/dashboard/tc/lmrb-match/" class="nav-item {% if 'lmrb-match' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-link"></i><span class="nav-text">TC ↔ LMRB (No Schedule)</span>
-      </a>
-
-      <p class="nav-label"><span class="nav-text">Reconciliation</span></p>
-      <a href="/dashboard/summary/" class="nav-item {% if '/summary/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-file-contract"></i><span class="nav-text">Summary Sheet</span>
-      </a>
-      <a href="/dashboard/manual/" class="nav-item {% if '/manual/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-link"></i><span class="nav-text">Manual Reconcile</span>
-      </a>
-
-      {% if ur in 'super_admin,admin,team_head,planner' %}
-      <p class="nav-label"><span class="nav-text">Intelligence</span></p>
-      <a href="/dashboard/competitor/" class="nav-item {% if '/competitor/' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-chess"></i><span class="nav-text">Competitor Analysis</span>
-      </a>
-      {% endif %}
-
-      {% endif %}{# end channel_officer else #}
 
       {% endwith %}
     </nav>
