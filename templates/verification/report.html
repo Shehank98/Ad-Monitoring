@@ -1,17 +1,17 @@
 {% extends 'base.html' %}
 {% block title %}Verification Report{% endblock %}
 {% block page_title %}Verification Report{% endblock %}
-{% block page_subtitle %}Account-level summary of all verification results by channel and month{% endblock %}
+{% block page_subtitle %}Brand-level summary of all verification results by channel and month{% endblock %}
 
 {% block content %}
 <div class="space-y-6">
 
-  <!-- Account selector -->
+  <!-- Brand selector -->
   <div class="card">
     <form method="get" class="flex flex-wrap items-end gap-4">
       <div class="flex-1 min-w-48">
         <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
-          <i class="fa-solid fa-building mr-1 text-slate-400"></i> Account
+          <i class="fa-solid fa-building mr-1 text-slate-400"></i> Brand
         </label>
         <select name="account_id" onchange="this.form.submit()"
                 class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -47,7 +47,7 @@
 
     {% else %}
 
-      <!-- Account-level summary cards -->
+      <!-- Brand-level summary cards -->
       <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         <div class="stat-card">
           <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Scopes</p>
