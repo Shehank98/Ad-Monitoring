@@ -528,19 +528,13 @@
       {% else %}
 
       <p class="nav-label"><span class="nav-text">Schedules</span></p>
-      <a href="/dashboard/schedules/" class="nav-item {% if '/schedules/' in path and 'upload' not in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-text">View Schedules</span>
-      </a>
-      <a href="/dashboard/schedules/upload/" class="nav-item {% if 'schedules/upload' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-file-arrow-up"></i><span class="nav-text">Upload Schedule</span>
+      <a href="/dashboard/schedules/" class="nav-item {% if '/schedules/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-calendar-days"></i><span class="nav-text">Schedule</span>
       </a>
 
       <p class="nav-label"><span class="nav-text">LMRB Data</span></p>
-      <a href="/dashboard/monitoring/" class="nav-item {% if '/monitoring/' in path and 'upload' not in path and '/monitor/' not in path and 'matched-lmrb' not in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-chart-bar"></i><span class="nav-text">View LMRB Data</span>
-      </a>
-      <a href="/dashboard/monitoring/upload/" class="nav-item {% if 'monitoring/upload' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload LMRB Data</span>
+      <a href="/dashboard/monitoring/" class="nav-item {% if '/monitoring/' in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-chart-bar"></i><span class="nav-text">LMRB Data</span>
       </a>
 
       <p class="nav-label"><span class="nav-text">Monitoring</span></p>
@@ -555,11 +549,8 @@
       </a>
 
       <p class="nav-label"><span class="nav-text">Transmission (TC)</span></p>
-      <a href="/dashboard/tc/" class="nav-item {% if '/tc/' in path and 'upload' not in path and 'lmrb-match' not in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-file-invoice"></i><span class="nav-text">View TC Reports</span>
-      </a>
-      <a href="/dashboard/tc/upload/" class="nav-item {% if 'tc/upload' in path %}active{% endif %}">
-        <i class="nav-icon fa-solid fa-cloud-arrow-up"></i><span class="nav-text">Upload TC</span>
+      <a href="/dashboard/tc/" class="nav-item {% if '/tc/' in path and 'lmrb-match' not in path %}active{% endif %}">
+        <i class="nav-icon fa-solid fa-file-invoice"></i><span class="nav-text">TC Reports</span>
       </a>
       <a href="/dashboard/tc/lmrb-match/" class="nav-item {% if 'lmrb-match' in path %}active{% endif %}">
         <i class="nav-icon fa-solid fa-link"></i><span class="nav-text">TC ↔ LMRB (No Schedule)</span>
