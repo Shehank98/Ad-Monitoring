@@ -63,6 +63,30 @@ git push origin --delete feature/short-descriptive-name
 > reaches `main` through `staging` first. This is the single habit that keeps the
 > repo clean and the client's data safe.
 
+### Reusing `staging` for every feature (it is permanent, not one-time)
+
+`main` and `staging` are **long-lived branches you reuse forever** — merging
+`staging → main` does not delete or "use up" staging. After that merge, `staging`
+and `main` simply sit at the same commit.
+
+For your **next** feature:
+
+1. Branch `feature/2` off `main`.
+2. Merge `feature/2 → staging`. Now staging is ahead of main by *only* feature 2.
+3. Merge `staging → main`. Git brings over **only the new commits** — the previous
+   feature (already in both) is recognised as shared history and is **not**
+   duplicated or re-applied. Nothing breaks.
+
+**Keep them level:** right after you merge to `main`, staging already equals main,
+so you are ready for the next feature. The only time they drift is if `main` changes
+*without* going through staging — a hotfix committed straight to main, or a rollback
+commit (see §7). Whenever that happens, merge `main` back into `staging` once to
+re-level them:
+
+```bash
+git checkout staging && git merge main && git push origin staging
+```
+
 ---
 
 ## 3. Railway environments
@@ -148,15 +172,67 @@ Notable archives:
 
 ---
 
-## 7. Quick reference
+## 7. Rolling back to a previous version
+
+When a production deploy misbehaves, there are three levels — from fastest to most
+thorough. **Always start with Level 1** to stop the bleeding, then decide on a
+permanent fix.
+
+### Level 1 — Instant rollback (no code, ~30 seconds) ← emergency button
+Railway keeps every past deployment. To serve an earlier good version immediately:
+
+1. Railway → **Production** service → **Deployments** tab.
+2. Find the last deployment that worked → **⋮ → Rollback** (or **Redeploy**).
+3. Railway re-serves that older build. Users are back on the good version.
+
+This is temporary — the bad code is still on `main`. Follow up with Level 2.
+
+### Level 2 — Permanent undo in git (removes the feature for good)
+Undo the merge that caused the problem, which auto-deploys a corrected `main`:
+
+```bash
+git checkout main && git pull
+git log --oneline --merges          # find the bad merge commit's SHA
+git revert -m 1 <bad-merge-sha>     # safely reverses it, keeps history intact
+git push origin main                # Railway auto-deploys the fixed production
+git checkout staging && git merge main && git push origin staging   # re-level staging (§2)
+```
+
+`git revert` does **not** delete history — it adds a new commit that undoes the
+change, so nothing is lost and you can re-apply the feature later.
+
+### Level 3 — Restore an entire earlier version
+Every past state is recoverable (see §5 and `ARCHIVE.md`):
+
+```bash
+git tag -l "archive/*"                         # list archived snapshots
+git checkout -b restore/<name> archive/<name>  # bring a whole old version back as a branch
+# then test on staging before promoting to main
+```
+
+### ⚠️ Code rollback does NOT rewind the database
+Levels 1–2 put the **code** back; they do **not** undo database changes. If a bad
+deploy ran a migration that altered or deleted data, restoring old code will not
+restore that data. Two protections:
+
+- **Test every migration on `staging` first** — that is the whole point of staging.
+- **Turn on production database backups:** Railway → **Production Postgres → Backups**.
+  With backups on, damaged data can be restored to a point in time. Do this once.
+
+---
+
+## 8. Quick reference
 
 | I want to… | Do this |
 |------------|---------|
 | Start new work | `git checkout main && git pull && git checkout -b feature/x` |
 | Test it safely | PR `feature/x → staging`, merge, open staging URL |
 | Ship it live | PR `staging → main`, merge (auto-deploys production) |
+| Do the next feature | branch off `main` again; staging is reused (§2) |
 | Clean up | delete `feature/x` on GitHub + locally |
 | Find old code | `git tag -l "archive/*"` then checkout the tag |
-| Undo a bad deploy | revert the merge commit on `main`, push (auto-redeploys) |
+| **Production is broken NOW** | Railway → Production → Deployments → **Rollback** (§7 Level 1) |
+| Undo a feature for good | `git revert -m 1 <merge-sha>` on `main`, push (§7 Level 2) |
+| Re-level staging after a hotfix | `git checkout staging && git merge main && git push origin staging` |
 
 Keep it boring. Boring is production-ready.
