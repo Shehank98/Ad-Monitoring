@@ -29,7 +29,19 @@
           <i class="fa-solid fa-layer-group text-indigo-600 text-xs"></i>
         </div>
         <span id="cl-name-{{ cl.id }}" class="font-bold text-slate-800 text-sm flex-1">{{ cl.name }}</span>
+        {% if cl.logo %}<img src="{{ cl.logo.url }}" alt="logo" class="h-6 max-w-[90px] object-contain mr-2 border border-slate-200 rounded bg-white">{% endif %}
         <span class="text-xs text-slate-400 mr-2">{{ cl.accounts.count }} account{{ cl.accounts.count|pluralize }}</span>
+
+        <!-- Client logo upload (for the Media Reconciliation Report) -->
+        <form method="post" enctype="multipart/form-data" class="inline-flex items-center gap-1 mr-1">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="set_client_logo"/>
+          <input type="hidden" name="client_id" value="{{ cl.id }}"/>
+          <label class="text-xs text-slate-400 hover:text-indigo-600 px-2 py-1 rounded cursor-pointer transition-colors" title="Upload client logo">
+            <i class="fa-solid fa-image"></i>
+            <input type="file" name="logo" accept="image/*" class="hidden" onchange="this.form.submit()"/>
+          </label>
+        </form>
 
         <!-- Edit client name inline -->
         <button type="button" onclick="toggleClientEdit({{ cl.id }})"

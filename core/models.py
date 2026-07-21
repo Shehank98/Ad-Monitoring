@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from decimal import Decimal
 import hashlib
 import uuid
 
@@ -56,6 +57,8 @@ class Client(models.Model):
     access to all Accounts under it.
     """
     name       = models.CharField(max_length=200, unique=True)
+    logo       = models.FileField(upload_to='client_logos/', null=True, blank=True,
+                                  help_text='Client logo shown on the Media Reconciliation Report.')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -758,6 +761,27 @@ class SummaryReportMeta(models.Model):
     authorised_by        = models.CharField(max_length=200, blank=True, default='')
     schedule_cost        = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     deviated_cost        = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+
+    # ── Media Reconciliation Report header fields (user-editable) ──
+    campaign             = models.CharField(max_length=300, blank=True, default='')
+    media                = models.CharField(max_length=300, blank=True, default='')   # free "Media:" line
+    medium               = models.CharField(max_length=100, blank=True, default='')   # e.g. TV / Radio / Press
+    specification        = models.CharField(max_length=300, blank=True, default='')
+    schedule_value       = models.CharField(max_length=200, blank=True, default='')
+    supplier_reference   = models.CharField(max_length=300, blank=True, default='')
+    date_of_reconciliation = models.DateField(null=True, blank=True)
+
+    # Per-deviation-row Reason/Solution + Deviated Value, keyed by "brand|dur"
+    deviation_notes      = models.JSONField(default=dict, blank=True)
+
+    # ── Editable rates (percentages) for the financial block ──
+    sscl_pct             = models.DecimalField(max_digits=6, decimal_places=3, default=Decimal('2.5'))
+    vat_pct              = models.DecimalField(max_digits=6, decimal_places=3, default=Decimal('18'))
+    media_house_pct      = models.DecimalField(max_digits=6, decimal_places=3, default=Decimal('85'))
+    agency_pct           = models.DecimalField(max_digits=6, decimal_places=3, default=Decimal('10.75'))
+    client_pct           = models.DecimalField(max_digits=6, decimal_places=3, default=Decimal('4.25'))
+    cag_pct              = models.DecimalField(max_digits=6, decimal_places=3, default=Decimal('0'))
+
     created_at           = models.DateTimeField(auto_now_add=True)
     updated_at           = models.DateTimeField(auto_now=True)
 

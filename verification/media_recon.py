@@ -1,0 +1,144 @@
+"""Media Reconciliation Report — shared context builder.
+
+One source of truth for the report so the on-screen UI, the Excel export and the
+PDF export all show the exact same numbers and layout.
+
+Financial formulas (confirmed with the client):
+    net_cost         = schedule_cost - deviated_cost
+    sscl             = net_cost * sscl_pct/100
+    sub_total        = net_cost + sscl
+    vat              = sub_total * vat_pct/100
+    total_with_taxes = sub_total + vat
+
+Payment split (each computed from NET COST, rates editable per report):
+    media_house = net_cost * media_house_pct/100
+    agency      = net_cost * agency_pct/100
+    client      = net_cost * client_pct/100
+    cag         = net_cost * cag_pct/100
+    total       = media_house + agency + client + cag
+"""
+from decimal import Decimal, ROUND_HALF_UP
+
+
+def _d(v):
+    """Coerce anything to Decimal, None/'' -> 0."""
+    if v is None or v == '':
+        return Decimal('0')
+    try:
+        return Decimal(str(v))
+    except Exception:
+        return Decimal('0')
+
+
+def _money(v):
+    return _d(v).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+def _pct(base, rate):
+    return _money(_d(base) * _d(rate) / Decimal('100'))
+
+
+def build_recon_context(account, channel, month, meta, summary_data, schedule=None):
+    """Assemble the full Media Reconciliation Report context.
+
+    account       : Account instance (the "Brand")
+    channel/month : scope strings
+    meta          : SummaryReportMeta instance or None
+    summary_data  : output of verification.tc_engine.build_summary_data()
+    schedule      : the Schedule record for this scope (for Schedule No / Medium)
+    """
+    client = getattr(account, 'client', None)
+    dev_notes = (meta.deviation_notes if meta and isinstance(meta.deviation_notes, dict) else {}) or {}
+
+    # ── Spot table (No. of Spots) + deviation rows, from the commercial rows ──
+    spots, deviations = [], []
+    tot_planned = tot_aired = tot_third = tot_dev = tot_notaired = 0
+    for row in (summary_data.get('commercial') or []):
+        brand = row.get('product', '')
+        dur   = row.get('dur', 0)
+        planned = row.get('planned', 0) or 0
+        aired   = row.get('aired', 0) or 0
+        third   = row.get('third_party', 0) or 0
+        extra   = row.get('extra', 0) or 0
+        missed  = row.get('missed', 0) or 0
+        spots.append({'brand': brand, 'dur': dur, 'planned': planned,
+                      'aired': aired, 'third_party': third})
+        tot_planned += planned
+        tot_aired   += aired
+        tot_third   += third
+        if extra or missed:
+            key = f'{brand}|{dur}'
+            note = dev_notes.get(key, {}) if isinstance(dev_notes, dict) else {}
+            deviations.append({
+                'brand': brand, 'dur': dur,
+                'deviated': extra, 'not_aired': missed,
+                'reason': (note.get('reason', '') if isinstance(note, dict) else ''),
+                'dev_value': (note.get('dev_value', '') if isinstance(note, dict) else ''),
+                'key': key,
+            })
+            tot_dev      += extra
+            tot_notaired += missed
+
+    # ── Financials ──
+    sc = _money(meta.schedule_cost) if (meta and meta.schedule_cost is not None) else Decimal('0')
+    dc = _money(meta.deviated_cost) if (meta and meta.deviated_cost is not None) else Decimal('0')
+    sscl_pct = _d(meta.sscl_pct) if meta else Decimal('2.5')
+    vat_pct  = _d(meta.vat_pct) if meta else Decimal('18')
+    mh_pct   = _d(meta.media_house_pct) if meta else Decimal('85')
+    ag_pct   = _d(meta.agency_pct) if meta else Decimal('10.75')
+    cl_pct   = _d(meta.client_pct) if meta else Decimal('4.25')
+    cag_pct  = _d(meta.cag_pct) if meta else Decimal('0')
+
+    net       = _money(sc - dc)
+    sscl      = _pct(net, sscl_pct)
+    sub_total = _money(net + sscl)
+    vat       = _pct(sub_total, vat_pct)
+    total_tax = _money(sub_total + vat)
+
+    mh  = _pct(net, mh_pct)
+    ag  = _pct(net, ag_pct)
+    cl  = _pct(net, cl_pct)
+    cag = _pct(net, cag_pct)
+
+    fin = {
+        'schedule_cost': sc, 'deviated_cost': dc, 'net': net,
+        'sscl_pct': sscl_pct, 'sscl': sscl, 'sub_total': sub_total,
+        'vat_pct': vat_pct, 'vat': vat, 'total_with_taxes': total_tax,
+        'media_house_pct': mh_pct, 'media_house': mh,
+        'agency_pct': ag_pct, 'agency': ag,
+        'client_pct': cl_pct, 'client': cl,
+        'cag_pct': cag_pct, 'cag': cag,
+        'split_total': _money(mh + ag + cl + cag),
+    }
+
+    logo = getattr(client, 'logo', None) if client else None
+    date_recon = ''
+    if meta and meta.date_of_reconciliation:
+        date_recon = meta.date_of_reconciliation.strftime('%d %b %Y')
+
+    return {
+        'title': 'Media Reconciliation Report',
+        'client': client.name if client else '',
+        'brand': account.name,
+        'campaign': (meta.campaign if meta else ''),
+        'media': (meta.media if meta else ''),
+        'medium': (meta.medium if meta else '') or (getattr(schedule, 'media_type', '') or ''),
+        'channel_publication': channel,
+        'specification': (meta.specification if meta else ''),
+        'schedule_value': (meta.schedule_value if meta else ''),
+        'schedule_no': (schedule.schedule_number if schedule else ''),
+        'client_po_no': (meta.po_no if meta else ''),
+        'supplier_reference': (meta.supplier_reference if meta else ''),
+        'date_recon': date_recon,
+        'scheduling_month': month,
+        'logo': logo,
+        'spots': spots,
+        'spots_total': {'planned': tot_planned, 'aired': tot_aired, 'third_party': tot_third},
+        'deviations': deviations,
+        'dev_total': {'deviated': tot_dev, 'not_aired': tot_notaired},
+        'notes': (meta.notes if meta else ''),
+        'fin': fin,
+        'prepared_by': (meta.prepared_by if meta else ''),
+        'checked_by': (meta.checked_by if meta else ''),
+        'authorised_by': (meta.authorised_by if meta else ''),
+    }
