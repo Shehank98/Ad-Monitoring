@@ -38,6 +38,19 @@ def _pct(base, rate):
     return _money(_d(base) * _d(rate) / Decimal('100'))
 
 
+def _money_str(s):
+    """Parse free-text money ('LKR 5,000,000' / '25000') -> Decimal or None."""
+    if s is None:
+        return None
+    c = ''.join(ch for ch in str(s) if ch.isdigit() or ch in '.-')
+    if c in ('', '.', '-', '-.', '.-'):
+        return None
+    try:
+        return Decimal(c)
+    except Exception:
+        return None
+
+
 def build_recon_context(account, channel, month, meta, summary_data, schedule=None):
     """Assemble the full Media Reconciliation Report context.
 
@@ -80,8 +93,27 @@ def build_recon_context(account, channel, month, meta, summary_data, schedule=No
             tot_notaired += missed
 
     # ── Financials ──
-    sc = _money(meta.schedule_cost) if (meta and meta.schedule_cost is not None) else Decimal('0')
-    dc = _money(meta.deviated_cost) if (meta and meta.deviated_cost is not None) else Decimal('0')
+    # Schedule Cost = numeric value of Schedule Value (fallback: stored schedule_cost)
+    sv = _money_str(getattr(meta, 'schedule_value', '') if meta else '')
+    if sv is not None:
+        sc = _money(sv)
+    elif meta and meta.schedule_cost is not None:
+        sc = _money(meta.schedule_cost)
+    else:
+        sc = Decimal('0')
+    # Deviated Cost = sum of the per-row Deviated Values (fallback: stored deviated_cost)
+    dc_sum, has_dc = Decimal('0'), False
+    for dv in deviations:
+        pv = _money_str(dv.get('dev_value'))
+        if pv is not None:
+            dc_sum += pv
+            has_dc = True
+    if has_dc:
+        dc = _money(dc_sum)
+    elif meta and meta.deviated_cost is not None:
+        dc = _money(meta.deviated_cost)
+    else:
+        dc = Decimal('0')
     sscl_pct = _d(meta.sscl_pct) if meta else Decimal('2.5')
     vat_pct  = _d(meta.vat_pct) if meta else Decimal('18')
     mh_pct   = _d(meta.media_house_pct) if meta else Decimal('85')

@@ -892,5 +892,115 @@ document.addEventListener('click', function(e) {
     <i class="fa-solid fa-xmark"></i>
   </button>
 </div>
+
+<!-- ══ Global upload progress overlay (applies to every file upload) ══ -->
+<style>
+  @keyframes uoPulse { 0%,100% { opacity:.55 } 50% { opacity:1 } }
+  #upload-overlay { display:none; position:fixed; inset:0; z-index:99999;
+    background:rgba(15,23,42,.55); backdrop-filter:blur(2px);
+    align-items:center; justify-content:center; }
+  #upload-overlay .uo-card { background:#fff; border-radius:16px; padding:24px 26px;
+    width:min(92vw,420px); box-shadow:0 20px 60px rgba(0,0,0,.32); }
+  #uo-track { height:12px; border-radius:999px; background:#e2e8f0; overflow:hidden; }
+  #uo-bar { height:100%; width:0%; border-radius:999px;
+    background:linear-gradient(90deg,#2563eb,#60a5fa); transition:width .15s ease; }
+  #uo-bar.processing { width:100% !important; animation:uoPulse 1.1s ease-in-out infinite; }
+</style>
+<div id="upload-overlay">
+  <div class="uo-card">
+    <div style="display:flex;align-items:center;gap:11px;margin-bottom:14px;">
+      <i class="fa-solid fa-cloud-arrow-up" style="color:#2563eb;font-size:20px;"></i>
+      <div style="min-width:0;">
+        <p id="uo-title" style="font-weight:700;color:#0f172a;font-size:15px;">Uploading…</p>
+        <p id="uo-file" style="font-size:12px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></p>
+      </div>
+    </div>
+    <div id="uo-track"><div id="uo-bar"></div></div>
+    <div style="display:flex;justify-content:space-between;margin-top:8px;">
+      <span id="uo-pct" style="font-size:12px;font-weight:600;color:#334155;">0%</span>
+      <span id="uo-time" style="font-size:12px;color:#64748b;">0:00</span>
+    </div>
+    <p id="uo-hint" style="font-size:11px;color:#94a3b8;margin-top:10px;">Please keep this tab open — large files take longer.</p>
+  </div>
+</div>
+<script>
+(function () {
+  var ov = document.getElementById('upload-overlay');
+  if (!ov) return;
+  var bar = document.getElementById('uo-bar'), pct = document.getElementById('uo-pct'),
+      tEl = document.getElementById('uo-time'), title = document.getElementById('uo-title'),
+      fileEl = document.getElementById('uo-file'), hint = document.getElementById('uo-hint');
+  var timer = null, start = 0;
+  function fmt(s){ var m = Math.floor(s/60), ss = s%60; return m + ':' + (ss<10?'0':'') + ss; }
+  function show(name, extra){
+    ov.style.display = 'flex';
+    bar.classList.remove('processing'); bar.style.width = '0%';
+    pct.textContent = '0%'; title.textContent = 'Uploading…';
+    fileEl.textContent = name ? (name + (extra||'')) : '';
+    hint.textContent = 'Please keep this tab open — large files take longer.';
+    tEl.textContent = '0:00'; start = Date.now();
+    if (timer) clearInterval(timer);
+    timer = setInterval(function(){ tEl.textContent = fmt(Math.floor((Date.now()-start)/1000)); }, 1000);
+  }
+  function processing(){
+    title.textContent = 'Processing on server…';
+    pct.textContent = ''; bar.classList.add('processing');
+    hint.textContent = 'Reading and saving your data. This can take a moment for large files.';
+  }
+  function hide(){ ov.style.display = 'none'; if (timer) clearInterval(timer); }
+
+  document.addEventListener('submit', function (e) {
+    var f = e.target;
+    if (!f || f.tagName !== 'FORM' || e.defaultPrevented) return;
+    if ((f.getAttribute('method')||'').toLowerCase() !== 'post') return;
+    if ((f.getAttribute('enctype')||'').toLowerCase() !== 'multipart/form-data') return;
+    if (f.hasAttribute('data-no-progress')) return;
+    if (!window.FormData || !window.XMLHttpRequest) return;   // very old browser → native submit
+
+    // Only take over when a file is actually chosen
+    var hasFile = false, name = '', mb = '';
+    f.querySelectorAll('input[type=file]').forEach(function (inp) {
+      if (inp.files && inp.files.length) {
+        hasFile = true; name = inp.files[0].name;
+        var sz = inp.files[0].size; if (sz) mb = '  (' + (sz/1048576).toFixed(1) + ' MB)';
+      }
+    });
+    if (!hasFile) return;
+    if (typeof f.checkValidity === 'function' && !f.checkValidity()) return;  // let native validation show
+
+    e.preventDefault();
+    var url = f.action || window.location.href;
+    var fd = new FormData(f);
+    if (e.submitter && e.submitter.name) fd.append(e.submitter.name, e.submitter.value || '');
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    xhr.upload.onprogress = function (ev) {
+      if (ev.lengthComputable) {
+        var p = Math.round(ev.loaded / ev.total * 100);
+        bar.style.width = p + '%'; pct.textContent = p + '%';
+        if (p >= 100) processing();
+      }
+    };
+    xhr.upload.onload = processing;
+    xhr.onload = function () {
+      var dest = xhr.responseURL || url;
+      try {
+        var a = new URL(dest, window.location.href), b = new URL(url, window.location.href);
+        if (a.pathname === b.pathname && a.search === b.search) {
+          // No redirect (e.g. validation error re-render) → show the returned page as-is
+          document.open(); document.write(xhr.responseText); document.close();
+          try { history.replaceState(null, '', dest); } catch (_) {}
+          return;
+        }
+      } catch (_) {}
+      window.location.href = dest;   // PRG → clean result page
+    };
+    xhr.onerror = function () { hide(); alert('Upload failed. Please check your connection and try again.'); };
+    show(name, mb);
+    xhr.send(fd);
+  }, false);
+})();
+</script>
 </body>
 </html>

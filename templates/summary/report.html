@@ -223,7 +223,7 @@
   <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
 
   <div class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-x-auto">
-    <div class="min-w-[900px] p-5 text-[13px] text-slate-800">
+    <div class="p-6 text-[13px] text-slate-800 mx-auto" style="width:1123px;max-width:1123px;">
 
       <!-- Title + logo -->
       <div class="flex items-center justify-between border-b-2 border-slate-200 pb-3 mb-4">
@@ -252,7 +252,7 @@
           <td class="border border-slate-300 px-1"><input name="medium" value="{{ meta.medium|default:recon.medium }}" class="input-field text-xs py-1 w-full"></td>
           <td class="border border-slate-300 px-2 py-1 text-center">{{ recon.channel_publication }}</td>
           <td class="border border-slate-300 px-1"><input name="specification" value="{{ meta.specification|default:'' }}" class="input-field text-xs py-1 w-full"></td>
-          <td class="border border-slate-300 px-1"><input name="schedule_value" value="{{ meta.schedule_value|default:'' }}" class="input-field text-xs py-1 w-full"></td>
+          <td class="border border-slate-300 px-1"><input name="schedule_value" id="in-schedule-value" value="{{ meta.schedule_value|default:'' }}" class="input-field text-xs py-1 w-full"></td>
         </tr></tbody>
       </table>
 
@@ -299,7 +299,7 @@
             <td class="border border-slate-300 px-2 py-1 text-center">{{ dv.deviated }}</td>
             <td class="border border-slate-300 px-2 py-1 text-center">{{ dv.not_aired }}</td>
             <td class="border border-slate-300 px-1"><input name="dev_reason" value="{{ dv.reason }}" class="input-field text-xs py-1 w-full"></td>
-            <td class="border border-slate-300 px-1"><input name="dev_value" value="{{ dv.dev_value }}" class="input-field text-xs py-1 w-full"></td>
+            <td class="border border-slate-300 px-1"><input name="dev_value" value="{{ dv.dev_value }}" class="input-field text-xs py-1 w-full dev-value-input"></td>
           </tr>
           {% empty %}
           <tr><td class="border border-slate-300 px-2 py-2 text-center text-slate-400" colspan="5">No deviations</td></tr>
@@ -324,25 +324,25 @@
         <!-- Left: cost buildup -->
         <table class="w-full border-collapse">
           <tbody>
-            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Schedule Cost</td>
-                <td class="border border-slate-300 px-1"><input type="number" step="0.01" name="schedule_cost" value="{{ meta.schedule_cost|default:'' }}" class="input-field text-xs py-1 w-full text-right"></td></tr>
-            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Deviated Cost</td>
-                <td class="border border-slate-300 px-1"><input type="number" step="0.01" name="deviated_cost" value="{{ meta.deviated_cost|default:'' }}" class="input-field text-xs py-1 w-full text-right"></td></tr>
-            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Net Cost</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.net|floatformat:2 }}</td></tr>
-            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">SSCL (<input type="number" step="0.001" name="sscl_pct" value="{{ meta.sscl_pct|default:'2.5' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.sscl|floatformat:2 }}</td></tr>
-            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Sub Total</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.sub_total|floatformat:2 }}</td></tr>
-            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">VAT (<input type="number" step="0.001" name="vat_pct" value="{{ meta.vat_pct|default:'18' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.vat|floatformat:2 }}</td></tr>
-            <tr class="bg-[#FCE4D6] font-bold"><td class="border border-slate-300 px-2 py-1">Total with Taxes</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.total_with_taxes|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Schedule Cost <span class="text-[9px] font-normal text-slate-400">(= Schedule Value)</span></td>
+                <td id="fc-sc" class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.schedule_cost|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Deviated Cost <span class="text-[9px] font-normal text-slate-400">(= Σ Deviated Values)</span></td>
+                <td id="fc-dc" class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.deviated_cost|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Net Cost</td><td id="fc-net" class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.net|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">SSCL (<input type="number" step="0.001" name="sscl_pct" data-rate="sscl" value="{{ meta.sscl_pct|default:'2.5' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td id="fc-sscl" class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.sscl|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Sub Total</td><td id="fc-sub" class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.sub_total|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">VAT (<input type="number" step="0.001" name="vat_pct" data-rate="vat" value="{{ meta.vat_pct|default:'18' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td id="fc-vat" class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.vat|floatformat:2 }}</td></tr>
+            <tr class="bg-[#FCE4D6] font-bold"><td class="border border-slate-300 px-2 py-1">Total with Taxes</td><td id="fc-tot" class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.total_with_taxes|floatformat:2 }}</td></tr>
           </tbody>
         </table>
         <!-- Right: payment split (from Net Cost) -->
         <table class="w-full border-collapse">
           <tbody>
-            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Media House (<input type="number" step="0.001" name="media_house_pct" value="{{ meta.media_house_pct|default:'85' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.media_house|floatformat:2 }}</td></tr>
-            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Agency AOR (<input type="number" step="0.001" name="agency_pct" value="{{ meta.agency_pct|default:'10.75' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.agency|floatformat:2 }}</td></tr>
-            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Client (<input type="number" step="0.001" name="client_pct" value="{{ meta.client_pct|default:'4.25' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.client|floatformat:2 }}</td></tr>
-            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">CAG (<input type="number" step="0.001" name="cag_pct" value="{{ meta.cag_pct|default:'0' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.cag|floatformat:2 }}</td></tr>
-            <tr class="bg-[#FCE4D6] font-bold"><td class="border border-slate-300 px-2 py-1">Total Cost to Client (100%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.split_total|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Media House (<input type="number" step="0.001" name="media_house_pct" data-rate="mh" value="{{ meta.media_house_pct|default:'85' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td id="fc-mh" class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.media_house|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Agency AOR (<input type="number" step="0.001" name="agency_pct" data-rate="ag" value="{{ meta.agency_pct|default:'10.75' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td id="fc-ag" class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.agency|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Client (<input type="number" step="0.001" name="client_pct" data-rate="cl" value="{{ meta.client_pct|default:'4.25' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td id="fc-cl" class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.client|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">CAG (<input type="number" step="0.001" name="cag_pct" data-rate="cag" value="{{ meta.cag_pct|default:'0' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td id="fc-cag" class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.cag|floatformat:2 }}</td></tr>
+            <tr class="bg-[#FCE4D6] font-bold"><td class="border border-slate-300 px-2 py-1">Total Cost to Client (100%)</td><td id="fc-split" class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.split_total|floatformat:2 }}</td></tr>
           </tbody>
         </table>
       </div>
@@ -356,10 +356,42 @@
 
       <div class="flex items-center gap-3 mt-5">
         <button type="submit" class="btn-primary text-xs"><i class="fa-solid fa-floppy-disk"></i> Save Report Details</button>
-        <span class="text-[11px] text-slate-400">Computed values (Net, SSCL, VAT, splits) refresh after saving.</span>
+        <span class="text-[11px] text-slate-400">Schedule Cost = Schedule Value · Deviated Cost = Σ Deviated Values · totals update live; click Save to store.</span>
       </div>
     </div>
   </div>
+
+  <script>
+  (function () {
+    var anchor = document.getElementById('fc-sc');
+    if (!anchor) return;
+    function num(v){ if (v == null) return 0; var c = String(v).replace(/[^0-9.\-]/g, ''); var n = parseFloat(c); return isFinite(n) ? n : 0; }
+    function fmt(n){ return n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+    function rate(name){ var el = document.querySelector('input[name="' + name + '"]'); return el ? num(el.value) : 0; }
+    function set(id, v){ var el = document.getElementById(id); if (el) el.textContent = fmt(v); }
+    function recompute(){
+      var sv = document.getElementById('in-schedule-value');
+      var sc = sv ? num(sv.value) : 0;
+      var dc = 0;
+      document.querySelectorAll('.dev-value-input').forEach(function (i) { dc += num(i.value); });
+      var net = sc - dc;
+      var sscl = net * rate('sscl_pct') / 100, sub = net + sscl,
+          vat = sub * rate('vat_pct') / 100, tot = sub + vat;
+      var mh = net * rate('media_house_pct') / 100, ag = net * rate('agency_pct') / 100,
+          cl = net * rate('client_pct') / 100, cag = net * rate('cag_pct') / 100;
+      set('fc-sc', sc); set('fc-dc', dc); set('fc-net', net);
+      set('fc-sscl', sscl); set('fc-sub', sub); set('fc-vat', vat); set('fc-tot', tot);
+      set('fc-mh', mh); set('fc-ag', ag); set('fc-cl', cl); set('fc-cag', cag);
+      set('fc-split', mh + ag + cl + cag);
+    }
+    var sv = document.getElementById('in-schedule-value');
+    if (sv) sv.addEventListener('input', recompute);
+    document.querySelectorAll('.dev-value-input, input[data-rate]').forEach(function (i) {
+      i.addEventListener('input', recompute);
+    });
+    recompute();
+  })();
+  </script>
 </form>
 {% endif %}
 
