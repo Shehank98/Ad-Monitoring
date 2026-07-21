@@ -213,6 +213,156 @@
 
 {% if summary_data %}
 
+{% if recon %}
+<!-- ══ Media Reconciliation Report (editable, matches Excel/PDF export) ══ -->
+<form method="post" class="mb-6">
+  {% csrf_token %}
+  <input type="hidden" name="account_id" value="{{ account_id }}">
+  <input type="hidden" name="channel"    value="{{ channel }}">
+  <input type="hidden" name="month"      value="{{ month }}">
+  <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
+
+  <div class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-x-auto">
+    <div class="min-w-[900px] p-5 text-[13px] text-slate-800">
+
+      <!-- Title + logo -->
+      <div class="flex items-center justify-between border-b-2 border-slate-200 pb-3 mb-4">
+        <h2 class="text-2xl font-extrabold text-[#1F3864]">Media Reconciliation Report</h2>
+        {% if recon.logo %}<img src="{{ recon.logo.url }}" alt="logo" class="h-12 object-contain">{% endif %}
+      </div>
+
+      <!-- Info grid -->
+      <div class="grid grid-cols-2 gap-x-6 gap-y-2 mb-4">
+        <div class="grid grid-cols-[130px_1fr] items-center gap-2"><span class="font-bold bg-slate-100 px-2 py-1 rounded">Client:</span><span>{{ recon.client }}</span></div>
+        <div class="grid grid-cols-[150px_1fr] items-center gap-2"><span class="font-bold bg-slate-100 px-2 py-1 rounded">Schedule No:</span><span>{{ recon.schedule_no }}</span></div>
+        <div class="grid grid-cols-[130px_1fr] items-center gap-2"><span class="font-bold bg-slate-100 px-2 py-1 rounded">Product/Brand:</span><span>{{ recon.brand }}</span></div>
+        <div class="grid grid-cols-[150px_1fr] items-center gap-2"><span class="font-bold bg-slate-100 px-2 py-1 rounded">Client PO No:</span><input name="po_no" value="{{ meta.po_no|default:'' }}" class="input-field text-xs py-1"></div>
+        <div class="grid grid-cols-[130px_1fr] items-center gap-2"><span class="font-bold bg-slate-100 px-2 py-1 rounded">Campaign:</span><input name="campaign" value="{{ meta.campaign|default:'' }}" class="input-field text-xs py-1"></div>
+        <div class="grid grid-cols-[150px_1fr] items-center gap-2"><span class="font-bold bg-slate-100 px-2 py-1 rounded">Supplier Ref:</span><input name="supplier_reference" value="{{ meta.supplier_reference|default:'' }}" class="input-field text-xs py-1"></div>
+        <div class="grid grid-cols-[130px_1fr] items-center gap-2"><span class="font-bold bg-slate-100 px-2 py-1 rounded">Media:</span><input name="media" value="{{ meta.media|default:'' }}" class="input-field text-xs py-1"></div>
+        <div class="grid grid-cols-[150px_1fr] items-center gap-2"><span class="font-bold bg-slate-100 px-2 py-1 rounded">Date of Recon:</span><input type="date" name="date_of_reconciliation" value="{{ meta.date_of_reconciliation|date:'Y-m-d' }}" class="input-field text-xs py-1"></div>
+      </div>
+
+      <!-- Medium row -->
+      <table class="w-full border-collapse mb-4 text-xs">
+        <thead><tr class="bg-[#1F3864] text-white">
+          <th class="border border-slate-300 px-2 py-1">Medium</th><th class="border border-slate-300 px-2 py-1">Channel/Publication</th>
+          <th class="border border-slate-300 px-2 py-1">Specification</th><th class="border border-slate-300 px-2 py-1">Schedule Value</th></tr></thead>
+        <tbody><tr>
+          <td class="border border-slate-300 px-1"><input name="medium" value="{{ meta.medium|default:recon.medium }}" class="input-field text-xs py-1 w-full"></td>
+          <td class="border border-slate-300 px-2 py-1 text-center">{{ recon.channel_publication }}</td>
+          <td class="border border-slate-300 px-1"><input name="specification" value="{{ meta.specification|default:'' }}" class="input-field text-xs py-1 w-full"></td>
+          <td class="border border-slate-300 px-1"><input name="schedule_value" value="{{ meta.schedule_value|default:'' }}" class="input-field text-xs py-1 w-full"></td>
+        </tr></tbody>
+      </table>
+
+      <!-- No. of Spots -->
+      <table class="w-full border-collapse mb-4 text-xs">
+        <thead>
+          <tr class="bg-[#1F3864] text-white"><th class="border border-slate-300 px-2 py-1" colspan="2"></th><th class="border border-slate-300 px-2 py-1" colspan="3">No of Spots</th></tr>
+          <tr class="bg-[#1F3864] text-white">
+            <th class="border border-slate-300 px-2 py-1">Scheduling Month</th><th class="border border-slate-300 px-2 py-1">Spot/VA Duration</th>
+            <th class="border border-slate-300 px-2 py-1">Schedule (Planned)</th><th class="border border-slate-300 px-2 py-1">Transmission (Aired)</th><th class="border border-slate-300 px-2 py-1">Nielsen (3rd Party)</th></tr>
+        </thead>
+        <tbody>
+          {% for sp in recon.spots %}
+          <tr>
+            <td class="border border-slate-300 px-2 py-1 text-center">{% if forloop.first %}{{ recon.scheduling_month }}{% endif %}</td>
+            <td class="border border-slate-300 px-2 py-1">{{ sp.brand }} {{ sp.dur }}s</td>
+            <td class="border border-slate-300 px-2 py-1 text-center">{{ sp.planned }}</td>
+            <td class="border border-slate-300 px-2 py-1 text-center">{{ sp.aired }}</td>
+            <td class="border border-slate-300 px-2 py-1 text-center">{{ sp.third_party }}</td>
+          </tr>
+          {% endfor %}
+          <tr class="bg-[#FCE4D6] font-bold">
+            <td class="border border-slate-300 px-2 py-1" colspan="2">Total</td>
+            <td class="border border-slate-300 px-2 py-1 text-center">{{ recon.spots_total.planned }}</td>
+            <td class="border border-slate-300 px-2 py-1 text-center">{{ recon.spots_total.aired }}</td>
+            <td class="border border-slate-300 px-2 py-1 text-center">{{ recon.spots_total.third_party }}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Deviations -->
+      <table class="w-full border-collapse mb-4 text-xs">
+        <thead>
+          <tr class="bg-[#1F3864] text-white"><th class="border border-slate-300 px-2 py-1" colspan="5">Transmission Report Details - Commercials / VA</th></tr>
+          <tr class="bg-[#1F3864] text-white">
+            <th class="border border-slate-300 px-2 py-1">Spot/VA Duration</th><th class="border border-slate-300 px-2 py-1">Deviated</th>
+            <th class="border border-slate-300 px-2 py-1">Not Aired</th><th class="border border-slate-300 px-2 py-1">Reason / Solution</th><th class="border border-slate-300 px-2 py-1">Deviated Value</th></tr>
+        </thead>
+        <tbody>
+          {% for dv in recon.deviations %}
+          <tr>
+            <td class="border border-slate-300 px-2 py-1">{{ dv.brand }} {{ dv.dur }}s
+              <input type="hidden" name="dev_key" value="{{ dv.key }}"></td>
+            <td class="border border-slate-300 px-2 py-1 text-center">{{ dv.deviated }}</td>
+            <td class="border border-slate-300 px-2 py-1 text-center">{{ dv.not_aired }}</td>
+            <td class="border border-slate-300 px-1"><input name="dev_reason" value="{{ dv.reason }}" class="input-field text-xs py-1 w-full"></td>
+            <td class="border border-slate-300 px-1"><input name="dev_value" value="{{ dv.dev_value }}" class="input-field text-xs py-1 w-full"></td>
+          </tr>
+          {% empty %}
+          <tr><td class="border border-slate-300 px-2 py-2 text-center text-slate-400" colspan="5">No deviations</td></tr>
+          {% endfor %}
+          <tr class="bg-[#FCE4D6] font-bold">
+            <td class="border border-slate-300 px-2 py-1">Total</td>
+            <td class="border border-slate-300 px-2 py-1 text-center">{{ recon.dev_total.deviated }}</td>
+            <td class="border border-slate-300 px-2 py-1 text-center">{{ recon.dev_total.not_aired }}</td>
+            <td class="border border-slate-300 px-2 py-1" colspan="2"></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Special Notes -->
+      <div class="mb-4">
+        <label class="font-bold text-slate-600 text-xs">Special Notes:</label>
+        <textarea name="notes" rows="2" class="input-field text-xs w-full mt-1">{{ meta.notes|default:'' }}</textarea>
+      </div>
+
+      <!-- Financial block -->
+      <div class="grid grid-cols-2 gap-4 text-xs">
+        <!-- Left: cost buildup -->
+        <table class="w-full border-collapse">
+          <tbody>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Schedule Cost</td>
+                <td class="border border-slate-300 px-1"><input type="number" step="0.01" name="schedule_cost" value="{{ meta.schedule_cost|default:'' }}" class="input-field text-xs py-1 w-full text-right"></td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Deviated Cost</td>
+                <td class="border border-slate-300 px-1"><input type="number" step="0.01" name="deviated_cost" value="{{ meta.deviated_cost|default:'' }}" class="input-field text-xs py-1 w-full text-right"></td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Net Cost</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.net|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">SSCL (<input type="number" step="0.001" name="sscl_pct" value="{{ meta.sscl_pct|default:'2.5' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.sscl|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Sub Total</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.sub_total|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">VAT (<input type="number" step="0.001" name="vat_pct" value="{{ meta.vat_pct|default:'18' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.vat|floatformat:2 }}</td></tr>
+            <tr class="bg-[#FCE4D6] font-bold"><td class="border border-slate-300 px-2 py-1">Total with Taxes</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.total_with_taxes|floatformat:2 }}</td></tr>
+          </tbody>
+        </table>
+        <!-- Right: payment split (from Net Cost) -->
+        <table class="w-full border-collapse">
+          <tbody>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Media House (<input type="number" step="0.001" name="media_house_pct" value="{{ meta.media_house_pct|default:'85' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.media_house|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Agency AOR (<input type="number" step="0.001" name="agency_pct" value="{{ meta.agency_pct|default:'10.75' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.agency|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">Client (<input type="number" step="0.001" name="client_pct" value="{{ meta.client_pct|default:'4.25' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.client|floatformat:2 }}</td></tr>
+            <tr><td class="border border-slate-300 px-2 py-1 font-bold bg-slate-100">CAG (<input type="number" step="0.001" name="cag_pct" value="{{ meta.cag_pct|default:'0' }}" class="input-field text-xs py-0.5 w-16 inline">%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.cag|floatformat:2 }}</td></tr>
+            <tr class="bg-[#FCE4D6] font-bold"><td class="border border-slate-300 px-2 py-1">Total Cost to Client (100%)</td><td class="border border-slate-300 px-2 py-1 text-right">{{ recon.fin.split_total|floatformat:2 }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Signatures -->
+      <div class="grid grid-cols-3 gap-4 mt-6 text-xs">
+        <div><input name="prepared_by" value="{{ meta.prepared_by|default:'' }}" class="input-field text-xs py-1 w-full text-center"><p class="text-center font-bold mt-1">Prepared By</p></div>
+        <div><input name="checked_by" value="{{ meta.checked_by|default:'' }}" class="input-field text-xs py-1 w-full text-center"><p class="text-center font-bold mt-1">Checked By</p></div>
+        <div><input name="authorised_by" value="{{ meta.authorised_by|default:'' }}" class="input-field text-xs py-1 w-full text-center"><p class="text-center font-bold mt-1">Authorized By</p></div>
+      </div>
+
+      <div class="flex items-center gap-3 mt-5">
+        <button type="submit" class="btn-primary text-xs"><i class="fa-solid fa-floppy-disk"></i> Save Report Details</button>
+        <span class="text-[11px] text-slate-400">Computed values (Net, SSCL, VAT, splits) refresh after saving.</span>
+      </div>
+    </div>
+  </div>
+</form>
+{% endif %}
+
 <!-- ── Action buttons ─────────────────────────────────────────── -->
 <div class="flex flex-wrap gap-2 mb-5">
   {% comment %}Scope hidden inputs reused across all forms on this page{% endcomment %}

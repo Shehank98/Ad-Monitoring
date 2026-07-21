@@ -408,6 +408,19 @@ def account_list(request):
                 messages.success(request, f'Client renamed to "{name}".')
             return redirect('/dashboard/accounts/')
 
+        elif action == 'set_client_logo':
+            pk = request.POST.get('client_id')
+            cl = get_object_or_404(Client, id=pk)
+            if request.FILES.get('logo'):
+                cl.logo = request.FILES['logo']
+                cl.save(update_fields=['logo'])
+                messages.success(request, f'Logo updated for "{cl.name}".')
+            elif request.POST.get('remove_logo'):
+                cl.logo = None
+                cl.save(update_fields=['logo'])
+                messages.success(request, f'Logo removed for "{cl.name}".')
+            return redirect('/dashboard/accounts/')
+
         elif action == 'delete_client':
             pk = request.POST.get('client_id')
             cl = get_object_or_404(Client, id=pk)
@@ -6043,7 +6056,19 @@ def summary_report(request):
             meta.schedule_cost, meta.deviated_cost
         ).calculate()
 
+    recon = None
+    if account_id and channel and month and summary_data:
+        try:
+            from verification.media_recon import build_recon_context
+            acc_obj = selected_account or Account.objects.filter(id=account_id).first()
+            if acc_obj:
+                recon = build_recon_context(acc_obj, channel, month, meta, summary_data,
+                                            schedule=schedule_obj)
+        except Exception:
+            recon = None
+
     return render(request, 'summary/report.html', {
+        'recon':                recon,
         'accounts':             account_qs,
         'selected_account':     selected_account,
         'account_id':           account_id,
