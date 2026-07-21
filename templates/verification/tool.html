@@ -83,10 +83,10 @@
 
 {% block content %}
 
-<!-- ── Filter bar: Account + Media type ───────────────────────────────────── -->
+<!-- ── Filter bar: Brand + Media type ───────────────────────────────────── -->
 <div class="flex flex-wrap items-center gap-3 mb-4">
 
-  <!-- Account filter -->
+  <!-- Brand filter -->
   <form method="get" class="flex items-center gap-2">
     <select name="account_id" onchange="this.form.submit()"
             class="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-600
@@ -189,7 +189,7 @@
             id="dot-{{ idx }}"
             title="{% if row.dot == 'none' %}Never verified{% elif row.dot == 'ok' %}Verified - no issues{% elif row.dot == 'missed' %}Missed spots detected{% endif %}"></span>
 
-      <!-- Channel + Account + Month -->
+      <!-- Channel + Brand + Month -->
       <div class="min-w-0 flex-1">
         <p class="font-bold text-slate-800 text-sm leading-tight">{{ row.channel }}</p>
         <p class="text-xs text-slate-400">{{ row.account_name }} &middot; {{ row.month }}</p>

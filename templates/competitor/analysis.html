@@ -18,13 +18,13 @@
         </div>
       </div>
 
-      <!-- Account selector -->
+      <!-- Brand selector -->
       <form method="get" id="accountForm" class="flex items-center gap-2">
         <input type="hidden" name="tab" value="{{ tab }}">
-        <label class="text-sm font-medium text-slate-600">Account:</label>
+        <label class="text-sm font-medium text-slate-600">Brand:</label>
         <select name="account_id" onchange="document.getElementById('accountForm').submit()"
                 class="select-field w-52">
-          <option value="">- Select Account -</option>
+          <option value="">- Select Brand -</option>
           {% for acc in account_qs %}
           <option value="{{ acc.id }}" {% if acc.id|stringformat:"s" == account_id %}selected{% endif %}>{{ acc.name }}</option>
           {% endfor %}

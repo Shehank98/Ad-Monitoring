@@ -57,20 +57,20 @@
   {% if not edit %}
   <!-- Multi account/channel assignments -->
   <div>
-    <label class="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Account &amp; Channel Assignments</label>
+    <label class="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Brand &amp; Channel Assignments</label>
     <p class="text-xs text-slate-400 mb-3">Add one row per account/channel this officer manages.</p>
     <div id="assignmentRows" class="space-y-2">
       <!-- Rows injected by JS on load -->
     </div>
     <button type="button" onclick="addAssignmentRow()"
             class="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:border-og-red hover:text-og-red text-xs font-semibold transition-colors">
-      <i class="fa-solid fa-plus"></i> Add Another Account / Channel
+      <i class="fa-solid fa-plus"></i> Add Another Brand / Channel
     </button>
   </div>
   {% else %}
   <!-- Edit: single assignment (one row) -->
   <div>
-    <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Account</label>
+    <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Brand</label>
     <select name="account_id" class="select-field" required>
       <option value="">Select account…</option>
       {% for acc in accounts %}
@@ -159,7 +159,7 @@ function toggleLoginFields() {
   fields.classList.toggle('hidden', !check.checked);
 }
 
-// Account/Channel assignment rows (create mode only)
+// Brand/Channel assignment rows (create mode only)
 const ACCOUNTS = [
   {% for acc in accounts %}{"id":"{{ acc.id }}","name":"{{ acc.name|escapejs }}"},{% endfor %}
 ];
@@ -170,7 +170,7 @@ const PREFILL_ACCOUNTS = {{ fd.account_ids_json|default:"[]"|safe }};
 const PREFILL_CHANNELS = {{ fd.channels_list_json|default:"[]"|safe }};
 
 function buildAccountOptions(selected) {
-  return '<option value="">Account…</option>' +
+  return '<option value="">Brand…</option>' +
     ACCOUNTS.map(a => `<option value="${a.id}"${a.id===selected?' selected':''}>${a.name}</option>`).join('');
 }
 function buildChannelOptions(selected) {

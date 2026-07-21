@@ -362,10 +362,10 @@ def edit_user(request, user_id):
                 my_ids = set(me.accounts.values_list('id', flat=True))
                 ids = [i for i in ids if int(i) in my_ids]
             target_user.accounts.set(ids)
-            messages.success(request, f'Accounts updated for {target_user.name}.')
+            messages.success(request, f'Brands updated for {target_user.name}.')
             AuditLog.objects.create(
                 user=me, action='user_accounts',
-                detail=f'Accounts updated for {target_user.name} ({target_user.email}).',
+                detail=f'Brands updated for {target_user.name} ({target_user.email}).',
                 ip=_ip or None,
             )
 

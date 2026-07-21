@@ -34,7 +34,7 @@
 
   <!-- Chart 1: Per-account compliance bar -->
   <div class="analytics-card lg:col-span-2">
-    <p class="section-label"><i class="fa-solid fa-building mr-1"></i>Compliance by Account</p>
+    <p class="section-label"><i class="fa-solid fa-building mr-1"></i>Compliance by Brand</p>
     {% if acct_compliance %}
     <div class="chart-wrap" style="height:{% if acct_compliance|length > 4 %}{{ acct_compliance|length|add:1 }}0{% else %}220{% endif %}px; min-height:160px;">
       <canvas id="chartCompliance"></canvas>
@@ -151,7 +151,7 @@
 {% block extra_scripts %}
 <script>
 (function () {
-  // ── Chart 1: Compliance by Account ──────────────────────────────────────
+  // ── Chart 1: Compliance by Brand ──────────────────────────────────────
   const acctLabels = {{ acct_labels_js|safe }};
   const acctRates  = {{ acct_rates_js|safe }};
 

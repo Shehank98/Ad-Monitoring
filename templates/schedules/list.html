@@ -24,7 +24,7 @@
     <i class="fa-solid fa-newspaper"></i> Press
   </a>
 
-  <!-- Account filter -->
+  <!-- Brand filter -->
   <form method="get" class="flex items-center gap-2 w-full sm:w-auto sm:ml-auto mt-1 sm:mt-0">
     <input type="hidden" name="media_type" value="{{ filters.media_type }}">
     {% if filters.month %}<input type="hidden" name="month" value="{{ filters.month }}">{% endif %}
@@ -182,7 +182,7 @@
       {# ── Multi-account view: account header → channel accordions ─────── #}
       {% for acc_name, ch_groups in account_channel_groups %}
 
-        <!-- Account section header -->
+        <!-- Brand section header -->
         <div class="flex items-center gap-3 mb-2 {% if not forloop.first %}mt-5{% endif %}">
           <span class="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase tracking-widest">
             <i class="fa-solid fa-building text-slate-300"></i>{{ acc_name }}
@@ -336,7 +336,7 @@
             <table class="w-full text-sm">
               <thead>
                 <tr class="bg-slate-50 border-b border-slate-100">
-                  <th class="px-5 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Account</th>
+                  <th class="px-5 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Brand</th>
                   <th class="px-5 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Sched #</th>
                   <th class="px-5 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">File</th>
                   <th class="px-5 py-2.5 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Rows</th>

@@ -412,7 +412,7 @@ def account_list(request):
             pk = request.POST.get('client_id')
             cl = get_object_or_404(Client, id=pk)
             cl.delete()
-            messages.success(request, f'Client "{cl.name}" deleted (accounts unlinked).')
+            messages.success(request, f'Client "{cl.name}" deleted (brands unlinked).')
             return redirect('/dashboard/accounts/')
 
         # ── Account actions ───────────────────────────────────────
@@ -420,9 +420,9 @@ def account_list(request):
             form = AccountForm(request.POST)
             if form.is_valid():
                 form.save()
-                messages.success(request, f'Account "{form.cleaned_data["name"]}" added.')
+                messages.success(request, f'Brand "{form.cleaned_data["name"]}" added.')
             else:
-                messages.error(request, 'Account name is required and must be unique.')
+                messages.error(request, 'Brand name is required and must be unique.')
             return redirect('/dashboard/accounts/')
 
         elif action == 'edit_account':
@@ -435,14 +435,14 @@ def account_list(request):
             acc.client_id = client_id
             acc.enable_special_notes = request.POST.get('enable_special_notes') == '1'
             acc.save(update_fields=['name', 'client_id', 'enable_special_notes'])
-            messages.success(request, f'Account "{acc.name}" updated.')
+            messages.success(request, f'Brand "{acc.name}" updated.')
             return redirect('/dashboard/accounts/')
 
         elif action == 'delete':
             acc_id = request.POST.get('account_id')
             acc    = get_object_or_404(Account, id=acc_id)
             acc.delete()
-            messages.success(request, f'Account "{acc.name}" deleted.')
+            messages.success(request, f'Brand "{acc.name}" deleted.')
             return redirect('/dashboard/accounts/')
 
     clients  = Client.objects.prefetch_related('accounts').all()
@@ -1854,11 +1854,11 @@ def brand_mapping_list(request):
             theme_list = [t.strip() for t in themes_raw.split('|') if t.strip()]
 
             if not (acc_id and brand and theme_list):
-                messages.error(request, 'Account, Brand, and at least one LMRB Theme are required.')
+                messages.error(request, 'Brand, Brand (Schedule), and at least one LMRB Theme are required.')
             else:
                 account = get_object_or_404(Account, id=acc_id)
                 if not _is_admin(user) and account not in account_qs:
-                    messages.error(request, 'No access to that account.')
+                    messages.error(request, 'No access to that brand.')
                 else:
                     created = 0
                     updated = 0
@@ -2321,7 +2321,7 @@ def brand_mapping_export(request):
     from openpyxl.styles import Font, PatternFill, Alignment
     account_id = request.GET.get('account', '').strip()
     if not account_id or not _account_access(request.user, account_id):
-        messages.error(request, 'Account not found or access denied.')
+        messages.error(request, 'Brand not found or access denied.')
         return redirect('brand_mapping_list')
 
     account = get_object_or_404(Account, id=account_id)
@@ -4151,7 +4151,7 @@ def tc_upload_parsed(request):
     rows_json   = request.POST.get('rows_json', '[]')
 
     if not (account_id and channel and month):
-        messages.error(request, 'Account, Channel and Month are required.')
+        messages.error(request, 'Brand, Channel and Month are required.')
         return redirect('/dashboard/tc/upload/')
 
     if not _account_access(request.user, account_id):
@@ -4488,7 +4488,7 @@ def tc_upload(request):
         schedule_id = request.POST.get('schedule_id', '').strip()
 
         if not (account_id and channel and month and tc_file):
-            messages.error(request, 'Account, Channel, Month and TC file are required.')
+            messages.error(request, 'Brand, Channel, Month and TC file are required.')
             return redirect('/dashboard/tc/upload/')
 
         if not _account_access(user, account_id):
@@ -4703,7 +4703,7 @@ def tc_reconcile(request):
     schedule_id = (request.POST.get('schedule_id') or request.GET.get('schedule_id', '')).strip()
 
     if not (account_id and channel and month):
-        messages.error(request, 'Account, channel and month are required.')
+        messages.error(request, 'Brand, channel and month are required.')
         return redirect('/dashboard/tc/')
 
     if not _account_access(request.user, account_id):
@@ -5309,7 +5309,7 @@ def tc_lmrb_upload(request):
         return redirect(url)
 
     if not (account_id and tc_file):
-        messages.error(request, 'Account and TC file are required.')
+        messages.error(request, 'Brand and TC file are required.')
         return _back()
     if not _account_access(user, account_id):
         messages.error(request, 'Access denied.')
@@ -5432,7 +5432,7 @@ def tc_lmrb_match_run(request):
     mode       = request.POST.get('mode', 'smart')
 
     if not (account_id and channel and month):
-        messages.error(request, 'Account, channel and month are required.')
+        messages.error(request, 'Brand, channel and month are required.')
         return redirect('/dashboard/tc/lmrb-match/')
     if not _account_access(request.user, account_id):
         messages.error(request, 'Access denied.')
@@ -7532,7 +7532,7 @@ def admin_export(request):
     scope           = request.POST.get('scope', 'both')
 
     if not account_id or not _account_access(user, account_id):
-        messages.error(request, 'Select a valid account.')
+        messages.error(request, 'Select a valid brand.')
         return redirect('/dashboard/admin-export/')
 
     account = get_object_or_404(Account, id=account_id)
