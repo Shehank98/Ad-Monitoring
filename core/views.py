@@ -5697,6 +5697,20 @@ def tc_lmrb_match_download(request):
 # Summary Sheet Report
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _parse_money(s):
+    """Parse a free-text money value ('LKR 5,000,000' / '25000') -> Decimal or None."""
+    from decimal import Decimal, InvalidOperation
+    if s is None:
+        return None
+    cleaned = ''.join(ch for ch in str(s) if ch.isdigit() or ch in '.-')
+    if cleaned in ('', '.', '-', '-.', '.-'):
+        return None
+    try:
+        return Decimal(cleaned)
+    except InvalidOperation:
+        return None
+
+
 @login_required
 def summary_report(request):
     """View + edit Summary Sheet metadata; preview the reconciliation results."""
@@ -5722,9 +5736,13 @@ def summary_report(request):
             meta, _ = SummaryReportMeta.objects.get_or_create(
                 account=account, channel=channel, month=month
             )
-            meta.supplier_invoice_no = request.POST.get('supplier_invoice_no', '').strip()
-            meta.po_no               = request.POST.get('po_no', '').strip()
-            meta.invoice_no          = request.POST.get('invoice_no', '').strip()
+            # Only update fields present in the POST — the Media Reconciliation
+            # card doesn't include these two, so absent keys keep stored values.
+            if 'supplier_invoice_no' in request.POST:
+                meta.supplier_invoice_no = request.POST.get('supplier_invoice_no', '').strip()
+            meta.po_no = request.POST.get('po_no', '').strip()
+            if 'invoice_no' in request.POST:
+                meta.invoice_no = request.POST.get('invoice_no', '').strip()
             meta.notes               = request.POST.get('notes', '').strip()
             meta.prepared_by         = request.POST.get('prepared_by', '').strip()
             meta.checked_by          = request.POST.get('checked_by', '').strip()
@@ -5752,11 +5770,18 @@ def summary_report(request):
                     dev_notes[k] = {'reason': r, 'dev_value': v}
             meta.deviation_notes = dev_notes
 
-            # ── Costs (always saved for the reconciliation report) ──
-            sc = request.POST.get('schedule_cost', '').strip()
-            dc = request.POST.get('deviated_cost', '').strip()
-            meta.schedule_cost = sc if sc else None
-            meta.deviated_cost = dc if dc else None
+            # ── Costs are derived, not typed ──
+            #   Schedule Cost = numeric value of Schedule Value
+            #   Deviated Cost = sum of the per-row Deviated Values
+            from decimal import Decimal
+            meta.schedule_cost = _parse_money(meta.schedule_value)
+            dev_sum, any_dev = None, False
+            for v in devvals:
+                pv = _parse_money(v)
+                if pv is not None:
+                    dev_sum = (dev_sum or Decimal('0')) + pv
+                    any_dev = True
+            meta.deviated_cost = dev_sum if any_dev else None
 
             # ── Editable rates (fall back to model defaults when blank/invalid) ──
             from decimal import Decimal, InvalidOperation
