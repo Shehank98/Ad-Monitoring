@@ -1348,7 +1348,11 @@ def build_original_and_colored_wb(schedule_pk, colors: dict, status_map=None):
             cell      = ws_color.cell(r, src_col)
             parts     = []
 
-            if statuses:
+            # Paint a status colour ONLY on cells that actually hold a planned
+            # count.  Statuses are keyed per (programme, start, dur) slot, so a
+            # slot that appears on several rows would otherwise paint empty
+            # cells on the duplicate rows — green boxes with no spot number.
+            if statuses and planned > 0:
                 primary = statuses[0][0]
                 cell.fill = status_to_fill.get(primary, fills['planned'])
                 for actual, n in sorted((date_data.get('late_to') or {}).items()):
