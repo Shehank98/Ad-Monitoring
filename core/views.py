@@ -6416,12 +6416,11 @@ def _write_media_recon_sheet(ws, ctx):
             c.number_format = fmt
         return c
 
-    # ── Title + logo ──
-    ws.merge_cells('A1:C3')
+    # ── Title (centered across the full width) + logo overlaid top-right ──
+    ws.merge_cells('A1:E3')
     t = ws['A1']; t.value = ctx['title']
     t.font = Font(bold=True, size=18, color='1F3864')
-    t.alignment = Alignment(horizontal='left', vertical='center')
-    ws.merge_cells('D1:E3')
+    t.alignment = Alignment(horizontal='center', vertical='center')
     logo = ctx.get('logo')
     if logo:
         try:
@@ -6432,9 +6431,6 @@ def _write_media_recon_sheet(ws, ctx):
             ws.add_image(img, 'D1')
         except Exception:
             pass
-    ws.row_dimensions[1].height = 20
-    ws.row_dimensions[2].height = 20
-    ws.row_dimensions[3].height = 20
 
     # ── Info grid rows 4-7 ──
     info = [
@@ -6516,7 +6512,6 @@ def _write_media_recon_sheet(ws, ctx):
     r = dtr + 2
     ws.merge_cells(f'A{r}:E{r}')
     cell(f'A{r}', f"Special Notes:  {ctx['notes']}", align=left, fill=sub_fill)
-    ws.row_dimensions[r].height = 40
 
     # ── Financial block ──
     fin = ctx['fin']
@@ -6539,6 +6534,9 @@ def _write_media_recon_sheet(ws, ctx):
         (f"Payable to CAG ({_fmt_pct(fin['cag_pct'])}%)", fin['cag']),
         ('Total Cost to Client (100%)', fin['split_total']),
     ]
+    # Column C stays completely blank (no value, no border) so the two cost
+    # tables read as separate boxes; rows beyond a table's length are left
+    # untouched rather than bordered empties.
     n = max(len(left_rows), len(right_rows))
     for i in range(n):
         rr = r + i
@@ -6546,15 +6544,10 @@ def _write_media_recon_sheet(ws, ctx):
             la, lv = left_rows[i]
             cell(f'A{rr}', la, font=bold, fill=sub_fill)
             cell(f'B{rr}', float(lv), align=right, fmt=money_fmt)
-        else:
-            cell(f'A{rr}', ''); cell(f'B{rr}', '')
         if i < len(right_rows):
             ra, rv = right_rows[i]
             cell(f'D{rr}', ra, font=bold, fill=sub_fill)
             cell(f'E{rr}', float(rv), align=right, fmt=money_fmt)
-        else:
-            cell(f'D{rr}', ''); cell(f'E{rr}', '')
-        cell(f'C{rr}', '')
 
     # ── Signatures ──
     r = r + n + 2
@@ -6566,6 +6559,11 @@ def _write_media_recon_sheet(ws, ctx):
         ws[f'{col}{r+1}'].value = f'{name}\n{who}' if name else who
         ws[f'{col}{r+1}'].alignment = center
         ws[f'{col}{r+1}'].font = bold
+
+    # ── Uniform row heights (professional, standard) ──
+    for rr in range(1, r + 2):
+        ws.row_dimensions[rr].height = 20
+    ws.row_dimensions[r + 1].height = 28   # name + role line under the signature dots
 
 
 @login_required
