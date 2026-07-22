@@ -44,9 +44,9 @@
               <i class="fa-solid fa-filter mr-1"></i> Filter options by scope
             </p>
 
-            <!-- Account -->
+            <!-- Brand -->
             <div>
-              <label class="field-label">Account <span class="text-red-400">*</span></label>
+              <label class="field-label">Brand <span class="text-red-400">*</span></label>
               <select name="account_id" id="addAccountSelect" class="select-field" required
                       onchange="onAccountChange(this.value)">
                 <option value="">Select account…</option>
@@ -252,9 +252,9 @@
       <!-- Filter bar -->
       <form method="get" class="bg-white border border-slate-100 rounded-xl shadow-sm px-4 py-3 space-y-3">
         <div class="flex flex-wrap items-end gap-3">
-          <!-- Account -->
+          <!-- Brand -->
           <div class="min-w-[140px] flex-1">
-            <label class="field-label">Account</label>
+            <label class="field-label">Brand</label>
             <select name="account" id="filterAccountSelect" class="select-field"
                     onchange="loadFilterChannels(this.value)">
               <option value="">All accounts</option>
@@ -804,7 +804,7 @@ function setSelectLoading(sel, loading) {
   }
 }
 
-// ── Cascade: Account → Channel → Month → Schedule ────────────────────────────
+// ── Cascade: Brand → Channel → Month → Schedule ────────────────────────────
 function onAccountChange(accountId) {
   _curAccountId  = accountId;
   _curChannel    = '';
