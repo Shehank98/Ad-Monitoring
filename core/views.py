@@ -7083,6 +7083,7 @@ def _build_combined_export_wb(schedule, colors, status_map):
     """
     from verification.colored_schedule import build_original_and_colored_wb
     from verification.tc_engine import build_summary_data
+    from verification.media_recon import build_recon_context
 
     wb, _detected = build_original_and_colored_wb(schedule.pk, colors, status_map)
 
@@ -7093,10 +7094,10 @@ def _build_combined_export_wb(schedule, colors, status_map):
     meta    = SummaryReportMeta.objects.filter(
         account_id=schedule.account_id, channel=channel, month=month
     ).first()
-    estimate_no = schedule.schedule_number or ''
 
     ws_sum = wb.create_sheet('Summary')
-    _write_summary_sheet(ws_sum, account, channel, month, data, meta, estimate_no)
+    ctx = build_recon_context(account, channel, month, meta, data, schedule=schedule)
+    _write_media_recon_sheet(ws_sum, ctx)
 
     ws_lmrb = wb.create_sheet('Matched LMRB Cuts')
     _write_matched_lmrb_sheet(ws_lmrb, schedule.account_id, channel, month, schedule_id=schedule.pk)
