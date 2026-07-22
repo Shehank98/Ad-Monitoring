@@ -268,7 +268,13 @@
           {% for sp in recon.spots %}
           <tr>
             <td class="border border-slate-300 px-2 py-1 text-center">{% if forloop.first %}{{ recon.scheduling_month }}{% endif %}</td>
-            <td class="border border-slate-300 px-2 py-1">{{ sp.brand }} {{ sp.dur }}s</td>
+            <td class="border border-slate-300 px-2 py-1">{{ sp.brand }} {{ sp.dur }}s
+              <button type="button" class="ml-1 text-[10px] text-blue-600 underline hover:text-blue-800"
+                      title="Manually link LMRB rows for this brand/duration"
+                      onclick="openTagsPicker('{{ account_id }}','{{ channel|escapejs }}','{{ month|escapejs }}','{{ sp.brand|escapejs }}','{{ sp.dur|default:'' }}')">
+                <i class="fa-solid fa-link"></i>
+              </button>
+            </td>
             <td class="border border-slate-300 px-2 py-1 text-center">{{ sp.planned }}</td>
             <td class="border border-slate-300 px-2 py-1 text-center">{{ sp.aired }}</td>
             <td class="border border-slate-300 px-2 py-1 text-center">{{ sp.third_party }}</td>
@@ -461,211 +467,16 @@
   </a>
 </div>
 
-<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
-
-  <!-- ── Left col: Meta + Notes form ──────────────────────────── -->
-  <div class="xl:col-span-1 space-y-4">
-
-    <!-- Report header info card -->
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-      <h3 class="font-bold text-slate-800 text-sm mb-4 flex items-center gap-2">
-        <i class="fa-solid fa-file-contract text-blue-500"></i> Report Header
-      </h3>
-      <div class="space-y-2 text-xs">
-        <div class="flex justify-between">
-          <span class="text-slate-500 font-semibold uppercase tracking-wide">Month</span>
-          <span class="font-bold text-slate-800">{{ month }}</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-slate-500 font-semibold uppercase tracking-wide">Channel</span>
-          <span class="font-bold text-slate-800">{{ channel }}</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-slate-500 font-semibold uppercase tracking-wide">Estimate No</span>
-          <span class="font-bold text-slate-800">{{ schedule_obj.schedule_number|default:"-" }}</span>
-        </div>
-        {% if tc_report %}
-        <div class="mt-2 pt-2 border-t border-slate-100">
-          <p class="text-slate-400">TC: {{ tc_report.original_filename }}</p>
-          <p class="text-slate-400">{{ tc_report.start_date|date:"d M Y"|default:"-" }} → {{ tc_report.end_date|date:"d M Y"|default:"-" }} ({{ tc_report.row_count }} rows)</p>
-        </div>
-        {% endif %}
-      </div>
-    </div>
-
-    <!-- Editable metadata form (collapsible) -->
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-      <details class="group" {% if meta.supplier_invoice_no or meta.po_no or meta.invoice_no or meta.notes %}open{% endif %}>
-        <summary class="flex items-center justify-between cursor-pointer list-none select-none">
-          <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
-            <i class="fa-solid fa-pen-to-square text-amber-500"></i> Invoice &amp; Notes
-          </h3>
-          <i class="fa-solid fa-chevron-down text-slate-400 text-xs transition-transform duration-200 group-open:rotate-180"></i>
-        </summary>
-        <form method="post" class="space-y-3 mt-4">
-          {% csrf_token %}
-          <input type="hidden" name="account_id"  value="{{ account_id }}">
-          <input type="hidden" name="channel"     value="{{ channel }}">
-          <input type="hidden" name="month"       value="{{ month }}">
-          <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
-
-          {% for field_name, label, placeholder in meta_fields %}
-          {% endfor %}
-
-          <div>
-            <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Supplier Invoice No</label>
-            <input type="text" name="supplier_invoice_no" class="input-field text-sm"
-                   placeholder="e.g. 5200061259, 5200062303"
-                   value="{{ meta.supplier_invoice_no|default:'' }}">
-          </div>
-          <div>
-            <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">PO No</label>
-            <input type="text" name="po_no" class="input-field text-sm"
-                   placeholder="e.g. 79190/2025"
-                   value="{{ meta.po_no|default:'' }}">
-          </div>
-          <div>
-            <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Invoice No</label>
-            <input type="text" name="invoice_no" class="input-field text-sm"
-                   placeholder="Invoice number"
-                   value="{{ meta.invoice_no|default:'' }}">
-          </div>
-          <div>
-            <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Notes</label>
-            <textarea name="notes" rows="3" class="input-field text-sm resize-none"
-                      placeholder="e.g. Channel transmission attached&#10;Sponsorship Benefits confirmation email attached">{{ meta.notes|default:'' }}</textarea>
-          </div>
-          <div class="grid grid-cols-3 gap-2">
-            <div>
-              <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Prepared By</label>
-              <input type="text" name="prepared_by" class="input-field text-xs"
-                     value="{{ meta.prepared_by|default:'' }}">
-            </div>
-            <div>
-              <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Checked By</label>
-              <input type="text" name="checked_by" class="input-field text-xs"
-                     value="{{ meta.checked_by|default:'' }}">
-            </div>
-            <div>
-              <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Authorised By</label>
-              <input type="text" name="authorised_by" class="input-field text-xs"
-                     value="{{ meta.authorised_by|default:'' }}">
-            </div>
-          </div>
-
-          {% if enable_special_notes %}
-          <div class="pt-3 mt-1 border-t border-dashed border-teal-200">
-            <p class="text-[10px] font-bold text-teal-700 uppercase tracking-wider mb-2">
-              <i class="fa-solid fa-calculator mr-1"></i> Cost Breakdown Inputs
-            </p>
-            <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Schedule Cost</label>
-                <input type="number" step="0.01" min="0" name="schedule_cost"
-                       class="input-field text-sm text-right"
-                       placeholder="0.00"
-                       value="{{ meta.schedule_cost|default:'' }}">
-              </div>
-              <div>
-                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Deviated Cost</label>
-                <input type="number" step="0.01" min="0" name="deviated_cost"
-                       class="input-field text-sm text-right"
-                       placeholder="0.00"
-                       value="{{ meta.deviated_cost|default:'' }}">
-              </div>
-            </div>
-          </div>
-          {% endif %}
-
-          <button type="submit" class="btn-primary w-full justify-center text-sm">
-            <i class="fa-solid fa-floppy-disk"></i> Save Details
-          </button>
-        </form>
-      </details>
-    </div>
-  </div>
-
-  <!-- ── Right col: Summary tables ─────────────────────────────── -->
-  <div class="xl:col-span-2 space-y-5">
-
-    <!-- SUMMARY SHEET REPORT header preview -->
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-      <div class="bg-slate-800 px-5 py-3 flex items-center gap-3">
-        <i class="fa-solid fa-file-contract text-slate-400"></i>
-        <span class="font-bold text-white text-sm">SUMMARY SHEET REPORT</span>
-        <span class="text-slate-400 text-xs">- {{ month }} | {{ channel }}</span>
-      </div>
-
-      <div class="p-4 space-y-4">
-
-        <!-- ── Commercial Benefits ──────────────────────────── -->
-        {% if summary_data.commercial %}
-        <div>
-          <div class="flex items-center gap-2 mb-2">
-            <span class="text-xs font-bold text-blue-700 uppercase tracking-wider bg-blue-50 px-2 py-0.5 rounded-md">Commercial Benefits</span>
-          </div>
-          <div class="overflow-x-auto border border-slate-200 rounded-xl">
-            <table class="sum-table w-full border-collapse">
-              <thead>
-                <tr>
-                  <th class="text-left">Product</th>
-                  <th class="text-center">Dur</th>
-                  <th class="text-center">Planned</th>
-                  <th class="text-center">Aired</th>
-                  <th class="text-center">Missed</th>
-                  <th class="text-center">Extra</th>
-                  <th class="text-center">3rd Party</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for row in summary_data.commercial %}
-                <tr>
-                  <td class="font-medium text-slate-800">
-                    {{ row.product }}
-                    {% if row.aired < row.planned %}
-                    <button type="button"
-                      class="ml-1 text-xs text-violet-600 underline hover:text-violet-800"
-                      onclick="openTagsPicker('{{ account_id }}','{{ channel|escapejs }}','{{ month|escapejs }}','{{ row.product|escapejs }}','{{ row.dur|default:'' }}')">
-                      + Tags
-                    </button>
-                    {% endif %}
-                  </td>
-                  <td class="text-center text-slate-600">{{ row.dur|default:"-" }}</td>
-                  <td class="text-center font-semibold">{{ row.planned }}</td>
-                  <td class="text-center text-emerald-700 font-semibold">
-                    {{ row.aired }}
-                    <div class="mt-1 w-full bg-slate-100 rounded-full h-1">
-                      {% if row.planned > 0 %}
-                      <div class="h-1 rounded-full {% if row.aired >= row.planned %}bg-emerald-500{% elif row.aired > 0 %}bg-amber-400{% else %}bg-red-400{% endif %}"
-                           style="width: {% widthratio row.aired row.planned 100 %}%"></div>
-                      {% endif %}
-                    </div>
-                  </td>
-                  <td class="text-center {% if row.missed > 0 %}text-red-600 font-bold{% else %}text-slate-400{% endif %}">
-                    {{ row.missed }}
-                  </td>
-                  <td class="text-center {% if row.extra > 0 %}text-violet-600 font-semibold{% else %}text-slate-400{% endif %}">
-                    {{ row.extra }}
-                  </td>
-                  <td class="text-center text-blue-600 font-semibold">{{ row.third_party }}</td>
-                </tr>
-                {% endfor %}
-                <!-- Grand total -->
-                <tr class="grand-row">
-                  <td>Grand Total</td>
-                  <td></td>
-                  <td class="text-center">{{ summary_data.commercial_total.planned }}</td>
-                  <td class="text-center text-emerald-800">{{ summary_data.commercial_total.aired }}</td>
-                  <td class="text-center {% if summary_data.commercial_total.missed > 0 %}text-red-700{% endif %}">{{ summary_data.commercial_total.missed }}</td>
-                  <td class="text-center {% if summary_data.commercial_total.extra > 0 %}text-violet-700{% endif %}">{{ summary_data.commercial_total.extra }}</td>
-                  <td class="text-center text-blue-700">{{ summary_data.commercial_total.third_party }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-        {% endif %}
-
+<!-- ── Sponsorship assignment tool (collapsed; report lives in the card above) ── -->
+<div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-6">
+  <details class="group">
+    <summary class="cursor-pointer flex items-center justify-between select-none">
+      <span class="text-sm font-bold text-slate-800">
+        <i class="fa-solid fa-star mr-1.5 text-yellow-500"></i> Sponsorship — counts &amp; manual assignment
+      </span>
+      <i class="fa-solid fa-chevron-down text-slate-400 text-xs transition-transform duration-200 group-open:rotate-180"></i>
+    </summary>
+    <div class="mt-4">
         <!-- ── Sponsorship Benefits ─────────────────────────── -->
         <div>
           <div class="flex items-center gap-2 mb-2">
@@ -751,124 +562,9 @@
           </div>
           {% endif %}
         </div>
-
-        <!-- ── Notes ──────────────────────────────────────────── -->
-        {% if meta and meta.notes %}
-        <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
-          <p class="text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">NOTE:</p>
-          {% for line in meta.notes.splitlines %}
-          <p class="text-xs text-slate-600">{{ line }}</p>
-          {% endfor %}
-        </div>
-        {% endif %}
-
-        <!-- ── Signatures (only rendered when meta record exists) ─── -->
-        {% if meta %}
-        <div class="grid grid-cols-3 gap-4 pt-4 border-t border-dashed border-slate-200">
-          <div class="text-center">
-            <p class="text-slate-300 text-lg tracking-widest mb-1">…………………………</p>
-            <p class="text-xs font-bold text-slate-500 uppercase tracking-wider">PREPARED BY</p>
-            {% if meta.prepared_by %}<p class="text-xs text-slate-700 mt-0.5">{{ meta.prepared_by }}</p>{% endif %}
-          </div>
-          <div class="text-center">
-            <p class="text-slate-300 text-lg tracking-widest mb-1">…………………………</p>
-            <p class="text-xs font-bold text-slate-500 uppercase tracking-wider">CHECKED BY</p>
-            {% if meta.checked_by %}<p class="text-xs text-slate-700 mt-0.5">{{ meta.checked_by }}</p>{% endif %}
-          </div>
-          <div class="text-center">
-            <p class="text-slate-300 text-lg tracking-widest mb-1">…………………………</p>
-            <p class="text-xs font-bold text-slate-500 uppercase tracking-wider">AUTHORISED BY</p>
-            {% if meta.authorised_by %}<p class="text-xs text-slate-700 mt-0.5">{{ meta.authorised_by }}</p>{% endif %}
-          </div>
-        </div>
-        {% endif %}
-
-        <!-- ── Special Notes / Cost Breakdown ────────────────────── -->
-        {% if enable_special_notes and special_notes_data %}
-        {% with sn=special_notes_data.fmt %}
-        <div class="mt-5 pt-4 border-t-2 border-teal-600">
-          <div class="flex items-center gap-2 mb-3">
-            <span class="text-xs font-bold text-teal-800 uppercase tracking-wider bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200">
-              <i class="fa-solid fa-calculator mr-1 text-teal-600"></i> Special Notes
-            </span>
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-
-            <!-- Left column -->
-            <div class="rounded-xl border border-slate-200 overflow-hidden">
-              <table class="w-full text-xs">
-                <tbody>
-                  <tr class="border-b border-slate-100">
-                    <td class="px-3 py-1.5 text-slate-600">Schedule Cost</td>
-                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.schedule_cost }}</td>
-                  </tr>
-                  <tr class="border-b border-slate-100 bg-slate-50">
-                    <td class="px-3 py-1.5 text-slate-600">Deviated Cost</td>
-                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.deviated_cost }}</td>
-                  </tr>
-                  <tr class="border-b border-slate-100">
-                    <td class="px-3 py-1.5 text-slate-700 font-semibold">Net Cost</td>
-                    <td class="px-3 py-1.5 text-right font-mono font-semibold text-slate-800">{{ sn.net_cost }}</td>
-                  </tr>
-                  <tr class="border-b border-slate-100 bg-slate-50">
-                    <td class="px-3 py-1.5 text-slate-600">2.50%</td>
-                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.two_point_five_percent }}</td>
-                  </tr>
-                  <tr class="border-b border-slate-100">
-                    <td class="px-3 py-1.5 text-slate-600">Total with Taxes (before VAT)</td>
-                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.total_with_tax_before_vat }}</td>
-                  </tr>
-                  <tr class="border-b border-slate-100 bg-slate-50">
-                    <td class="px-3 py-1.5 text-slate-600">VAT (18%)</td>
-                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.vat }}</td>
-                  </tr>
-                  <tr class="bg-teal-50">
-                    <td class="px-3 py-1.5 text-teal-800 font-bold">Total with Taxes (final)</td>
-                    <td class="px-3 py-1.5 text-right font-mono font-bold text-teal-800">{{ sn.total_with_tax_final }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <!-- Right column -->
-            <div class="rounded-xl border border-slate-200 overflow-hidden">
-              <table class="w-full text-xs">
-                <tbody>
-                  <tr class="border-b border-slate-100">
-                    <td class="px-3 py-1.5 text-slate-600">Payable to Media (85%)</td>
-                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.payable_to_media }}</td>
-                  </tr>
-                  <tr class="border-b border-slate-100 bg-slate-50">
-                    <td class="px-3 py-1.5 text-slate-600">Geometry Global Media (3%)</td>
-                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.geometry_global }}</td>
-                  </tr>
-                  <tr class="border-b border-slate-100">
-                    <td class="px-3 py-1.5 text-slate-600">Agency Commission (12%)</td>
-                    <td class="px-3 py-1.5 text-right font-mono text-slate-800">{{ sn.agency_commission }}</td>
-                  </tr>
-                  <tr class="border-b border-slate-100 bg-slate-50">
-                    <td class="px-3 py-1.5 text-slate-700 font-semibold">Total Cost to Client (88%)</td>
-                    <td class="px-3 py-1.5 text-right font-mono font-semibold text-slate-800">{{ sn.total_cost_to_client_88 }}</td>
-                  </tr>
-                  <tr class="bg-teal-50">
-                    <td class="px-3 py-1.5 text-teal-800 font-bold">Total Cost to Client (with VAT)</td>
-                    <td class="px-3 py-1.5 text-right font-mono font-bold text-teal-800">{{ sn.total_cost_to_client_with_vat }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-          </div>
-        </div>
-        {% endwith %}
-        {% endif %}
-
-      </div><!-- /p-4 -->
-    </div><!-- /card -->
-
-  </div><!-- /right col -->
-
-</div><!-- /grid -->
+    </div>
+  </details>
+</div>
 
 {% else %}
 <!-- No summary data yet for this scope -->

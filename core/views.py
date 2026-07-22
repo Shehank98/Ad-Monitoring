@@ -5722,9 +5722,13 @@ def summary_report(request):
             meta, _ = SummaryReportMeta.objects.get_or_create(
                 account=account, channel=channel, month=month
             )
-            meta.supplier_invoice_no = request.POST.get('supplier_invoice_no', '').strip()
-            meta.po_no               = request.POST.get('po_no', '').strip()
-            meta.invoice_no          = request.POST.get('invoice_no', '').strip()
+            # Only update fields present in the POST — the Media Reconciliation
+            # card doesn't include these two, so absent keys keep stored values.
+            if 'supplier_invoice_no' in request.POST:
+                meta.supplier_invoice_no = request.POST.get('supplier_invoice_no', '').strip()
+            meta.po_no = request.POST.get('po_no', '').strip()
+            if 'invoice_no' in request.POST:
+                meta.invoice_no = request.POST.get('invoice_no', '').strip()
             meta.notes               = request.POST.get('notes', '').strip()
             meta.prepared_by         = request.POST.get('prepared_by', '').strip()
             meta.checked_by          = request.POST.get('checked_by', '').strip()
