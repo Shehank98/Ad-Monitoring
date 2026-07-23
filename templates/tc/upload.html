@@ -5,7 +5,7 @@
 {% block page_subtitle %}Upload the channel's TC file received after schedule completion - aired spots are auto-parsed{% endblock %}
 
 {% block content %}
-<div class="max-w-3xl space-y-5">
+<div class="max-w-4xl mx-auto space-y-6">
 
   {% if is_officer %}
   <a href="/dashboard/channel-officer/"
@@ -19,7 +19,35 @@
   </a>
   {% endif %}
 
-  <!-- Supported channels banner (hidden for channel officers) -->
+  <!-- ── Hero header ─────────────────────────────────────────────────────────── -->
+  <div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-teal-900 text-white shadow-lg">
+    <div class="absolute -right-8 -top-10 w-48 h-48 rounded-full bg-teal-500/20 blur-2xl"></div>
+    <div class="absolute -left-10 -bottom-12 w-56 h-56 rounded-full bg-amber-500/10 blur-2xl"></div>
+    <div class="relative px-6 py-6 sm:px-8 sm:py-7 flex flex-col sm:flex-row sm:items-center gap-5">
+      <div class="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center shrink-0 ring-1 ring-white/20">
+        <i class="fa-solid fa-file-invoice text-2xl text-amber-300"></i>
+      </div>
+      <div class="flex-1">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h2 class="text-xl font-extrabold tracking-tight">Upload Transmission Certificate</h2>
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-400/20 text-teal-200 ring-1 ring-teal-300/30">
+            <i class="fa-solid fa-bolt text-[8px]"></i> AUTO-PARSE
+          </span>
+        </div>
+        <p class="text-sm text-slate-300 mt-1">Excel (.xlsx / .xls) or PDF - columns are detected automatically, then preview before saving.</p>
+      </div>
+      <!-- Step indicator -->
+      <div class="hidden md:flex items-center gap-2 text-xs font-semibold shrink-0">
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 ring-1 ring-white/15"><span class="w-4 h-4 rounded-full bg-amber-400 text-slate-900 grid place-items-center text-[10px] font-extrabold">1</span> Details</span>
+        <i class="fa-solid fa-chevron-right text-[9px] text-white/30"></i>
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 ring-1 ring-white/15"><span class="w-4 h-4 rounded-full bg-amber-400 text-slate-900 grid place-items-center text-[10px] font-extrabold">2</span> File</span>
+        <i class="fa-solid fa-chevron-right text-[9px] text-white/30"></i>
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 ring-1 ring-white/15"><span class="w-4 h-4 rounded-full bg-amber-400 text-slate-900 grid place-items-center text-[10px] font-extrabold">3</span> Preview</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Supported channels guide (hidden for channel officers) -->
   {% if not is_officer %}
   <details class="group bg-white border border-slate-200 rounded-2xl shadow-sm">
     <summary class="flex items-center gap-2 px-5 py-4 cursor-pointer select-none text-slate-700 font-bold text-sm">
@@ -62,117 +90,122 @@
   </details>
   {% endif %}
 
-  <!-- Upload form card -->
+  <!-- ── Upload form card ────────────────────────────────────────────────────── -->
   <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
-    <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
-      <div class="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-        <i class="fa-solid fa-file-invoice text-amber-600"></i>
-      </div>
-      <div>
-        <h2 class="font-bold text-slate-800 text-sm">Upload TC File</h2>
-        <p class="text-xs text-slate-400">Excel (.xlsx / .xls) or PDF - columns detected automatically</p>
-      </div>
-      <span class="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-50 text-teal-600 border border-teal-200">
-        <i class="fa-solid fa-bolt text-[8px]"></i> AUTO-PARSE
-      </span>
-    </div>
-
-    <form method="post" enctype="multipart/form-data" class="px-5 py-5 space-y-4" id="tc-upload-form">
+    <form method="post" enctype="multipart/form-data" class="p-0" id="tc-upload-form">
       {% csrf_token %}
 
       {% if is_officer %}
-      <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700">
+      <div class="m-5 mb-0 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-xs text-blue-700">
         <i class="fa-solid fa-tv mr-1.5 text-blue-500"></i>
         Upload the Transmission Certificate for your channel.
       </div>
       {% endif %}
 
-      <!-- Brand -->
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">
-          Brand <span class="text-red-500">*</span>
-        </label>
-        <select name="account_id" id="selAccount"
-                class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
-                required onchange="loadSchedules()">
-          <option value="">Select account…</option>
-          {% for acc in accounts %}
-            <option value="{{ acc.id }}" {% if prefill.account_id == acc.id|stringformat:"s" %}selected{% endif %}>{{ acc.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
+      <!-- Step 1: Scope details -->
+      <div class="px-5 pt-5 pb-4">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="w-6 h-6 rounded-full bg-slate-900 text-white grid place-items-center text-[11px] font-extrabold">1</span>
+          <h3 class="font-bold text-slate-800 text-sm">Report details</h3>
+        </div>
 
-      <!-- Channel -->
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">
-          Channel <span class="text-red-500">*</span>
-        </label>
-        <input type="text" name="channel" id="inpChannel" placeholder="e.g. Sirasa TV"
-               class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 {% if is_officer %}bg-slate-50{% else %}bg-white{% endif %}"
-               required value="{{ prefill.channel }}" {% if is_officer %}readonly{% endif %}>
-      </div>
-
-      <!-- Month -->
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">
-          Month <span class="text-red-500">*</span>
-        </label>
-        <input type="text" name="month" id="inpMonth" placeholder="e.g. June 2025"
-               class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
-               required value="{{ prefill.month }}">
-      </div>
-
-      <!-- Linked Schedule -->
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">
-          Link to Schedule <span class="text-red-500">*</span>
-        </label>
-        <select name="schedule_id" id="selSchedule"
-                class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
-                onchange="scheduleSelected(this)" required>
-          <option value="">Select schedule…</option>
-          {% for sch in schedules %}
-            <option value="{{ sch.id }}"
-                    data-account="{{ sch.account_id }}"
-                    data-channel="{{ sch.channel }}"
-                    data-month="{{ sch.month }}"
-                    {% if prefill.schedule_pk == sch.id|stringformat:"s" %}selected{% endif %}>
-              {% if is_officer %}{{ sch.month }} | #{{ sch.schedule_number }}{% else %}{{ sch.account.name }} | {{ sch.channel }} | {{ sch.month }} | #{{ sch.schedule_number }}{% endif %}
-            </option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <!-- File upload -->
-      <div>
-        <label class="block text-xs font-semibold text-slate-600 mb-1.5">
-          TC File <span class="text-red-500">*</span>
-        </label>
-        <label for="tcFile"
-               class="flex items-center gap-3 w-full border-2 border-dashed border-slate-300 rounded-xl
-                      cursor-pointer bg-slate-50 hover:bg-slate-100 hover:border-slate-400
-                      transition-colors px-4 py-4">
-          <i class="fa-solid fa-file-arrow-up text-slate-400 text-lg shrink-0"></i>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <!-- Brand -->
           <div>
-            <p class="text-sm font-semibold text-slate-600">Click to choose TC file</p>
-            <p class="text-xs text-slate-400">Excel (.xlsx / .xls) or PDF</p>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">
+              <i class="fa-solid fa-building text-slate-400 mr-1"></i> Brand <span class="text-red-500">*</span>
+            </label>
+            <select name="account_id" id="selAccount"
+                    class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"
+                    required onchange="loadSchedules()">
+              <option value="">Select account…</option>
+              {% for acc in accounts %}
+                <option value="{{ acc.id }}" {% if prefill.account_id == acc.id|stringformat:"s" %}selected{% endif %}>{{ acc.name }}</option>
+              {% endfor %}
+            </select>
           </div>
-          <p id="tcFileName" class="ml-auto text-xs text-slate-600 font-medium hidden truncate max-w-[160px]"></p>
+
+          <!-- Linked Schedule -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">
+              <i class="fa-solid fa-link text-slate-400 mr-1"></i> Link to Schedule <span class="text-red-500">*</span>
+            </label>
+            <select name="schedule_id" id="selSchedule"
+                    class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"
+                    onchange="scheduleSelected(this)" required>
+              <option value="">Select schedule…</option>
+              {% for sch in schedules %}
+                <option value="{{ sch.id }}"
+                        data-account="{{ sch.account_id }}"
+                        data-channel="{{ sch.channel }}"
+                        data-month="{{ sch.month }}"
+                        {% if prefill.schedule_pk == sch.id|stringformat:"s" %}selected{% endif %}>
+                  {% if is_officer %}{{ sch.month }} | #{{ sch.schedule_number }}{% else %}{{ sch.account.name }} | {{ sch.channel }} | {{ sch.month }} | #{{ sch.schedule_number }}{% endif %}
+                </option>
+              {% endfor %}
+            </select>
+            <p class="text-[10px] text-slate-400 mt-1">Linking a schedule fills in the exact channel &amp; month automatically.</p>
+          </div>
+
+          <!-- Channel -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">
+              <i class="fa-solid fa-tv text-slate-400 mr-1"></i> Channel <span class="text-red-500">*</span>
+            </label>
+            <input type="text" name="channel" id="inpChannel" placeholder="e.g. Sirasa TV"
+                   class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-400 {% if is_officer %}bg-slate-50{% else %}bg-white{% endif %}"
+                   required value="{{ prefill.channel }}" {% if is_officer %}readonly{% endif %}>
+          </div>
+
+          <!-- Month -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1.5">
+              <i class="fa-solid fa-calendar-days text-slate-400 mr-1"></i> Month <span class="text-red-500">*</span>
+            </label>
+            <input type="text" name="month" id="inpMonth" placeholder="e.g. June 2025"
+                   class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"
+                   required value="{{ prefill.month }}">
+          </div>
+        </div>
+      </div>
+
+      <div class="h-px bg-slate-100"></div>
+
+      <!-- Step 2: File -->
+      <div class="px-5 pt-5 pb-5">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="w-6 h-6 rounded-full bg-slate-900 text-white grid place-items-center text-[11px] font-extrabold">2</span>
+          <h3 class="font-bold text-slate-800 text-sm">TC file</h3>
+        </div>
+
+        <label for="tcFile"
+               class="flex items-center gap-4 w-full border-2 border-dashed border-slate-300 rounded-2xl
+                      cursor-pointer bg-slate-50 hover:bg-teal-50 hover:border-teal-400
+                      transition-colors px-5 py-6">
+          <div class="w-12 h-12 rounded-xl bg-white shadow-sm ring-1 ring-slate-100 grid place-items-center shrink-0">
+            <i class="fa-solid fa-file-arrow-up text-teal-500 text-xl"></i>
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-semibold text-slate-700">Click to choose, or drag &amp; drop your TC file</p>
+            <p class="text-xs text-slate-400 mt-0.5">Excel (.xlsx / .xls) or PDF - max 50 MB</p>
+          </div>
+          <p id="tcFileName" class="ml-auto text-xs text-teal-700 font-semibold hidden truncate max-w-[160px] bg-teal-50 px-2.5 py-1 rounded-lg border border-teal-200"></p>
         </label>
         <input type="file" name="tc_file" id="tcFile" accept=".xlsx,.xls,.pdf"
                class="sr-only" onchange="onFileChange(this)" required>
-      </div>
 
-      <!-- Excel detect result -->
-      <div id="detectResult" class="hidden p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800">
-        <p class="font-semibold mb-0.5"><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> File detected</p>
-        <p id="detectText" class="text-emerald-700"></p>
+        <!-- Excel detect result -->
+        <div id="detectResult" class="hidden mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800">
+          <p class="font-semibold mb-0.5"><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> File detected</p>
+          <p id="detectText" class="text-emerald-700"></p>
+        </div>
       </div>
 
       <!-- Action row -->
-      <div class="flex justify-end pt-1">
-        <button type="button" id="btnPreview" onclick="runPreview()" class="btn-primary">
+      <div class="px-5 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-3">
+        <p class="text-[11px] text-slate-400 hidden sm:block"><i class="fa-solid fa-shield-halved mr-1"></i> Nothing is saved until you confirm the preview.</p>
+        <button type="button" id="btnPreview" onclick="runPreview()" class="btn-primary ml-auto">
           <i class="fa-solid fa-magnifying-glass"></i> Preview &amp; Verify Data
         </button>
       </div>
