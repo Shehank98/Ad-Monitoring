@@ -5770,6 +5770,16 @@ def summary_report(request):
                     dev_notes[k] = {'reason': r, 'dev_value': v}
             meta.deviation_notes = dev_notes
 
+            # ── Per-spot editable "Spot/VA Duration" labels ──
+            spot_keys   = request.POST.getlist('spot_key')
+            spot_labels = request.POST.getlist('spot_label')
+            labels = {}
+            for i, k in enumerate(spot_keys):
+                v = spot_labels[i].strip() if i < len(spot_labels) else ''
+                if k and v:
+                    labels[k] = v
+            meta.spot_labels = labels
+
             # ── Costs are derived, not typed ──
             #   Schedule Cost = numeric value of Schedule Value
             #   Deviated Cost = sum of the per-row Deviated Values
@@ -6470,7 +6480,7 @@ def _write_media_recon_sheet(ws, ctx):
     for i, sp in enumerate(spots):
         rr = start + i
         cell(f'A{rr}', ctx['scheduling_month'] if i == 0 else '', align=center)
-        label = f"{sp['brand']} {sp['dur']}s".strip() if sp['brand'] else ''
+        label = sp.get('label') or (f"{sp['brand']} {sp['dur']}s".strip() if sp['brand'] else '')
         cell(f'B{rr}', label)
         cell(f'C{rr}', sp['planned'], align=center)
         cell(f'D{rr}', sp['aired'], align=center)
@@ -6634,6 +6644,7 @@ def summary_pdf(request):
     from reportlab.lib.enums import TA_CENTER, TA_LEFT
     from reportlab.platypus import (
         SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage,
+        PageBreak,
     )
     from verification.tc_engine import build_summary_data
     from verification.media_recon import build_recon_context
@@ -6667,6 +6678,10 @@ def summary_pdf(request):
     styH = ParagraphStyle('h', fontName='Helvetica-Bold', fontSize=8, leading=10,
                           textColor=white, alignment=TA_CENTER)
     styC = ParagraphStyle('c', fontName='Helvetica', fontSize=8, leading=10, alignment=TA_CENTER)
+    styLC = ParagraphStyle('lc', fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=TA_CENTER)
+    # Compact padding applied to every table so the whole report fits one page.
+    PAD = [('TOPPADDING', (0, 0), (-1, -1), 1.5), ('BOTTOMPADDING', (0, 0), (-1, -1), 1.5),
+           ('LEFTPADDING', (0, 0), (-1, -1), 3), ('RIGHTPADDING', (0, 0), (-1, -1), 3)]
 
     from decimal import Decimal
     def money(v):
@@ -6716,8 +6731,8 @@ def summary_pdf(request):
     itab.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, GREY),
                               ('BACKGROUND', (0, 0), (0, -1), SUB),
                               ('BACKGROUND', (2, 0), (2, -1), SUB),
-                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
-    story += [itab, Spacer(1, 6)]
+                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')] + PAD))
+    story += [itab, Spacer(1, 5)]
 
     # ── Medium block ──
     med = [[Paragraph('Medium', styH), Paragraph('Channel/Publication', styH),
@@ -6727,8 +6742,8 @@ def summary_pdf(request):
     mtab = Table(med, colWidths=[W*0.25]*4)
     mtab.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, GREY),
                               ('BACKGROUND', (0, 0), (-1, 0), NAVY),
-                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
-    story += [mtab, Spacer(1, 8)]
+                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')] + PAD))
+    story += [mtab, Spacer(1, 6)]
 
     # ── No. of Spots table ──
     spot_rows = [[Paragraph('No of Spots', styH), '', '', '', ''],
@@ -6736,20 +6751,21 @@ def summary_pdf(request):
                   Paragraph('Schedule (Planned)', styH), Paragraph('Transmission (Aired)', styH),
                   Paragraph('Nielsen (3rd Party)', styH)]]
     for i, sp in enumerate(ctx['spots'] or []):
-        lbl = f"{sp['brand']} {sp['dur']}s" if sp['brand'] else ''
+        lbl = sp.get('label') or (f"{sp['brand']} {sp['dur']}s" if sp['brand'] else '')
         spot_rows.append([Paragraph(ctx['scheduling_month'] if i == 0 else '', styC),
                           Paragraph(lbl, styN), Paragraph(str(sp['planned']), styC),
                           Paragraph(str(sp['aired']), styC), Paragraph(str(sp['third_party']), styC)])
     st = ctx['spots_total']
-    spot_rows.append([Paragraph('Total', styL), '', Paragraph(str(st['planned']), styL),
-                      Paragraph(str(st['aired']), styL), Paragraph(str(st['third_party']), styL)])
+    spot_rows.append([Paragraph('Total', styLC), '', Paragraph(str(st['planned']), styLC),
+                      Paragraph(str(st['aired']), styLC), Paragraph(str(st['third_party']), styLC)])
     stab = Table(spot_rows, colWidths=[W*0.22, W*0.30, W*0.16, W*0.16, W*0.16])
     stab.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, GREY),
                               ('SPAN', (2, 0), (4, 0)), ('SPAN', (0, 0), (1, 0)),
+                              ('SPAN', (0, -1), (1, -1)),
                               ('BACKGROUND', (0, 0), (-1, 1), NAVY),
                               ('BACKGROUND', (0, -1), (-1, -1), TOT),
-                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
-    story += [stab, Spacer(1, 8)]
+                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')] + PAD))
+    story += [stab, Spacer(1, 6)]
 
     # ── Deviations ──
     dev_rows = [[Paragraph('Transmission Report Details - Commercials / VA', styH), '', '', '', ''],
@@ -6762,15 +6778,15 @@ def summary_pdf(request):
                          Paragraph(str(dv['not_aired'] or ''), styC), Paragraph(dv['reason'] or '', styN),
                          Paragraph(str(dv['dev_value'] or ''), styC)])
     dt = ctx['dev_total']
-    dev_rows.append([Paragraph('Total', styL), Paragraph(str(dt['deviated']), styL),
-                     Paragraph(str(dt['not_aired']), styL), '', ''])
+    dev_rows.append([Paragraph('Total', styLC), Paragraph(str(dt['deviated']), styLC),
+                     Paragraph(str(dt['not_aired']), styLC), '', ''])
     dtab = Table(dev_rows, colWidths=[W*0.22, W*0.13, W*0.13, W*0.36, W*0.16])
     dtab.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, GREY),
                               ('SPAN', (0, 0), (4, 0)),
                               ('BACKGROUND', (0, 0), (-1, 1), NAVY),
                               ('BACKGROUND', (0, -1), (-1, -1), TOT),
-                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
-    story += [dtab, Spacer(1, 6)]
+                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')] + PAD))
+    story += [dtab, Spacer(1, 5)]
 
     # ── Special notes ──
     if ctx['notes']:
@@ -6800,8 +6816,8 @@ def summary_pdf(request):
     ftab.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, GREY),
                               ('BACKGROUND', (0, 0), (0, -1), SUB),
                               ('BACKGROUND', (2, 0), (2, -1), SUB),
-                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
-    story += [ftab, Spacer(1, 16)]
+                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')] + PAD))
+    story += [ftab, Spacer(1, 10)]
 
     # ── Signatures ──
     sig = [[Paragraph('………………………………', styC), Paragraph('………………………………', styC),
@@ -6813,6 +6829,51 @@ def summary_pdf(request):
     stab2.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('TOPPADDING', (0, 0), (-1, 0), 10)]))
     story += [stab2]
 
+    # ── Matched LMRB report (starts on a fresh page after the summary) ──
+    matched = _matched_lmrb_rows(account_id, channel, month, schedule_id=sid)
+    styMH = ParagraphStyle('mh', fontName='Helvetica-Bold', fontSize=6.5, leading=8,
+                           textColor=white, alignment=TA_CENTER)
+    styM  = ParagraphStyle('m', fontName='Helvetica', fontSize=6.5, leading=8)
+    styMC = ParagraphStyle('mc', fontName='Helvetica', fontSize=6.5, leading=8, alignment=TA_CENTER)
+
+    story += [PageBreak(),
+              Paragraph("<font color='#1F3864'><b>Matched LMRB Report</b></font>",
+                        ParagraphStyle('mt', fontName='Helvetica-Bold', fontSize=14, leading=16)),
+              Spacer(1, 2),
+              Paragraph(f"{ctx['channel_publication']} · {ctx['scheduling_month']} · "
+                        f"{len(matched)} matched row{'' if len(matched) == 1 else 's'}", styN),
+              Spacer(1, 6)]
+
+    mheaders = ['Date', 'Time', 'Advt_Theme', 'Dur', 'Programme', 'Advertiser', 'Product', 'Cost']
+    mrows = [[Paragraph(h, styMH) for h in mheaders]]
+    for lr in matched:
+        d = lr.date.strftime('%d/%m/%Y') if lr.date else ''
+        mrows.append([
+            Paragraph(d, styMC),
+            Paragraph(lr.advt_time or '', styMC),
+            Paragraph(lr.advt_theme or '', styM),
+            Paragraph(str(lr.duration) if lr.duration is not None else '', styMC),
+            Paragraph(lr.program or '', styM),
+            Paragraph(lr.advertiser or '', styM),
+            Paragraph(lr.product or '', styM),
+            Paragraph(money(lr.cost) if lr.cost is not None else '', styMC),
+        ])
+    if not matched:
+        mrows.append([Paragraph('No matched LMRB rows for this scope.', styM), '', '', '', '', '', '', ''])
+    mtab2 = Table(mrows, colWidths=[W*0.09, W*0.08, W*0.24, W*0.05, W*0.19, W*0.15, W*0.12, W*0.08],
+                  repeatRows=1)
+    mstyle = [('GRID', (0, 0), (-1, -1), 0.4, GREY),
+              ('BACKGROUND', (0, 0), (-1, 0), NAVY),
+              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+              ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, HexColor('#F4F6FB')])]
+    if not matched:
+        mstyle.append(('SPAN', (0, 1), (-1, 1)))
+    mtab2.setStyle(TableStyle(mstyle + [('TOPPADDING', (0, 0), (-1, -1), 1),
+                                        ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+                                        ('LEFTPADDING', (0, 0), (-1, -1), 2),
+                                        ('RIGHTPADDING', (0, 0), (-1, -1), 2)]))
+    story += [mtab2]
+
     doc.build(story)
     buf.seek(0)
     fname = f'Reconciliation_{account.name}_{channel}_{month}.pdf'.replace(' ', '_')
@@ -6821,19 +6882,13 @@ def summary_pdf(request):
     return response
 
 
-def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
-    """
-    Shared helper: write all matched LMRB rows (commercial + sponsorship) into
-    an existing openpyxl worksheet.  Returns the row count written.
+def _matched_lmrb_rows(account_id, channel, month, schedule_id=None):
+    """Return the combined, deduplicated list of matched LMRBRow records for a
+    scope (commercial + sponsorship + TC-confirmed), ordered by date/time.
 
-    Commercial matched  = LMRBRow.is_matched=True (Schedule↔LMRB engine)
-    Sponsorship matched = LMRBRow rows linked via SponsorshipLmrbAssignment
-    Both sets are deduplicated so a row appearing in both groups is written once.
-
-    schedule_id: when provided, restrict to rows belonging to that schedule only.
+    Single source of truth shared by the Matched LMRB Excel export and the
+    Matched LMRB section of the Reconciliation PDF.
     """
-    import openpyxl  # noqa - imported by callers too; ensure available
-    from openpyxl.styles import Font, Alignment, PatternFill
     from django.db.models import Min, Max
     from core.models import SponsorshipLmrbAssignment
 
@@ -6852,7 +6907,8 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
     if schedule_id:
         comm_qs = comm_qs.filter(matched_schedule__schedule_id=schedule_id)
 
-    # Sponsorship matched (via SponsorshipLmrbAssignment)
+    # Sponsorship matched (via SponsorshipLmrbAssignment) — not date-restricted so
+    # cross-month spillover matches from the Sponsorship Matching page are included.
     spon_q = SponsorshipLmrbAssignment.objects.filter(
         account_id=account_id,
         schedule_row__channel=channel,
@@ -6899,9 +6955,26 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
     if tc_confirmed_ids:
         comm_lmrb_ids &= tc_confirmed_ids
     all_ids = comm_lmrb_ids | spon_ids | tc_spon_lmrb_ids | tc_confirmed_ids
-    combined = list(
+    return list(
         LMRBRow.objects.filter(id__in=all_ids).order_by('date', 'advt_time')
     )
+
+
+def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
+    """
+    Shared helper: write all matched LMRB rows (commercial + sponsorship) into
+    an existing openpyxl worksheet.  Returns the row count written.
+
+    Commercial matched  = LMRBRow.is_matched=True (Schedule↔LMRB engine)
+    Sponsorship matched = LMRBRow rows linked via SponsorshipLmrbAssignment
+    Both sets are deduplicated so a row appearing in both groups is written once.
+
+    schedule_id: when provided, restrict to rows belonging to that schedule only.
+    """
+    import openpyxl  # noqa - imported by callers too; ensure available
+    from openpyxl.styles import Font, Alignment, PatternFill
+
+    combined = _matched_lmrb_rows(account_id, channel, month, schedule_id=schedule_id)
 
     HDR_FILL = PatternFill('solid', fgColor='0F2340')
     hdr_font = Font(bold=True, color='FFFFFF', size=10)

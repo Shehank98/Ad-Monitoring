@@ -62,8 +62,21 @@ def build_recon_context(account, channel, month, meta, summary_data, schedule=No
     """
     client = getattr(account, 'client', None)
     dev_notes = (meta.deviation_notes if meta and isinstance(meta.deviation_notes, dict) else {}) or {}
+    spot_labels = (meta.spot_labels if meta and isinstance(meta.spot_labels, dict) else {}) or {}
 
-    # ── Spot table (No. of Spots) + deviation rows, from the commercial rows ──
+    def _default_label(brand, dur):
+        if not brand:
+            return ''
+        return f'{brand} {dur}s' if dur else str(brand)
+
+    def _label(key, brand, dur):
+        custom = spot_labels.get(key) if isinstance(spot_labels, dict) else ''
+        return custom if (custom and str(custom).strip()) else _default_label(brand, dur)
+
+    # ── Spot table (No. of Spots) + deviation rows ──
+    # Commercial rows first, then the sponsorship products so their names also
+    # appear in the "Spot/VA Duration" column.  Every spot carries a stable
+    # `key` and a user-editable `label`.
     spots, deviations = [], []
     tot_planned = tot_aired = tot_third = tot_dev = tot_notaired = 0
     for row in (summary_data.get('commercial') or []):
@@ -74,13 +87,15 @@ def build_recon_context(account, channel, month, meta, summary_data, schedule=No
         third   = row.get('third_party', 0) or 0
         extra   = row.get('extra', 0) or 0
         missed  = row.get('missed', 0) or 0
+        key = f'{brand}|{dur}'
         spots.append({'brand': brand, 'dur': dur, 'planned': planned,
-                      'aired': aired, 'third_party': third})
+                      'aired': aired, 'third_party': third,
+                      'key': key, 'label': _label(key, brand, dur),
+                      'is_sponsorship': False})
         tot_planned += planned
         tot_aired   += aired
         tot_third   += third
         if extra or missed:
-            key = f'{brand}|{dur}'
             note = dev_notes.get(key, {}) if isinstance(dev_notes, dict) else {}
             deviations.append({
                 'brand': brand, 'dur': dur,
@@ -91,6 +106,23 @@ def build_recon_context(account, channel, month, meta, summary_data, schedule=No
             })
             tot_dev      += extra
             tot_notaired += missed
+
+    # Sponsorship products (grouped rows) — names shown in the same column.
+    for section in (summary_data.get('sponsorship') or []):
+        for row in (section.get('rows') or []):
+            product = row.get('product', '')
+            dur     = row.get('dur', 0)
+            planned = row.get('planned', 0) or 0
+            aired   = row.get('aired', 0) or 0
+            third   = row.get('third_party', 0) or 0
+            key = f'spon|{product}|{dur}'
+            spots.append({'brand': product, 'dur': dur, 'planned': planned,
+                          'aired': aired, 'third_party': third,
+                          'key': key, 'label': _label(key, product, dur),
+                          'is_sponsorship': True})
+            tot_planned += planned
+            tot_aired   += aired
+            tot_third   += third
 
     # ── Financials ──
     # Schedule Cost = numeric value of Schedule Value (fallback: stored schedule_cost)

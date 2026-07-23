@@ -442,7 +442,7 @@ def matching_groups(account_id: int, channel: str, month: str,
             'program':    lr.program or '',
             'duration':   lr.duration,
             'match_type': a.match_type,
-            'matched_by': a.matched_by.get_full_name() or a.matched_by.email
+            'matched_by': (a.matched_by.name or a.matched_by.email)
                           if a.matched_by else 'Auto',
             'matched_at': timezone.localtime(a.matched_at).strftime('%d %b %Y, %H:%M')
                           if a.matched_at else '',
