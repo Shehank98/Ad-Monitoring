@@ -373,8 +373,8 @@
             <td class="border border-slate-300 px-1 py-1">
               <div class="flex items-center gap-1">
                 <input type="hidden" name="spot_key" value="{{ sp.key }}">
-                <input name="spot_label" value="{{ sp.label }}"
-                       class="input-field text-xs py-0.5 w-full"
+                <input name="spot_label" value="{{ sp.label }}" data-spot-key="{{ sp.key }}"
+                       class="input-field text-xs py-0.5 w-full spot-label-input"
                        title="Edit the Spot/VA Duration label; blank restores the default">
                 {% if sp.is_sponsorship %}
                 <span class="text-[9px] text-amber-600 font-bold uppercase" title="Sponsorship">Spon</span>
@@ -412,8 +412,12 @@
         <tbody>
           {% for dv in recon.deviations %}
           <tr>
-            <td class="border border-slate-300 px-2 py-1">{{ dv.brand }} {{ dv.dur }}s
-              <input type="hidden" name="dev_key" value="{{ dv.key }}"></td>
+            <td class="border border-slate-300 px-1">
+              <input type="hidden" name="dev_key" value="{{ dv.key }}">
+              <input type="hidden" name="spot_key" value="{{ dv.key }}">
+              <input name="spot_label" value="{{ dv.label }}" data-spot-key="{{ dv.key }}"
+                     class="input-field text-xs py-1 w-full spot-label-input"
+                     title="Edit the Spot/VA Duration label; blank restores the default"></td>
             <td class="border border-slate-300 px-2 py-1 text-center">{{ dv.deviated }}</td>
             <td class="border border-slate-300 px-2 py-1 text-center">{{ dv.not_aired }}</td>
             <td class="border border-slate-300 px-1"><input name="dev_reason" value="{{ dv.reason }}" class="input-field text-xs py-1 w-full"></td>
@@ -508,13 +512,21 @@
       i.addEventListener('input', recompute);
     });
     recompute();
+
+    // Keep the "Spot/VA Duration" label in sync across the No-of-Spots table
+    // and the Deviations table when the same spot appears in both.
+    document.querySelectorAll('.spot-label-input').forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        var k = this.getAttribute('data-spot-key');
+        document.querySelectorAll('.spot-label-input[data-spot-key="' + (window.CSS && CSS.escape ? CSS.escape(k) : k) + '"]').forEach(function (other) {
+          if (other !== inp) other.value = inp.value;
+        });
+      });
+    });
   })();
   </script>
 </form>
 {% endif %}
-
-{# Sponsorship counts & manual assignment now live on the dedicated
-   Sponsorship Matching page (button above). #}
 
 {% else %}
 <!-- No summary data yet for this scope -->

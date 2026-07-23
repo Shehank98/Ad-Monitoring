@@ -6830,11 +6830,12 @@ def summary_pdf(request):
     story += [stab2]
 
     # ── Matched LMRB report (starts on a fresh page after the summary) ──
+    # Full LMRB column set, in the same order as the Matched LMRB Excel export.
     matched = _matched_lmrb_rows(account_id, channel, month, schedule_id=sid)
-    styMH = ParagraphStyle('mh', fontName='Helvetica-Bold', fontSize=6.5, leading=8,
+    styMH = ParagraphStyle('mh', fontName='Helvetica-Bold', fontSize=5, leading=6,
                            textColor=white, alignment=TA_CENTER)
-    styM  = ParagraphStyle('m', fontName='Helvetica', fontSize=6.5, leading=8)
-    styMC = ParagraphStyle('mc', fontName='Helvetica', fontSize=6.5, leading=8, alignment=TA_CENTER)
+    styM  = ParagraphStyle('m', fontName='Helvetica', fontSize=5, leading=6)
+    styMC = ParagraphStyle('mc', fontName='Helvetica', fontSize=5, leading=6, alignment=TA_CENTER)
 
     story += [PageBreak(),
               Paragraph("<font color='#1F3864'><b>Matched LMRB Report</b></font>",
@@ -6844,34 +6845,56 @@ def summary_pdf(request):
                         f"{len(matched)} matched row{'' if len(matched) == 1 else 's'}", styN),
               Spacer(1, 6)]
 
-    mheaders = ['Date', 'Time', 'Advt_Theme', 'Dur', 'Programme', 'Advertiser', 'Product', 'Cost']
-    mrows = [[Paragraph(h, styMH) for h in mheaders]]
+    # (header, relative width, centre?) — same columns/order as _write_matched_lmrb_sheet
+    mcols = [
+        ('Product_Group', 1.3, False), ('Advertiser', 1.3, False), ('Product', 1.2, False),
+        ('Advt_Theme', 2.2, False), ('Ads', 0.7, True), ('Channel', 1.2, False),
+        ('Program', 1.8, False), ('Dd', 0.4, True), ('Mn', 0.4, True), ('Yr', 0.55, True),
+        ('Day', 0.6, True), ('Prog_time', 0.85, True), ('Advt_time', 0.85, True),
+        ('AdPos', 0.6, True), ('TotAds', 0.6, True), ('BrkNo', 0.6, True),
+        ('PosinBrk', 0.7, True), ('AdsinBrk', 0.7, True), ('Lng', 0.5, True),
+        ('Dur', 0.5, True), ('Cost', 0.9, True),
+    ]
+    wsum = sum(c[1] for c in mcols)
+    mcolw = [W * (c[1] / wsum) for c in mcols]
+    mrows = [[Paragraph(c[0], styMH) for c in mcols]]
+
+    def _cell(v, centre):
+        s = '' if v is None or v == '' else str(v)
+        return Paragraph(s, styMC if centre else styM)
+
     for lr in matched:
-        d = lr.date.strftime('%d/%m/%Y') if lr.date else ''
-        mrows.append([
-            Paragraph(d, styMC),
-            Paragraph(lr.advt_time or '', styMC),
-            Paragraph(lr.advt_theme or '', styM),
-            Paragraph(str(lr.duration) if lr.duration is not None else '', styMC),
-            Paragraph(lr.program or '', styM),
-            Paragraph(lr.advertiser or '', styM),
-            Paragraph(lr.product or '', styM),
-            Paragraph(money(lr.cost) if lr.cost is not None else '', styMC),
-        ])
+        dd = lr.date.day   if lr.date else ''
+        mn = lr.date.month if lr.date else ''
+        yr = lr.date.year  if lr.date else ''
+        vals = [
+            lr.product_group or '', lr.advertiser or '', lr.product or '',
+            lr.advt_theme or '', lr.ads or '', lr.channel or '', lr.program or '',
+            dd, mn, yr, lr.day or '', lr.prog_time or '', lr.advt_time or '',
+            lr.ad_pos     if lr.ad_pos     is not None else '',
+            lr.tot_ads    if lr.tot_ads    is not None else '',
+            lr.brk_no     if lr.brk_no     is not None else '',
+            lr.pos_in_brk if lr.pos_in_brk is not None else '',
+            lr.ads_in_brk if lr.ads_in_brk is not None else '',
+            lr.lng or '',
+            lr.duration   if lr.duration   is not None else '',
+            money(lr.cost) if lr.cost is not None else '',
+        ]
+        mrows.append([_cell(v, mcols[i][2]) for i, v in enumerate(vals)])
     if not matched:
-        mrows.append([Paragraph('No matched LMRB rows for this scope.', styM), '', '', '', '', '', '', ''])
-    mtab2 = Table(mrows, colWidths=[W*0.09, W*0.08, W*0.24, W*0.05, W*0.19, W*0.15, W*0.12, W*0.08],
-                  repeatRows=1)
-    mstyle = [('GRID', (0, 0), (-1, -1), 0.4, GREY),
+        mrows.append([Paragraph('No matched LMRB rows for this scope.', styM)]
+                     + ['' for _ in mcols[1:]])
+    mtab2 = Table(mrows, colWidths=mcolw, repeatRows=1)
+    mstyle = [('GRID', (0, 0), (-1, -1), 0.35, GREY),
               ('BACKGROUND', (0, 0), (-1, 0), NAVY),
               ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
               ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, HexColor('#F4F6FB')])]
     if not matched:
         mstyle.append(('SPAN', (0, 1), (-1, 1)))
-    mtab2.setStyle(TableStyle(mstyle + [('TOPPADDING', (0, 0), (-1, -1), 1),
-                                        ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
-                                        ('LEFTPADDING', (0, 0), (-1, -1), 2),
-                                        ('RIGHTPADDING', (0, 0), (-1, -1), 2)]))
+    mtab2.setStyle(TableStyle(mstyle + [('TOPPADDING', (0, 0), (-1, -1), 0.8),
+                                        ('BOTTOMPADDING', (0, 0), (-1, -1), 0.8),
+                                        ('LEFTPADDING', (0, 0), (-1, -1), 1.5),
+                                        ('RIGHTPADDING', (0, 0), (-1, -1), 1.5)]))
     story += [mtab2]
 
     doc.build(story)
