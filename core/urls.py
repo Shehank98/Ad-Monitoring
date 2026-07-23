@@ -32,6 +32,7 @@ urlpatterns = [
     path('brand-mappings/',           views.brand_mapping_list,      name='brand_mapping_list'),
     path('brand-mappings/quick/',     views.brand_mapping_quick,     name='brand_mapping_quick'),
     path('brand-mappings/quick/add/', views.brand_mapping_quick_add, name='brand_mapping_quick_add'),
+    path('brand-mappings/quick/detail/', views.brand_mapping_detail, name='brand_mapping_detail'),
     path('brand-mappings/options/',   views.brand_mapping_options,   name='brand_mapping_options'),
     path('brand-mappings/channels/',  views.brand_mapping_channels,  name='brand_mapping_channels'),
     path('brand-mappings/months/',    views.brand_mapping_months,    name='brand_mapping_months'),
