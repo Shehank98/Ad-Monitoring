@@ -102,7 +102,7 @@ def build_recon_context(account, channel, month, meta, summary_data, schedule=No
                 'deviated': extra, 'not_aired': missed,
                 'reason': (note.get('reason', '') if isinstance(note, dict) else ''),
                 'dev_value': (note.get('dev_value', '') if isinstance(note, dict) else ''),
-                'key': key,
+                'key': key, 'label': _label(key, brand, dur),
             })
             tot_dev      += extra
             tot_notaired += missed
