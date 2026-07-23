@@ -8324,6 +8324,158 @@ def sponsorship_unmatched_rows(request):
     return JsonResponse({'schedule_row_ids': ids})
 
 
+# ── Dedicated Sponsorship Matching page ───────────────────────────────────────
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+def sponsorship_matching(request):
+    """
+    Dedicated Sponsorship Matching page.
+
+    Sponsorship ads are not present in the TC, so they cannot be reconciled via
+    TC↔LMRB.  This page lists every SPONSORSHIP product (brand + duration) for the
+    scope with its required Telecast Requirement (TR = planned row count), how many
+    are already assigned, and how many remain.  The user picks matching rows from
+    the unmatched LMRB pool (this scope + the following month for spillover) until
+    the TR is reached.  Matches reuse SponsorshipLmrbAssignment, so they show up as
+    "Aired" on the Summary Sheet and in the Matched LMRB export, and the LMRB rows
+    are permanently locked (is_sponsorship_matched=True).
+    """
+    from verification.sponsorship_engine import matching_groups, matching_scope
+
+    user       = request.user
+    account_qs = _account_qs(user)
+
+    account_id  = request.GET.get('account_id', '')
+    channel     = request.GET.get('channel', '')
+    month       = request.GET.get('month', '')
+    schedule_id = request.GET.get('schedule_id', '').strip()
+
+    selected_account = None
+    if account_id:
+        try:
+            selected_account = account_qs.get(pk=account_id)
+        except Account.DoesNotExist:
+            selected_account = None
+
+    channels, months = [], []
+    groups = []
+    window_start = window_end = next_end = None
+
+    if selected_account:
+        channels = list(
+            ScheduleRow.objects.filter(
+                account_id=account_id, ad_type='SPONSORSHIP',
+            ).values_list('channel', flat=True).distinct().order_by('channel')
+        )
+        if channel:
+            months = list(
+                ScheduleRow.objects.filter(
+                    account_id=account_id, channel=channel, ad_type='SPONSORSHIP',
+                ).values_list('month', flat=True).distinct().order_by('month')
+            )
+        if channel and month:
+            sid = int(schedule_id) if schedule_id else None
+            groups = matching_groups(int(account_id), channel, month, schedule_id=sid)
+            window_start, window_end, next_end = matching_scope(
+                int(account_id), channel, month)
+
+    totals = {
+        'required':  sum(g['required']  for g in groups),
+        'assigned':  sum(g['assigned']  for g in groups),
+        'remaining': sum(g['remaining'] for g in groups),
+    }
+
+    return render(request, 'sponsorship/matching.html', {
+        'accounts':         account_qs,
+        'selected_account': selected_account,
+        'account_id':       account_id,
+        'channel':          channel,
+        'month':            month,
+        'schedule_id':      schedule_id,
+        'channels':         channels,
+        'months':           months,
+        'groups':           groups,
+        'totals':           totals,
+        'window_start':     window_start,
+        'window_end':       window_end,
+        'next_end':         next_end,
+    })
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+def sponsorship_matching_candidates(request):
+    """
+    GET (AJAX): unmatched LMRB rows selectable for a sponsorship product.
+    Pool spans the scope date range extended into the next month (spillover).
+    Query params: account_id, channel, month, brand, duration (optional).
+    """
+    from verification.sponsorship_engine import matching_candidates
+
+    account_id = request.GET.get('account_id', '').strip()
+    channel    = request.GET.get('channel', '').strip()
+    month      = request.GET.get('month', '').strip()
+    brand      = request.GET.get('brand', '').strip()
+    duration   = request.GET.get('duration', '').strip()
+
+    if not (account_id and channel and month):
+        return JsonResponse({'error': 'Incomplete parameters.'}, status=400)
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'error': 'Access denied.'}, status=403)
+
+    dur = None
+    if duration:
+        try:
+            dur = int(duration)
+        except ValueError:
+            dur = None
+
+    rows = matching_candidates(int(account_id), channel, month, brand, dur)
+    return JsonResponse({'candidates': rows})
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+@require_POST
+def sponsorship_matching_undo(request):
+    """
+    POST (AJAX or form): remove one or more SponsorshipLmrbAssignments and unlock
+    their LMRB rows.  Accepts JSON {assignment_ids:[...], account_id, channel, month}
+    or form-encoded assignment_ids (repeated) for a no-JS fallback.
+    """
+    import json as _json
+    from verification.sponsorship_engine import remove_assignments
+
+    if request.content_type and 'application/json' in request.content_type:
+        try:
+            body = _json.loads(request.body)
+        except (ValueError, TypeError):
+            return JsonResponse({'error': 'Invalid JSON.'}, status=400)
+        account_id = str(body.get('account_id', '')).strip()
+        channel    = str(body.get('channel', '')).strip()
+        month      = str(body.get('month', '')).strip()
+        raw_ids    = body.get('assignment_ids', [])
+    else:
+        account_id = request.POST.get('account_id', '').strip()
+        channel    = request.POST.get('channel', '').strip()
+        month      = request.POST.get('month', '').strip()
+        raw_ids    = request.POST.getlist('assignment_ids')
+
+    if not (account_id and channel and month):
+        return JsonResponse({'error': 'Incomplete parameters.'}, status=400)
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'error': 'Access denied.'}, status=403)
+
+    try:
+        ids = [int(x) for x in raw_ids]
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Invalid assignment_ids.'}, status=400)
+
+    result = remove_assignments(int(account_id), channel, month, ids)
+    return JsonResponse(result)
+
+
 # ── Manual Reconciliation ──────────────────────────────────────────────────────
 
 @login_required
