@@ -493,7 +493,15 @@ def channel_list(request):
             messages.success(request, f'Channel "{ch.name}" deleted.')
             return redirect('/dashboard/channels/')
 
-    return render(request, 'admin_panel/channels.html', {'channels': channels, 'form': form})
+    channels = channels.order_by('name')
+    tv_channels    = [c for c in channels if 'radio' not in c.name.lower()]
+    radio_channels = [c for c in channels if 'radio' in c.name.lower()]
+    return render(request, 'admin_panel/channels.html', {
+        'channels':       channels,
+        'tv_channels':    tv_channels,
+        'radio_channels': radio_channels,
+        'form':           form,
+    })
 
 
 # ── Schedules ─────────────────────────────────────────────────────────────────
