@@ -5387,13 +5387,13 @@ def tc_lmrb_upload(request):
     if not channel:
         channel = _safe_str(meta.get('channel'))
     if not channel:
-        messages.error(request, 'Could not detect the Channel — type it in and re-upload.')
+        messages.error(request, 'Could not detect the Channel - type it in and re-upload.')
         return _back()
     if not month:
         if meta.get('start_date'):
             month = meta['start_date'].strftime('%B %Y')
         else:
-            messages.error(request, 'Could not detect the Month — type it (e.g. "January 2025") and re-upload.')
+            messages.error(request, 'Could not detect the Month - type it (e.g. "January 2025") and re-upload.')
             return _back()
 
     tc_report = TransmissionReport.objects.create(
@@ -5415,7 +5415,7 @@ def tc_lmrb_upload(request):
     if count == 0:
         messages.warning(
             request,
-            'TC uploaded but 0 rows were parsed — check the file has TC Theme, '
+            'TC uploaded but 0 rows were parsed - check the file has TC Theme, '
             'Aired Time and Date columns (add column aliases in Settings if needed).'
         )
     else:
@@ -8222,10 +8222,10 @@ def period_sponsorship_create(request):
     )
     cov = reconcile_period_sponsorship(ps, user=request.user)
     if not cov['mapped'] and not theme:
-        messages.warning(request, f'Added "{brand}" but it has no brand mapping and no theme — '
+        messages.warning(request, f'Added "{brand}" but it has no brand mapping and no theme - '
                                   f'found 0. Set a theme or map the brand, then reconcile.')
     else:
-        messages.success(request, f'Added "{brand}" — found {cov["found"]} of {cov["planned"]} planned.')
+        messages.success(request, f'Added "{brand}" - found {cov["found"]} of {cov["planned"]} planned.')
     return _period_sponsorship_redirect(account_id, channel, month)
 
 
@@ -8279,7 +8279,7 @@ def period_sponsorship_reconcile(request, pk):
         messages.error(request, 'Access denied.')
         return _period_sponsorship_redirect('')
     cov = reconcile_period_sponsorship(ps, user=request.user)
-    messages.success(request, f'"{ps.brand}" reconciled — found {cov["found"]} of {cov["planned"]}.')
+    messages.success(request, f'"{ps.brand}" reconciled - found {cov["found"]} of {cov["planned"]}.')
     return _period_sponsorship_redirect(ps.account_id, ps.channel, ps.month)
 
 
@@ -8318,7 +8318,7 @@ def period_sponsorship_reset(request, pk):
         messages.error(request, 'Access denied.')
         return _period_sponsorship_redirect('')
     n = reset_period_sponsorship(ps)
-    messages.success(request, f'"{ps.brand}" reset — {n} LMRB row(s) unlocked.')
+    messages.success(request, f'"{ps.brand}" reset - {n} LMRB row(s) unlocked.')
     return _period_sponsorship_redirect(ps.account_id, ps.channel, ps.month)
 
 
@@ -10866,7 +10866,7 @@ def whatsapp_test(request):
             f'✓ Template "{label}" sent to {to}. Check your WhatsApp.')
     else:
         messages.error(request,
-            f'✗ Template "{label}" failed — check that the template is approved in Meta and '
+            f'✗ Template "{label}" failed - check that the template is approved in Meta and '
             f'that the test number ({to}) is added as a recipient in the Meta API Setup page.')
     return redirect('/dashboard/settings/')
 

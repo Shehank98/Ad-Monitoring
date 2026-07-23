@@ -260,7 +260,7 @@
         <summary class="flex items-center gap-2 px-4 py-3 cursor-pointer select-none text-amber-800 font-semibold text-sm">
           <i class="fa-solid fa-calendar-plus text-amber-500"></i>
           Makeup / Late-Airing Options
-          <span class="ml-1 text-[11px] font-normal text-amber-600">(optional — for rescheduled or late-aired spots)</span>
+          <span class="ml-1 text-[11px] font-normal text-amber-600">(optional - for rescheduled or late-aired spots)</span>
           <i class="fa-solid fa-chevron-down text-amber-400 ml-auto group-open:rotate-180 transition-transform"></i>
         </summary>
         <div class="px-4 pb-4 pt-1 space-y-4">
@@ -293,7 +293,7 @@
               select the original schedule here. Its reconciliation run will include this upload's spots.
             </p>
             <select id="id_parent_schedule" name="parent_schedule" class="select-field max-w-lg">
-              <option value="">— None (standalone schedule) —</option>
+              <option value="">- None (standalone schedule) -</option>
               {% for ps in parent_schedule_choices %}
               <option value="{{ ps.id }}">
                 {{ ps.account__name }} | {{ ps.channel }} | {{ ps.month }} | #{{ ps.schedule_number }} v{{ ps.version }}
@@ -371,7 +371,7 @@
             Sponsorship Brands Detected - Assign Types
           </p>
           <p class="text-xs text-amber-700 mb-3">
-            The file contains SPONSORSHIP rows. Select one or more types per brand — the dashboard will count LMRB observations for all selected keywords.
+            The file contains SPONSORSHIP rows. Select one or more types per brand - the dashboard will count LMRB observations for all selected keywords.
             <span class="font-semibold">Tip: Opening/Closing sponsorships usually need both <code class="bg-amber-100 px-1 rounded">-Intro</code> and <code class="bg-amber-100 px-1 rounded">-Extro</code> selected.</span>
           </p>
           <div id="spon-brand-rows" class="space-y-2"></div>
@@ -565,7 +565,7 @@
         ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-700">PIVOT</span>`
         : (s.total_spots > 0
            ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-700">FLAT</span>`
-           : `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-200 text-slate-500">—</span>`);
+           : `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-200 text-slate-500">-</span>`);
 
       const skippedBadge = !isSchedule
         ? `<span class="ml-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">SKIP</span>`
@@ -574,7 +574,7 @@
       const cSpots = s.commercial_spots  || 0;
       const sSpots = s.sponsorship_spots || 0;
 
-      const monthLine = s.month || '—';
+      const monthLine = s.month || '-';
       const rangeLine = (s.start_date && s.end_date)
         ? `<br><span class="text-[10px] text-slate-400">${s.start_date} → ${s.end_date}</span>`
         : '';
@@ -625,10 +625,10 @@
             ${monthLine}${rangeLine}
           </td>
           <td class="px-3 py-2 text-right font-mono font-bold ${cSpots > 0 ? 'text-blue-700' : 'text-slate-300'}">
-            ${cSpots > 0 ? cSpots.toLocaleString() : '—'}
+            ${cSpots > 0 ? cSpots.toLocaleString() : '-'}
           </td>
           <td class="px-3 py-2 text-right font-mono font-bold ${sSpots > 0 ? 'text-amber-600' : 'text-slate-300'}">
-            ${sSpots > 0 ? sSpots.toLocaleString() : '—'}
+            ${sSpots > 0 ? sSpots.toLocaleString() : '-'}
           </td>
           <td class="px-3 py-2 text-center">
             <input type="checkbox" class="w-4 h-4 accent-indigo-600 cursor-pointer"
@@ -699,7 +699,7 @@
     try {
       const res  = await fetch('/dashboard/schedules/upload-multi/', {method: 'POST', body: fd});
       if (!res.ok && res.status !== 200) {
-        throw new Error(`Server returned ${res.status} — check your account permissions.`);
+        throw new Error(`Server returned ${res.status} - check your account permissions.`);
       }
       const data = await res.json();
       showMultiUploadResult(data);
@@ -729,8 +729,8 @@
           <td class="px-3 py-2 font-medium text-slate-700">${escHtml(r.sheet)}</td>
           <td class="px-3 py-2 text-slate-600">${escHtml(r.channel)}</td>
           <td class="px-3 py-2 text-slate-600">${escHtml(r.month)}</td>
-          <td class="px-3 py-2 text-right font-bold ${cSpots > 0 ? 'text-blue-700' : 'text-slate-300'}">${cSpots > 0 ? cSpots.toLocaleString() : '—'}</td>
-          <td class="px-3 py-2 text-right font-bold ${sSpots > 0 ? 'text-amber-600' : 'text-slate-300'}">${sSpots > 0 ? sSpots.toLocaleString() : '—'}</td>
+          <td class="px-3 py-2 text-right font-bold ${cSpots > 0 ? 'text-blue-700' : 'text-slate-300'}">${cSpots > 0 ? cSpots.toLocaleString() : '-'}</td>
+          <td class="px-3 py-2 text-right font-bold ${sSpots > 0 ? 'text-amber-600' : 'text-slate-300'}">${sSpots > 0 ? sSpots.toLocaleString() : '-'}</td>
           <td class="px-3 py-2 text-center">
             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
               <i class="fa-solid fa-circle-check"></i> Uploaded

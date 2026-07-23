@@ -347,7 +347,7 @@
               {% endfor %}
             </div>
             {% else %}
-            <p class="text-slate-400 italic">None — all brands are mapped</p>
+            <p class="text-slate-400 italic">None - all brands are mapped</p>
             {% endif %}
           </div>
           <!-- ⚠️ Needs TC Theme -->
@@ -366,7 +366,7 @@
               {% endfor %}
             </div>
             {% else %}
-            <p class="text-slate-400 italic">None — all mapped brands have a TC theme</p>
+            <p class="text-slate-400 italic">None - all mapped brands have a TC theme</p>
             {% endif %}
           </div>
           <!-- ✅ Fully Mapped -->
@@ -404,7 +404,7 @@
               Unmapped LMRB Themes
               <span class="ml-1.5 px-1.5 py-0.5 rounded-md bg-orange-100 text-orange-600 text-xs font-bold">{{ unmapped_lmrb_themes|length }}</span>
             </p>
-            <p class="text-xs text-slate-500 mt-0.5">These LMRB themes in this scope have no brand mapping — they will appear as "Extra Aired". Click any to fill the LMRB Theme field in the Add form.</p>
+            <p class="text-xs text-slate-500 mt-0.5">These LMRB themes in this scope have no brand mapping - they will appear as "Extra Aired". Click any to fill the LMRB Theme field in the Add form.</p>
           </div>
         </div>
         <div class="flex flex-wrap gap-1.5">
@@ -457,7 +457,7 @@
       </div>
       {% endif %}
 
-      <!-- Table (grouped by brand — one row per brand/product/duration group) -->
+      <!-- Table (grouped by brand - one row per brand/product/duration group) -->
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {% if grouped_mappings %}
         <div class="overflow-x-auto">
@@ -486,7 +486,7 @@
                       <span class="truncate">{{ grp.product }}</span>
                     </span>
                     {% else %}
-                    <span class="text-[11px] text-slate-400 italic">—</span>
+                    <span class="text-[11px] text-slate-400 italic">-</span>
                     {% endif %}
                     <button onclick="openEditFieldModal({{ first_id }}, 'product', '{{ grp.product|escapejs }}')"
                             class="mt-0.5 inline-flex items-center px-1 py-0.5 rounded text-[10px] text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 transition-colors border border-transparent hover:border-indigo-200"
@@ -511,7 +511,7 @@
                   </div>
                 </td>
 
-                <!-- LMRB Themes — all themes for this brand group as chips -->
+                <!-- LMRB Themes - all themes for this brand group as chips -->
                 <td class="px-3 py-3">
                   <div class="flex flex-wrap gap-1.5">
                     {% for lt in grp.lmrb_themes %}
@@ -573,7 +573,7 @@
                     </span>
                     {% endfor %}
                     {% else %}
-                    <span class="text-[11px] text-slate-300">—</span>
+                    <span class="text-[11px] text-slate-300">-</span>
                     {% endif %}
                     <button onclick="openEditMaponlineModal({{ first_id }}, '{{ grp.maponline_theme|escapejs }}')"
                             class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 transition-colors border border-transparent hover:border-cyan-200"
