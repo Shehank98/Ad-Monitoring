@@ -1511,3 +1511,32 @@ class ChannelOfficer(models.Model):
         if self.user and self.user.whatsapp_number:
             return self.user.whatsapp_number
         return ''
+
+
+class SiteNotification(models.Model):
+    """A site-wide announcement banner shown across the dashboard UI.
+
+    Use for release notes / bug-fix updates / maintenance notices. Each active
+    notification renders as a dismissible banner at the top of the page body;
+    dismissal is remembered per browser (localStorage) keyed by id + updated_at,
+    so editing a notification re-shows it to everyone.
+    """
+    LEVELS = [
+        ('update',  'Update'),
+        ('info',    'Info'),
+        ('success', 'Success'),
+        ('warning', 'Warning'),
+    ]
+    title      = models.CharField(max_length=200, blank=True, default='')
+    message    = models.TextField(help_text='Shown in the banner. Plain text.')
+    level      = models.CharField(max_length=10, choices=LEVELS, default='update')
+    is_active  = models.BooleanField(default=True, db_index=True,
+                                     help_text='Uncheck to hide the banner without deleting it.')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.title or (self.message[:60] if self.message else f'Notification #{self.pk}')
