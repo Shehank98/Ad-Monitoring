@@ -2272,11 +2272,19 @@ def brand_mapping_options(request):
         maponline_qs = maponline_qs.filter(product__iexact=product)
     maponline_themes = sorted(set(maponline_qs.values_list('advt_theme', flat=True)))
 
+    # ── Which schedule brands already have at least one mapping ───────────────
+    mapped_brand_set = set(
+        b.lower().strip()
+        for b in BrandMapping.objects.filter(account_id=account_id).values_list('brand', flat=True)
+    )
+    mapped_brands = [b for b in brands if b.lower().strip() in mapped_brand_set]
+
     return JsonResponse({
         'brands': brands, 'themes': themes, 'tc_themes': tc_themes,
         'products': products, 'mapped_themes': mapped_themes,
         'theme_product_map': theme_product_map,
         'maponline_themes': maponline_themes,
+        'mapped_brands': mapped_brands,
     })
 
 
@@ -2376,6 +2384,82 @@ def brand_mapping_export(request):
     filename = f"brand_mappings_{account.name.replace(' ', '_')}.xlsx"
     return FileResponse(buf, as_attachment=True, filename=filename,
                         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+# ── Brand mappings — Quick Map (guided) ──────────────────────────────────────
+
+@login_required
+def brand_mapping_quick(request):
+    """Guided 'Quick Map' page: pick a scope, then click-to-map schedule brands
+    to the real LMRB / TC themes found in the uploaded data. Saving is handled
+    by brand_mapping_quick_add (AJAX). The detailed table stays at
+    /dashboard/brand-mappings/."""
+    return render(request, 'admin_panel/brand_mappings_quick.html', {
+        'accounts': _account_qs(request.user),
+    })
+
+
+@login_required
+@require_POST
+def brand_mapping_quick_add(request):
+    """AJAX: create/enrich BrandMapping rows from the Quick Map guided picker.
+
+    Body JSON: {account_id, brand, themes:[...], tc_themes:[...],
+                maponline_theme, product, duration}
+    Mirrors the create-or-enrich logic of brand_mapping_list action='add'
+    (one row per LMRB theme; existing rows get TC/MapOnline enriched).
+    Returns {ok, created, updated, skipped}.
+    """
+    import json as _json
+    user       = request.user
+    account_qs = _account_qs(user)
+    try:
+        body = _json.loads(request.body)
+    except (ValueError, TypeError):
+        return JsonResponse({'ok': False, 'error': 'Invalid JSON.'}, status=400)
+
+    acc_id   = str(body.get('account_id', '')).strip()
+    brand    = str(body.get('brand', '')).strip()
+    themes   = [str(t).strip() for t in (body.get('themes') or []) if str(t).strip()]
+    tc_list  = [str(t).strip() for t in (body.get('tc_themes') or []) if str(t).strip()]
+    tc_theme = '|'.join(dict.fromkeys(tc_list))   # de-dup, keep order; model splits on '|'
+    maponline_theme = str(body.get('maponline_theme', '')).strip()
+    product  = str(body.get('product', '')).strip()
+    dur_raw  = str(body.get('duration', '')).strip()
+    duration = int(dur_raw) if dur_raw.isdigit() else None
+
+    if not (acc_id and brand and themes):
+        return JsonResponse({'ok': False, 'error': 'Brand and at least one LMRB theme are required.'}, status=400)
+    if not _account_access(user, acc_id):
+        return JsonResponse({'ok': False, 'error': 'No access to that brand.'}, status=403)
+    account = get_object_or_404(Account, id=acc_id)
+    if not _is_admin(user) and account not in account_qs:
+        return JsonResponse({'ok': False, 'error': 'No access to that brand.'}, status=403)
+
+    created = updated = skipped = 0
+    for theme in themes:
+        existing = BrandMapping.objects.filter(
+            account=account, brand=brand, theme=theme,
+            duration=duration, product=product,
+        ).first()
+        if existing:
+            changed_fields = []
+            if tc_theme and existing.tc_theme != tc_theme:
+                existing.tc_theme = tc_theme; changed_fields.append('tc_theme')
+            if maponline_theme and existing.maponline_theme != maponline_theme:
+                existing.maponline_theme = maponline_theme; changed_fields.append('maponline_theme')
+            if changed_fields:
+                existing.save(update_fields=changed_fields); updated += 1
+            else:
+                skipped += 1
+        else:
+            BrandMapping.objects.create(
+                account=account, brand=brand, theme=theme,
+                tc_theme=tc_theme, maponline_theme=maponline_theme,
+                duration=duration, product=product)
+            created += 1
+
+    return JsonResponse({'ok': True, 'created': created, 'updated': updated, 'skipped': skipped})
 
 
 # ── Monitoring Dashboard (Items 3 + 4) ───────────────────────────────────────

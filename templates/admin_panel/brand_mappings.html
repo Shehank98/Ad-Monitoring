@@ -7,6 +7,17 @@
 {% block content %}
 <div class="space-y-5">
 
+  <!-- ── Quick Map call-to-action ─────────────────────────────────────────── -->
+  <a href="/dashboard/brand-mappings/quick/{% if request.GET.account %}?account={{ request.GET.account }}{% endif %}"
+     class="flex items-center gap-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-5 py-3.5 shadow-sm hover:from-emerald-700 hover:to-teal-700 transition-colors">
+    <span class="w-9 h-9 rounded-xl bg-white/15 grid place-items-center shrink-0"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
+    <span class="flex-1 min-w-0">
+      <span class="block font-bold text-sm leading-tight">Try Quick Map - the easy way</span>
+      <span class="block text-xs text-emerald-50/90">Click a brand and tick its themes, no typing. Best for mapping lots of brands fast.</span>
+    </span>
+    <i class="fa-solid fa-arrow-right shrink-0"></i>
+  </a>
+
   <!-- ── How it works (collapsible) ───────────────────────────────────────── -->
   <details class="group bg-blue-50 border border-blue-200 rounded-xl text-sm">
     <summary class="flex items-center gap-2 px-4 py-3 cursor-pointer select-none text-blue-700 font-semibold">
