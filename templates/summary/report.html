@@ -369,7 +369,9 @@
         <tbody>
           {% for sp in recon.spots %}
           <tr>
-            <td class="border border-slate-300 px-2 py-1 text-center">{% if forloop.first %}{{ recon.scheduling_month }}{% endif %}</td>
+            {% if forloop.first %}
+            <td rowspan="{{ recon.spots|length }}" class="border border-slate-300 px-2 py-1 text-center align-middle font-medium">{{ recon.scheduling_month }}</td>
+            {% endif %}
             <td class="border border-slate-300 px-1 py-1">
               <div class="flex items-center gap-1">
                 <input type="hidden" name="spot_key" value="{{ sp.key }}">
