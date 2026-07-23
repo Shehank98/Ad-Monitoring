@@ -11,7 +11,7 @@
   <div class="flex items-center gap-2 mb-3">
     <i class="fa-solid fa-chart-line text-slate-400 text-sm"></i>
     <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">Data Coverage</h3>
-    <span class="text-xs text-slate-400">— latest date range per account</span>
+    <span class="text-xs text-slate-400">- latest date range per account</span>
   </div>
 
   {# Group coverage by account #}
@@ -23,7 +23,7 @@
         <div class="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
           <i class="fa-solid fa-building text-slate-500 text-[11px]"></i>
         </div>
-        <p class="text-xs font-bold text-slate-800">{{ account_group.grouper|default:"—" }}</p>
+        <p class="text-xs font-bold text-slate-800">{{ account_group.grouper|default:"-" }}</p>
         <span class="ml-auto text-[10px] font-semibold text-slate-400">{{ account_group.list|length }} channel{{ account_group.list|length|pluralize }}</span>
       </div>
       <div class="space-y-1.5 max-h-36 overflow-y-auto pr-1">
@@ -112,7 +112,7 @@
           </div>
           <div>
             <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-sm font-bold text-slate-800">{{ batch.account.name|default:"—" }}</span>
+              <span class="text-sm font-bold text-slate-800">{{ batch.account.name|default:"-" }}</span>
               <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold
                 {% if batch.data_type == 'maponline' %}bg-blue-50 text-blue-700 ring-1 ring-blue-200
                 {% else %}bg-purple-50 text-purple-700 ring-1 ring-purple-200{% endif %}">
@@ -128,7 +128,7 @@
               {% endif %}
             </p>
             <p class="text-[11px] text-slate-400 mt-0.5">
-              <i class="fa-solid fa-user text-slate-300 mr-1"></i>{{ batch.uploaded_by.name|default:"—" }}
+              <i class="fa-solid fa-user text-slate-300 mr-1"></i>{{ batch.uploaded_by.name|default:"-" }}
               ·
               {% if batch.uploaded_at.date == today %}
                 <span class="text-emerald-600 font-semibold">Today</span>

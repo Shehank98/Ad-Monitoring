@@ -10,7 +10,7 @@
     notes_map           - optional dict {schedule_row_id: {'mo': SpotNote|None, 'ops': SpotNote|None}}
                           when provided, a "Notes" column is appended showing MO + Ops notes
     show_mark_aired     - optional bool, when True adds an "Actions" column with "Mark as Aired" button
-                          (only rendered for ops users — JS handles the AJAX action)
+                          (only rendered for ops users - JS handles the AJAX action)
     account_id          - optional str, needed when show_mark_aired is True
     channel             - optional str, needed when show_mark_aired is True
     month               - optional str, needed when show_mark_aired is True
@@ -148,7 +148,7 @@
               {% endif %}
             </div>
             {% endwith %}
-          {% else %}—{% endif %}
+          {% else %}-{% endif %}
         </td>
         {% endif %}
 

@@ -51,11 +51,11 @@
       <div>
         <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Detected Columns</p>
         <ul class="text-xs text-slate-600 space-y-1">
-          <li><span class="font-semibold text-slate-700">Date</span> — Date / Aired Date / Prg Date</li>
-          <li><span class="font-semibold text-slate-700">Programme</span> — Programme / Program / Prg Name</li>
-          <li><span class="font-semibold text-slate-700">TC Theme</span> — Theme / Product / Description / Ad Name</li>
-          <li><span class="font-semibold text-slate-700">Duration</span> — Duration / Dur / Seconds / Ad Dur</li>
-          <li><span class="font-semibold text-slate-700">Aired Time</span> — Time / Aired Time / Advt_time / Ad Start</li>
+          <li><span class="font-semibold text-slate-700">Date</span> - Date / Aired Date / Prg Date</li>
+          <li><span class="font-semibold text-slate-700">Programme</span> - Programme / Program / Prg Name</li>
+          <li><span class="font-semibold text-slate-700">TC Theme</span> - Theme / Product / Description / Ad Name</li>
+          <li><span class="font-semibold text-slate-700">Duration</span> - Duration / Dur / Seconds / Ad Dur</li>
+          <li><span class="font-semibold text-slate-700">Aired Time</span> - Time / Aired Time / Advt_time / Ad Start</li>
         </ul>
       </div>
     </div>
@@ -71,7 +71,7 @@
       </div>
       <div>
         <h2 class="font-bold text-slate-800 text-sm">Upload TC File</h2>
-        <p class="text-xs text-slate-400">Excel (.xlsx / .xls) or PDF — columns detected automatically</p>
+        <p class="text-xs text-slate-400">Excel (.xlsx / .xls) or PDF - columns detected automatically</p>
       </div>
       <span class="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-50 text-teal-600 border border-teal-200">
         <i class="fa-solid fa-bolt text-[8px]"></i> AUTO-PARSE
@@ -322,7 +322,7 @@ function esc(s) {
 }
 
 // The page scrolls inside the main content container (an .overflow-y-auto div in
-// base.html), NOT window — so window.scrollTo is a no-op here. Walk up to the
+// base.html), NOT window - so window.scrollTo is a no-op here. Walk up to the
 // nearest scrollable ancestor and scroll that instead.
 function getScrollParent(el) {
   let node = el ? el.parentElement : null;
@@ -352,7 +352,7 @@ function scheduleSelected(sel) {
   const chField  = document.getElementById('inpChannel');
   const moField  = document.getElementById('inpMonth');
   if (!opt.value) {
-    // Cleared — unlock manual editing
+    // Cleared - unlock manual editing
     chField.readOnly = false;
     chField.classList.remove('bg-slate-50');
     moField.readOnly = false;
@@ -510,7 +510,7 @@ async function runPreview() {
   const fileInput  = document.getElementById('tcFile');
 
   if (!accountId)  { alert('Please select an account first.'); return; }
-  if (!scheduleId) { alert('Please link a schedule — this sets the correct channel for parsing.'); return; }
+  if (!scheduleId) { alert('Please link a schedule - this sets the correct channel for parsing.'); return; }
   if (!channel)    { alert('Please enter a channel name.'); return; }
   if (!month)      { alert('Please enter a month (e.g. January 2025).'); return; }
   if (!fileInput.files.length) { alert('Please choose a TC file.'); return; }

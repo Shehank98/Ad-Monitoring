@@ -289,7 +289,7 @@
     body.sidebar-collapsed .sidebar-footer-text { opacity: 0; max-width: 0; pointer-events: none; overflow: hidden; }
 
     /* ══════════════════════════════════════════════════════════════════
-       OFFICER MODE  — teal accent, desktop-first layout
+       OFFICER MODE  - teal accent, desktop-first layout
     ══════════════════════════════════════════════════════════════════ */
 
     /* Teal accent in top bar */
@@ -313,7 +313,7 @@
        MOBILE  (≤768px)
     ════════════════════════════════════════════════════════════════ */
 
-    /* Mobile sidebar — slides in as full-height overlay from the left */
+    /* Mobile sidebar - slides in as full-height overlay from the left */
     @media (max-width: 768px) {
       #app-sidebar {
         position: fixed !important;
@@ -762,7 +762,7 @@
 </script>
 {% if request.user.is_authenticated %}
 <script>
-// Poll for unread notifications — bell icon for all users, MC badge for channel officers
+// Poll for unread notifications - bell icon for all users, MC badge for channel officers
 (function pollNotifications() {
   function update() {
     fetch('/dashboard/spot/notifications/')
@@ -920,7 +920,7 @@ document.addEventListener('click', function(e) {
       <span id="uo-pct" style="font-size:12px;font-weight:600;color:#334155;">0%</span>
       <span id="uo-time" style="font-size:12px;color:#64748b;">0:00</span>
     </div>
-    <p id="uo-hint" style="font-size:11px;color:#94a3b8;margin-top:10px;">Please keep this tab open — large files take longer.</p>
+    <p id="uo-hint" style="font-size:11px;color:#94a3b8;margin-top:10px;">Please keep this tab open - large files take longer.</p>
   </div>
 </div>
 <script>
@@ -937,7 +937,7 @@ document.addEventListener('click', function(e) {
     bar.classList.remove('processing'); bar.style.width = '0%';
     pct.textContent = '0%'; title.textContent = 'Uploading…';
     fileEl.textContent = name ? (name + (extra||'')) : '';
-    hint.textContent = 'Please keep this tab open — large files take longer.';
+    hint.textContent = 'Please keep this tab open - large files take longer.';
     tEl.textContent = '0:00'; start = Date.now();
     if (timer) clearInterval(timer);
     timer = setInterval(function(){ tEl.textContent = fmt(Math.floor((Date.now()-start)/1000)); }, 1000);

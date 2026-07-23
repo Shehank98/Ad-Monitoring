@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}TC vs LMRB{% endblock %}
 {% block page_title %}TC vs LMRB{% endblock %}
-{% block page_subtitle %}TC (channel certificate) · LMRB (3rd-party monitoring) — every TC spot alongside its LMRB confirmation{% endblock %}
+{% block page_subtitle %}TC (channel certificate) · LMRB (3rd-party monitoring) - every TC spot alongside its LMRB confirmation{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -225,9 +225,9 @@
 
 <!-- ── Colour legend ───────────────────────────────────────────── -->
 <div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
-  <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Confirmed — TC &amp; LMRB both recorded this spot</span>
-  <span class="badge badge-amber"><i class="fa-solid fa-triangle-exclamation"></i> TC Only — TC says aired, LMRB did not confirm</span>
-  <span class="badge badge-purple"><i class="fa-solid fa-plus"></i> Extra — TC spot with no matching schedule row</span>
+  <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Confirmed - TC &amp; LMRB both recorded this spot</span>
+  <span class="badge badge-amber"><i class="fa-solid fa-triangle-exclamation"></i> TC Only - TC says aired, LMRB did not confirm</span>
+  <span class="badge badge-purple"><i class="fa-solid fa-plus"></i> Extra - TC spot with no matching schedule row</span>
   <span class="text-slate-400 ml-2"><i class="fa-solid fa-hand-pointer mr-1"></i>Click any row for details</span>
 </div>
 
@@ -316,7 +316,7 @@
           <td id="lmrb-d3-{{ r.tc_row_id }}" class="text-slate-600 max-w-[140px] truncate" title="{{ r.lmrb_theme }}">{{ r.lmrb_theme }}</td>
           <td id="lmrb-d4-{{ r.tc_row_id }}" class="text-slate-700 max-w-[160px] truncate" title="{{ r.lmrb_programme }}">{{ r.lmrb_programme|default:"-" }}</td>
         {% else %}
-          <td id="lmrb-d1-{{ r.tc_row_id }}" class="group-sep text-slate-300 italic text-center" colspan="4" data-placeholder="1">— no LMRB match —</td>
+          <td id="lmrb-d1-{{ r.tc_row_id }}" class="group-sep text-slate-300 italic text-center" colspan="4" data-placeholder="1">- no LMRB match -</td>
         {% endif %}
 
         <!-- Status -->
@@ -362,7 +362,7 @@
                   <div><span class="lbl">Brand</span> {{ r.sched_brand }}</div>
                   <div><span class="lbl">Date</span> {{ r.sched_date|date:"d M Y" }}</div>
                   <div><span class="lbl">Window</span> {{ r.sched_start_time }} – {{ r.sched_end_time }}</div>
-                  <div><span class="lbl">Programme</span> {{ r.sched_programme|default:"—" }}</div>
+                  <div><span class="lbl">Programme</span> {{ r.sched_programme|default:"-" }}</div>
                 </div>
                 {% if r.live_covered %}
                 <div class="mt-2 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1">
@@ -375,7 +375,7 @@
               {% elif r.is_extra %}
               <div class="detail-card" style="border-color:#e9d5ff; background:#faf5ff;">
                 <div class="detail-card-title" style="color:#7c3aed;"><i class="fa-solid fa-calendar-xmark mr-1"></i>Schedule (Planned)</div>
-                <div class="detail-row-val text-slate-500 text-xs">No schedule row — this TC spot was not in the booking plan.</div>
+                <div class="detail-row-val text-slate-500 text-xs">No schedule row - this TC spot was not in the booking plan.</div>
               </div>
               {% endif %}
 
@@ -391,7 +391,7 @@
                   <div><span class="lbl">Time</span> {{ r.lmrb_time }}
                     {% if r.tc_lmrb_delta_secs is not None %}
                       {% if r.tc_lmrb_delta_secs <= 5 %}
-                        <span class="delta-pill delta-ok ml-1">±{{ r.tc_lmrb_delta_secs }}s — within tolerance</span>
+                        <span class="delta-pill delta-ok ml-1">±{{ r.tc_lmrb_delta_secs }}s - within tolerance</span>
                       {% elif r.tc_lmrb_delta_secs <= 30 %}
                         <span class="delta-pill delta-near ml-1">±{{ r.tc_lmrb_delta_secs }}s</span>
                       {% else %}
@@ -438,7 +438,7 @@
   <div class="flex items-center gap-3 mb-3">
     <span class="text-sm font-bold text-amber-700 uppercase tracking-wide">
       <i class="fa-solid fa-calendar-xmark mr-1"></i>
-      Not Aired — {{ missed_ads|length }} planned spot{{ missed_ads|length|pluralize }} with no TC record
+      Not Aired - {{ missed_ads|length }} planned spot{{ missed_ads|length|pluralize }} with no TC record
     </span>
     <div class="flex-1 h-px bg-amber-200"></div>
   </div>
@@ -464,7 +464,7 @@
         {% for m in missed_ads %}
         <tr class="border-t border-amber-100 {% cycle 'bg-white' 'bg-amber-50/40' %}">
           <td class="px-3 py-1.5 font-medium text-slate-700">{{ m.brand }}</td>
-          <td class="px-3 py-1.5 text-slate-600">{{ m.programme|default:"—" }}</td>
+          <td class="px-3 py-1.5 text-slate-600">{{ m.programme|default:"-" }}</td>
           <td class="px-3 py-1.5 text-slate-600">{{ m.date|date:"d M Y" }}</td>
           <td class="px-3 py-1.5 text-slate-500 whitespace-nowrap">{{ m.start_time }} – {{ m.end_time }}</td>
           <td class="px-3 py-1.5 text-slate-500 text-center">{{ m.duration }}s</td>
@@ -566,7 +566,7 @@ function _renderCandidates(tcRowId, candidates) {
   for (const c of candidates) {
     let gapHtml;
     if (c.gap_secs === null || c.gap_secs === undefined) {
-      gapHtml = '<span style="color:#94a3b8;">—</span>';
+      gapHtml = '<span style="color:#94a3b8;">-</span>';
     } else if (c.gap_secs <= 30) {
       gapHtml = `<span class="delta-pill delta-ok">±${c.gap_secs}s</span>`;
     } else if (c.gap_secs <= 120) {
@@ -729,7 +729,7 @@ function _revertMainLmrb(tcRowId) {
   placeholder.className = 'group-sep text-slate-300 italic text-center';
   placeholder.setAttribute('colspan', '4');
   placeholder.setAttribute('data-placeholder', '1');
-  placeholder.textContent = '— no LMRB match —';
+  placeholder.textContent = '- no LMRB match -';
   tr.insertBefore(placeholder, statusCell);
 }
 </script>

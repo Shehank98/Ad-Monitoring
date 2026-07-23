@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}LMRB vs TC{% endblock %}
 {% block page_title %}LMRB vs TC{% endblock %}
-{% block page_subtitle %}LMRB cut of TC data — every TC-confirmed LMRB spot, grouped by brand{% endblock %}
+{% block page_subtitle %}LMRB cut of TC data - every TC-confirmed LMRB spot, grouped by brand{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -140,8 +140,8 @@
 
 <!-- ── Legend ─────────────────────────────────────────────────── -->
 <div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
-  <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Schedule matched — TC spot linked to a planned ad</span>
-  <span class="badge badge-purple"><i class="fa-solid fa-plus"></i> Extra — TC spot with no matching schedule row</span>
+  <span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Schedule matched - TC spot linked to a planned ad</span>
+  <span class="badge badge-purple"><i class="fa-solid fa-plus"></i> Extra - TC spot with no matching schedule row</span>
   <span class="text-slate-400 ml-2">Only TC rows where LMRB confirmed within the time tolerance are shown here.</span>
 </div>
 
@@ -221,7 +221,7 @@
               <span class="delta-pill delta-far">{{ r.gap_secs }}s</span>
             {% endif %}
           {% else %}
-            <span class="text-slate-300">—</span>
+            <span class="text-slate-300">-</span>
           {% endif %}
         </td>
       </tr>
