@@ -6758,13 +6758,19 @@ def summary_pdf(request):
     st = ctx['spots_total']
     spot_rows.append([Paragraph('Total', styLC), '', Paragraph(str(st['planned']), styLC),
                       Paragraph(str(st['aired']), styLC), Paragraph(str(st['third_party']), styLC)])
+    nspots = len(ctx['spots'] or [])
+    stab_style = [('GRID', (0, 0), (-1, -1), 0.5, GREY),
+                  ('SPAN', (2, 0), (4, 0)), ('SPAN', (0, 0), (1, 0)),
+                  ('SPAN', (0, -1), (1, -1)),
+                  ('BACKGROUND', (0, 0), (-1, 1), NAVY),
+                  ('BACKGROUND', (0, -1), (-1, -1), TOT),
+                  ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]
+    if nspots >= 1:
+        # Merge the Scheduling Month cell down all data rows (rows 2 .. 1+nspots).
+        stab_style += [('SPAN', (0, 2), (0, 1 + nspots)),
+                       ('ALIGN', (0, 2), (0, 1 + nspots), 'CENTER')]
     stab = Table(spot_rows, colWidths=[W*0.22, W*0.30, W*0.16, W*0.16, W*0.16])
-    stab.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, GREY),
-                              ('SPAN', (2, 0), (4, 0)), ('SPAN', (0, 0), (1, 0)),
-                              ('SPAN', (0, -1), (1, -1)),
-                              ('BACKGROUND', (0, 0), (-1, 1), NAVY),
-                              ('BACKGROUND', (0, -1), (-1, -1), TOT),
-                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')] + PAD))
+    stab.setStyle(TableStyle(stab_style + PAD))
     story += [stab, Spacer(1, 6)]
 
     # ── Deviations ──

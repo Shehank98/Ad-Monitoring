@@ -107,7 +107,8 @@ def build_recon_context(account, channel, month, meta, summary_data, schedule=No
             tot_dev      += extra
             tot_notaired += missed
 
-    # Sponsorship products (grouped rows) — names shown in the same column.
+    # Sponsorship products (grouped rows) — names shown in the same column,
+    # and their missed / extra also appear in the deviations table.
     for section in (summary_data.get('sponsorship') or []):
         for row in (section.get('rows') or []):
             product = row.get('product', '')
@@ -115,6 +116,8 @@ def build_recon_context(account, channel, month, meta, summary_data, schedule=No
             planned = row.get('planned', 0) or 0
             aired   = row.get('aired', 0) or 0
             third   = row.get('third_party', 0) or 0
+            extra   = row.get('extra', 0) or 0
+            missed  = row.get('missed', 0) or 0
             key = f'spon|{product}|{dur}'
             spots.append({'brand': product, 'dur': dur, 'planned': planned,
                           'aired': aired, 'third_party': third,
@@ -123,6 +126,17 @@ def build_recon_context(account, channel, month, meta, summary_data, schedule=No
             tot_planned += planned
             tot_aired   += aired
             tot_third   += third
+            if extra or missed:
+                note = dev_notes.get(key, {}) if isinstance(dev_notes, dict) else {}
+                deviations.append({
+                    'brand': product, 'dur': dur,
+                    'deviated': extra, 'not_aired': missed,
+                    'reason': (note.get('reason', '') if isinstance(note, dict) else ''),
+                    'dev_value': (note.get('dev_value', '') if isinstance(note, dict) else ''),
+                    'key': key, 'label': _label(key, product, dur),
+                })
+                tot_dev      += extra
+                tot_notaired += missed
 
     # ── Financials ──
     # Schedule Cost = numeric value of Schedule Value (fallback: stored schedule_cost)
