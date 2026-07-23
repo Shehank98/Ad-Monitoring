@@ -104,6 +104,11 @@ urlpatterns = [
     path('sponsorship/reset/',         views.sponsorship_reset,          name='sponsorship_reset'),
     path('sponsorship/unmatched-rows/',views.sponsorship_unmatched_rows, name='sponsorship_unmatched_rows'),
 
+    # Dedicated Sponsorship Matching page (manual, TR-driven, cross-month)
+    path('sponsorship/matching/',            views.sponsorship_matching,            name='sponsorship_matching'),
+    path('sponsorship/matching/candidates/', views.sponsorship_matching_candidates, name='sponsorship_matching_candidates'),
+    path('sponsorship/matching/undo/',       views.sponsorship_matching_undo,       name='sponsorship_matching_undo'),
+
     # Period (date-range) Sponsorships
     path('sponsorship/period/',              views.period_sponsorship_list,     name='period_sponsorship_list'),
     path('sponsorship/period/create/',       views.period_sponsorship_create,   name='period_sponsorship_create'),
