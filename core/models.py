@@ -774,6 +774,11 @@ class SummaryReportMeta(models.Model):
     # Per-deviation-row Reason/Solution + Deviated Value, keyed by "brand|dur"
     deviation_notes      = models.JSONField(default=dict, blank=True)
 
+    # User-overridden "Spot/VA Duration" labels, keyed by the spot's key
+    # ("brand|dur" for commercial, "spon|product|dur" for sponsorship).
+    # Absent key = use the default "<brand> <dur>s" label.
+    spot_labels          = models.JSONField(default=dict, blank=True)
+
     # ── Editable rates (percentages) for the financial block ──
     sscl_pct             = models.DecimalField(max_digits=6, decimal_places=3, default=Decimal('2.5'))
     vat_pct              = models.DecimalField(max_digits=6, decimal_places=3, default=Decimal('18'))

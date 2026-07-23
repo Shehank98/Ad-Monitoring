@@ -370,12 +370,22 @@
           {% for sp in recon.spots %}
           <tr>
             <td class="border border-slate-300 px-2 py-1 text-center">{% if forloop.first %}{{ recon.scheduling_month }}{% endif %}</td>
-            <td class="border border-slate-300 px-2 py-1">{{ sp.brand }} {{ sp.dur }}s
-              <button type="button" class="ml-1 text-[10px] text-blue-600 underline hover:text-blue-800"
-                      title="Manually link LMRB rows for this brand/duration"
-                      onclick="openTagsPicker('{{ account_id }}','{{ channel|escapejs }}','{{ month|escapejs }}','{{ sp.brand|escapejs }}','{{ sp.dur|default:'' }}')">
-                <i class="fa-solid fa-link"></i>
-              </button>
+            <td class="border border-slate-300 px-1 py-1">
+              <div class="flex items-center gap-1">
+                <input type="hidden" name="spot_key" value="{{ sp.key }}">
+                <input name="spot_label" value="{{ sp.label }}"
+                       class="input-field text-xs py-0.5 w-full"
+                       title="Edit the Spot/VA Duration label; blank restores the default">
+                {% if sp.is_sponsorship %}
+                <span class="text-[9px] text-amber-600 font-bold uppercase" title="Sponsorship">Spon</span>
+                {% else %}
+                <button type="button" class="text-[10px] text-blue-600 underline hover:text-blue-800 whitespace-nowrap"
+                        title="Manually link LMRB rows for this brand/duration"
+                        onclick="openTagsPicker('{{ account_id }}','{{ channel|escapejs }}','{{ month|escapejs }}','{{ sp.brand|escapejs }}','{{ sp.dur|default:'' }}')">
+                  <i class="fa-solid fa-link"></i>
+                </button>
+                {% endif %}
+              </div>
             </td>
             <td class="border border-slate-300 px-2 py-1 text-center">{{ sp.planned }}</td>
             <td class="border border-slate-300 px-2 py-1 text-center">{{ sp.aired }}</td>
@@ -503,104 +513,8 @@
 </form>
 {% endif %}
 
-<!-- ── Sponsorship assignment tool (collapsed; report lives in the card above) ── -->
-<div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-6">
-  <details class="group">
-    <summary class="cursor-pointer flex items-center justify-between select-none">
-      <span class="text-sm font-bold text-slate-800">
-        <i class="fa-solid fa-star mr-1.5 text-yellow-500"></i> Sponsorship — counts &amp; manual assignment
-      </span>
-      <i class="fa-solid fa-chevron-down text-slate-400 text-xs transition-transform duration-200 group-open:rotate-180"></i>
-    </summary>
-    <div class="mt-4">
-        <!-- ── Sponsorship Benefits ─────────────────────────── -->
-        <div>
-          <div class="flex items-center gap-2 mb-2">
-            <span class="text-xs font-bold text-amber-700 uppercase tracking-wider bg-amber-50 px-2 py-0.5 rounded-md">
-              <i class="fa-solid fa-star mr-1 text-yellow-500"></i> Sponsorship Benefits
-            </span>
-          </div>
-          {% if summary_data.sponsorship %}
-          <div class="overflow-x-auto border border-slate-200 rounded-xl">
-            <table class="sum-table w-full border-collapse">
-              <thead>
-                <tr>
-                  <th class="text-left">Product</th>
-                  <th class="text-center">Dur</th>
-                  <th class="text-center">Planned</th>
-                  <th class="text-center">Aired</th>
-                  <th class="text-center">Missed</th>
-                  <th class="text-center">Extra</th>
-                  <th class="text-center">3rd Party</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for section in summary_data.sponsorship %}
-                <!-- Programme heading row -->
-                <tr class="prog-header">
-                  <td colspan="7" class="uppercase tracking-wide text-xs">
-                    <i class="fa-solid fa-tv mr-1"></i> {{ section.programme }}
-                  </td>
-                </tr>
-                {% for row in section.rows %}
-                <tr>
-                  <td class="pl-4 font-medium text-slate-800">
-                    {{ row.product }}
-                    <span class="status-{{ row.status }}">
-                      {% if row.status == 'complete' %}✓ Complete
-                      {% elif row.status == 'incomplete' %}⚠ Incomplete
-                      {% else %}- No data
-                      {% endif %}
-                    </span>
-                    {% if row.status != 'complete' %}
-                    <button type="button"
-                      class="ml-1 text-xs text-blue-600 underline hover:text-blue-800"
-                      onclick="openSponPicker('{{ account_id }}','{{ channel|escapejs }}','{{ month|escapejs }}','{{ row.product|escapejs }}','{{ row.dur|default:'' }}')">
-                      + Add from LMRB
-                    </button>
-                    {% endif %}
-                  </td>
-                  <td class="text-center text-slate-600">{{ row.dur|default:"-" }}</td>
-                  <td class="text-center font-semibold">{{ row.planned }}</td>
-                  <td class="text-center text-emerald-700 font-semibold">
-                    {{ row.aired }}
-                    <div class="mt-1 w-full bg-slate-100 rounded-full h-1">
-                      {% if row.planned > 0 %}
-                      <div class="h-1 rounded-full {% if row.aired >= row.planned %}bg-emerald-500{% elif row.aired > 0 %}bg-amber-400{% else %}bg-red-400{% endif %}"
-                           style="width: {% widthratio row.aired row.planned 100 %}%"></div>
-                      {% endif %}
-                    </div>
-                  </td>
-                  <td class="text-center {% if row.missed > 0 %}text-red-600 font-bold{% else %}text-slate-400{% endif %}">{{ row.missed }}</td>
-                  <td class="text-center {% if row.extra > 0 %}text-violet-600 font-semibold{% else %}text-slate-400{% endif %}">{{ row.extra }}</td>
-                  <td class="text-center text-blue-600 font-semibold">{{ row.third_party }}</td>
-                </tr>
-                {% endfor %}
-                {% endfor %}
-                <!-- Overall sponsorship total only -->
-                <tr class="spon-header">
-                  <td colspan="2" class="font-bold">SPONSORSHIP GRAND TOTAL</td>
-                  <td class="text-center font-bold">{{ summary_data.sponsorship_total.planned }}</td>
-                  <td class="text-center font-bold text-emerald-800">{{ summary_data.sponsorship_total.aired }}</td>
-                  <td class="text-center font-bold {% if summary_data.sponsorship_total.missed > 0 %}text-red-700{% endif %}">{{ summary_data.sponsorship_total.missed }}</td>
-                  <td class="text-center font-bold">{{ summary_data.sponsorship_total.extra }}</td>
-                  <td class="text-center font-bold text-blue-700">{{ summary_data.sponsorship_total.third_party }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          {% else %}
-          <div class="text-xs text-slate-400 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
-            <i class="fa-solid fa-circle-info mr-1 text-amber-400"></i>
-            No SPONSORSHIP schedule rows found for this scope. Upload a schedule file containing
-            rows with <strong>ad_type = SPONSORSHIP</strong> to use sponsorship reconciliation.
-            Once uploaded, click <em>Run Sponsorship Auto-Match</em> above.
-          </div>
-          {% endif %}
-        </div>
-    </div>
-  </details>
-</div>
+{# Sponsorship counts & manual assignment now live on the dedicated
+   Sponsorship Matching page (button above). #}
 
 {% else %}
 <!-- No summary data yet for this scope -->
