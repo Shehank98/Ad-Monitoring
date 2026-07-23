@@ -6472,7 +6472,8 @@ def _write_media_recon_sheet(ws, ctx):
     cell(f'A{r}', '', fill=hdr_fill); cell(f'B{r}', '', fill=hdr_fill)
     r = 13
     for ref, txt in [(f'A{r}', 'Scheduling Month'), (f'B{r}', 'Spot/VA Duration'),
-                     (f'C{r}', 'Schedule'), (f'D{r}', 'Transmission Report'), (f'E{r}', 'Nielsen Report')]:
+                     (f'C{r}', 'Schedule (Planned)'), (f'D{r}', 'Transmission (Aired)'),
+                     (f'E{r}', 'Nielsen (3rd Party)')]:
         cell(ref, txt, font=white_bold, align=center, fill=hdr_fill)
     start = 14
     spots = ctx['spots'] or [{'brand': '', 'dur': '', 'planned': 0, 'aired': 0, 'third_party': 0}]
@@ -6746,7 +6747,9 @@ def summary_pdf(request):
     story += [mtab, Spacer(1, 6)]
 
     # ── No. of Spots table ──
-    spot_rows = [[Paragraph('No of Spots', styH), '', '', '', ''],
+    # "No of Spots" spans the three metric columns (Schedule / Transmission /
+    # Nielsen); the Scheduling Month + Spot/VA Duration columns stay unlabelled.
+    spot_rows = [['', '', Paragraph('No of Spots', styH), '', ''],
                  [Paragraph('Scheduling Month', styH), Paragraph('Spot/VA Duration', styH),
                   Paragraph('Schedule (Planned)', styH), Paragraph('Transmission (Aired)', styH),
                   Paragraph('Nielsen (3rd Party)', styH)]]
