@@ -2232,6 +2232,13 @@ def brand_mapping_options(request):
         themes_qs = themes_qs.filter(product__iexact=product)
     themes = sorted(set(themes_qs.values_list('advt_theme', flat=True)))
 
+    # ── Duration(s) each LMRB theme appears at (for the picker) ───────────
+    theme_durations = {}
+    for row in (themes_qs.exclude(duration__isnull=True)
+                .values('advt_theme', 'duration').distinct()):
+        theme_durations.setdefault(row['advt_theme'], set()).add(row['duration'])
+    theme_durations = {k: sorted(v) for k, v in theme_durations.items()}
+
     # ── Theme → Product map (most common product per theme) ──────────────
     theme_product_map = {}
     tp_rows = (
@@ -2274,6 +2281,13 @@ def brand_mapping_options(request):
         tc_qs = tc_qs.filter(date__lte=sch_dates['e'])
     tc_themes = sorted(set(tc_qs.values_list('tc_theme', flat=True)))
 
+    # ── Duration(s) each TC theme appears at ──────────────────────────────
+    tc_theme_durations = {}
+    for row in (tc_qs.exclude(duration__isnull=True)
+                .values('tc_theme', 'duration').distinct()):
+        tc_theme_durations.setdefault(row['tc_theme'], set()).add(row['duration'])
+    tc_theme_durations = {k: sorted(v) for k, v in tc_theme_durations.items()}
+
     # ── MapOnline themes (distinct advt_theme from MapOnline source) ──────
     maponline_qs = lmrb_base.filter(source='maponline').exclude(advt_theme='')
     if product:
@@ -2293,6 +2307,8 @@ def brand_mapping_options(request):
         'theme_product_map': theme_product_map,
         'maponline_themes': maponline_themes,
         'mapped_brands': mapped_brands,
+        'theme_durations': theme_durations,
+        'tc_theme_durations': tc_theme_durations,
     })
 
 
@@ -2405,6 +2421,42 @@ def brand_mapping_quick(request):
     return render(request, 'admin_panel/brand_mappings_quick.html', {
         'accounts': _account_qs(request.user),
     })
+
+
+@login_required
+def brand_mapping_detail(request):
+    """AJAX: existing mappings + schedule durations for one schedule brand.
+
+    Query: account_id, brand, channel (optional), month (optional).
+    Returns {mappings:[{id, theme, tc_themes:[...], maponline_theme, duration,
+    product}], schedule_durations:[...]}. Powers the 'Currently mapped' panel
+    and duration hints in the Quick Map picker.
+    """
+    account_id = request.GET.get('account_id', '').strip()
+    brand      = request.GET.get('brand', '').strip()
+    channel    = request.GET.get('channel', '').strip()
+    month      = request.GET.get('month', '').strip()
+    if not account_id or not _account_access(request.user, account_id):
+        return JsonResponse({'mappings': [], 'schedule_durations': []})
+
+    maps = []
+    for bm in BrandMapping.objects.filter(account_id=account_id, brand=brand).order_by('duration', 'theme'):
+        maps.append({
+            'id': bm.id, 'theme': bm.theme,
+            'tc_themes': [t for t in (bm.tc_theme or '').split('|') if t.strip()],
+            'maponline_theme': bm.maponline_theme or '',
+            'duration': bm.duration, 'product': bm.product or '',
+        })
+
+    sr = ScheduleRow.objects.filter(account_id=account_id, brand=brand)
+    if channel and month:
+        sr = sr.filter(schedule__channel=channel, schedule__month=month)
+    elif channel:
+        sr = sr.filter(schedule__channel=channel)
+    sched_durs = sorted(set(
+        d for d in sr.exclude(duration__isnull=True).values_list('duration', flat=True)
+    ))
+    return JsonResponse({'mappings': maps, 'schedule_durations': sched_durs})
 
 
 @login_required

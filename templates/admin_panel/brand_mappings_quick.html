@@ -226,17 +226,26 @@
     if (!items.length) {
       list.innerHTML = '<p class="text-[11px] text-slate-400 px-3 py-3">' + (opts.emptyMsg || 'None found in this scope.') + '</p>';
     }
+    var durMap = opts.durMap || {};
+    var pre = opts.preselect || new Set();
     items.forEach(function (it) {
-      var mapped = opts.mappedSet && opts.mappedSet.has(String(it).toLowerCase().trim());
+      var key = String(it).toLowerCase().trim();
+      var mappedAnywhere = opts.mappedSet && opts.mappedSet.has(key);
+      var here = pre.has(key);
+      var durs = durMap[it];
+      var durTxt = (durs && durs.length) ? durs.map(function (d) { return d + 's'; }).join(', ') : '';
       var row = document.createElement('label');
-      row.className = 'flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-emerald-50';
-      row.innerHTML = '<input type="checkbox" value="' + esc(it) + '" class="accent-emerald-600 w-3.5 h-3.5">' +
+      row.className = 'flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-emerald-50' + (here ? ' bg-emerald-50/70' : '');
+      row.innerHTML = '<input type="checkbox" value="' + esc(it) + '" class="accent-emerald-600 w-3.5 h-3.5"' + (here ? ' checked' : '') + '>' +
         '<span class="text-slate-700 truncate">' + esc(it) + '</span>' +
-        (mapped ? '<span class="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 shrink-0">mapped</span>' : '');
+        (durTxt ? '<span class="text-[9px] font-bold text-indigo-500 shrink-0 whitespace-nowrap">' + esc(durTxt) + '</span>' : '') +
+        (here ? '<span class="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-600 shrink-0">mapped here</span>'
+              : (mappedAnywhere ? '<span class="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 shrink-0">mapped</span>' : ''));
       list.appendChild(row);
     });
     function upd() { count.textContent = list.querySelectorAll('input:checked').length + ' selected'; }
     list.addEventListener('change', upd);
+    upd();
     wrap.querySelector('.js-search').addEventListener('input', function () {
       var q = this.value.toLowerCase();
       list.querySelectorAll('label').forEach(function (l) {
@@ -247,8 +256,63 @@
   }
 
   function buildEditor(editor, brand) {
-    var lmrb = checklist('LMRB Theme *', OPTS.themes || [], { mappedSet: mappedThemeSet, emptyMsg: 'No LMRB themes in this scope - upload monitoring data or widen the scope.' });
-    var tc   = checklist('TC Theme', OPTS.tc_themes || [], { emptyMsg: 'No TC themes in this scope.' });
+    editor.innerHTML = '<p class="text-xs text-slate-400 py-2"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading current mapping…</p>';
+    var qs = '?account_id=' + encodeURIComponent(elAcc.value) + '&brand=' + encodeURIComponent(brand);
+    if (elChan.value)  qs += '&channel=' + encodeURIComponent(elChan.value);
+    if (elMonth.value) qs += '&month='   + encodeURIComponent(elMonth.value);
+    fetch('/dashboard/brand-mappings/quick/detail/' + qs)
+      .then(r => r.json())
+      .then(function (d) { renderEditor(editor, brand, d); })
+      .catch(function () { renderEditor(editor, brand, { mappings: [], schedule_durations: [] }); });
+  }
+
+  function renderEditor(editor, brand, detail) {
+    editor.innerHTML = '';
+    var maps = detail.mappings || [];
+    var schedDurs = detail.schedule_durations || [];
+
+    // ── Currently mapped panel ──────────────────────────────────────────────
+    var cur = document.createElement('div');
+    if (maps.length) {
+      var rows = maps.map(function (m) {
+        var d  = (m.duration != null ? m.duration + 's' : 'any');
+        var tc = (m.tc_themes && m.tc_themes.length) ? m.tc_themes.join(', ') : '-';
+        return '<tr class="border-t border-emerald-100">' +
+          '<td class="py-1 pr-3 font-medium text-slate-700">' + esc(m.theme) + '</td>' +
+          '<td class="py-1 pr-3 text-slate-600">' + esc(tc) + '</td>' +
+          '<td class="py-1 pr-3 text-indigo-600 font-bold whitespace-nowrap">' + esc(d) + '</td>' +
+          '<td class="py-1 text-slate-500">' + esc(m.product || '') + '</td></tr>';
+      }).join('');
+      cur.className = 'rounded-lg border border-emerald-200 bg-emerald-50/50 p-3';
+      cur.innerHTML =
+        '<p class="text-xs font-bold text-emerald-700 mb-1.5"><i class="fa-solid fa-check mr-1"></i>Currently mapped (' + maps.length + ')</p>' +
+        '<div class="overflow-x-auto"><table class="w-full text-[11px]"><thead><tr class="text-slate-400 text-left">' +
+          '<th class="pr-3 font-semibold">LMRB Theme</th><th class="pr-3 font-semibold">TC Theme</th><th class="pr-3 font-semibold">Dur</th><th class="font-semibold">Product</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody></table></div>' +
+        '<p class="text-[10px] text-slate-400 mt-1.5">Edit or remove these on the <a class="underline" href="/dashboard/brand-mappings/?account=' + encodeURIComponent(elAcc.value) + '">detailed table</a>.</p>';
+    } else {
+      cur.className = 'rounded-lg border border-slate-200 bg-white p-3 text-[11px] text-slate-400';
+      cur.innerHTML = '<i class="fa-solid fa-circle-info mr-1"></i>No mappings yet for this brand.';
+    }
+    editor.appendChild(cur);
+
+    // Schedule duration hint (durations differ across sources - surface it)
+    if (schedDurs.length) {
+      var sd = document.createElement('p');
+      sd.className = 'text-[11px] text-slate-500';
+      sd.innerHTML = '<i class="fa-solid fa-clock text-slate-400 mr-1"></i>This brand\'s <b>schedule</b> durations: ' +
+        schedDurs.map(function (x) { return '<span class="font-bold text-slate-700">' + x + 's</span>'; }).join(', ') +
+        ' &middot; LMRB / TC durations are shown next to each theme below.';
+      editor.appendChild(sd);
+    }
+
+    // Pre-selected themes already mapped to THIS brand
+    var preLmrb = new Set(maps.map(function (m) { return String(m.theme).toLowerCase().trim(); }));
+    var preTc = new Set();
+    maps.forEach(function (m) { (m.tc_themes || []).forEach(function (t) { preTc.add(String(t).toLowerCase().trim()); }); });
+
+    var lmrb = checklist('LMRB Theme *', OPTS.themes || [], { mappedSet: mappedThemeSet, durMap: OPTS.theme_durations || {}, preselect: preLmrb, emptyMsg: 'No LMRB themes in this scope - upload monitoring data or widen the scope.' });
+    var tc   = checklist('TC Theme', OPTS.tc_themes || [], { durMap: OPTS.tc_theme_durations || {}, preselect: preTc, emptyMsg: 'No TC themes in this scope.' });
 
     var grid = document.createElement('div');
     grid.className = 'grid grid-cols-1 sm:grid-cols-2 gap-4';
@@ -257,15 +321,21 @@
     // Advanced (MapOnline / Product / Duration)
     var adv = document.createElement('details');
     adv.className = 'group rounded-lg border border-slate-200 bg-white';
+    adv.open = maps.length > 0;   // reveal when there's an existing duration to see
+    var durChips = schedDurs.map(function (x) {
+      return '<button type="button" class="js-durchip text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-emerald-100" data-d="' + x + '">' + x + 's</button>';
+    }).join(' ');
     adv.innerHTML =
       '<summary class="flex items-center gap-2 px-3 py-2 cursor-pointer select-none text-xs font-bold text-slate-600">' +
-        '<i class="fa-solid fa-sliders text-slate-400"></i> Advanced (MapOnline, Product, Duration)' +
+        '<i class="fa-solid fa-sliders text-slate-400"></i> Advanced (Duration, Product, MapOnline)' +
         '<i class="fa-solid fa-chevron-down text-slate-300 ml-auto group-open:rotate-180 transition-transform"></i></summary>' +
       '<div class="px-3 pb-3 pt-1 grid grid-cols-1 sm:grid-cols-3 gap-3">' +
+        '<div><label class="block text-[11px] font-semibold text-slate-500 mb-1">Duration (s) <span class="font-normal text-slate-400">- schedule spot length</span></label>' +
+          '<input type="number" min="1" class="js-duration w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" placeholder="any duration">' +
+          (durChips ? '<div class="mt-1 flex flex-wrap gap-1">' + durChips + '</div>' : '') +
+          '<p class="text-[9px] text-slate-400 mt-1">Blank = applies to any spot length. Set it to restrict this mapping to one schedule length.</p></div>' +
         '<div><label class="block text-[11px] font-semibold text-slate-500 mb-1">Product</label>' +
           '<input list="q-products" class="js-product w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" placeholder="optional"></div>' +
-        '<div><label class="block text-[11px] font-semibold text-slate-500 mb-1">Duration (s)</label>' +
-          '<input type="number" min="1" class="js-duration w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" placeholder="any"></div>' +
         '<div><label class="block text-[11px] font-semibold text-slate-500 mb-1">MapOnline Theme</label>' +
           '<input list="q-maponline" class="js-maponline w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" placeholder="optional"></div>' +
       '</div>';
@@ -277,6 +347,11 @@
       '<button type="button" class="btn-primary text-xs js-save"><i class="fa-solid fa-floppy-disk"></i> Save mapping</button>';
 
     editor.appendChild(grid); editor.appendChild(adv); editor.appendChild(actions);
+
+    // Duration quick-pick chips
+    adv.querySelectorAll('.js-durchip').forEach(function (chip) {
+      chip.addEventListener('click', function () { adv.querySelector('.js-duration').value = this.dataset.d; });
+    });
 
     // Auto-suggest product from the first selected LMRB theme
     lmrb.wrap.querySelector('.js-list').addEventListener('change', function () {
