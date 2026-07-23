@@ -6431,11 +6431,10 @@ def _write_media_recon_sheet(ws, ctx):
     t = ws['A1']; t.value = ctx['title']
     t.font = Font(bold=True, size=18, color='1F3864')
     t.alignment = Alignment(horizontal='center', vertical='center')
-    logo = ctx.get('logo')
-    if logo:
+    _logo_data = _recon_logo_bytes(ctx)
+    if _logo_data:
         try:
-            path = logo.path
-            img = XLImage(path)
+            img = XLImage(io.BytesIO(_logo_data))
             img.height = 55
             img.width  = 150
             ws.add_image(img, 'D1')
@@ -6704,9 +6703,10 @@ def summary_pdf(request):
 
     # ── Title + logo ──
     logo_flow = ''
-    if ctx.get('logo'):
+    _logo_data = _recon_logo_bytes(ctx)
+    if _logo_data:
         try:
-            logo_flow = RLImage(ctx['logo'].path, width=42*mm, height=16*mm, kind='proportional')
+            logo_flow = RLImage(io.BytesIO(_logo_data), width=42*mm, height=16*mm, kind='proportional')
         except Exception:
             logo_flow = ''
     title_p = Paragraph(f"<font color='#1F3864'><b>{ctx['title']}</b></font>",
@@ -6909,6 +6909,32 @@ def summary_pdf(request):
     response = HttpResponse(buf.read(), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{fname}"'
     return response
+
+
+def _recon_logo_bytes(ctx):
+    """Return the reconciliation logo file's bytes, or None.
+
+    The on-screen report reads the logo via its storage URL, but the Excel/PDF
+    exporters previously used ``FieldFile.path`` which is unavailable on non-local
+    storage backends (and points at an ephemeral path in some deployments), so
+    the logo silently vanished from the exports. Read through the storage backend
+    instead (works for local and remote), falling back to the local path.
+    """
+    logo = ctx.get('logo')
+    if not logo:
+        return None
+    try:
+        logo.open('rb')
+        try:
+            return logo.read()
+        finally:
+            logo.close()
+    except Exception:
+        try:
+            with open(logo.path, 'rb') as fh:
+                return fh.read()
+        except Exception:
+            return None
 
 
 def _matched_lmrb_rows(account_id, channel, month, schedule_id=None):
