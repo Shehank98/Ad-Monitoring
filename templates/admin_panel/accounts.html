@@ -15,6 +15,22 @@
 {% endblock %}
 
 {% block content %}
+
+<!-- ── Hero header ─────────────────────────────────────────────────────────── -->
+<div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-900 text-white shadow-lg mb-6">
+  <div class="absolute -right-8 -top-10 w-48 h-48 rounded-full bg-emerald-500/20 blur-2xl"></div>
+  <div class="absolute -left-10 -bottom-12 w-56 h-56 rounded-full bg-indigo-500/10 blur-2xl"></div>
+  <div class="relative px-6 py-6 sm:px-8 sm:py-7 flex items-center gap-5">
+    <div class="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center shrink-0 ring-1 ring-white/20">
+      <i class="fa-solid fa-building text-2xl text-emerald-300"></i>
+    </div>
+    <div class="flex-1">
+      <h2 class="text-xl font-extrabold tracking-tight">Brand Management</h2>
+      <p class="text-sm text-slate-300 mt-1">{{ clients|length }} client{{ clients|length|pluralize }} - group brand accounts and set each client's reconciliation logo.</p>
+    </div>
+  </div>
+</div>
+
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
   <!-- ── Left: Client-grouped account list ────────────────────────── -->
@@ -323,6 +339,7 @@
     </div>
   </div>
 </div>
+{% endblock %}
 
 {% block extra_js %}
 <script>
@@ -360,5 +377,4 @@ function toggleAccEdit(id) {
   el.classList.toggle('hidden');
 }
 </script>
-{% endblock %}
 {% endblock %}
