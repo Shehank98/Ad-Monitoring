@@ -93,26 +93,19 @@ def _is_admin(user):
 
 
 def _account_access(user, account_id):
+    # Access is per-brand only. Assigning a Client materializes its brands into
+    # user.accounts (see accounts.views), so individual brands stay removable.
     if _is_admin(user):
         return True
-    if user.accounts.filter(id=account_id).exists():
-        return True
-    # Client-level access: access to a Client grants access to all its Accounts
-    acc = Account.objects.filter(id=account_id).select_related('client').first()
-    if acc and acc.client_id and user.clients.filter(id=acc.client_id).exists():
-        return True
-    return False
+    return user.accounts.filter(id=account_id).exists()
 
 
 def _account_qs(user):
-    from django.db.models import Q
+    # Per-brand access only — client assignment materializes brands into
+    # user.accounts, so removing one brand from a user actually takes effect.
     if _is_admin(user):
         return Account.objects.all()
-    direct = user.accounts.values_list('id', flat=True)
-    via_client = Account.objects.filter(
-        client_id__in=user.clients.values_list('id', flat=True)
-    ).values_list('id', flat=True)
-    return Account.objects.filter(Q(id__in=direct) | Q(id__in=via_client))
+    return Account.objects.filter(id__in=user.accounts.values_list('id', flat=True))
 
 
 def _serve_file(field_file, filename: str):
@@ -432,7 +425,12 @@ def account_list(request):
         elif action == 'add':
             form = AccountForm(request.POST)
             if form.is_valid():
-                form.save()
+                acc = form.save()
+                # A new brand under a client is auto-assigned to that client's
+                # users (client access materializes as per-brand assignments).
+                if acc.client_id:
+                    for u in acc.client.users.all():
+                        u.accounts.add(acc)
                 messages.success(request, f'Brand "{form.cleaned_data["name"]}" added.')
             else:
                 messages.error(request, 'Brand name is required and must be unique.')
@@ -443,11 +441,16 @@ def account_list(request):
             name      = request.POST.get('name', '').strip()
             client_id = request.POST.get('client_id') or None
             acc       = get_object_or_404(Account, id=pk)
+            old_client_id = acc.client_id
             if name:
                 acc.name = name
             acc.client_id = client_id
             acc.enable_special_notes = request.POST.get('enable_special_notes') == '1'
             acc.save(update_fields=['name', 'client_id', 'enable_special_notes'])
+            # Brand moved into a (different) client → auto-assign to its users.
+            if acc.client_id and acc.client_id != old_client_id:
+                for u in acc.client.users.all():
+                    u.accounts.add(acc)
             messages.success(request, f'Brand "{acc.name}" updated.')
             return redirect('/dashboard/accounts/')
 

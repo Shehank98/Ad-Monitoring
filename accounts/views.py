@@ -222,8 +222,12 @@ def create_user(request):
                 )
                 if form.cleaned_data.get('clients'):
                     new_user.clients.set(form.cleaned_data['clients'])
+                    # Auto-assign every brand of the selected clients (the admin
+                    # can remove individual brands afterwards on the edit page).
+                    new_user.accounts.add(*Account.objects.filter(
+                        client__in=form.cleaned_data['clients']))
                 if form.cleaned_data.get('accounts'):
-                    new_user.accounts.set(form.cleaned_data['accounts'])
+                    new_user.accounts.add(*form.cleaned_data['accounts'])
                 messages.success(request, f'User {new_user.name} created successfully.')
                 ip = (request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
                       or request.META.get('REMOTE_ADDR'))
@@ -347,8 +351,20 @@ def edit_user(request, user_id):
             if me.role == 'team_head':
                 my_cids = set(me.clients.values_list('id', flat=True))
                 client_ids = [c for c in client_ids if int(c) in my_cids]
+            # Materialize client access as per-brand assignments so the admin
+            # can then remove individual brands one by one.
+            old_cids = set(target_user.clients.values_list('id', flat=True))
+            new_cids = {int(c) for c in client_ids}
             target_user.clients.set(client_ids)
-            messages.success(request, f'Client access updated for {target_user.name}.')
+            added_c   = new_cids - old_cids
+            removed_c = old_cids - new_cids
+            if added_c:
+                target_user.accounts.add(*Account.objects.filter(client_id__in=added_c))
+            if removed_c:
+                target_user.accounts.remove(*Account.objects.filter(client_id__in=removed_c))
+            messages.success(request,
+                             f'Client access updated for {target_user.name} — '
+                             f'brands auto-assigned; remove individual brands below if needed.')
             AuditLog.objects.create(
                 user=me, action='user_clients',
                 detail=f'Clients updated for {target_user.name} ({target_user.email}).',
