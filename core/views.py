@@ -493,7 +493,15 @@ def channel_list(request):
             messages.success(request, f'Channel "{ch.name}" deleted.')
             return redirect('/dashboard/channels/')
 
-    return render(request, 'admin_panel/channels.html', {'channels': channels, 'form': form})
+    channels = channels.order_by('name')
+    tv_channels    = [c for c in channels if 'radio' not in c.name.lower()]
+    radio_channels = [c for c in channels if 'radio' in c.name.lower()]
+    return render(request, 'admin_panel/channels.html', {
+        'channels':       channels,
+        'tv_channels':    tv_channels,
+        'radio_channels': radio_channels,
+        'form':           form,
+    })
 
 
 # ── Schedules ─────────────────────────────────────────────────────────────────
@@ -2224,6 +2232,13 @@ def brand_mapping_options(request):
         themes_qs = themes_qs.filter(product__iexact=product)
     themes = sorted(set(themes_qs.values_list('advt_theme', flat=True)))
 
+    # ── Duration(s) each LMRB theme appears at (for the picker) ───────────
+    theme_durations = {}
+    for row in (themes_qs.exclude(duration__isnull=True)
+                .values('advt_theme', 'duration').distinct()):
+        theme_durations.setdefault(row['advt_theme'], set()).add(row['duration'])
+    theme_durations = {k: sorted(v) for k, v in theme_durations.items()}
+
     # ── Theme → Product map (most common product per theme) ──────────────
     theme_product_map = {}
     tp_rows = (
@@ -2266,17 +2281,34 @@ def brand_mapping_options(request):
         tc_qs = tc_qs.filter(date__lte=sch_dates['e'])
     tc_themes = sorted(set(tc_qs.values_list('tc_theme', flat=True)))
 
+    # ── Duration(s) each TC theme appears at ──────────────────────────────
+    tc_theme_durations = {}
+    for row in (tc_qs.exclude(duration__isnull=True)
+                .values('tc_theme', 'duration').distinct()):
+        tc_theme_durations.setdefault(row['tc_theme'], set()).add(row['duration'])
+    tc_theme_durations = {k: sorted(v) for k, v in tc_theme_durations.items()}
+
     # ── MapOnline themes (distinct advt_theme from MapOnline source) ──────
     maponline_qs = lmrb_base.filter(source='maponline').exclude(advt_theme='')
     if product:
         maponline_qs = maponline_qs.filter(product__iexact=product)
     maponline_themes = sorted(set(maponline_qs.values_list('advt_theme', flat=True)))
 
+    # ── Which schedule brands already have at least one mapping ───────────────
+    mapped_brand_set = set(
+        b.lower().strip()
+        for b in BrandMapping.objects.filter(account_id=account_id).values_list('brand', flat=True)
+    )
+    mapped_brands = [b for b in brands if b.lower().strip() in mapped_brand_set]
+
     return JsonResponse({
         'brands': brands, 'themes': themes, 'tc_themes': tc_themes,
         'products': products, 'mapped_themes': mapped_themes,
         'theme_product_map': theme_product_map,
         'maponline_themes': maponline_themes,
+        'mapped_brands': mapped_brands,
+        'theme_durations': theme_durations,
+        'tc_theme_durations': tc_theme_durations,
     })
 
 
@@ -2376,6 +2408,118 @@ def brand_mapping_export(request):
     filename = f"brand_mappings_{account.name.replace(' ', '_')}.xlsx"
     return FileResponse(buf, as_attachment=True, filename=filename,
                         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+# ── Brand mappings — Quick Map (guided) ──────────────────────────────────────
+
+@login_required
+def brand_mapping_quick(request):
+    """Guided 'Quick Map' page: pick a scope, then click-to-map schedule brands
+    to the real LMRB / TC themes found in the uploaded data. Saving is handled
+    by brand_mapping_quick_add (AJAX). The detailed table stays at
+    /dashboard/brand-mappings/."""
+    return render(request, 'admin_panel/brand_mappings_quick.html', {
+        'accounts': _account_qs(request.user),
+    })
+
+
+@login_required
+def brand_mapping_detail(request):
+    """AJAX: existing mappings + schedule durations for one schedule brand.
+
+    Query: account_id, brand, channel (optional), month (optional).
+    Returns {mappings:[{id, theme, tc_themes:[...], maponline_theme, duration,
+    product}], schedule_durations:[...]}. Powers the 'Currently mapped' panel
+    and duration hints in the Quick Map picker.
+    """
+    account_id = request.GET.get('account_id', '').strip()
+    brand      = request.GET.get('brand', '').strip()
+    channel    = request.GET.get('channel', '').strip()
+    month      = request.GET.get('month', '').strip()
+    if not account_id or not _account_access(request.user, account_id):
+        return JsonResponse({'mappings': [], 'schedule_durations': []})
+
+    maps = []
+    for bm in BrandMapping.objects.filter(account_id=account_id, brand=brand).order_by('duration', 'theme'):
+        maps.append({
+            'id': bm.id, 'theme': bm.theme,
+            'tc_themes': [t for t in (bm.tc_theme or '').split('|') if t.strip()],
+            'maponline_theme': bm.maponline_theme or '',
+            'duration': bm.duration, 'product': bm.product or '',
+        })
+
+    sr = ScheduleRow.objects.filter(account_id=account_id, brand=brand)
+    if channel and month:
+        sr = sr.filter(schedule__channel=channel, schedule__month=month)
+    elif channel:
+        sr = sr.filter(schedule__channel=channel)
+    sched_durs = sorted(set(
+        d for d in sr.exclude(duration__isnull=True).values_list('duration', flat=True)
+    ))
+    return JsonResponse({'mappings': maps, 'schedule_durations': sched_durs})
+
+
+@login_required
+@require_POST
+def brand_mapping_quick_add(request):
+    """AJAX: create/enrich BrandMapping rows from the Quick Map guided picker.
+
+    Body JSON: {account_id, brand, themes:[...], tc_themes:[...],
+                maponline_theme, product, duration}
+    Mirrors the create-or-enrich logic of brand_mapping_list action='add'
+    (one row per LMRB theme; existing rows get TC/MapOnline enriched).
+    Returns {ok, created, updated, skipped}.
+    """
+    import json as _json
+    user       = request.user
+    account_qs = _account_qs(user)
+    try:
+        body = _json.loads(request.body)
+    except (ValueError, TypeError):
+        return JsonResponse({'ok': False, 'error': 'Invalid JSON.'}, status=400)
+
+    acc_id   = str(body.get('account_id', '')).strip()
+    brand    = str(body.get('brand', '')).strip()
+    themes   = [str(t).strip() for t in (body.get('themes') or []) if str(t).strip()]
+    tc_list  = [str(t).strip() for t in (body.get('tc_themes') or []) if str(t).strip()]
+    tc_theme = '|'.join(dict.fromkeys(tc_list))   # de-dup, keep order; model splits on '|'
+    maponline_theme = str(body.get('maponline_theme', '')).strip()
+    product  = str(body.get('product', '')).strip()
+    dur_raw  = str(body.get('duration', '')).strip()
+    duration = int(dur_raw) if dur_raw.isdigit() else None
+
+    if not (acc_id and brand and themes):
+        return JsonResponse({'ok': False, 'error': 'Brand and at least one LMRB theme are required.'}, status=400)
+    if not _account_access(user, acc_id):
+        return JsonResponse({'ok': False, 'error': 'No access to that brand.'}, status=403)
+    account = get_object_or_404(Account, id=acc_id)
+    if not _is_admin(user) and account not in account_qs:
+        return JsonResponse({'ok': False, 'error': 'No access to that brand.'}, status=403)
+
+    created = updated = skipped = 0
+    for theme in themes:
+        existing = BrandMapping.objects.filter(
+            account=account, brand=brand, theme=theme,
+            duration=duration, product=product,
+        ).first()
+        if existing:
+            changed_fields = []
+            if tc_theme and existing.tc_theme != tc_theme:
+                existing.tc_theme = tc_theme; changed_fields.append('tc_theme')
+            if maponline_theme and existing.maponline_theme != maponline_theme:
+                existing.maponline_theme = maponline_theme; changed_fields.append('maponline_theme')
+            if changed_fields:
+                existing.save(update_fields=changed_fields); updated += 1
+            else:
+                skipped += 1
+        else:
+            BrandMapping.objects.create(
+                account=account, brand=brand, theme=theme,
+                tc_theme=tc_theme, maponline_theme=maponline_theme,
+                duration=duration, product=product)
+            created += 1
+
+    return JsonResponse({'ok': True, 'created': created, 'updated': updated, 'skipped': skipped})
 
 
 # ── Monitoring Dashboard (Items 3 + 4) ───────────────────────────────────────
@@ -5387,13 +5531,13 @@ def tc_lmrb_upload(request):
     if not channel:
         channel = _safe_str(meta.get('channel'))
     if not channel:
-        messages.error(request, 'Could not detect the Channel — type it in and re-upload.')
+        messages.error(request, 'Could not detect the Channel - type it in and re-upload.')
         return _back()
     if not month:
         if meta.get('start_date'):
             month = meta['start_date'].strftime('%B %Y')
         else:
-            messages.error(request, 'Could not detect the Month — type it (e.g. "January 2025") and re-upload.')
+            messages.error(request, 'Could not detect the Month - type it (e.g. "January 2025") and re-upload.')
             return _back()
 
     tc_report = TransmissionReport.objects.create(
@@ -5415,7 +5559,7 @@ def tc_lmrb_upload(request):
     if count == 0:
         messages.warning(
             request,
-            'TC uploaded but 0 rows were parsed — check the file has TC Theme, '
+            'TC uploaded but 0 rows were parsed - check the file has TC Theme, '
             'Aired Time and Date columns (add column aliases in Settings if needed).'
         )
     else:
@@ -5769,6 +5913,16 @@ def summary_report(request):
                 if r or v:
                     dev_notes[k] = {'reason': r, 'dev_value': v}
             meta.deviation_notes = dev_notes
+
+            # ── Per-spot editable "Spot/VA Duration" labels ──
+            spot_keys   = request.POST.getlist('spot_key')
+            spot_labels = request.POST.getlist('spot_label')
+            labels = {}
+            for i, k in enumerate(spot_keys):
+                v = spot_labels[i].strip() if i < len(spot_labels) else ''
+                if k and v:
+                    labels[k] = v
+            meta.spot_labels = labels
 
             # ── Costs are derived, not typed ──
             #   Schedule Cost = numeric value of Schedule Value
@@ -6421,11 +6575,10 @@ def _write_media_recon_sheet(ws, ctx):
     t = ws['A1']; t.value = ctx['title']
     t.font = Font(bold=True, size=18, color='1F3864')
     t.alignment = Alignment(horizontal='center', vertical='center')
-    logo = ctx.get('logo')
-    if logo:
+    _logo_data = _recon_logo_bytes(ctx)
+    if _logo_data:
         try:
-            path = logo.path
-            img = XLImage(path)
+            img = XLImage(io.BytesIO(_logo_data))
             img.height = 55
             img.width  = 150
             ws.add_image(img, 'D1')
@@ -6463,14 +6616,15 @@ def _write_media_recon_sheet(ws, ctx):
     cell(f'A{r}', '', fill=hdr_fill); cell(f'B{r}', '', fill=hdr_fill)
     r = 13
     for ref, txt in [(f'A{r}', 'Scheduling Month'), (f'B{r}', 'Spot/VA Duration'),
-                     (f'C{r}', 'Schedule'), (f'D{r}', 'Transmission Report'), (f'E{r}', 'Nielsen Report')]:
+                     (f'C{r}', 'Schedule (Planned)'), (f'D{r}', 'Transmission (Aired)'),
+                     (f'E{r}', 'Nielsen (3rd Party)')]:
         cell(ref, txt, font=white_bold, align=center, fill=hdr_fill)
     start = 14
     spots = ctx['spots'] or [{'brand': '', 'dur': '', 'planned': 0, 'aired': 0, 'third_party': 0}]
     for i, sp in enumerate(spots):
         rr = start + i
         cell(f'A{rr}', ctx['scheduling_month'] if i == 0 else '', align=center)
-        label = f"{sp['brand']} {sp['dur']}s".strip() if sp['brand'] else ''
+        label = sp.get('label') or (f"{sp['brand']} {sp['dur']}s".strip() if sp['brand'] else '')
         cell(f'B{rr}', label)
         cell(f'C{rr}', sp['planned'], align=center)
         cell(f'D{rr}', sp['aired'], align=center)
@@ -6634,6 +6788,7 @@ def summary_pdf(request):
     from reportlab.lib.enums import TA_CENTER, TA_LEFT
     from reportlab.platypus import (
         SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage,
+        PageBreak,
     )
     from verification.tc_engine import build_summary_data
     from verification.media_recon import build_recon_context
@@ -6667,6 +6822,10 @@ def summary_pdf(request):
     styH = ParagraphStyle('h', fontName='Helvetica-Bold', fontSize=8, leading=10,
                           textColor=white, alignment=TA_CENTER)
     styC = ParagraphStyle('c', fontName='Helvetica', fontSize=8, leading=10, alignment=TA_CENTER)
+    styLC = ParagraphStyle('lc', fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=TA_CENTER)
+    # Compact padding applied to every table so the whole report fits one page.
+    PAD = [('TOPPADDING', (0, 0), (-1, -1), 1.5), ('BOTTOMPADDING', (0, 0), (-1, -1), 1.5),
+           ('LEFTPADDING', (0, 0), (-1, -1), 3), ('RIGHTPADDING', (0, 0), (-1, -1), 3)]
 
     from decimal import Decimal
     def money(v):
@@ -6689,9 +6848,10 @@ def summary_pdf(request):
 
     # ── Title + logo ──
     logo_flow = ''
-    if ctx.get('logo'):
+    _logo_data = _recon_logo_bytes(ctx)
+    if _logo_data:
         try:
-            logo_flow = RLImage(ctx['logo'].path, width=42*mm, height=16*mm, kind='proportional')
+            logo_flow = RLImage(io.BytesIO(_logo_data), width=42*mm, height=16*mm, kind='proportional')
         except Exception:
             logo_flow = ''
     title_p = Paragraph(f"<font color='#1F3864'><b>{ctx['title']}</b></font>",
@@ -6716,8 +6876,8 @@ def summary_pdf(request):
     itab.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, GREY),
                               ('BACKGROUND', (0, 0), (0, -1), SUB),
                               ('BACKGROUND', (2, 0), (2, -1), SUB),
-                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
-    story += [itab, Spacer(1, 6)]
+                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')] + PAD))
+    story += [itab, Spacer(1, 5)]
 
     # ── Medium block ──
     med = [[Paragraph('Medium', styH), Paragraph('Channel/Publication', styH),
@@ -6727,29 +6887,38 @@ def summary_pdf(request):
     mtab = Table(med, colWidths=[W*0.25]*4)
     mtab.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, GREY),
                               ('BACKGROUND', (0, 0), (-1, 0), NAVY),
-                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
-    story += [mtab, Spacer(1, 8)]
+                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')] + PAD))
+    story += [mtab, Spacer(1, 6)]
 
     # ── No. of Spots table ──
-    spot_rows = [[Paragraph('No of Spots', styH), '', '', '', ''],
+    # "No of Spots" spans the three metric columns (Schedule / Transmission /
+    # Nielsen); the Scheduling Month + Spot/VA Duration columns stay unlabelled.
+    spot_rows = [['', '', Paragraph('No of Spots', styH), '', ''],
                  [Paragraph('Scheduling Month', styH), Paragraph('Spot/VA Duration', styH),
                   Paragraph('Schedule (Planned)', styH), Paragraph('Transmission (Aired)', styH),
                   Paragraph('Nielsen (3rd Party)', styH)]]
     for i, sp in enumerate(ctx['spots'] or []):
-        lbl = f"{sp['brand']} {sp['dur']}s" if sp['brand'] else ''
+        lbl = sp.get('label') or (f"{sp['brand']} {sp['dur']}s" if sp['brand'] else '')
         spot_rows.append([Paragraph(ctx['scheduling_month'] if i == 0 else '', styC),
                           Paragraph(lbl, styN), Paragraph(str(sp['planned']), styC),
                           Paragraph(str(sp['aired']), styC), Paragraph(str(sp['third_party']), styC)])
     st = ctx['spots_total']
-    spot_rows.append([Paragraph('Total', styL), '', Paragraph(str(st['planned']), styL),
-                      Paragraph(str(st['aired']), styL), Paragraph(str(st['third_party']), styL)])
+    spot_rows.append([Paragraph('Total', styLC), '', Paragraph(str(st['planned']), styLC),
+                      Paragraph(str(st['aired']), styLC), Paragraph(str(st['third_party']), styLC)])
+    nspots = len(ctx['spots'] or [])
+    stab_style = [('GRID', (0, 0), (-1, -1), 0.5, GREY),
+                  ('SPAN', (2, 0), (4, 0)), ('SPAN', (0, 0), (1, 0)),
+                  ('SPAN', (0, -1), (1, -1)),
+                  ('BACKGROUND', (0, 0), (-1, 1), NAVY),
+                  ('BACKGROUND', (0, -1), (-1, -1), TOT),
+                  ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]
+    if nspots >= 1:
+        # Merge the Scheduling Month cell down all data rows (rows 2 .. 1+nspots).
+        stab_style += [('SPAN', (0, 2), (0, 1 + nspots)),
+                       ('ALIGN', (0, 2), (0, 1 + nspots), 'CENTER')]
     stab = Table(spot_rows, colWidths=[W*0.22, W*0.30, W*0.16, W*0.16, W*0.16])
-    stab.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, GREY),
-                              ('SPAN', (2, 0), (4, 0)), ('SPAN', (0, 0), (1, 0)),
-                              ('BACKGROUND', (0, 0), (-1, 1), NAVY),
-                              ('BACKGROUND', (0, -1), (-1, -1), TOT),
-                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
-    story += [stab, Spacer(1, 8)]
+    stab.setStyle(TableStyle(stab_style + PAD))
+    story += [stab, Spacer(1, 6)]
 
     # ── Deviations ──
     dev_rows = [[Paragraph('Transmission Report Details - Commercials / VA', styH), '', '', '', ''],
@@ -6762,15 +6931,15 @@ def summary_pdf(request):
                          Paragraph(str(dv['not_aired'] or ''), styC), Paragraph(dv['reason'] or '', styN),
                          Paragraph(str(dv['dev_value'] or ''), styC)])
     dt = ctx['dev_total']
-    dev_rows.append([Paragraph('Total', styL), Paragraph(str(dt['deviated']), styL),
-                     Paragraph(str(dt['not_aired']), styL), '', ''])
+    dev_rows.append([Paragraph('Total', styLC), Paragraph(str(dt['deviated']), styLC),
+                     Paragraph(str(dt['not_aired']), styLC), '', ''])
     dtab = Table(dev_rows, colWidths=[W*0.22, W*0.13, W*0.13, W*0.36, W*0.16])
     dtab.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, GREY),
                               ('SPAN', (0, 0), (4, 0)),
                               ('BACKGROUND', (0, 0), (-1, 1), NAVY),
                               ('BACKGROUND', (0, -1), (-1, -1), TOT),
-                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
-    story += [dtab, Spacer(1, 6)]
+                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')] + PAD))
+    story += [dtab, Spacer(1, 5)]
 
     # ── Special notes ──
     if ctx['notes']:
@@ -6800,8 +6969,8 @@ def summary_pdf(request):
     ftab.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, GREY),
                               ('BACKGROUND', (0, 0), (0, -1), SUB),
                               ('BACKGROUND', (2, 0), (2, -1), SUB),
-                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
-    story += [ftab, Spacer(1, 16)]
+                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')] + PAD))
+    story += [ftab, Spacer(1, 10)]
 
     # ── Signatures ──
     sig = [[Paragraph('………………………………', styC), Paragraph('………………………………', styC),
@@ -6813,6 +6982,74 @@ def summary_pdf(request):
     stab2.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('TOPPADDING', (0, 0), (-1, 0), 10)]))
     story += [stab2]
 
+    # ── Matched LMRB report (starts on a fresh page after the summary) ──
+    # Full LMRB column set, in the same order as the Matched LMRB Excel export.
+    matched = _matched_lmrb_rows(account_id, channel, month, schedule_id=sid)
+    styMH = ParagraphStyle('mh', fontName='Helvetica-Bold', fontSize=5, leading=6,
+                           textColor=white, alignment=TA_CENTER)
+    styM  = ParagraphStyle('m', fontName='Helvetica', fontSize=5, leading=6)
+    styMC = ParagraphStyle('mc', fontName='Helvetica', fontSize=5, leading=6, alignment=TA_CENTER)
+
+    story += [PageBreak(),
+              Paragraph("<font color='#1F3864'><b>Matched LMRB Report</b></font>",
+                        ParagraphStyle('mt', fontName='Helvetica-Bold', fontSize=14, leading=16)),
+              Spacer(1, 2),
+              Paragraph(f"{ctx['channel_publication']} · {ctx['scheduling_month']} · "
+                        f"{len(matched)} matched row{'' if len(matched) == 1 else 's'}", styN),
+              Spacer(1, 6)]
+
+    # (header, relative width, centre?) — same columns/order as _write_matched_lmrb_sheet
+    mcols = [
+        ('Product_Group', 1.3, False), ('Advertiser', 1.3, False), ('Product', 1.2, False),
+        ('Advt_Theme', 2.2, False), ('Ads', 0.7, True), ('Channel', 1.2, False),
+        ('Program', 1.8, False), ('Dd', 0.4, True), ('Mn', 0.4, True), ('Yr', 0.55, True),
+        ('Day', 0.6, True), ('Prog_time', 0.85, True), ('Advt_time', 0.85, True),
+        ('AdPos', 0.6, True), ('TotAds', 0.6, True), ('BrkNo', 0.6, True),
+        ('PosinBrk', 0.7, True), ('AdsinBrk', 0.7, True), ('Lng', 0.5, True),
+        ('Dur', 0.5, True), ('Cost', 0.9, True),
+    ]
+    wsum = sum(c[1] for c in mcols)
+    mcolw = [W * (c[1] / wsum) for c in mcols]
+    mrows = [[Paragraph(c[0], styMH) for c in mcols]]
+
+    def _cell(v, centre):
+        s = '' if v is None or v == '' else str(v)
+        return Paragraph(s, styMC if centre else styM)
+
+    for lr in matched:
+        dd = lr.date.day   if lr.date else ''
+        mn = lr.date.month if lr.date else ''
+        yr = lr.date.year  if lr.date else ''
+        vals = [
+            lr.product_group or '', lr.advertiser or '', lr.product or '',
+            lr.advt_theme or '', lr.ads or '', lr.channel or '', lr.program or '',
+            dd, mn, yr, lr.day or '', lr.prog_time or '', lr.advt_time or '',
+            lr.ad_pos     if lr.ad_pos     is not None else '',
+            lr.tot_ads    if lr.tot_ads    is not None else '',
+            lr.brk_no     if lr.brk_no     is not None else '',
+            lr.pos_in_brk if lr.pos_in_brk is not None else '',
+            lr.ads_in_brk if lr.ads_in_brk is not None else '',
+            lr.lng or '',
+            lr.duration   if lr.duration   is not None else '',
+            money(lr.cost) if lr.cost is not None else '',
+        ]
+        mrows.append([_cell(v, mcols[i][2]) for i, v in enumerate(vals)])
+    if not matched:
+        mrows.append([Paragraph('No matched LMRB rows for this scope.', styM)]
+                     + ['' for _ in mcols[1:]])
+    mtab2 = Table(mrows, colWidths=mcolw, repeatRows=1)
+    mstyle = [('GRID', (0, 0), (-1, -1), 0.35, GREY),
+              ('BACKGROUND', (0, 0), (-1, 0), NAVY),
+              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+              ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, HexColor('#F4F6FB')])]
+    if not matched:
+        mstyle.append(('SPAN', (0, 1), (-1, 1)))
+    mtab2.setStyle(TableStyle(mstyle + [('TOPPADDING', (0, 0), (-1, -1), 0.8),
+                                        ('BOTTOMPADDING', (0, 0), (-1, -1), 0.8),
+                                        ('LEFTPADDING', (0, 0), (-1, -1), 1.5),
+                                        ('RIGHTPADDING', (0, 0), (-1, -1), 1.5)]))
+    story += [mtab2]
+
     doc.build(story)
     buf.seek(0)
     fname = f'Reconciliation_{account.name}_{channel}_{month}.pdf'.replace(' ', '_')
@@ -6821,19 +7058,39 @@ def summary_pdf(request):
     return response
 
 
-def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
-    """
-    Shared helper: write all matched LMRB rows (commercial + sponsorship) into
-    an existing openpyxl worksheet.  Returns the row count written.
+def _recon_logo_bytes(ctx):
+    """Return the reconciliation logo file's bytes, or None.
 
-    Commercial matched  = LMRBRow.is_matched=True (Schedule↔LMRB engine)
-    Sponsorship matched = LMRBRow rows linked via SponsorshipLmrbAssignment
-    Both sets are deduplicated so a row appearing in both groups is written once.
-
-    schedule_id: when provided, restrict to rows belonging to that schedule only.
+    The on-screen report reads the logo via its storage URL, but the Excel/PDF
+    exporters previously used ``FieldFile.path`` which is unavailable on non-local
+    storage backends (and points at an ephemeral path in some deployments), so
+    the logo silently vanished from the exports. Read through the storage backend
+    instead (works for local and remote), falling back to the local path.
     """
-    import openpyxl  # noqa - imported by callers too; ensure available
-    from openpyxl.styles import Font, Alignment, PatternFill
+    logo = ctx.get('logo')
+    if not logo:
+        return None
+    try:
+        logo.open('rb')
+        try:
+            return logo.read()
+        finally:
+            logo.close()
+    except Exception:
+        try:
+            with open(logo.path, 'rb') as fh:
+                return fh.read()
+        except Exception:
+            return None
+
+
+def _matched_lmrb_rows(account_id, channel, month, schedule_id=None):
+    """Return the combined, deduplicated list of matched LMRBRow records for a
+    scope (commercial + sponsorship + TC-confirmed), ordered by date/time.
+
+    Single source of truth shared by the Matched LMRB Excel export and the
+    Matched LMRB section of the Reconciliation PDF.
+    """
     from django.db.models import Min, Max
     from core.models import SponsorshipLmrbAssignment
 
@@ -6852,7 +7109,8 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
     if schedule_id:
         comm_qs = comm_qs.filter(matched_schedule__schedule_id=schedule_id)
 
-    # Sponsorship matched (via SponsorshipLmrbAssignment)
+    # Sponsorship matched (via SponsorshipLmrbAssignment) — not date-restricted so
+    # cross-month spillover matches from the Sponsorship Matching page are included.
     spon_q = SponsorshipLmrbAssignment.objects.filter(
         account_id=account_id,
         schedule_row__channel=channel,
@@ -6899,9 +7157,26 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
     if tc_confirmed_ids:
         comm_lmrb_ids &= tc_confirmed_ids
     all_ids = comm_lmrb_ids | spon_ids | tc_spon_lmrb_ids | tc_confirmed_ids
-    combined = list(
+    return list(
         LMRBRow.objects.filter(id__in=all_ids).order_by('date', 'advt_time')
     )
+
+
+def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
+    """
+    Shared helper: write all matched LMRB rows (commercial + sponsorship) into
+    an existing openpyxl worksheet.  Returns the row count written.
+
+    Commercial matched  = LMRBRow.is_matched=True (Schedule↔LMRB engine)
+    Sponsorship matched = LMRBRow rows linked via SponsorshipLmrbAssignment
+    Both sets are deduplicated so a row appearing in both groups is written once.
+
+    schedule_id: when provided, restrict to rows belonging to that schedule only.
+    """
+    import openpyxl  # noqa - imported by callers too; ensure available
+    from openpyxl.styles import Font, Alignment, PatternFill
+
+    combined = _matched_lmrb_rows(account_id, channel, month, schedule_id=schedule_id)
 
     HDR_FILL = PatternFill('solid', fgColor='0F2340')
     hdr_font = Font(bold=True, color='FFFFFF', size=10)
@@ -8120,10 +8395,10 @@ def period_sponsorship_create(request):
     )
     cov = reconcile_period_sponsorship(ps, user=request.user)
     if not cov['mapped'] and not theme:
-        messages.warning(request, f'Added "{brand}" but it has no brand mapping and no theme — '
+        messages.warning(request, f'Added "{brand}" but it has no brand mapping and no theme - '
                                   f'found 0. Set a theme or map the brand, then reconcile.')
     else:
-        messages.success(request, f'Added "{brand}" — found {cov["found"]} of {cov["planned"]} planned.')
+        messages.success(request, f'Added "{brand}" - found {cov["found"]} of {cov["planned"]} planned.')
     return _period_sponsorship_redirect(account_id, channel, month)
 
 
@@ -8177,7 +8452,7 @@ def period_sponsorship_reconcile(request, pk):
         messages.error(request, 'Access denied.')
         return _period_sponsorship_redirect('')
     cov = reconcile_period_sponsorship(ps, user=request.user)
-    messages.success(request, f'"{ps.brand}" reconciled — found {cov["found"]} of {cov["planned"]}.')
+    messages.success(request, f'"{ps.brand}" reconciled - found {cov["found"]} of {cov["planned"]}.')
     return _period_sponsorship_redirect(ps.account_id, ps.channel, ps.month)
 
 
@@ -8216,7 +8491,7 @@ def period_sponsorship_reset(request, pk):
         messages.error(request, 'Access denied.')
         return _period_sponsorship_redirect('')
     n = reset_period_sponsorship(ps)
-    messages.success(request, f'"{ps.brand}" reset — {n} LMRB row(s) unlocked.')
+    messages.success(request, f'"{ps.brand}" reset - {n} LMRB row(s) unlocked.')
     return _period_sponsorship_redirect(ps.account_id, ps.channel, ps.month)
 
 
@@ -8322,6 +8597,158 @@ def sponsorship_unmatched_rows(request):
 
     ids = list(qs.order_by('date', 'start_time').values_list('id', flat=True))
     return JsonResponse({'schedule_row_ids': ids})
+
+
+# ── Dedicated Sponsorship Matching page ───────────────────────────────────────
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+def sponsorship_matching(request):
+    """
+    Dedicated Sponsorship Matching page.
+
+    Sponsorship ads are not present in the TC, so they cannot be reconciled via
+    TC↔LMRB.  This page lists every SPONSORSHIP product (brand + duration) for the
+    scope with its required Telecast Requirement (TR = planned row count), how many
+    are already assigned, and how many remain.  The user picks matching rows from
+    the unmatched LMRB pool (this scope + the following month for spillover) until
+    the TR is reached.  Matches reuse SponsorshipLmrbAssignment, so they show up as
+    "Aired" on the Summary Sheet and in the Matched LMRB export, and the LMRB rows
+    are permanently locked (is_sponsorship_matched=True).
+    """
+    from verification.sponsorship_engine import matching_groups, matching_scope
+
+    user       = request.user
+    account_qs = _account_qs(user)
+
+    account_id  = request.GET.get('account_id', '')
+    channel     = request.GET.get('channel', '')
+    month       = request.GET.get('month', '')
+    schedule_id = request.GET.get('schedule_id', '').strip()
+
+    selected_account = None
+    if account_id:
+        try:
+            selected_account = account_qs.get(pk=account_id)
+        except Account.DoesNotExist:
+            selected_account = None
+
+    channels, months = [], []
+    groups = []
+    window_start = window_end = next_end = None
+
+    if selected_account:
+        channels = list(
+            ScheduleRow.objects.filter(
+                account_id=account_id, ad_type='SPONSORSHIP',
+            ).values_list('channel', flat=True).distinct().order_by('channel')
+        )
+        if channel:
+            months = list(
+                ScheduleRow.objects.filter(
+                    account_id=account_id, channel=channel, ad_type='SPONSORSHIP',
+                ).values_list('month', flat=True).distinct().order_by('month')
+            )
+        if channel and month:
+            sid = int(schedule_id) if schedule_id else None
+            groups = matching_groups(int(account_id), channel, month, schedule_id=sid)
+            window_start, window_end, next_end = matching_scope(
+                int(account_id), channel, month)
+
+    totals = {
+        'required':  sum(g['required']  for g in groups),
+        'assigned':  sum(g['assigned']  for g in groups),
+        'remaining': sum(g['remaining'] for g in groups),
+    }
+
+    return render(request, 'sponsorship/matching.html', {
+        'accounts':         account_qs,
+        'selected_account': selected_account,
+        'account_id':       account_id,
+        'channel':          channel,
+        'month':            month,
+        'schedule_id':      schedule_id,
+        'channels':         channels,
+        'months':           months,
+        'groups':           groups,
+        'totals':           totals,
+        'window_start':     window_start,
+        'window_end':       window_end,
+        'next_end':         next_end,
+    })
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+def sponsorship_matching_candidates(request):
+    """
+    GET (AJAX): unmatched LMRB rows selectable for a sponsorship product.
+    Pool spans the scope date range extended into the next month (spillover).
+    Query params: account_id, channel, month, brand, duration (optional).
+    """
+    from verification.sponsorship_engine import matching_candidates
+
+    account_id = request.GET.get('account_id', '').strip()
+    channel    = request.GET.get('channel', '').strip()
+    month      = request.GET.get('month', '').strip()
+    brand      = request.GET.get('brand', '').strip()
+    duration   = request.GET.get('duration', '').strip()
+
+    if not (account_id and channel and month):
+        return JsonResponse({'error': 'Incomplete parameters.'}, status=400)
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'error': 'Access denied.'}, status=403)
+
+    dur = None
+    if duration:
+        try:
+            dur = int(duration)
+        except ValueError:
+            dur = None
+
+    rows = matching_candidates(int(account_id), channel, month, brand, dur)
+    return JsonResponse({'candidates': rows})
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations', 'team_head', 'planner'])
+@require_POST
+def sponsorship_matching_undo(request):
+    """
+    POST (AJAX or form): remove one or more SponsorshipLmrbAssignments and unlock
+    their LMRB rows.  Accepts JSON {assignment_ids:[...], account_id, channel, month}
+    or form-encoded assignment_ids (repeated) for a no-JS fallback.
+    """
+    import json as _json
+    from verification.sponsorship_engine import remove_assignments
+
+    if request.content_type and 'application/json' in request.content_type:
+        try:
+            body = _json.loads(request.body)
+        except (ValueError, TypeError):
+            return JsonResponse({'error': 'Invalid JSON.'}, status=400)
+        account_id = str(body.get('account_id', '')).strip()
+        channel    = str(body.get('channel', '')).strip()
+        month      = str(body.get('month', '')).strip()
+        raw_ids    = body.get('assignment_ids', [])
+    else:
+        account_id = request.POST.get('account_id', '').strip()
+        channel    = request.POST.get('channel', '').strip()
+        month      = request.POST.get('month', '').strip()
+        raw_ids    = request.POST.getlist('assignment_ids')
+
+    if not (account_id and channel and month):
+        return JsonResponse({'error': 'Incomplete parameters.'}, status=400)
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'error': 'Access denied.'}, status=403)
+
+    try:
+        ids = [int(x) for x in raw_ids]
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Invalid assignment_ids.'}, status=400)
+
+    result = remove_assignments(int(account_id), channel, month, ids)
+    return JsonResponse(result)
 
 
 # ── Manual Reconciliation ──────────────────────────────────────────────────────
@@ -10612,7 +11039,7 @@ def whatsapp_test(request):
             f'✓ Template "{label}" sent to {to}. Check your WhatsApp.')
     else:
         messages.error(request,
-            f'✗ Template "{label}" failed — check that the template is approved in Meta and '
+            f'✗ Template "{label}" failed - check that the template is approved in Meta and '
             f'that the test number ({to}) is added as a recipient in the Meta API Setup page.')
     return redirect('/dashboard/settings/')
 

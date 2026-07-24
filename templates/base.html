@@ -289,7 +289,7 @@
     body.sidebar-collapsed .sidebar-footer-text { opacity: 0; max-width: 0; pointer-events: none; overflow: hidden; }
 
     /* ══════════════════════════════════════════════════════════════════
-       OFFICER MODE  — teal accent, desktop-first layout
+       OFFICER MODE  - teal accent, desktop-first layout
     ══════════════════════════════════════════════════════════════════ */
 
     /* Teal accent in top bar */
@@ -313,7 +313,7 @@
        MOBILE  (≤768px)
     ════════════════════════════════════════════════════════════════ */
 
-    /* Mobile sidebar — slides in as full-height overlay from the left */
+    /* Mobile sidebar - slides in as full-height overlay from the left */
     @media (max-width: 768px) {
       #app-sidebar {
         position: fixed !important;
@@ -670,6 +670,60 @@
       </div>
     {% endif %}
 
+    <!-- Site-wide announcement banners (dismissible, remembered per browser) -->
+    {% if site_notifications %}
+      <div id="site-notif-wrap" class="px-6 pt-4 space-y-2 flex-shrink-0">
+        {% for n in site_notifications %}
+        <div class="site-notif hidden items-start gap-3 rounded-xl px-4 py-3 text-sm border shadow-sm
+              {% if n.level == 'success' %}bg-emerald-50 text-emerald-800 border-emerald-200
+              {% elif n.level == 'warning' %}bg-amber-50 text-amber-800 border-amber-200
+              {% elif n.level == 'info' %}bg-blue-50 text-blue-800 border-blue-200
+              {% else %}bg-gradient-to-r from-indigo-50 to-violet-50 text-indigo-900 border-indigo-200{% endif %}"
+             data-notif-key="{{ n.id }}-{{ n.updated_at|date:'U' }}">
+          <i class="fa-solid mt-0.5 flex-shrink-0
+              {% if n.level == 'success' %}fa-circle-check text-emerald-500
+              {% elif n.level == 'warning' %}fa-triangle-exclamation text-amber-500
+              {% elif n.level == 'info' %}fa-circle-info text-blue-500
+              {% else %}fa-rocket text-indigo-500{% endif %}"></i>
+          <div class="flex-1 min-w-0">
+            {% if n.title %}<p class="font-bold leading-snug">{{ n.title }}</p>{% endif %}
+            <p class="{% if n.title %}mt-0.5 {% endif %}whitespace-pre-line leading-snug">{{ n.message }}</p>
+          </div>
+          <button type="button" onclick="dismissSiteNotif(this)"
+                  class="shrink-0 -mr-1 -mt-0.5 w-7 h-7 grid place-items-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-black/5 transition-colors"
+                  aria-label="Dismiss">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        {% endfor %}
+      </div>
+      <script>
+      (function () {
+        var KEY = 'dismissedSiteNotifs';
+        function getDismissed() {
+          try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { return []; }
+        }
+        var dismissed = getDismissed();
+        var anyShown = false;
+        document.querySelectorAll('.site-notif').forEach(function (el) {
+          var k = el.getAttribute('data-notif-key');
+          if (dismissed.indexOf(k) === -1) { el.classList.remove('hidden'); el.classList.add('flex'); anyShown = true; }
+        });
+        if (!anyShown) { var w = document.getElementById('site-notif-wrap'); if (w) w.classList.add('hidden'); }
+        window.dismissSiteNotif = function (btn) {
+          var el = btn.closest('.site-notif');
+          if (!el) return;
+          var k = el.getAttribute('data-notif-key');
+          var d = getDismissed();
+          if (d.indexOf(k) === -1) { d.push(k); try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (e) {} }
+          el.classList.add('hidden'); el.classList.remove('flex');
+          var wrap = document.getElementById('site-notif-wrap');
+          if (wrap && !wrap.querySelector('.site-notif.flex')) wrap.classList.add('hidden');
+        };
+      })();
+      </script>
+    {% endif %}
+
     <!-- Page body -->
     <div class="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-5">
       {% block content %}{% endblock %}
@@ -762,7 +816,7 @@
 </script>
 {% if request.user.is_authenticated %}
 <script>
-// Poll for unread notifications — bell icon for all users, MC badge for channel officers
+// Poll for unread notifications - bell icon for all users, MC badge for channel officers
 (function pollNotifications() {
   function update() {
     fetch('/dashboard/spot/notifications/')
@@ -920,7 +974,7 @@ document.addEventListener('click', function(e) {
       <span id="uo-pct" style="font-size:12px;font-weight:600;color:#334155;">0%</span>
       <span id="uo-time" style="font-size:12px;color:#64748b;">0:00</span>
     </div>
-    <p id="uo-hint" style="font-size:11px;color:#94a3b8;margin-top:10px;">Please keep this tab open — large files take longer.</p>
+    <p id="uo-hint" style="font-size:11px;color:#94a3b8;margin-top:10px;">Please keep this tab open - large files take longer.</p>
   </div>
 </div>
 <script>
@@ -937,7 +991,7 @@ document.addEventListener('click', function(e) {
     bar.classList.remove('processing'); bar.style.width = '0%';
     pct.textContent = '0%'; title.textContent = 'Uploading…';
     fileEl.textContent = name ? (name + (extra||'')) : '';
-    hint.textContent = 'Please keep this tab open — large files take longer.';
+    hint.textContent = 'Please keep this tab open - large files take longer.';
     tEl.textContent = '0:00'; start = Date.now();
     if (timer) clearInterval(timer);
     timer = setInterval(function(){ tEl.textContent = fmt(Math.floor((Date.now()-start)/1000)); }, 1000);

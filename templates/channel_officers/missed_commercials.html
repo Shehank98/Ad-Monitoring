@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Missed Commercials{% endblock %}
 {% block page_title %}Missed Commercials{% endblock %}
-{% block page_subtitle %}Not-aired spots by schedule — {{ selected_channel }}{% endblock %}
+{% block page_subtitle %}Not-aired spots by schedule - {{ selected_channel }}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -188,13 +188,13 @@
       <tbody>
         {% for row in grp.rows %}
         <tr id="spot-row-{{ row.sr_id }}">
-          <td class="font-medium text-slate-800">{{ row.mr.brand|default:"—" }}</td>
-          <td class="text-slate-600 max-w-[140px] truncate" title="{{ row.mr.programme }}">{{ row.mr.programme|default:"—" }}</td>
-          <td class="text-slate-600 whitespace-nowrap">{{ row.mr.scheduled_date|date:"d M Y"|default:"—" }}</td>
+          <td class="font-medium text-slate-800">{{ row.mr.brand|default:"-" }}</td>
+          <td class="text-slate-600 max-w-[140px] truncate" title="{{ row.mr.programme }}">{{ row.mr.programme|default:"-" }}</td>
+          <td class="text-slate-600 whitespace-nowrap">{{ row.mr.scheduled_date|date:"d M Y"|default:"-" }}</td>
           <td class="text-slate-600 whitespace-nowrap text-xs">
-            {{ row.mr.planned_start|default:"—" }} – {{ row.mr.planned_end|default:"—" }}
+            {{ row.mr.planned_start|default:"-" }} – {{ row.mr.planned_end|default:"-" }}
           </td>
-          <td class="text-right text-slate-700">{{ row.mr.duration|default:"—" }}s</td>
+          <td class="text-right text-slate-700">{{ row.mr.duration|default:"-" }}s</td>
           <td>
             {% if row.mr.status == 'no_mapping' %}
               <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">No Mapping</span>
@@ -224,7 +224,7 @@
             </div>
             <div class="note-form-wrap" id="mo-form-{{ row.sr_id }}">
               <textarea class="note-textarea" id="mo-textarea-{{ row.sr_id }}"
-                        placeholder="e.g. Confirmed aired on 02 May at 14:35 in Neela Pabalu — station log ref #4421">{{ row.mo_note.text|default:"" }}</textarea>
+                        placeholder="e.g. Confirmed aired on 02 May at 14:35 in Neela Pabalu - station log ref #4421">{{ row.mo_note.text|default:"" }}</textarea>
               <div class="flex items-center gap-1 mt-1">
                 <button class="note-save-btn" onclick="saveMONote({{ row.sr_id }})">
                   <i class="fa-solid fa-floppy-disk mr-1"></i>Save
@@ -250,7 +250,7 @@
               {% endif %}
             </p>
             {% else %}
-            <p class="note-empty">—</p>
+            <p class="note-empty">-</p>
             {% endif %}
           </td>
         </tr>
@@ -339,7 +339,7 @@ function saveMONote(srId) {
     })
     .catch(() => {
       spinner.style.display = 'none';
-      alert('Network error — note not saved.');
+      alert('Network error - note not saved.');
     });
 }
 

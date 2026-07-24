@@ -4,16 +4,33 @@
 {% block page_subtitle %}Manage TV and radio channels available for selection{% endblock %}
 
 {% block content %}
+
+<!-- ── Hero header ─────────────────────────────────────────────────────────── -->
+<div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-purple-900 text-white shadow-lg mb-6">
+  <div class="absolute -right-8 -top-10 w-48 h-48 rounded-full bg-purple-500/20 blur-2xl"></div>
+  <div class="absolute -left-10 -bottom-12 w-56 h-56 rounded-full bg-blue-500/10 blur-2xl"></div>
+  <div class="relative px-6 py-6 sm:px-8 sm:py-7 flex items-center gap-5">
+    <div class="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center shrink-0 ring-1 ring-white/20">
+      <i class="fa-solid fa-tower-broadcast text-2xl text-purple-300"></i>
+    </div>
+    <div class="flex-1">
+      <h2 class="text-xl font-extrabold tracking-tight">Channel Management</h2>
+      <p class="text-sm text-slate-300 mt-1">{{ tv_channels|length }} TV &middot; {{ radio_channels|length }} radio - shown as a dropdown when uploading schedules &amp; monitoring data.</p>
+    </div>
+    <div class="hidden sm:flex items-center gap-2 shrink-0">
+      <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 ring-1 ring-white/15 text-xs font-semibold"><i class="fa-solid fa-tv text-blue-300"></i> {{ tv_channels|length }}</span>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 ring-1 ring-white/15 text-xs font-semibold"><i class="fa-solid fa-radio text-purple-300"></i> {{ radio_channels|length }}</span>
+    </div>
+  </div>
+</div>
+
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
   <!-- ── Channel List ───────────────────────────────────────────── -->
   <div class="lg:col-span-2 space-y-5">
 
-    {# Split into TV and Radio #}
-    {% with tv_channels=channels|dictsort:"name" radio_channels=channels|dictsort:"name" %}
-
     <!-- TV Channels -->
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
@@ -21,23 +38,15 @@
           </div>
           <div>
             <h3 class="font-bold text-slate-800 text-sm">TV Channels</h3>
-            <p class="text-xs text-slate-400">
-              {% with count=0 %}
-                {% for ch in channels %}{% if "Radio" not in ch.name %}{% with count=count|add:1 %}{% endwith %}{% endif %}{% endfor %}
-              {% endwith %}
-              Channels starting with "Tv" or "TV"
-            </p>
+            <p class="text-xs text-slate-400">Channels not prefixed with "Radio"</p>
           </div>
         </div>
         <span class="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-semibold ring-1 ring-blue-200">
-          <i class="fa-solid fa-tv mr-1 text-[10px]"></i>
-          {% for ch in channels %}{% if "Radio" not in ch.name %}{% with x=forloop.counter %}{% endwith %}{% endif %}{% endfor %}
-          TV
+          <i class="fa-solid fa-tv mr-1 text-[10px]"></i>{{ tv_channels|length }} TV
         </span>
       </div>
       <div class="divide-y divide-slate-50">
-        {% for ch in channels %}
-        {% if "Radio" not in ch.name %}
+        {% for ch in tv_channels %}
         <div class="px-6 py-3 flex items-center justify-between hover:bg-slate-50/60 transition-colors">
           <div class="flex items-center gap-3">
             <div class="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
@@ -61,7 +70,6 @@
             </form>
           </div>
         </div>
-        {% endif %}
         {% empty %}
         <div class="px-6 py-10 text-center text-slate-400 text-sm">No TV channels yet.</div>
         {% endfor %}
@@ -69,7 +77,7 @@
     </div>
 
     <!-- Radio Channels -->
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
@@ -77,16 +85,15 @@
           </div>
           <div>
             <h3 class="font-bold text-slate-800 text-sm">Radio Channels</h3>
-            <p class="text-xs text-slate-400">Channels starting with "Radio"</p>
+            <p class="text-xs text-slate-400">Channels prefixed with "Radio"</p>
           </div>
         </div>
         <span class="px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 text-xs font-semibold ring-1 ring-purple-200">
-          <i class="fa-solid fa-radio mr-1 text-[10px]"></i>Radio
+          <i class="fa-solid fa-radio mr-1 text-[10px]"></i>{{ radio_channels|length }} Radio
         </span>
       </div>
       <div class="divide-y divide-slate-50">
-        {% for ch in channels %}
-        {% if "Radio" in ch.name %}
+        {% for ch in radio_channels %}
         <div class="px-6 py-3 flex items-center justify-between hover:bg-slate-50/60 transition-colors">
           <div class="flex items-center gap-3">
             <div class="w-7 h-7 rounded-lg bg-purple-50 flex items-center justify-center flex-shrink-0">
@@ -110,12 +117,12 @@
             </form>
           </div>
         </div>
-        {% endif %}
+        {% empty %}
+        <div class="px-6 py-10 text-center text-slate-400 text-sm">No radio channels yet.</div>
         {% endfor %}
       </div>
     </div>
 
-    {% endwith %}
   </div>
 
   <!-- ── Add Channel Form ──────────────────────────────────────── -->
@@ -123,22 +130,18 @@
 
     <!-- Stats -->
     <div class="grid grid-cols-2 gap-3">
-      <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 text-center">
-        <p class="text-2xl font-bold text-blue-700">
-          {% with n=0 %}{% for ch in channels %}{% if "Radio" not in ch.name %}{{ forloop.counter }}{% endif %}{% endfor %}{% endwith %}
-        </p>
+      <div class="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 text-center">
+        <p class="text-2xl font-black text-blue-700">{{ tv_channels|length }}</p>
         <p class="text-xs text-blue-500 font-semibold mt-0.5">TV Channels</p>
       </div>
-      <div class="bg-purple-50 border border-purple-100 rounded-xl p-4 text-center">
-        <p class="text-2xl font-bold text-purple-700">
-          {% with n=0 %}{% for ch in channels %}{% if "Radio" in ch.name %}{{ forloop.counter }}{% endif %}{% endfor %}{% endwith %}
-        </p>
+      <div class="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 text-center">
+        <p class="text-2xl font-black text-purple-700">{{ radio_channels|length }}</p>
         <p class="text-xs text-purple-500 font-semibold mt-0.5">Radio Channels</p>
       </div>
     </div>
 
     <!-- Add form -->
-    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
         <div class="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
           <i class="fa-solid fa-plus text-emerald-600 text-sm"></i>
@@ -217,6 +220,8 @@
   </div>
 </div>
 
+{% endblock %}
+
 {% block extra_js %}
 <script>
 let targetFormId = null;
@@ -236,5 +241,4 @@ document.getElementById('delete-modal').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
 });
 </script>
-{% endblock %}
 {% endblock %}

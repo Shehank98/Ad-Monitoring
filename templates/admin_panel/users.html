@@ -5,25 +5,26 @@
 
 {% block content %}
 
-<!-- Header row -->
-<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-  <div class="flex items-center gap-3">
-    <div class="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
-      <i class="fa-solid fa-users text-blue-600"></i>
+<!-- ── Hero header ─────────────────────────────────────────────────────────── -->
+<div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 text-white shadow-lg mb-6">
+  <div class="absolute -right-8 -top-10 w-48 h-48 rounded-full bg-blue-500/20 blur-2xl"></div>
+  <div class="absolute -left-10 -bottom-12 w-56 h-56 rounded-full bg-indigo-500/10 blur-2xl"></div>
+  <div class="relative px-6 py-6 sm:px-8 sm:py-7 flex flex-col sm:flex-row sm:items-center gap-5">
+    <div class="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center shrink-0 ring-1 ring-white/20">
+      <i class="fa-solid fa-users text-2xl text-blue-300"></i>
     </div>
-    <div>
-      <p class="text-slate-800 font-bold text-base">{{ users.count }} User{{ users.count|pluralize }}</p>
-      <p class="text-xs text-slate-400">Registered on the platform</p>
+    <div class="flex-1">
+      <h2 class="text-xl font-extrabold tracking-tight">User Management</h2>
+      <p class="text-sm text-slate-300 mt-1">{{ users.count }} user{{ users.count|pluralize }} registered on the platform.</p>
     </div>
+    {% if can_create %}
+    <a href="/dashboard/users/create/"
+       class="inline-flex items-center gap-2 px-5 py-2.5 bg-white text-slate-900 hover:bg-slate-100
+              text-sm font-semibold rounded-xl shadow-sm transition-all duration-150 shrink-0">
+      <i class="fa-solid fa-user-plus"></i> Add User
+    </a>
+    {% endif %}
   </div>
-  {% if can_create %}
-  <a href="/dashboard/users/create/"
-     class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700
-            text-white text-sm font-semibold rounded-xl shadow-sm shadow-blue-200
-            transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-    <i class="fa-solid fa-user-plus"></i> Add User
-  </a>
-  {% endif %}
 </div>
 
 <!-- User table card -->
@@ -124,7 +125,7 @@
               </span>
               <p class="text-[10px] text-slate-300 mt-0.5">{{ u.last_login|date:"d M Y" }}</p>
             {% else %}
-              <p class="text-xs text-slateald-600 font-medium">{{ u.last_login|timesince }} ago</p>
+              <p class="text-xs text-emerald-600 font-medium">{{ u.last_login|timesince }} ago</p>
               <p class="text-[10px] text-slate-300">{{ u.last_login|date:"d M Y" }}</p>
             {% endif %}
           </td>

@@ -30,6 +30,9 @@ urlpatterns = [
 
     # Brand mappings
     path('brand-mappings/',           views.brand_mapping_list,      name='brand_mapping_list'),
+    path('brand-mappings/quick/',     views.brand_mapping_quick,     name='brand_mapping_quick'),
+    path('brand-mappings/quick/add/', views.brand_mapping_quick_add, name='brand_mapping_quick_add'),
+    path('brand-mappings/quick/detail/', views.brand_mapping_detail, name='brand_mapping_detail'),
     path('brand-mappings/options/',   views.brand_mapping_options,   name='brand_mapping_options'),
     path('brand-mappings/channels/',  views.brand_mapping_channels,  name='brand_mapping_channels'),
     path('brand-mappings/months/',    views.brand_mapping_months,    name='brand_mapping_months'),
@@ -103,6 +106,11 @@ urlpatterns = [
     path('sponsorship/assign/',        views.sponsorship_assign,         name='sponsorship_assign'),
     path('sponsorship/reset/',         views.sponsorship_reset,          name='sponsorship_reset'),
     path('sponsorship/unmatched-rows/',views.sponsorship_unmatched_rows, name='sponsorship_unmatched_rows'),
+
+    # Dedicated Sponsorship Matching page (manual, TR-driven, cross-month)
+    path('sponsorship/matching/',            views.sponsorship_matching,            name='sponsorship_matching'),
+    path('sponsorship/matching/candidates/', views.sponsorship_matching_candidates, name='sponsorship_matching_candidates'),
+    path('sponsorship/matching/undo/',       views.sponsorship_matching_undo,       name='sponsorship_matching_undo'),
 
     # Period (date-range) Sponsorships
     path('sponsorship/period/',              views.period_sponsorship_list,     name='period_sponsorship_list'),

@@ -4,7 +4,37 @@
 {% block page_subtitle %}Add a new ad schedule - month and date range are detected automatically from the file{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl space-y-6">
+<div class="max-w-4xl mx-auto space-y-6">
+
+  <a href="/dashboard/schedules/"
+     class="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 transition-colors">
+    <i class="fa-solid fa-arrow-left text-xs"></i> Back to Schedules
+  </a>
+
+  <!-- ── Hero header ─────────────────────────────────────────────────────────── -->
+  <div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 text-white shadow-lg">
+    <div class="absolute -right-8 -top-10 w-48 h-48 rounded-full bg-indigo-500/20 blur-2xl"></div>
+    <div class="absolute -left-10 -bottom-12 w-56 h-56 rounded-full bg-blue-500/10 blur-2xl"></div>
+    <div class="relative px-6 py-6 sm:px-8 sm:py-7 flex flex-col sm:flex-row sm:items-center gap-5">
+      <div class="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center shrink-0 ring-1 ring-white/20">
+        <i class="fa-solid fa-calendar-days text-2xl text-indigo-300"></i>
+      </div>
+      <div class="flex-1">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h2 class="text-xl font-extrabold tracking-tight">Upload Schedule</h2>
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-400/20 text-indigo-200 ring-1 ring-indigo-300/30">
+            <i class="fa-solid fa-wand-magic-sparkles text-[8px]"></i> AUTO-DETECT
+          </span>
+        </div>
+        <p class="text-sm text-slate-300 mt-1">Month and date range are detected from the file - pivot and flat formats both supported.</p>
+      </div>
+      <div class="hidden md:flex items-center gap-2 text-xs font-semibold shrink-0">
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 ring-1 ring-white/15"><span class="w-4 h-4 rounded-full bg-indigo-400 text-slate-900 grid place-items-center text-[10px] font-extrabold">1</span> Details</span>
+        <i class="fa-solid fa-chevron-right text-[9px] text-white/30"></i>
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 ring-1 ring-white/15"><span class="w-4 h-4 rounded-full bg-indigo-400 text-slate-900 grid place-items-center text-[10px] font-extrabold">2</span> File</span>
+      </div>
+    </div>
+  </div>
 
   <!-- ── Upload summary (shown after a successful upload) ─────────────────── -->
   {% if upload_summary %}
@@ -234,10 +264,15 @@
   </details>
 
   <!-- ── Upload form ───────────────────────────────────────────────────────── -->
-  <div class="card max-w-2xl">
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden max-w-2xl">
 
-    <form method="post" enctype="multipart/form-data" class="space-y-5" id="upload-form">
+    <form method="post" enctype="multipart/form-data" class="space-y-5 p-6" id="upload-form">
       {% csrf_token %}
+
+      <div class="flex items-center gap-2">
+        <span class="w-6 h-6 rounded-full bg-slate-900 text-white grid place-items-center text-[11px] font-extrabold">1</span>
+        <h3 class="font-bold text-slate-800 text-sm">Schedule details</h3>
+      </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
         <div>
@@ -254,55 +289,6 @@
         <label class="block text-sm font-semibold text-slate-700 mb-1.5">Schedule Number *</label>
         {{ form.schedule_number }}
       </div>
-
-      <!-- ── Makeup / Late-airing options (collapsible) ─────────────────────── -->
-      <details class="group bg-amber-50 border border-amber-200 rounded-xl" id="makeup-details">
-        <summary class="flex items-center gap-2 px-4 py-3 cursor-pointer select-none text-amber-800 font-semibold text-sm">
-          <i class="fa-solid fa-calendar-plus text-amber-500"></i>
-          Makeup / Late-Airing Options
-          <span class="ml-1 text-[11px] font-normal text-amber-600">(optional — for rescheduled or late-aired spots)</span>
-          <i class="fa-solid fa-chevron-down text-amber-400 ml-auto group-open:rotate-180 transition-transform"></i>
-        </summary>
-        <div class="px-4 pb-4 pt-1 space-y-4">
-          <p class="text-xs text-amber-700">
-            Use these fields when spots from this schedule may air <strong>after</strong> the schedule's end date,
-            or when this schedule is a formal makeup/reschedule of missed spots from a previous month.
-          </p>
-
-          <!-- makeup_end_date -->
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-1" for="id_makeup_end_date">
-              Late-Airing Until
-            </label>
-            <p class="text-xs text-slate-500 mb-1.5">
-              If spots from this schedule may air after the last date in the file, set the latest date
-              to search for LMRB data. E.g. Jan schedule with spots that may air up to Feb 10.
-            </p>
-            <input type="date" id="id_makeup_end_date" name="makeup_end_date"
-                   class="input-field max-w-xs"
-                   placeholder="YYYY-MM-DD">
-          </div>
-
-          <!-- parent_schedule -->
-          <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-1" for="id_parent_schedule">
-              Parent Schedule (this is a makeup for…)
-            </label>
-            <p class="text-xs text-slate-500 mb-1.5">
-              If this upload is a formal reschedule of missed spots from a <em>different month</em>,
-              select the original schedule here. Its reconciliation run will include this upload's spots.
-            </p>
-            <select id="id_parent_schedule" name="parent_schedule" class="select-field max-w-lg">
-              <option value="">— None (standalone schedule) —</option>
-              {% for ps in parent_schedule_choices %}
-              <option value="{{ ps.id }}">
-                {{ ps.account__name }} | {{ ps.channel }} | {{ ps.month }} | #{{ ps.schedule_number }} v{{ ps.version }}
-              </option>
-              {% endfor %}
-            </select>
-          </div>
-        </div>
-      </details>
 
       <!-- Auto-detect preview (single-sheet) -->
       <div id="detect-preview" class="hidden">
@@ -371,7 +357,7 @@
             Sponsorship Brands Detected - Assign Types
           </p>
           <p class="text-xs text-amber-700 mb-3">
-            The file contains SPONSORSHIP rows. Select one or more types per brand — the dashboard will count LMRB observations for all selected keywords.
+            The file contains SPONSORSHIP rows. Select one or more types per brand - the dashboard will count LMRB observations for all selected keywords.
             <span class="font-semibold">Tip: Opening/Closing sponsorships usually need both <code class="bg-amber-100 px-1 rounded">-Intro</code> and <code class="bg-amber-100 px-1 rounded">-Extro</code> selected.</span>
           </p>
           <div id="spon-brand-rows" class="space-y-2"></div>
@@ -380,20 +366,23 @@
 
       <!-- File drop zone -->
       <div>
-        <label class="block text-sm font-semibold text-slate-700 mb-1.5">Schedule File *</label>
+        <div class="flex items-center gap-2 mb-2">
+          <span class="w-6 h-6 rounded-full bg-slate-900 text-white grid place-items-center text-[11px] font-extrabold">2</span>
+          <h3 class="font-bold text-slate-800 text-sm">Schedule file</h3>
+        </div>
         <label for="schedule-file"
                class="flex flex-col items-center justify-center w-full h-36 border-2 border-dashed
-                      border-slate-300 rounded-xl cursor-pointer bg-slate-50 hover:bg-blue-50
-                      hover:border-blue-400 transition-all group"
+                      border-slate-300 rounded-2xl cursor-pointer bg-slate-50 hover:bg-indigo-50
+                      hover:border-indigo-400 transition-all group"
                id="drop-label">
-          <div class="text-center">
-            <i class="fa-solid fa-file-excel text-3xl text-slate-300 group-hover:text-blue-400 transition-colors mb-2"></i>
-            <p class="text-sm text-slate-500 group-hover:text-blue-600">
-              <span class="font-semibold">Click to upload</span> or drag & drop
-            </p>
-            <p class="text-xs text-slate-400 mt-1">.xlsx or .xls - max 50 MB</p>
+          <div class="w-12 h-12 rounded-xl bg-white shadow-sm ring-1 ring-slate-100 grid place-items-center mb-2">
+            <i class="fa-solid fa-file-excel text-xl text-indigo-500 group-hover:scale-110 transition-transform"></i>
           </div>
-          <p id="file-name" class="mt-2 text-xs text-blue-600 font-medium hidden"></p>
+          <p class="text-sm text-slate-600 group-hover:text-indigo-600">
+            <span class="font-semibold">Click to upload</span> or drag &amp; drop
+          </p>
+          <p class="text-xs text-slate-400 mt-1">.xlsx or .xls - max 50 MB</p>
+          <p id="file-name" class="mt-2 text-xs text-indigo-700 font-semibold hidden bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200"></p>
         </label>
         {{ form.file }}
       </div>
@@ -565,7 +554,7 @@
         ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-700">PIVOT</span>`
         : (s.total_spots > 0
            ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-700">FLAT</span>`
-           : `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-200 text-slate-500">—</span>`);
+           : `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-200 text-slate-500">-</span>`);
 
       const skippedBadge = !isSchedule
         ? `<span class="ml-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">SKIP</span>`
@@ -574,7 +563,7 @@
       const cSpots = s.commercial_spots  || 0;
       const sSpots = s.sponsorship_spots || 0;
 
-      const monthLine = s.month || '—';
+      const monthLine = s.month || '-';
       const rangeLine = (s.start_date && s.end_date)
         ? `<br><span class="text-[10px] text-slate-400">${s.start_date} → ${s.end_date}</span>`
         : '';
@@ -625,10 +614,10 @@
             ${monthLine}${rangeLine}
           </td>
           <td class="px-3 py-2 text-right font-mono font-bold ${cSpots > 0 ? 'text-blue-700' : 'text-slate-300'}">
-            ${cSpots > 0 ? cSpots.toLocaleString() : '—'}
+            ${cSpots > 0 ? cSpots.toLocaleString() : '-'}
           </td>
           <td class="px-3 py-2 text-right font-mono font-bold ${sSpots > 0 ? 'text-amber-600' : 'text-slate-300'}">
-            ${sSpots > 0 ? sSpots.toLocaleString() : '—'}
+            ${sSpots > 0 ? sSpots.toLocaleString() : '-'}
           </td>
           <td class="px-3 py-2 text-center">
             <input type="checkbox" class="w-4 h-4 accent-indigo-600 cursor-pointer"
@@ -699,7 +688,7 @@
     try {
       const res  = await fetch('/dashboard/schedules/upload-multi/', {method: 'POST', body: fd});
       if (!res.ok && res.status !== 200) {
-        throw new Error(`Server returned ${res.status} — check your account permissions.`);
+        throw new Error(`Server returned ${res.status} - check your account permissions.`);
       }
       const data = await res.json();
       showMultiUploadResult(data);
@@ -729,8 +718,8 @@
           <td class="px-3 py-2 font-medium text-slate-700">${escHtml(r.sheet)}</td>
           <td class="px-3 py-2 text-slate-600">${escHtml(r.channel)}</td>
           <td class="px-3 py-2 text-slate-600">${escHtml(r.month)}</td>
-          <td class="px-3 py-2 text-right font-bold ${cSpots > 0 ? 'text-blue-700' : 'text-slate-300'}">${cSpots > 0 ? cSpots.toLocaleString() : '—'}</td>
-          <td class="px-3 py-2 text-right font-bold ${sSpots > 0 ? 'text-amber-600' : 'text-slate-300'}">${sSpots > 0 ? sSpots.toLocaleString() : '—'}</td>
+          <td class="px-3 py-2 text-right font-bold ${cSpots > 0 ? 'text-blue-700' : 'text-slate-300'}">${cSpots > 0 ? cSpots.toLocaleString() : '-'}</td>
+          <td class="px-3 py-2 text-right font-bold ${sSpots > 0 ? 'text-amber-600' : 'text-slate-300'}">${sSpots > 0 ? sSpots.toLocaleString() : '-'}</td>
           <td class="px-3 py-2 text-center">
             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
               <i class="fa-solid fa-circle-check"></i> Uploaded

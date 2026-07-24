@@ -25,7 +25,7 @@
 
 {% block content %}
 
-{# STATE A — No account selected: centered account picker #}
+{# STATE A - No account selected: centered account picker #}
 {% if not account_id %}
 
 <div class="flex flex-col items-center justify-center py-20 gap-6">
@@ -47,7 +47,7 @@
   </form>
 </div>
 
-{# STATE B — Brand selected, no full scope: card grid #}
+{# STATE B - Brand selected, no full scope: card grid #}
 {% elif not channel or not month %}
 
 <!-- Brand header bar -->
@@ -135,7 +135,7 @@
 
 {% endif %}
 
-{# STATE C — Full scope selected: detail view #}
+{# STATE C - Full scope selected: detail view #}
 {% else %}
 
 <!-- Breadcrumb back link -->
@@ -213,6 +213,99 @@
 
 {% if summary_data %}
 
+<!-- ── Action buttons ─────────────────────────────────────────── -->
+<div class="flex flex-wrap gap-2 mb-5">
+  {% comment %}Scope hidden inputs reused across all forms on this page{% endcomment %}
+  {% if not tc_report %}
+  <div class="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
+    <i class="fa-solid fa-triangle-exclamation"></i>
+    No TC report uploaded for this scope yet.
+    <a href="/dashboard/tc/upload/" class="font-bold underline">Upload TC</a> first, then
+    <form method="post" action="/dashboard/tc/reconcile/" class="inline">
+      {% csrf_token %}
+      <input type="hidden" name="account_id"  value="{{ account_id }}">
+      <input type="hidden" name="channel"     value="{{ channel }}">
+      <input type="hidden" name="month"       value="{{ month }}">
+      <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
+      <input type="hidden" name="mode"        value="smart">
+      <button type="submit" class="font-bold underline">run reconciliation</button>.
+    </form>
+  </div>
+  {% else %}
+  <form method="post" action="/dashboard/tc/reconcile/">
+    {% csrf_token %}
+    <input type="hidden" name="account_id"  value="{{ account_id }}">
+    <input type="hidden" name="channel"     value="{{ channel }}">
+    <input type="hidden" name="month"       value="{{ month }}">
+    <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
+    <input type="hidden" name="mode"        value="reset">
+    <button type="submit" class="btn-secondary text-xs">
+      <i class="fa-solid fa-rotate text-emerald-600"></i> Re-run Reconciliation
+    </button>
+  </form>
+  {% endif %}
+
+  <a href="/dashboard/summary/excel/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
+     class="btn-primary text-xs">
+    <i class="fa-solid fa-file-excel"></i> Download Excel Summary
+  </a>
+
+  <a href="/dashboard/summary/pdf/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
+     class="btn-secondary text-xs">
+    <i class="fa-solid fa-file-pdf text-red-500"></i> Download Reconciliation PDF
+  </a>
+
+  <a href="/dashboard/monitoring/matched-lmrb-excel/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
+     class="btn-secondary text-xs">
+    <i class="fa-solid fa-file-excel text-teal-600"></i> Download Matched LMRB
+  </a>
+
+  <a href="/dashboard/summary/unmatched-lmrb-excel/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
+     class="btn-secondary text-xs" title="Leftover 3rd-party LMRB spots for this client + channel that no engine matched">
+    <i class="fa-solid fa-file-excel text-amber-600"></i> Download Unmatched LMRB
+  </a>
+
+  <a href="/dashboard/summary/colored-schedule/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
+     class="btn-secondary text-xs">
+    <i class="fa-solid fa-palette text-violet-600"></i> Colored Schedule
+  </a>
+
+  <a href="/dashboard/tc/detail/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
+     class="btn-secondary text-xs">
+    <i class="fa-solid fa-table-columns text-violet-600"></i> TC vs LMRB
+  </a>
+
+  <!-- Sponsorship reconciliation controls - always visible -->
+  <form method="post" action="/dashboard/sponsorship/reconcile/" class="inline">
+    {% csrf_token %}
+    <input type="hidden" name="account_id"  value="{{ account_id }}">
+    <input type="hidden" name="channel"     value="{{ channel }}">
+    <input type="hidden" name="month"       value="{{ month }}">
+    <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
+    <input type="hidden" name="mode"        value="smart">
+    <button type="submit" class="btn-secondary text-xs">
+      <i class="fa-solid fa-wand-magic-sparkles text-amber-500"></i> Run Sponsorship Auto-Match
+    </button>
+  </form>
+  {% if summary_data.sponsorship %}
+  <form method="post" action="/dashboard/sponsorship/reset/" class="inline"
+        onsubmit="return confirm('Reset all sponsorship assignments for this scope?');">
+    {% csrf_token %}
+    <input type="hidden" name="account_id"  value="{{ account_id }}">
+    <input type="hidden" name="channel"     value="{{ channel }}">
+    <input type="hidden" name="month"       value="{{ month }}">
+    <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
+    <button type="submit" class="btn-secondary text-xs">
+      <i class="fa-solid fa-rotate-left text-rose-500"></i> Reset Sponsorship
+    </button>
+  </form>
+  {% endif %}
+  <a href="/dashboard/sponsorship/matching/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
+     class="btn-secondary text-xs" title="Manually match sponsorship ads (not in the TC) to unmatched LMRB records up to the schedule's planned count">
+    <i class="fa-solid fa-star text-amber-500"></i> Sponsorship Matching
+  </a>
+</div>
+
 {% if recon %}
 <!-- ══ Media Reconciliation Report (editable, matches Excel/PDF export) ══ -->
 <form method="post" class="mb-6">
@@ -267,13 +360,25 @@
         <tbody>
           {% for sp in recon.spots %}
           <tr>
-            <td class="border border-slate-300 px-2 py-1 text-center">{% if forloop.first %}{{ recon.scheduling_month }}{% endif %}</td>
-            <td class="border border-slate-300 px-2 py-1">{{ sp.brand }} {{ sp.dur }}s
-              <button type="button" class="ml-1 text-[10px] text-blue-600 underline hover:text-blue-800"
-                      title="Manually link LMRB rows for this brand/duration"
-                      onclick="openTagsPicker('{{ account_id }}','{{ channel|escapejs }}','{{ month|escapejs }}','{{ sp.brand|escapejs }}','{{ sp.dur|default:'' }}')">
-                <i class="fa-solid fa-link"></i>
-              </button>
+            {% if forloop.first %}
+            <td rowspan="{{ recon.spots|length }}" class="border border-slate-300 px-2 py-1 text-center align-middle font-medium">{{ recon.scheduling_month }}</td>
+            {% endif %}
+            <td class="border border-slate-300 px-1 py-1">
+              <div class="flex items-center gap-1">
+                <input type="hidden" name="spot_key" value="{{ sp.key }}">
+                <input name="spot_label" value="{{ sp.label }}" data-spot-key="{{ sp.key }}"
+                       class="input-field text-xs py-0.5 w-full spot-label-input"
+                       title="Edit the Spot/VA Duration label; blank restores the default">
+                {% if sp.is_sponsorship %}
+                <span class="text-[9px] text-amber-600 font-bold uppercase" title="Sponsorship">Spon</span>
+                {% else %}
+                <button type="button" class="text-[10px] text-blue-600 underline hover:text-blue-800 whitespace-nowrap"
+                        title="Manually link LMRB rows for this brand/duration"
+                        onclick="openTagsPicker('{{ account_id }}','{{ channel|escapejs }}','{{ month|escapejs }}','{{ sp.brand|escapejs }}','{{ sp.dur|default:'' }}')">
+                  <i class="fa-solid fa-link"></i>
+                </button>
+                {% endif %}
+              </div>
             </td>
             <td class="border border-slate-300 px-2 py-1 text-center">{{ sp.planned }}</td>
             <td class="border border-slate-300 px-2 py-1 text-center">{{ sp.aired }}</td>
@@ -300,8 +405,12 @@
         <tbody>
           {% for dv in recon.deviations %}
           <tr>
-            <td class="border border-slate-300 px-2 py-1">{{ dv.brand }} {{ dv.dur }}s
-              <input type="hidden" name="dev_key" value="{{ dv.key }}"></td>
+            <td class="border border-slate-300 px-1">
+              <input type="hidden" name="dev_key" value="{{ dv.key }}">
+              <input type="hidden" name="spot_key" value="{{ dv.key }}">
+              <input name="spot_label" value="{{ dv.label }}" data-spot-key="{{ dv.key }}"
+                     class="input-field text-xs py-1 w-full spot-label-input"
+                     title="Edit the Spot/VA Duration label; blank restores the default"></td>
             <td class="border border-slate-300 px-2 py-1 text-center">{{ dv.deviated }}</td>
             <td class="border border-slate-300 px-2 py-1 text-center">{{ dv.not_aired }}</td>
             <td class="border border-slate-300 px-1"><input name="dev_reason" value="{{ dv.reason }}" class="input-field text-xs py-1 w-full"></td>
@@ -396,207 +505,21 @@
       i.addEventListener('input', recompute);
     });
     recompute();
+
+    // Keep the "Spot/VA Duration" label in sync across the No-of-Spots table
+    // and the Deviations table when the same spot appears in both.
+    document.querySelectorAll('.spot-label-input').forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        var k = this.getAttribute('data-spot-key');
+        document.querySelectorAll('.spot-label-input[data-spot-key="' + (window.CSS && CSS.escape ? CSS.escape(k) : k) + '"]').forEach(function (other) {
+          if (other !== inp) other.value = inp.value;
+        });
+      });
+    });
   })();
   </script>
 </form>
 {% endif %}
-
-<!-- ── Action buttons ─────────────────────────────────────────── -->
-<div class="flex flex-wrap gap-2 mb-5">
-  {% comment %}Scope hidden inputs reused across all forms on this page{% endcomment %}
-  {% if not tc_report %}
-  <div class="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
-    <i class="fa-solid fa-triangle-exclamation"></i>
-    No TC report uploaded for this scope yet.
-    <a href="/dashboard/tc/upload/" class="font-bold underline">Upload TC</a> first, then
-    <form method="post" action="/dashboard/tc/reconcile/" class="inline">
-      {% csrf_token %}
-      <input type="hidden" name="account_id"  value="{{ account_id }}">
-      <input type="hidden" name="channel"     value="{{ channel }}">
-      <input type="hidden" name="month"       value="{{ month }}">
-      <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
-      <input type="hidden" name="mode"        value="smart">
-      <button type="submit" class="font-bold underline">run reconciliation</button>.
-    </form>
-  </div>
-  {% else %}
-  <form method="post" action="/dashboard/tc/reconcile/">
-    {% csrf_token %}
-    <input type="hidden" name="account_id"  value="{{ account_id }}">
-    <input type="hidden" name="channel"     value="{{ channel }}">
-    <input type="hidden" name="month"       value="{{ month }}">
-    <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
-    <input type="hidden" name="mode"        value="reset">
-    <button type="submit" class="btn-secondary text-xs">
-      <i class="fa-solid fa-rotate text-emerald-600"></i> Re-run Reconciliation
-    </button>
-  </form>
-  {% endif %}
-
-  <a href="/dashboard/summary/excel/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
-     class="btn-primary text-xs">
-    <i class="fa-solid fa-file-excel"></i> Download Excel Summary
-  </a>
-
-  <a href="/dashboard/summary/pdf/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
-     class="btn-secondary text-xs">
-    <i class="fa-solid fa-file-pdf text-red-500"></i> Download Reconciliation PDF
-  </a>
-
-  <a href="/dashboard/monitoring/matched-lmrb-excel/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
-     class="btn-secondary text-xs">
-    <i class="fa-solid fa-file-excel text-teal-600"></i> Download Matched LMRB
-  </a>
-
-  <a href="/dashboard/summary/unmatched-lmrb-excel/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
-     class="btn-secondary text-xs" title="Leftover 3rd-party LMRB spots for this client + channel that no engine matched">
-    <i class="fa-solid fa-file-excel text-amber-600"></i> Download Unmatched LMRB
-  </a>
-
-  <a href="/dashboard/summary/colored-schedule/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
-     class="btn-secondary text-xs">
-    <i class="fa-solid fa-palette text-violet-600"></i> Colored Schedule
-  </a>
-
-  <a href="/dashboard/tc/detail/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
-     class="btn-secondary text-xs">
-    <i class="fa-solid fa-table-columns text-violet-600"></i> TC vs LMRB
-  </a>
-
-  <a href="/dashboard/tc/lmrb-tc/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}{% if schedule_id %}&schedule_id={{ schedule_id }}{% endif %}"
-     class="btn-secondary text-xs">
-    <i class="fa-solid fa-link text-green-600"></i> LMRB vs TC
-  </a>
-
-  <!-- Sponsorship reconciliation controls - always visible -->
-  <form method="post" action="/dashboard/sponsorship/reconcile/" class="inline">
-    {% csrf_token %}
-    <input type="hidden" name="account_id"  value="{{ account_id }}">
-    <input type="hidden" name="channel"     value="{{ channel }}">
-    <input type="hidden" name="month"       value="{{ month }}">
-    <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
-    <input type="hidden" name="mode"        value="smart">
-    <button type="submit" class="btn-secondary text-xs">
-      <i class="fa-solid fa-wand-magic-sparkles text-amber-500"></i> Run Sponsorship Auto-Match
-    </button>
-  </form>
-  {% if summary_data.sponsorship %}
-  <form method="post" action="/dashboard/sponsorship/reset/" class="inline"
-        onsubmit="return confirm('Reset all sponsorship assignments for this scope?');">
-    {% csrf_token %}
-    <input type="hidden" name="account_id"  value="{{ account_id }}">
-    <input type="hidden" name="channel"     value="{{ channel }}">
-    <input type="hidden" name="month"       value="{{ month }}">
-    <input type="hidden" name="schedule_id" value="{{ schedule_id }}">
-    <button type="submit" class="btn-secondary text-xs">
-      <i class="fa-solid fa-rotate-left text-rose-500"></i> Reset Sponsorship
-    </button>
-  </form>
-  {% endif %}
-  <a href="/dashboard/sponsorship/period/?account_id={{ account_id }}&channel={{ channel }}&month={{ month }}"
-     class="btn-secondary text-xs" title="For sponsorships that aren't single spots in the TC — verify by date range">
-    <i class="fa-solid fa-calendar-week text-indigo-500"></i> Period Sponsorships
-  </a>
-</div>
-
-<!-- ── Sponsorship assignment tool (collapsed; report lives in the card above) ── -->
-<div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-6">
-  <details class="group">
-    <summary class="cursor-pointer flex items-center justify-between select-none">
-      <span class="text-sm font-bold text-slate-800">
-        <i class="fa-solid fa-star mr-1.5 text-yellow-500"></i> Sponsorship — counts &amp; manual assignment
-      </span>
-      <i class="fa-solid fa-chevron-down text-slate-400 text-xs transition-transform duration-200 group-open:rotate-180"></i>
-    </summary>
-    <div class="mt-4">
-        <!-- ── Sponsorship Benefits ─────────────────────────── -->
-        <div>
-          <div class="flex items-center gap-2 mb-2">
-            <span class="text-xs font-bold text-amber-700 uppercase tracking-wider bg-amber-50 px-2 py-0.5 rounded-md">
-              <i class="fa-solid fa-star mr-1 text-yellow-500"></i> Sponsorship Benefits
-            </span>
-          </div>
-          {% if summary_data.sponsorship %}
-          <div class="overflow-x-auto border border-slate-200 rounded-xl">
-            <table class="sum-table w-full border-collapse">
-              <thead>
-                <tr>
-                  <th class="text-left">Product</th>
-                  <th class="text-center">Dur</th>
-                  <th class="text-center">Planned</th>
-                  <th class="text-center">Aired</th>
-                  <th class="text-center">Missed</th>
-                  <th class="text-center">Extra</th>
-                  <th class="text-center">3rd Party</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for section in summary_data.sponsorship %}
-                <!-- Programme heading row -->
-                <tr class="prog-header">
-                  <td colspan="7" class="uppercase tracking-wide text-xs">
-                    <i class="fa-solid fa-tv mr-1"></i> {{ section.programme }}
-                  </td>
-                </tr>
-                {% for row in section.rows %}
-                <tr>
-                  <td class="pl-4 font-medium text-slate-800">
-                    {{ row.product }}
-                    <span class="status-{{ row.status }}">
-                      {% if row.status == 'complete' %}✓ Complete
-                      {% elif row.status == 'incomplete' %}⚠ Incomplete
-                      {% else %}- No data
-                      {% endif %}
-                    </span>
-                    {% if row.status != 'complete' %}
-                    <button type="button"
-                      class="ml-1 text-xs text-blue-600 underline hover:text-blue-800"
-                      onclick="openSponPicker('{{ account_id }}','{{ channel|escapejs }}','{{ month|escapejs }}','{{ row.product|escapejs }}','{{ row.dur|default:'' }}')">
-                      + Add from LMRB
-                    </button>
-                    {% endif %}
-                  </td>
-                  <td class="text-center text-slate-600">{{ row.dur|default:"-" }}</td>
-                  <td class="text-center font-semibold">{{ row.planned }}</td>
-                  <td class="text-center text-emerald-700 font-semibold">
-                    {{ row.aired }}
-                    <div class="mt-1 w-full bg-slate-100 rounded-full h-1">
-                      {% if row.planned > 0 %}
-                      <div class="h-1 rounded-full {% if row.aired >= row.planned %}bg-emerald-500{% elif row.aired > 0 %}bg-amber-400{% else %}bg-red-400{% endif %}"
-                           style="width: {% widthratio row.aired row.planned 100 %}%"></div>
-                      {% endif %}
-                    </div>
-                  </td>
-                  <td class="text-center {% if row.missed > 0 %}text-red-600 font-bold{% else %}text-slate-400{% endif %}">{{ row.missed }}</td>
-                  <td class="text-center {% if row.extra > 0 %}text-violet-600 font-semibold{% else %}text-slate-400{% endif %}">{{ row.extra }}</td>
-                  <td class="text-center text-blue-600 font-semibold">{{ row.third_party }}</td>
-                </tr>
-                {% endfor %}
-                {% endfor %}
-                <!-- Overall sponsorship total only -->
-                <tr class="spon-header">
-                  <td colspan="2" class="font-bold">SPONSORSHIP GRAND TOTAL</td>
-                  <td class="text-center font-bold">{{ summary_data.sponsorship_total.planned }}</td>
-                  <td class="text-center font-bold text-emerald-800">{{ summary_data.sponsorship_total.aired }}</td>
-                  <td class="text-center font-bold {% if summary_data.sponsorship_total.missed > 0 %}text-red-700{% endif %}">{{ summary_data.sponsorship_total.missed }}</td>
-                  <td class="text-center font-bold">{{ summary_data.sponsorship_total.extra }}</td>
-                  <td class="text-center font-bold text-blue-700">{{ summary_data.sponsorship_total.third_party }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          {% else %}
-          <div class="text-xs text-slate-400 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
-            <i class="fa-solid fa-circle-info mr-1 text-amber-400"></i>
-            No SPONSORSHIP schedule rows found for this scope. Upload a schedule file containing
-            rows with <strong>ad_type = SPONSORSHIP</strong> to use sponsorship reconciliation.
-            Once uploaded, click <em>Run Sponsorship Auto-Match</em> above.
-          </div>
-          {% endif %}
-        </div>
-    </div>
-  </details>
-</div>
 
 {% else %}
 <!-- No summary data yet for this scope -->

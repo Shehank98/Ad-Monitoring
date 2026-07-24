@@ -1,0 +1,408 @@
+{% extends 'base.html' %}
+{% block title %}Quick Map Brands{% endblock %}
+{% block page_title %}Quick Map Brands{% endblock %}
+{% block page_subtitle %}Guided brand mapping - pick a scope, then click a brand and tick the themes found in your data{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto space-y-6">
+
+  <a href="/dashboard/brand-mappings/{% if request.GET.account %}?account={{ request.GET.account }}{% endif %}"
+     class="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 transition-colors">
+    <i class="fa-solid fa-table text-xs"></i> Switch to detailed table (edit / delete)
+  </a>
+
+  <!-- Hero -->
+  <div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-900 text-white shadow-lg">
+    <div class="absolute -right-8 -top-10 w-48 h-48 rounded-full bg-emerald-500/20 blur-2xl"></div>
+    <div class="relative px-6 py-6 sm:px-8 sm:py-7 flex items-center gap-5">
+      <div class="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center shrink-0 ring-1 ring-white/20">
+        <i class="fa-solid fa-diagram-project text-2xl text-emerald-300"></i>
+      </div>
+      <div class="flex-1">
+        <h2 class="text-xl font-extrabold tracking-tight">Quick Map Brands</h2>
+        <p class="text-sm text-slate-300 mt-1">Connect each schedule brand to its real LMRB &amp; TC themes - no typing, just tick and save.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scope selector -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div>
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Brand (Account) <span class="text-red-400">*</span></label>
+        <select id="q-account" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+          <option value="">Select account…</option>
+          {% for acc in accounts %}<option value="{{ acc.id }}">{{ acc.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Channel <span class="text-slate-300 normal-case font-medium">(optional)</span></label>
+        <select id="q-channel" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400" disabled>
+          <option value="">All channels</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Month <span class="text-slate-300 normal-case font-medium">(optional)</span></label>
+        <select id="q-month" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400" disabled>
+          <option value="">All months</option>
+        </select>
+      </div>
+    </div>
+    <p class="text-[11px] text-slate-400 mt-2"><i class="fa-solid fa-circle-info mr-1"></i> Choosing a channel &amp; month narrows the theme lists to exactly what aired in that period.</p>
+  </div>
+
+  <!-- Coverage summary -->
+  <div id="q-coverage" class="hidden flex flex-wrap items-center gap-3">
+    <div class="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+      <span class="font-bold text-slate-500 uppercase tracking-wider">Brands</span><span id="q-total" class="font-extrabold text-slate-800 text-sm">0</span>
+    </div>
+    <div class="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-xs">
+      <span class="font-bold text-emerald-600 uppercase tracking-wider">Mapped</span><span id="q-mapped" class="font-extrabold text-emerald-800 text-sm">0</span>
+    </div>
+    <div class="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-50 border border-amber-200 text-xs">
+      <span class="font-bold text-amber-600 uppercase tracking-wider">Unmapped</span><span id="q-unmapped" class="font-extrabold text-amber-800 text-sm">0</span>
+    </div>
+    <label class="ml-auto inline-flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none">
+      <input type="checkbox" id="q-show-mapped" class="accent-emerald-600"> Show already-mapped brands
+    </label>
+  </div>
+
+  <!-- States -->
+  <div id="q-empty" class="flex flex-col items-center justify-center py-16 gap-3 bg-white rounded-2xl border border-slate-100 shadow-sm text-center">
+    <div class="w-14 h-14 bg-slate-100 rounded-2xl grid place-items-center"><i class="fa-solid fa-diagram-project text-slate-400 text-2xl"></i></div>
+    <p class="text-slate-500 text-sm">Select an account above to see its schedule brands.</p>
+  </div>
+  <div id="q-loading" class="hidden text-center py-10 text-slate-400 text-sm"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading brands &amp; themes…</div>
+  <div id="q-none" class="hidden text-center py-10 text-slate-400 text-sm">No schedule brands found for this scope. Upload a schedule first.</div>
+
+  <!-- Brand cards -->
+  <div id="q-cards" class="space-y-3"></div>
+
+</div>
+
+<!-- Toast -->
+<div id="q-toast" class="fixed bottom-5 right-5 z-[9999] hidden items-center gap-2 px-4 py-3 rounded-xl bg-slate-900 text-white text-sm shadow-lg">
+  <i id="q-toast-icon" class="fa-solid fa-circle-check text-emerald-400"></i>
+  <span id="q-toast-msg"></span>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  var csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+  var elAcc = document.getElementById('q-account');
+  var elChan = document.getElementById('q-channel');
+  var elMonth = document.getElementById('q-month');
+  var elCards = document.getElementById('q-cards');
+  var OPTS = null;              // last loaded options payload
+  var mappedThemeSet = new Set();
+  var mappedBrandSet = new Set();
+
+  function toast(msg, ok) {
+    var t = document.getElementById('q-toast');
+    document.getElementById('q-toast-msg').textContent = msg;
+    var ic = document.getElementById('q-toast-icon');
+    ic.className = ok === false ? 'fa-solid fa-circle-exclamation text-rose-400' : 'fa-solid fa-circle-check text-emerald-400';
+    t.classList.remove('hidden'); t.classList.add('flex');
+    clearTimeout(t._t); t._t = setTimeout(function () { t.classList.add('hidden'); t.classList.remove('flex'); }, 2600);
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function show(id, on) { var e = document.getElementById(id); if (e) e.classList.toggle('hidden', !on); }
+
+  // ── Scope cascades ──────────────────────────────────────────────────────────
+  elAcc.addEventListener('change', function () {
+    elChan.innerHTML = '<option value="">All channels</option>'; elChan.disabled = true;
+    elMonth.innerHTML = '<option value="">All months</option>'; elMonth.disabled = true;
+    if (!this.value) { reset(); return; }
+    fetch('/dashboard/brand-mappings/channels/?account_id=' + encodeURIComponent(this.value))
+      .then(r => r.json()).then(d => {
+        (d.channels || []).forEach(function (ch) { elChan.insertAdjacentHTML('beforeend', '<option value="' + esc(ch) + '">' + esc(ch) + '</option>'); });
+        elChan.disabled = false;
+      });
+    loadOptions();
+  });
+  elChan.addEventListener('change', function () {
+    elMonth.innerHTML = '<option value="">All months</option>'; elMonth.disabled = true;
+    if (this.value) {
+      fetch('/dashboard/brand-mappings/months/?account_id=' + encodeURIComponent(elAcc.value) + '&channel=' + encodeURIComponent(this.value))
+        .then(r => r.json()).then(d => {
+          (d.months || []).forEach(function (m) { elMonth.insertAdjacentHTML('beforeend', '<option value="' + esc(m) + '">' + esc(m) + '</option>'); });
+          elMonth.disabled = false;
+        });
+    }
+    loadOptions();
+  });
+  elMonth.addEventListener('change', loadOptions);
+  document.getElementById('q-show-mapped').addEventListener('change', render);
+
+  function reset() {
+    OPTS = null; elCards.innerHTML = '';
+    show('q-empty', true); show('q-coverage', false); show('q-none', false); show('q-loading', false);
+  }
+
+  function loadOptions() {
+    if (!elAcc.value) { reset(); return; }
+    show('q-empty', false); show('q-none', false); show('q-coverage', false); show('q-loading', true);
+    elCards.innerHTML = '';
+    var qs = '?account_id=' + encodeURIComponent(elAcc.value);
+    if (elChan.value)  qs += '&channel=' + encodeURIComponent(elChan.value);
+    if (elMonth.value) qs += '&month='   + encodeURIComponent(elMonth.value);
+    fetch('/dashboard/brand-mappings/options/' + qs)
+      .then(r => r.json())
+      .then(function (d) {
+        OPTS = d;
+        mappedThemeSet = new Set((d.mapped_themes || []).map(function (t) { return t.toLowerCase().trim(); }));
+        mappedBrandSet = new Set((d.mapped_brands || []).map(function (b) { return b.toLowerCase().trim(); }));
+        show('q-loading', false);
+        render();
+      })
+      .catch(function () { show('q-loading', false); toast('Could not load data.', false); });
+  }
+
+  function isBrandMapped(b) { return mappedBrandSet.has(b.toLowerCase().trim()); }
+
+  function render() {
+    if (!OPTS) return;
+    var brands = OPTS.brands || [];
+    var total = brands.length;
+    var mapped = brands.filter(isBrandMapped).length;
+    document.getElementById('q-total').textContent = total;
+    document.getElementById('q-mapped').textContent = mapped;
+    document.getElementById('q-unmapped').textContent = total - mapped;
+    show('q-coverage', total > 0);
+    show('q-none', total === 0);
+
+    var showMapped = document.getElementById('q-show-mapped').checked;
+    // Unmapped first, then (optionally) mapped
+    var ordered = brands.slice().sort(function (a, b) {
+      var ma = isBrandMapped(a), mb = isBrandMapped(b);
+      if (ma !== mb) return ma ? 1 : -1;
+      return a.toLowerCase().localeCompare(b.toLowerCase());
+    });
+    elCards.innerHTML = '';
+    ordered.forEach(function (brand) {
+      var done = isBrandMapped(brand);
+      if (done && !showMapped) return;
+      elCards.appendChild(brandCard(brand, done));
+    });
+  }
+
+  function brandCard(brand, done) {
+    var card = document.createElement('div');
+    card.className = 'bg-white rounded-2xl border shadow-sm overflow-hidden ' + (done ? 'border-emerald-200' : 'border-amber-200');
+    card.innerHTML =
+      '<div class="flex items-center gap-3 px-4 py-3">' +
+        '<span class="w-8 h-8 rounded-lg grid place-items-center shrink-0 ' + (done ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600') + '"><i class="fa-solid ' + (done ? 'fa-check' : 'fa-link') + '"></i></span>' +
+        '<div class="min-w-0 flex-1"><p class="font-bold text-slate-800 text-sm truncate">' + esc(brand) + '</p>' +
+          '<p class="text-[11px] ' + (done ? 'text-emerald-600' : 'text-amber-600') + ' font-semibold">' + (done ? 'Mapped' : 'Not mapped yet') + '</p></div>' +
+        '<button type="button" class="btn-secondary text-xs js-toggle">' + (done ? '<i class="fa-solid fa-plus"></i> Add more' : '<i class="fa-solid fa-wand-magic-sparkles"></i> Map') + '</button>' +
+      '</div>' +
+      '<div class="js-editor hidden border-t border-slate-100 p-4 space-y-4 bg-slate-50/50"></div>';
+
+    var editor = card.querySelector('.js-editor');
+    var btn = card.querySelector('.js-toggle');
+    btn.addEventListener('click', function () {
+      var open = !editor.classList.contains('hidden');
+      if (open) { editor.classList.add('hidden'); return; }
+      if (!editor.dataset.built) { buildEditor(editor, brand); editor.dataset.built = '1'; }
+      editor.classList.remove('hidden');
+    });
+    return card;
+  }
+
+  // Build a searchable checklist block; returns {wrap, getSelected}
+  function checklist(title, items, opts) {
+    opts = opts || {};
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<div class="flex items-center justify-between mb-1.5">' +
+        '<p class="text-xs font-bold text-slate-600">' + esc(title) + '</p>' +
+        '<span class="js-count text-[10px] text-slate-400">0 selected</span></div>' +
+      '<input type="text" class="js-search w-full mb-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-400" placeholder="Filter…">' +
+      '<div class="js-list max-h-44 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-50"></div>';
+    var list = wrap.querySelector('.js-list');
+    var count = wrap.querySelector('.js-count');
+    if (!items.length) {
+      list.innerHTML = '<p class="text-[11px] text-slate-400 px-3 py-3">' + (opts.emptyMsg || 'None found in this scope.') + '</p>';
+    }
+    var durMap = opts.durMap || {};
+    var pre = opts.preselect || new Set();
+    items.forEach(function (it) {
+      var key = String(it).toLowerCase().trim();
+      var mappedAnywhere = opts.mappedSet && opts.mappedSet.has(key);
+      var here = pre.has(key);
+      var durs = durMap[it];
+      var durTxt = (durs && durs.length) ? durs.map(function (d) { return d + 's'; }).join(', ') : '';
+      var row = document.createElement('label');
+      row.className = 'flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-emerald-50' + (here ? ' bg-emerald-50/70' : '');
+      row.innerHTML = '<input type="checkbox" value="' + esc(it) + '" class="accent-emerald-600 w-3.5 h-3.5"' + (here ? ' checked' : '') + '>' +
+        '<span class="text-slate-700 truncate">' + esc(it) + '</span>' +
+        (durTxt ? '<span class="text-[9px] font-bold text-indigo-500 shrink-0 whitespace-nowrap">' + esc(durTxt) + '</span>' : '') +
+        (here ? '<span class="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-600 shrink-0">mapped here</span>'
+              : (mappedAnywhere ? '<span class="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 shrink-0">mapped</span>' : ''));
+      list.appendChild(row);
+    });
+    function upd() { count.textContent = list.querySelectorAll('input:checked').length + ' selected'; }
+    list.addEventListener('change', upd);
+    upd();
+    wrap.querySelector('.js-search').addEventListener('input', function () {
+      var q = this.value.toLowerCase();
+      list.querySelectorAll('label').forEach(function (l) {
+        l.style.display = l.textContent.toLowerCase().indexOf(q) === -1 ? 'none' : '';
+      });
+    });
+    return { wrap: wrap, getSelected: function () { return Array.from(list.querySelectorAll('input:checked')).map(function (c) { return c.value; }); } };
+  }
+
+  function buildEditor(editor, brand) {
+    editor.innerHTML = '<p class="text-xs text-slate-400 py-2"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading current mapping…</p>';
+    var qs = '?account_id=' + encodeURIComponent(elAcc.value) + '&brand=' + encodeURIComponent(brand);
+    if (elChan.value)  qs += '&channel=' + encodeURIComponent(elChan.value);
+    if (elMonth.value) qs += '&month='   + encodeURIComponent(elMonth.value);
+    fetch('/dashboard/brand-mappings/quick/detail/' + qs)
+      .then(r => r.json())
+      .then(function (d) { renderEditor(editor, brand, d); })
+      .catch(function () { renderEditor(editor, brand, { mappings: [], schedule_durations: [] }); });
+  }
+
+  function renderEditor(editor, brand, detail) {
+    editor.innerHTML = '';
+    var maps = detail.mappings || [];
+    var schedDurs = detail.schedule_durations || [];
+
+    // ── Currently mapped panel ──────────────────────────────────────────────
+    var cur = document.createElement('div');
+    if (maps.length) {
+      var rows = maps.map(function (m) {
+        var d  = (m.duration != null ? m.duration + 's' : 'any');
+        var tc = (m.tc_themes && m.tc_themes.length) ? m.tc_themes.join(', ') : '-';
+        return '<tr class="border-t border-emerald-100">' +
+          '<td class="py-1 pr-3 font-medium text-slate-700">' + esc(m.theme) + '</td>' +
+          '<td class="py-1 pr-3 text-slate-600">' + esc(tc) + '</td>' +
+          '<td class="py-1 pr-3 text-indigo-600 font-bold whitespace-nowrap">' + esc(d) + '</td>' +
+          '<td class="py-1 text-slate-500">' + esc(m.product || '') + '</td></tr>';
+      }).join('');
+      cur.className = 'rounded-lg border border-emerald-200 bg-emerald-50/50 p-3';
+      cur.innerHTML =
+        '<p class="text-xs font-bold text-emerald-700 mb-1.5"><i class="fa-solid fa-check mr-1"></i>Currently mapped (' + maps.length + ')</p>' +
+        '<div class="overflow-x-auto"><table class="w-full text-[11px]"><thead><tr class="text-slate-400 text-left">' +
+          '<th class="pr-3 font-semibold">LMRB Theme</th><th class="pr-3 font-semibold">TC Theme</th><th class="pr-3 font-semibold">Dur</th><th class="font-semibold">Product</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody></table></div>' +
+        '<p class="text-[10px] text-slate-400 mt-1.5">Edit or remove these on the <a class="underline" href="/dashboard/brand-mappings/?account=' + encodeURIComponent(elAcc.value) + '">detailed table</a>.</p>';
+    } else {
+      cur.className = 'rounded-lg border border-slate-200 bg-white p-3 text-[11px] text-slate-400';
+      cur.innerHTML = '<i class="fa-solid fa-circle-info mr-1"></i>No mappings yet for this brand.';
+    }
+    editor.appendChild(cur);
+
+    // Schedule duration hint (durations differ across sources - surface it)
+    if (schedDurs.length) {
+      var sd = document.createElement('p');
+      sd.className = 'text-[11px] text-slate-500';
+      sd.innerHTML = '<i class="fa-solid fa-clock text-slate-400 mr-1"></i>This brand\'s <b>schedule</b> durations: ' +
+        schedDurs.map(function (x) { return '<span class="font-bold text-slate-700">' + x + 's</span>'; }).join(', ') +
+        ' &middot; LMRB / TC durations are shown next to each theme below.';
+      editor.appendChild(sd);
+    }
+
+    // Pre-selected themes already mapped to THIS brand
+    var preLmrb = new Set(maps.map(function (m) { return String(m.theme).toLowerCase().trim(); }));
+    var preTc = new Set();
+    maps.forEach(function (m) { (m.tc_themes || []).forEach(function (t) { preTc.add(String(t).toLowerCase().trim()); }); });
+
+    var lmrb = checklist('LMRB Theme *', OPTS.themes || [], { mappedSet: mappedThemeSet, durMap: OPTS.theme_durations || {}, preselect: preLmrb, emptyMsg: 'No LMRB themes in this scope - upload monitoring data or widen the scope.' });
+    var tc   = checklist('TC Theme', OPTS.tc_themes || [], { durMap: OPTS.tc_theme_durations || {}, preselect: preTc, emptyMsg: 'No TC themes in this scope.' });
+
+    var grid = document.createElement('div');
+    grid.className = 'grid grid-cols-1 sm:grid-cols-2 gap-4';
+    grid.appendChild(lmrb.wrap); grid.appendChild(tc.wrap);
+
+    // Advanced (MapOnline / Product / Duration)
+    var adv = document.createElement('details');
+    adv.className = 'group rounded-lg border border-slate-200 bg-white';
+    adv.open = maps.length > 0;   // reveal when there's an existing duration to see
+    var durChips = schedDurs.map(function (x) {
+      return '<button type="button" class="js-durchip text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-emerald-100" data-d="' + x + '">' + x + 's</button>';
+    }).join(' ');
+    adv.innerHTML =
+      '<summary class="flex items-center gap-2 px-3 py-2 cursor-pointer select-none text-xs font-bold text-slate-600">' +
+        '<i class="fa-solid fa-sliders text-slate-400"></i> Advanced (Duration, Product, MapOnline)' +
+        '<i class="fa-solid fa-chevron-down text-slate-300 ml-auto group-open:rotate-180 transition-transform"></i></summary>' +
+      '<div class="px-3 pb-3 pt-1 grid grid-cols-1 sm:grid-cols-3 gap-3">' +
+        '<div><label class="block text-[11px] font-semibold text-slate-500 mb-1">Duration (s) <span class="font-normal text-slate-400">- schedule spot length</span></label>' +
+          '<input type="number" min="1" class="js-duration w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" placeholder="any duration">' +
+          (durChips ? '<div class="mt-1 flex flex-wrap gap-1">' + durChips + '</div>' : '') +
+          '<p class="text-[9px] text-slate-400 mt-1">Blank = applies to any spot length. Set it to restrict this mapping to one schedule length.</p></div>' +
+        '<div><label class="block text-[11px] font-semibold text-slate-500 mb-1">Product</label>' +
+          '<input list="q-products" class="js-product w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" placeholder="optional"></div>' +
+        '<div><label class="block text-[11px] font-semibold text-slate-500 mb-1">MapOnline Theme</label>' +
+          '<input list="q-maponline" class="js-maponline w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" placeholder="optional"></div>' +
+      '</div>';
+
+    var actions = document.createElement('div');
+    actions.className = 'flex items-center justify-end gap-2 pt-1';
+    actions.innerHTML =
+      '<span class="js-hint text-[11px] text-slate-400 mr-auto"></span>' +
+      '<button type="button" class="btn-primary text-xs js-save"><i class="fa-solid fa-floppy-disk"></i> Save mapping</button>';
+
+    editor.appendChild(grid); editor.appendChild(adv); editor.appendChild(actions);
+
+    // Duration quick-pick chips
+    adv.querySelectorAll('.js-durchip').forEach(function (chip) {
+      chip.addEventListener('click', function () { adv.querySelector('.js-duration').value = this.dataset.d; });
+    });
+
+    // Auto-suggest product from the first selected LMRB theme
+    lmrb.wrap.querySelector('.js-list').addEventListener('change', function () {
+      var sel = lmrb.getSelected();
+      var pi = adv.querySelector('.js-product');
+      if (sel.length && !pi.value && OPTS.theme_product_map && OPTS.theme_product_map[sel[0]]) {
+        pi.value = OPTS.theme_product_map[sel[0]];
+      }
+    });
+
+    actions.querySelector('.js-save').addEventListener('click', function () {
+      var themes = lmrb.getSelected();
+      if (!themes.length) { toast('Pick at least one LMRB theme.', false); return; }
+      var btn = this; btn.disabled = true;
+      var payload = {
+        account_id: elAcc.value, brand: brand, themes: themes,
+        tc_themes: tc.getSelected(),
+        product: adv.querySelector('.js-product').value.trim(),
+        duration: adv.querySelector('.js-duration').value.trim(),
+        maponline_theme: adv.querySelector('.js-maponline').value.trim(),
+      };
+      fetch('/dashboard/brand-mappings/quick/add/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify(payload),
+      }).then(r => r.json()).then(function (d) {
+        btn.disabled = false;
+        if (!d.ok) { toast(d.error || 'Save failed.', false); return; }
+        var parts = [];
+        if (d.created) parts.push(d.created + ' added');
+        if (d.updated) parts.push(d.updated + ' updated');
+        if (d.skipped) parts.push(d.skipped + ' already existed');
+        toast(brand + ': ' + (parts.join(', ') || 'no changes') + '.', true);
+        // Mark brand mapped + reflect newly-mapped themes
+        mappedBrandSet.add(brand.toLowerCase().trim());
+        themes.forEach(function (t) { mappedThemeSet.add(t.toLowerCase().trim()); });
+        render();
+      }).catch(function () { btn.disabled = false; toast('Network error.', false); });
+    });
+  }
+
+  // datalists for advanced inputs
+  var dlP = document.createElement('datalist'); dlP.id = 'q-products';
+  var dlM = document.createElement('datalist'); dlM.id = 'q-maponline';
+  document.body.appendChild(dlP); document.body.appendChild(dlM);
+  function refreshDatalists() {
+    dlP.innerHTML = (OPTS && OPTS.products || []).map(function (p) { return '<option value="' + esc(p) + '">'; }).join('');
+    dlM.innerHTML = (OPTS && OPTS.maponline_themes || []).map(function (m) { return '<option value="' + esc(m) + '">'; }).join('');
+  }
+  var _origRender = render;
+  render = function () { refreshDatalists(); _origRender(); };
+})();
+</script>
+{% endblock %}

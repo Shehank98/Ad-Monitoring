@@ -18,3 +18,16 @@ def branding(request):
         'branding_logo_url':   _branding_url('logo'),
         'branding_tartan_url': _branding_url('tartan'),
     }
+
+
+def site_notifications(request):
+    """Inject active site-wide announcement banners for signed-in users."""
+    user = getattr(request, 'user', None)
+    if not user or not user.is_authenticated:
+        return {'site_notifications': []}
+    try:
+        from core.models import SiteNotification
+        notes = list(SiteNotification.objects.filter(is_active=True)[:5])
+    except Exception:
+        notes = []
+    return {'site_notifications': notes}

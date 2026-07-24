@@ -30,3 +30,14 @@ class PeriodSponsorshipAdmin(admin.ModelAdmin):
 @admin.register(PeriodSponsorshipMatch)
 class PeriodSponsorshipMatchAdmin(admin.ModelAdmin):
     list_display  = ('period_sponsorship', 'lmrb_row', 'matched_at')
+
+
+from .models import SiteNotification
+
+
+@admin.register(SiteNotification)
+class SiteNotificationAdmin(admin.ModelAdmin):
+    list_display  = ('__str__', 'level', 'is_active', 'created_at', 'updated_at')
+    list_filter   = ('is_active', 'level')
+    list_editable = ('level', 'is_active')
+    search_fields = ('title', 'message')

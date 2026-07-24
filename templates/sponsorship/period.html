@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Period Sponsorships{% endblock %}
 {% block page_title %}Period Sponsorships (date range){% endblock %}
-{% block page_subtitle %}For sponsorships that aren't single spots in the TC — verify them by counting LMRB appearances between a start and end date{% endblock %}
+{% block page_subtitle %}For sponsorships that aren't single spots in the TC - verify them by counting LMRB appearances between a start and end date{% endblock %}
 
 {% block content %}
 <div class="max-w-5xl space-y-5">
@@ -49,7 +49,7 @@
       </p>
     {% elif channel %}
       <p class="text-xs text-rose-500 mt-2 font-semibold">
-        <i class="fa-solid fa-triangle-exclamation"></i> No LMRB data for this channel yet — nothing to count against.
+        <i class="fa-solid fa-triangle-exclamation"></i> No LMRB data for this channel yet - nothing to count against.
       </p>
     {% endif %}
   </div>
@@ -140,9 +140,9 @@
         <tbody class="divide-y divide-slate-50">
           {% for g in lmrb_groups %}
           <tr class="hover:bg-slate-50">
-            <td class="py-1.5 pr-2 text-slate-500 max-w-[160px] truncate" title="{{ g.product }}">{{ g.product|default:"—" }}</td>
+            <td class="py-1.5 pr-2 text-slate-500 max-w-[160px] truncate" title="{{ g.product }}">{{ g.product|default:"-" }}</td>
             <td class="py-1.5 pr-2 text-slate-700 max-w-[220px] truncate" title="{{ g.theme }}">{{ g.theme }}</td>
-            <td class="py-1.5 text-center text-slate-600">{{ g.duration|default_if_none:"—" }}{% if g.duration %}s{% endif %}</td>
+            <td class="py-1.5 text-center text-slate-600">{{ g.duration|default_if_none:"-" }}{% if g.duration %}s{% endif %}</td>
             <td class="py-1.5 text-center font-bold text-emerald-700">{{ g.count }}</td>
             <td class="py-1.5 pr-2 text-slate-500 whitespace-nowrap">{{ g.date_min|date:"d M" }} – {{ g.date_max|date:"d M Y" }}</td>
             <td class="py-1.5 text-right">

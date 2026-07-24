@@ -41,9 +41,11 @@ reset_sponsorship(account_id, channel, month)
     Remove all SponsorshipLmrbAssignments for this scope and unlock the
     associated LMRBRows.
 """
+import calendar
+import datetime
 import logging
 
-from django.db.models import Max, Min
+from django.db.models import Count, Max, Min
 from django.utils import timezone
 
 from core.models import (
@@ -339,6 +341,197 @@ def reset_sponsorship(account_id: int, channel: str, month: str) -> dict:
 
     logger.info(
         'reset_sponsorship: account=%s channel=%s month=%s deleted=%d lmrb_unlocked=%d',
+        account_id, channel, month, deleted, len(lmrb_ids),
+    )
+    return {'deleted': deleted, 'lmrb_unlocked': len(lmrb_ids)}
+
+
+# ── Dedicated Sponsorship Matching page ───────────────────────────────────────
+#
+# The functions below back the standalone "Sponsorship Matching" page
+# (templates/sponsorship/matching.html).  They build on the same per-row
+# SponsorshipLmrbAssignment store used above, so anything matched here flows
+# into the Summary Sheet "Aired" count and the Matched LMRB export automatically,
+# and every matched LMRB row carries the permanent is_sponsorship_matched lock.
+
+def _next_month_end(month: str):
+    """Return the last date of the calendar month AFTER the scope `month`.
+
+    `month` is the summary scope label, e.g. "January 2025".  Sponsorship
+    campaigns can spill into the following month's telecast, so the manual
+    matching page offers LMRB rows up to the end of the next month.  Returns
+    None when the label cannot be parsed.
+    """
+    try:
+        base = datetime.datetime.strptime(month.strip(), '%B %Y').date()
+    except (ValueError, AttributeError):
+        return None
+    year = base.year + (1 if base.month == 12 else 0)
+    nxt = 1 if base.month == 12 else base.month + 1
+    last_day = calendar.monthrange(year, nxt)[1]
+    return datetime.date(year, nxt, last_day)
+
+
+def _all_themes_for_brand(brand: str, theme_map: dict) -> set:
+    """All normalised LMRB themes mapped to a brand, at any duration."""
+    return {nt for nt, _dur in theme_map.get(_normalize(brand), [])}
+
+
+def matching_scope(account_id: int, channel: str, month: str):
+    """Return (window_start, window_end, next_month_end) for the matching page.
+
+    window covers the scope's own date range extended to the end of the next
+    calendar month, so cross-month spillover rows are selectable.
+    """
+    d_min, d_max = _scope_date_range(account_id, channel, month)
+    next_end = _next_month_end(month)
+    window_start = d_min
+    window_end = next_end or d_max
+    if d_max and window_end and d_max > window_end:
+        window_end = d_max
+    return window_start, window_end, next_end
+
+
+def matching_groups(account_id: int, channel: str, month: str,
+                    schedule_id=None) -> list:
+    """Per (product/brand + duration) sponsorship targets for the scope.
+
+    Each entry:
+        {
+          'brand', 'duration',
+          'required',   # planned SPONSORSHIP rows for this brand+duration (TR)
+          'assigned',   # how many already have a SponsorshipLmrbAssignment
+          'remaining',  # required - assigned (never negative)
+          'assignments': [ {id, theme, date, time, program, duration,
+                            match_type, matched_by, matched_at}, ... ],
+        }
+    Sorted by brand then duration.
+    """
+    spon_qs = ScheduleRow.objects.filter(
+        account_id=account_id, channel=channel, month=month,
+        ad_type='SPONSORSHIP',
+    )
+    if schedule_id:
+        spon_qs = spon_qs.filter(schedule_id=schedule_id)
+
+    # Required count per (brand, duration)
+    required: dict = {}
+    for row in spon_qs.values('brand', 'duration').annotate(n=Count('id')):
+        key = (row['brand'], row['duration'])
+        required[key] = row['n']
+
+    # Existing assignments per (brand, duration)
+    asgn_qs = SponsorshipLmrbAssignment.objects.filter(
+        account_id=account_id,
+        schedule_row__channel=channel,
+        schedule_row__month=month,
+        schedule_row__ad_type='SPONSORSHIP',
+    ).select_related('schedule_row', 'lmrb_row', 'matched_by')
+    if schedule_id:
+        asgn_qs = asgn_qs.filter(schedule_row__schedule_id=schedule_id)
+
+    assignments_by_key: dict = {}
+    for a in asgn_qs:
+        key = (a.schedule_row.brand, a.schedule_row.duration)
+        lr = a.lmrb_row
+        assignments_by_key.setdefault(key, []).append({
+            'id':         a.id,
+            'theme':      lr.advt_theme or '',
+            'date':       lr.date.isoformat() if lr.date else '',
+            'time':       lr.advt_time or '',
+            'program':    lr.program or '',
+            'duration':   lr.duration,
+            'match_type': a.match_type,
+            'matched_by': (a.matched_by.name or a.matched_by.email)
+                          if a.matched_by else 'Auto',
+            'matched_at': timezone.localtime(a.matched_at).strftime('%d %b %Y, %H:%M')
+                          if a.matched_at else '',
+        })
+
+    groups = []
+    for key in sorted(required, key=lambda k: (str(k[0]).lower(), k[1] or 0)):
+        brand, dur = key
+        req = required[key]
+        assigned_list = assignments_by_key.get(key, [])
+        assigned = len(assigned_list)
+        groups.append({
+            'brand':       brand,
+            'duration':    dur,
+            'required':    req,
+            'assigned':    assigned,
+            'remaining':   max(0, req - assigned),
+            'assignments': assigned_list,
+        })
+    return groups
+
+
+def matching_candidates(account_id: int, channel: str, month: str,
+                        brand: str, duration=None) -> list:
+    """Unmatched LMRB rows selectable for a sponsorship product.
+
+    Pool = every LMRB row for the channel that is not locked by any engine,
+    dated within the scope range extended to the end of the next calendar month
+    (cross-month spillover).  When the brand resolves to one or more themes via
+    BrandMapping, the pool is narrowed to those themes; otherwise the full
+    in-window unmatched pool is returned so the user can filter by theme text.
+
+    Duration is NOT hard-filtered here (the auto engine matches same-duration,
+    but the page lets the user pick cross-duration spillover); the page pre-fills
+    the duration filter client-side instead.
+    """
+    window_start, window_end, _next_end = matching_scope(account_id, channel, month)
+
+    qs = LMRBRow.objects.filter(
+        account_id=account_id,
+        channel__iexact=channel,
+        is_matched=False,
+        is_sponsorship_matched=False,
+        is_manual_matched=False,
+        is_tc_lmrb_matched=False,
+    )
+    if window_start:
+        qs = qs.filter(date__gte=window_start)
+    if window_end:
+        qs = qs.filter(date__lte=window_end)
+
+    theme_map = _build_lmrb_theme_map(account_id)
+    themes = _all_themes_for_brand(brand, theme_map) if brand else set()
+    rows = []
+    for r in qs.order_by('advt_theme', 'date', 'advt_time').values(
+        'id', 'date', 'advt_time', 'advt_theme', 'duration',
+        'program', 'source', 'product', 'advertiser',
+    ):
+        if themes and _normalize(r.get('advt_theme')) not in themes:
+            continue
+        if hasattr(r.get('date'), 'isoformat'):
+            r['date'] = r['date'].isoformat()
+        rows.append(r)
+    return rows
+
+
+def remove_assignments(account_id: int, channel: str, month: str,
+                       assignment_ids: list) -> dict:
+    """Undo specific SponsorshipLmrbAssignments and unlock their LMRB rows.
+
+    Scoped to the given account/channel/month so ids from another scope cannot
+    be removed.  Returns {'deleted': int, 'lmrb_unlocked': int}.
+    """
+    if not assignment_ids:
+        return {'deleted': 0, 'lmrb_unlocked': 0}
+
+    qs = SponsorshipLmrbAssignment.objects.filter(
+        id__in=assignment_ids,
+        account_id=account_id,
+        schedule_row__channel=channel,
+        schedule_row__month=month,
+    )
+    lmrb_ids = list(qs.values_list('lmrb_row_id', flat=True))
+    deleted, _ = qs.delete()
+    if lmrb_ids:
+        LMRBRow.objects.filter(id__in=lmrb_ids).update(is_sponsorship_matched=False)
+
+    logger.info(
+        'remove_assignments: account=%s channel=%s month=%s deleted=%d unlocked=%d',
         account_id, channel, month, deleted, len(lmrb_ids),
     )
     return {'deleted': deleted, 'lmrb_unlocked': len(lmrb_ids)}
