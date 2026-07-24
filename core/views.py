@@ -9533,10 +9533,10 @@ def admin_analytics(request):
 # ── Database Admin Tools ───────────────────────────────────────────────────────
 
 @login_required
-@role_required(['super_admin', 'admin'])
+@role_required(['super_admin'])
 def db_tools(request):
     """
-    Database management page - admin/super_admin only.
+    Database management page - super_admin only.
     Provides data reset, selective delete, and database backup tools.
     """
     from django.db import connection
