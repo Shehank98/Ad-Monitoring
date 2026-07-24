@@ -28,6 +28,7 @@ from .models import (
     Account, AuditLog, BrandMapping, Channel, ChannelOfficer, Client,
     LMRBRow, ManualMatch, MatchResult, MonitoringData, Schedule, ScheduleRow,
     SpotNote, SponsorshipLmrbAssignment, SummaryReportMeta, SystemSetting,
+    TcChannelPrompt,
     TCRow, TcLmrbMatch, TransmissionReport,
     _ensure_defaults, get_setting, get_setting_int, get_setting_list,
 )
@@ -4269,6 +4270,59 @@ def tc_list(request):
     })
 
 
+DEFAULT_TC_CHANNEL_PROMPT = """\
+Column headings used by this channel's TC (map them to the output fields):
+- Date        -> headings: Date / Aired Date / Prg Date
+- Programme   -> headings: Programme / Program / Prg Name
+- TC Theme    -> headings: Theme / Product / Description / Ad Name
+- Duration    -> headings: Duration / Dur / Seconds / Ad Dur
+- Aired Time  -> headings: Time / Aired Time / Advt_time / Ad Start
+
+Add any layout notes for this channel below (e.g. "theme wraps onto two lines",
+"ignore the first summary table", "times are 12-hour with AM/PM").
+"""
+
+
+def _tc_channel_prompt(channel: str) -> str:
+    """Saved per-channel AI instructions for the TC PDF converter ('' if none)."""
+    if not channel:
+        return ''
+    row = TcChannelPrompt.objects.filter(channel=channel).first()
+    return (row.prompt or '') if row else ''
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations'])
+@require_POST
+def tc_channel_prompt_save(request):
+    """Create/update the AI conversion prompt for one channel."""
+    channel = request.POST.get('channel', '').strip()
+    prompt  = request.POST.get('prompt', '')
+    if not channel:
+        return JsonResponse({'ok': False, 'error': 'Channel is required.'})
+    obj, _ = TcChannelPrompt.objects.get_or_create(channel=channel)
+    obj.prompt = prompt
+    obj.updated_by = request.user
+    obj.save()
+    return JsonResponse({'ok': True, 'saved': True})
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations'])
+def tc_channel_prompt_get(request):
+    """Return the saved prompt for a channel (blank -> the starter template)."""
+    channel = request.GET.get('channel', '').strip()
+    row = TcChannelPrompt.objects.filter(channel=channel).first() if channel else None
+    return JsonResponse({
+        'ok': True,
+        'channel': channel,
+        'prompt': (row.prompt if row else ''),
+        'is_saved': bool(row and (row.prompt or '').strip()),
+        'default_prompt': DEFAULT_TC_CHANNEL_PROMPT,
+        'updated_at': (row.updated_at.strftime('%d %b %Y %H:%M') if row else ''),
+    })
+
+
 @login_required
 @role_required(['super_admin', 'admin', 'operations'])
 def tc_pdf_convert(request):
@@ -4310,7 +4364,9 @@ def tc_pdf_convert(request):
                 df = None
                 if gemini_ai.is_configured():
                     try:
-                        df = gemini_ai.parse_pdf(tmp_path, channel=channel)
+                        df = gemini_ai.parse_pdf(
+                            tmp_path, channel=channel,
+                            extra_instructions=_tc_channel_prompt(channel))
                         engine = 'gemini'
                     except gemini_ai.GeminiError as e:
                         engine_note = str(e)
@@ -5354,7 +5410,9 @@ def tc_lmrb_upload(request):
             df = None
             if gemini_ai.is_configured():
                 try:
-                    df = gemini_ai.parse_pdf(tmp_path, channel=channel)
+                    df = gemini_ai.parse_pdf(
+                        tmp_path, channel=channel,
+                        extra_instructions=_tc_channel_prompt(channel))
                     engine = 'gemini'
                 except gemini_ai.GeminiError as e:
                     engine_note = str(e)

@@ -56,6 +56,12 @@ Rules:
   lines, totals and summary sections.
 - Never invent or merge rows. If a field is unreadable, use "" (or 0 for
   duration).
+{channel_instructions}"""
+
+CHANNEL_INSTRUCTIONS_TMPL = """
+Channel-specific instructions for this document (they take priority over the
+generic guidance above when they conflict):
+{text}
 """
 
 
@@ -97,7 +103,7 @@ def _time_str(val) -> str:
     return s
 
 
-def parse_pdf(pdf_path: str, channel: str = '') -> pd.DataFrame:
+def parse_pdf(pdf_path: str, channel: str = '', extra_instructions: str = '') -> pd.DataFrame:
     api_key, model = _get_settings()
     if not api_key:
         raise GeminiError('GEMINI_API_KEY is not configured.')
@@ -106,6 +112,10 @@ def parse_pdf(pdf_path: str, channel: str = '') -> pd.DataFrame:
         pdf_b64 = base64.b64encode(f.read()).decode('ascii')
 
     channel_hint = f' (channel: {channel})' if channel else ''
+    channel_instructions = (
+        CHANNEL_INSTRUCTIONS_TMPL.format(text=extra_instructions.strip())
+        if extra_instructions and extra_instructions.strip() else ''
+    )
     generation_config = {
         'temperature': 0,
         'maxOutputTokens': 65536,
@@ -134,7 +144,8 @@ def parse_pdf(pdf_path: str, channel: str = '') -> pd.DataFrame:
         'contents': [{
             'parts': [
                 {'inline_data': {'mime_type': 'application/pdf', 'data': pdf_b64}},
-                {'text': PROMPT.format(channel_hint=channel_hint)},
+                {'text': PROMPT.format(channel_hint=channel_hint,
+                                       channel_instructions=channel_instructions)},
             ],
         }],
         'generationConfig': generation_config,
