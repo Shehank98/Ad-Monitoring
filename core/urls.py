@@ -77,6 +77,8 @@ urlpatterns = [
     path('tc/lmrb-match/remove/<int:pk>/',      views.tc_lmrb_match_remove,     name='tc_lmrb_match_remove'),
     path('tc/lmrb-match/download/',             views.tc_lmrb_match_download,   name='tc_lmrb_match_download'),
     path('tc/pdf-convert/',                     views.tc_pdf_convert,    name='tc_pdf_convert'),
+    path('tc/channel-prompt/',                  views.tc_channel_prompt_get,  name='tc_channel_prompt_get'),
+    path('tc/channel-prompt/save/',             views.tc_channel_prompt_save, name='tc_channel_prompt_save'),
 
     # Summary Sheet Report
     path('summary/',                            views.summary_report,      name='summary_report'),
