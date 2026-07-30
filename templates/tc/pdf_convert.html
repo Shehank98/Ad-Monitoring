@@ -75,12 +75,49 @@ function App() {
   const [uploadResult,   setUploadResult]   = useState(null);
   const [engine,         setEngine]         = useState('');
   const [engineNote,     setEngineNote]     = useState('');
+  const [promptText,     setPromptText]     = useState('');
+  const [defaultPrompt,  setDefaultPrompt]  = useState('');
+  const [isSavingPrompt, setIsSavingPrompt] = useState(false);
+  const [promptSaved,    setPromptSaved]    = useState(false);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc =
       'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   }, []);
+
+  // Load this channel's saved prompt whenever the channel changes.
+  useEffect(() => {
+    let cancelled = false;
+    setPromptSaved(false);
+    fetch('{% url "tc_channel_prompt_get" %}?channel=' + encodeURIComponent(selectedChannel))
+      .then(r => r.json())
+      .then(d => {
+        if (cancelled || !d.ok) return;
+        setDefaultPrompt(d.default_prompt || '');
+        setPromptText(d.prompt || '');
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedChannel]);
+
+  const savePrompt = async () => {
+    setIsSavingPrompt(true);
+    try {
+      const fd = new FormData();
+      fd.append('channel', selectedChannel);
+      fd.append('prompt', promptText);
+      const res = await fetch('{% url "tc_channel_prompt_save" %}', {
+        method: 'POST', headers: { 'X-CSRFToken': CSRF }, body: fd,
+      });
+      const d = await res.json();
+      if (d.ok) { setPromptSaved(true); setTimeout(() => setPromptSaved(false), 2500); }
+      else setErrorMsg(d.error || 'Could not save the prompt.');
+    } catch (e) {
+      setErrorMsg('Could not save the prompt: ' + e.message);
+    }
+    setIsSavingPrompt(false);
+  };
 
   const handleFile = (f) => {
     if (!f) return;
@@ -93,9 +130,9 @@ function App() {
     setIsConverting(true); setErrorMsg(''); setEngine(''); setEngineNote('');
 
     // Listed channels have dedicated heuristic parsing rules → convert in the
-    // browser (no AI). AI (server, Gemini) is reserved for other schedules and
-    // is used only when the selected channel has no heuristic rules.
-    if (window.TCPDFParser.isHeuristicChannel(selectedChannel)) {
+    // browser (no AI). A saved channel prompt overrides that: the operator has
+    // described this TC's headings, so use the server AI path instead.
+    if (window.TCPDFParser.isHeuristicChannel(selectedChannel) && !promptText.trim()) {
       try {
         const data = await parsePDF(file, selectedChannel);
         if (!data.length) {
@@ -229,9 +266,48 @@ function App() {
         </div>
       </div>
 
+      {/* ── AI conversion prompt for this channel ─────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+        <div className="flex items-start justify-between gap-3 mb-1">
+          <div>
+            <h2 className="text-sm font-bold text-slate-700">
+              2. AI Conversion Prompt — <span className="text-blue-700">{selectedChannel}</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Tell the AI which column headings <strong>this channel</strong> uses. Saved per channel and
+              applied automatically on every AI conversion.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {promptSaved && <span className="text-[11px] text-emerald-600 font-semibold"><IcoCheck /> Saved</span>}
+            <button onClick={() => setPromptText(defaultPrompt)}
+                    className="text-[11px] text-slate-500 hover:text-slate-800 underline">
+              Insert template
+            </button>
+            <button onClick={savePrompt} disabled={isSavingPrompt}
+                    className="bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-40">
+              {isSavingPrompt ? 'Saving…' : 'Save Prompt'}
+            </button>
+          </div>
+        </div>
+        <textarea
+          value={promptText}
+          onChange={e => { setPromptText(e.target.value); setPromptSaved(false); }}
+          rows={9}
+          spellCheck={false}
+          placeholder={defaultPrompt}
+          className="w-full mt-2 border border-slate-300 rounded-lg p-3 text-xs font-mono leading-relaxed
+                     focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400"
+        />
+        <p className="text-[11px] text-slate-400 mt-1">
+          Required output fields: <strong>Date</strong>, <strong>Programme</strong>, <strong>TC Theme</strong>,
+          <strong> Duration</strong>, <strong>Aired Time</strong>. Leave blank to use the generic prompt only.
+        </p>
+      </div>
+
       {/* ── Upload & Convert ──────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-        <h2 className="text-sm font-bold text-slate-700 mb-1">2. Upload TC PDF</h2>
+        <h2 className="text-sm font-bold text-slate-700 mb-1">3. Upload TC PDF</h2>
         <p className="text-xs text-slate-400 mb-4">Upload your <strong>{selectedChannel}</strong> Transmission Certificate</p>
 
         <div
@@ -283,7 +359,7 @@ function App() {
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-sm font-bold text-slate-700 mb-1">3. Preview &amp; Upload</h2>
+              <h2 className="text-sm font-bold text-slate-700 mb-1">4. Preview &amp; Upload</h2>
               <span className="bg-blue-50 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-full">
                 {rows.length} rows converted
               </span>

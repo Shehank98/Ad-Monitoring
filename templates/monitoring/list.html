@@ -77,11 +77,9 @@
   <div class="flex flex-wrap gap-2">
     <button type="submit" class="btn-primary flex-1 sm:flex-none justify-center"><i class="fa-solid fa-filter"></i> Filter</button>
     <a href="/dashboard/monitoring/" class="btn-secondary flex-1 sm:flex-none justify-center text-center">Clear</a>
-    {% if request.user.role in "operations,super_admin,admin" %}
     <a href="/dashboard/monitoring/upload/" class="btn-primary flex-1 sm:flex-none justify-center">
       <i class="fa-solid fa-cloud-arrow-up"></i> Upload Data
     </a>
-    {% endif %}
   </div>
 </form>
 
@@ -92,11 +90,9 @@
       <i class="fa-solid fa-database mr-1.5 text-slate-300"></i>
       {{ batch_summaries|length }} upload batch{{ batch_summaries|length|pluralize:"es" }}
     </p>
-    {% if request.user.role in "operations,super_admin,admin" %}
     <a href="/dashboard/monitoring/upload/" class="text-xs font-semibold text-og-red hover:underline">
       <i class="fa-solid fa-plus mr-1"></i>Upload New
     </a>
-    {% endif %}
   </div>
 
   <div class="divide-y divide-slate-100">
@@ -200,11 +196,9 @@
           <i class="fa-solid fa-database text-slate-400 text-2xl"></i>
         </div>
         <p class="text-slate-500 font-medium">No monitoring data found</p>
-        {% if request.user.role in "operations,super_admin,admin" %}
           <a href="/dashboard/monitoring/upload/" class="btn-primary text-xs">
             <i class="fa-solid fa-cloud-arrow-up"></i> Upload the first dataset
           </a>
-        {% endif %}
       </div>
     </div>
     {% endfor %}

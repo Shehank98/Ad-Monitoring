@@ -1350,6 +1350,29 @@ SETTING_DEFAULTS = [
 ]
 
 
+class TcChannelPrompt(models.Model):
+    """Per-channel AI conversion instructions for the TC PDF Converter.
+
+    Every channel labels the standard TC columns differently. This prompt tells
+    the Gemini parser which headings THIS channel's PDF uses for:
+      Date, Programme, TC Theme, Duration, Aired Time.
+    It is appended to the generic extraction prompt for that channel only.
+    """
+    channel    = models.CharField(max_length=200, unique=True)
+    prompt     = models.TextField(blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tc_channel_prompts',
+    )
+
+    class Meta:
+        ordering = ['channel']
+
+    def __str__(self):
+        return f'TC prompt: {self.channel}'
+
+
 class SystemSetting(models.Model):
     """
     Site-wide configuration editable by super_admin at /dashboard/settings/.

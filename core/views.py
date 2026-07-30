@@ -28,6 +28,7 @@ from .models import (
     Account, AuditLog, BrandMapping, Channel, ChannelOfficer, Client,
     LMRBRow, ManualMatch, MatchResult, MonitoringData, Schedule, ScheduleRow,
     SpotNote, SponsorshipLmrbAssignment, SummaryReportMeta, SystemSetting,
+    TcChannelPrompt,
     TCRow, TcLmrbMatch, TransmissionReport,
     _ensure_defaults, get_setting, get_setting_int, get_setting_list,
 )
@@ -92,27 +93,29 @@ def _is_admin(user):
     return user.role in ('super_admin', 'admin')
 
 
+# ── Upload permissions ────────────────────────────────────────────────────────
+# The upload button is always visible everywhere in the UI, so every signed-in
+# role must be able to actually use it — otherwise the button would 403.
+ALL_UPLOAD_ROLES = ['super_admin', 'admin', 'team_head', 'planner', 'operations',
+                    'channel_officer']
+MONITORING_UPLOAD_ROLES = ALL_UPLOAD_ROLES
+SCHEDULE_UPLOAD_ROLES   = ALL_UPLOAD_ROLES
+
+
 def _account_access(user, account_id):
+    # Access is per-brand only. Assigning a Client materializes its brands into
+    # user.accounts (see accounts.views), so individual brands stay removable.
     if _is_admin(user):
         return True
-    if user.accounts.filter(id=account_id).exists():
-        return True
-    # Client-level access: access to a Client grants access to all its Accounts
-    acc = Account.objects.filter(id=account_id).select_related('client').first()
-    if acc and acc.client_id and user.clients.filter(id=acc.client_id).exists():
-        return True
-    return False
+    return user.accounts.filter(id=account_id).exists()
 
 
 def _account_qs(user):
-    from django.db.models import Q
+    # Per-brand access only — client assignment materializes brands into
+    # user.accounts, so removing one brand from a user actually takes effect.
     if _is_admin(user):
         return Account.objects.all()
-    direct = user.accounts.values_list('id', flat=True)
-    via_client = Account.objects.filter(
-        client_id__in=user.clients.values_list('id', flat=True)
-    ).values_list('id', flat=True)
-    return Account.objects.filter(Q(id__in=direct) | Q(id__in=via_client))
+    return Account.objects.filter(id__in=user.accounts.values_list('id', flat=True))
 
 
 def _serve_file(field_file, filename: str):
@@ -432,7 +435,12 @@ def account_list(request):
         elif action == 'add':
             form = AccountForm(request.POST)
             if form.is_valid():
-                form.save()
+                acc = form.save()
+                # A new brand under a client is auto-assigned to that client's
+                # users (client access materializes as per-brand assignments).
+                if acc.client_id:
+                    for u in acc.client.users.all():
+                        u.accounts.add(acc)
                 messages.success(request, f'Brand "{form.cleaned_data["name"]}" added.')
             else:
                 messages.error(request, 'Brand name is required and must be unique.')
@@ -443,11 +451,16 @@ def account_list(request):
             name      = request.POST.get('name', '').strip()
             client_id = request.POST.get('client_id') or None
             acc       = get_object_or_404(Account, id=pk)
+            old_client_id = acc.client_id
             if name:
                 acc.name = name
             acc.client_id = client_id
             acc.enable_special_notes = request.POST.get('enable_special_notes') == '1'
             acc.save(update_fields=['name', 'client_id', 'enable_special_notes'])
+            # Brand moved into a (different) client → auto-assign to its users.
+            if acc.client_id and acc.client_id != old_client_id:
+                for u in acc.client.users.all():
+                    u.accounts.add(acc)
             messages.success(request, f'Brand "{acc.name}" updated.')
             return redirect('/dashboard/accounts/')
 
@@ -594,7 +607,7 @@ def schedule_list(request):
 
 
 @login_required
-@role_required(['planner', 'super_admin', 'admin', 'team_head', 'operations'])
+@role_required(SCHEDULE_UPLOAD_ROLES)
 def schedule_upload(request):
     user = request.user
     form = ScheduleUploadForm()
@@ -1354,7 +1367,7 @@ def monitoring_list(request):
 
 
 @login_required
-@role_required(['operations', 'super_admin', 'admin', 'team_head', 'planner'])
+@role_required(MONITORING_UPLOAD_ROLES)
 def monitoring_upload(request):
     """
     Upload a MapOnline or LMRB file.
@@ -4410,6 +4423,59 @@ def tc_list(request):
     })
 
 
+DEFAULT_TC_CHANNEL_PROMPT = """\
+Column headings used by this channel's TC (map them to the output fields):
+- Date        -> headings: Date / Aired Date / Prg Date
+- Programme   -> headings: Programme / Program / Prg Name
+- TC Theme    -> headings: Theme / Product / Description / Ad Name
+- Duration    -> headings: Duration / Dur / Seconds / Ad Dur
+- Aired Time  -> headings: Time / Aired Time / Advt_time / Ad Start
+
+Add any layout notes for this channel below (e.g. "theme wraps onto two lines",
+"ignore the first summary table", "times are 12-hour with AM/PM").
+"""
+
+
+def _tc_channel_prompt(channel: str) -> str:
+    """Saved per-channel AI instructions for the TC PDF converter ('' if none)."""
+    if not channel:
+        return ''
+    row = TcChannelPrompt.objects.filter(channel=channel).first()
+    return (row.prompt or '') if row else ''
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations'])
+@require_POST
+def tc_channel_prompt_save(request):
+    """Create/update the AI conversion prompt for one channel."""
+    channel = request.POST.get('channel', '').strip()
+    prompt  = request.POST.get('prompt', '')
+    if not channel:
+        return JsonResponse({'ok': False, 'error': 'Channel is required.'})
+    obj, _ = TcChannelPrompt.objects.get_or_create(channel=channel)
+    obj.prompt = prompt
+    obj.updated_by = request.user
+    obj.save()
+    return JsonResponse({'ok': True, 'saved': True})
+
+
+@login_required
+@role_required(['super_admin', 'admin', 'operations'])
+def tc_channel_prompt_get(request):
+    """Return the saved prompt for a channel (blank -> the starter template)."""
+    channel = request.GET.get('channel', '').strip()
+    row = TcChannelPrompt.objects.filter(channel=channel).first() if channel else None
+    return JsonResponse({
+        'ok': True,
+        'channel': channel,
+        'prompt': (row.prompt if row else ''),
+        'is_saved': bool(row and (row.prompt or '').strip()),
+        'default_prompt': DEFAULT_TC_CHANNEL_PROMPT,
+        'updated_at': (row.updated_at.strftime('%d %b %Y %H:%M') if row else ''),
+    })
+
+
 @login_required
 @role_required(['super_admin', 'admin', 'operations'])
 def tc_pdf_convert(request):
@@ -4451,7 +4517,9 @@ def tc_pdf_convert(request):
                 df = None
                 if gemini_ai.is_configured():
                     try:
-                        df = gemini_ai.parse_pdf(tmp_path, channel=channel)
+                        df = gemini_ai.parse_pdf(
+                            tmp_path, channel=channel,
+                            extra_instructions=_tc_channel_prompt(channel))
                         engine = 'gemini'
                     except gemini_ai.GeminiError as e:
                         engine_note = str(e)
@@ -5495,7 +5563,9 @@ def tc_lmrb_upload(request):
             df = None
             if gemini_ai.is_configured():
                 try:
-                    df = gemini_ai.parse_pdf(tmp_path, channel=channel)
+                    df = gemini_ai.parse_pdf(
+                        tmp_path, channel=channel,
+                        extra_instructions=_tc_channel_prompt(channel))
                     engine = 'gemini'
                 except gemini_ai.GeminiError as e:
                     engine_note = str(e)
