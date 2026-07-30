@@ -5083,7 +5083,20 @@ def tc_three_way(request):
         # duration is really that planned spot airing.  Resolve it live so the row
         # shows its Schedule (Planned) details and the slot is not double-reported
         # as missed.  Greedy one-to-one; mirrors the TC engine's window (+10 min).
-        from verification.tc_engine import _time_to_secs as _tts3w2
+        #
+        # The time window alone is NOT sufficient evidence: the TC spot's tc_theme
+        # must also resolve to the planned row's brand via BrandMapping.  Without
+        # that check any unmapped spot could be credited to whichever brand
+        # happened to book that slot, inflating Aired and hiding missing mappings
+        # (the same defect that was removed from build_summary_data).
+        from verification.tc_engine import (
+            _time_to_secs as _tts3w2,
+            _build_reverse_tc_theme_map as _rev_tc_map3w,
+            _brands_for_tc_theme as _brands_for_tc3w,
+            _normalize as _norm3w,
+        )
+
+        _reverse_tc_map = _rev_tc_map3w(account_id)
 
         cover_sched_qs = ScheduleRow.objects.filter(
             account_id=account_id, channel=channel, month=month,
@@ -5103,11 +5116,18 @@ def tc_three_way(request):
                 continue
             if e_s < s_s and s_s > 43200:   # midnight-crossing window
                 e_s += 86400
+            srow_brand = _norm3w(srow.brand)
             for tcr in unlinked_tc:
                 if tcr.id in _used_tc_ids or tcr.date != srow.date:
                     continue
                 if (srow.duration is not None and tcr.duration is not None
                         and tcr.duration != srow.duration):
+                    continue
+                # Brand agreement: the TC theme must map to this planned brand.
+                tc_dur = int(tcr.duration) if tcr.duration is not None else None
+                if srow_brand not in _brands_for_tc3w(
+                    tcr.tc_theme, tc_dur, _reverse_tc_map
+                ):
                     continue
                 a_s = _tts3w2(tcr.aired_time)
                 if a_s is None:
