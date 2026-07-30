@@ -93,6 +93,14 @@ def _is_admin(user):
     return user.role in ('super_admin', 'admin')
 
 
+# ── Upload permissions ────────────────────────────────────────────────────────
+# One source of truth per section: the decorator AND the list page's upload
+# button both read these, so the button can never disappear for a role that is
+# actually allowed to upload.
+MONITORING_UPLOAD_ROLES = ['operations', 'super_admin', 'admin', 'team_head', 'planner']
+SCHEDULE_UPLOAD_ROLES   = ['planner', 'super_admin', 'admin', 'team_head', 'operations']
+
+
 def _account_access(user, account_id):
     # Access is per-brand only. Assigning a Client materializes its brands into
     # user.accounts (see accounts.views), so individual brands stay removable.
@@ -577,6 +585,7 @@ def schedule_list(request):
     accounts = _account_qs(user)
     channels = Channel.objects.all()
     return render(request, 'schedules/list.html', {
+        'can_upload':             request.user.role in SCHEDULE_UPLOAD_ROLES,
         'schedules':              qs,
         'channel_groups_list':    channel_groups_list,
         'account_channel_groups': account_channel_groups,
@@ -590,7 +599,7 @@ def schedule_list(request):
 
 
 @login_required
-@role_required(['planner', 'super_admin', 'admin', 'team_head', 'operations'])
+@role_required(SCHEDULE_UPLOAD_ROLES)
 def schedule_upload(request):
     user = request.user
     form = ScheduleUploadForm()
@@ -1339,6 +1348,7 @@ def monitoring_list(request):
     accounts = _account_qs(user)
     channels = Channel.objects.all()
     return render(request, 'monitoring/list.html', {
+        'can_upload':      request.user.role in MONITORING_UPLOAD_ROLES,
         'data_groups':     data_groups,
         'batch_summaries': batch_summaries,
         'coverage':        coverage,
@@ -1350,7 +1360,7 @@ def monitoring_list(request):
 
 
 @login_required
-@role_required(['operations', 'super_admin', 'admin', 'team_head', 'planner'])
+@role_required(MONITORING_UPLOAD_ROLES)
 def monitoring_upload(request):
     """
     Upload a MapOnline or LMRB file.

@@ -42,7 +42,7 @@
     {% endif %}
   </form>
 
-  {% if request.user.role in "planner,super_admin,admin" %}
+  {% if can_upload %}
   <a href="/dashboard/schedules/upload/" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-og-red text-white hover:bg-og-red/90 transition-all">
     <i class="fa-solid fa-file-arrow-up"></i> Upload
   </a>
@@ -110,7 +110,7 @@
       <i class="fa-solid fa-calendar-days text-slate-400 text-2xl"></i>
     </div>
     <p class="text-slate-500 font-medium">No schedules uploaded yet</p>
-    {% if request.user.role in "planner,super_admin,admin" %}
+    {% if can_upload %}
       <a href="/dashboard/schedules/upload/" class="btn-primary text-xs">
         <i class="fa-solid fa-file-arrow-up"></i> Upload the first schedule
       </a>
@@ -437,7 +437,7 @@
       <p class="text-slate-600 font-semibold">No schedules for {{ filters.month }}</p>
       <p class="text-slate-400 text-xs mt-1">Try clearing the channel or search filters, or upload a schedule.</p>
     </div>
-    {% if request.user.role in "planner,super_admin,admin" %}
+    {% if can_upload %}
       <a href="/dashboard/schedules/upload/" class="btn-primary text-xs">
         <i class="fa-solid fa-file-arrow-up"></i> Upload Schedule
       </a>
