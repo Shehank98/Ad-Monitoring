@@ -94,11 +94,12 @@ def _is_admin(user):
 
 
 # ── Upload permissions ────────────────────────────────────────────────────────
-# One source of truth per section: the decorator AND the list page's upload
-# button both read these, so the button can never disappear for a role that is
-# actually allowed to upload.
-MONITORING_UPLOAD_ROLES = ['operations', 'super_admin', 'admin', 'team_head', 'planner']
-SCHEDULE_UPLOAD_ROLES   = ['planner', 'super_admin', 'admin', 'team_head', 'operations']
+# The upload button is always visible everywhere in the UI, so every signed-in
+# role must be able to actually use it — otherwise the button would 403.
+ALL_UPLOAD_ROLES = ['super_admin', 'admin', 'team_head', 'planner', 'operations',
+                    'channel_officer']
+MONITORING_UPLOAD_ROLES = ALL_UPLOAD_ROLES
+SCHEDULE_UPLOAD_ROLES   = ALL_UPLOAD_ROLES
 
 
 def _account_access(user, account_id):
@@ -585,7 +586,6 @@ def schedule_list(request):
     accounts = _account_qs(user)
     channels = Channel.objects.all()
     return render(request, 'schedules/list.html', {
-        'can_upload':             request.user.role in SCHEDULE_UPLOAD_ROLES,
         'schedules':              qs,
         'channel_groups_list':    channel_groups_list,
         'account_channel_groups': account_channel_groups,
@@ -1348,7 +1348,6 @@ def monitoring_list(request):
     accounts = _account_qs(user)
     channels = Channel.objects.all()
     return render(request, 'monitoring/list.html', {
-        'can_upload':      request.user.role in MONITORING_UPLOAD_ROLES,
         'data_groups':     data_groups,
         'batch_summaries': batch_summaries,
         'coverage':        coverage,
