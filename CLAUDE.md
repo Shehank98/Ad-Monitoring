@@ -618,6 +618,27 @@ reconcile_sponsorship(account_id, channel, month)
 
 Implemented in `build_summary_data()` in `verification/tc_engine.py`.
 
+> **CRITICAL — mapping is required evidence for Aired.**
+> A TC spot counts toward **Aired** / **3rd Party** only when its `tc_theme` resolves
+> to that brand via `BrandMapping.tc_theme`, or when an operator has confirmed it
+> with a `ManualMatch`. Time-window overlap alone is **never** sufficient.
+>
+> A brand with no `tc_theme` mapping therefore reports `Aired = 0`,
+> `3rd Party = 0`, `Missed = Planned` (plus any ManualMatch rows). This is
+> intentional: an unmapped theme is a *missing mapping*, and the Summary Sheet
+> surfaces it as Missed rather than silently guessing which brand the spot belongs to.
+> **If a brand shows unexpected Missed counts, check its `tc_theme` mapping first.**
+>
+> A previous "window-coverage fallback" credited LMRB-confirmed spots whose
+> `tc_theme` resolved to *no* brand to any planned slot whose date + time window +
+> duration covered them. It fired only when mappings were incomplete — exactly when
+> attribution is unknowable — and produced two wrong results: unmapped brands showed
+> `Aired > 0`, and one advertiser's unmapped spot leaked into another brand's count.
+> It has been removed. The same brand-agreement rule now gates the live coverage
+> resolution in `tc_three_way()` (`core/views.py`), so the three-way "Not Aired" list
+> and the Summary Sheet stay consistent.
+> Regression guard: `core.tests.UnmappedThemeNotAiredTest`.
+
 ---
 
 ## 10. File Parsing — Column Detection
@@ -759,6 +780,7 @@ Function: `summary_pdf()` in `core/views.py`
 | TC reconciliation matches wrong theme variant | `tc_theme` contains one value but TC file has multiple variant names | Use pipe-separated values in `tc_theme` field, e.g. `Theme A\|Theme B` |
 | Manual match prevents automatic re-matching | `is_manual_matched=True` rows are permanently skipped | To undo, use `/dashboard/manual/` → de-match. `mode='reset'` does NOT clear manual matches |
 | Sponsorship "Aired" shows zero | Sponsorship LMRB assignments not run yet | Visit the Summary Sheet sponsorship panel and click "Auto-reconcile" or assign manually |
+| Brand shows `Aired = 0` / `Missed = Planned` even though it clearly aired | `BrandMapping.tc_theme` is blank or doesn't match the TC file's theme spelling | Fill in / correct `tc_theme` in Brand Mappings, then re-run TC reconciliation. Mapping is **required** evidence — see Section 9 |
 | TC–LMRB confirmed count too low | Time tolerance too tight — TC and LMRB timestamps differ by more than 5s | Increase **TC–LMRB Time Tolerance** in `/dashboard/settings/` |
 | TC theme variant not matching (e.g. "Brand extra") | tc_theme exact-match misses variant suffixes | Add `*` suffix to `tc_theme` in Brand Mappings, e.g. `"Unlimited Fiber - 20 Sec*"` |
 

@@ -1901,3 +1901,86 @@ class ScheduleSupersedeBugTest(TestCase):
             "LMRB row is permanently locked even after old schedule is superseded. "
             "It cannot be matched against the new schedule.",
         )
+
+
+class UnmappedThemeNotAiredTest(TestCase):
+    """
+    A TC spot only counts as Aired when its tc_theme resolves to the brand via
+    BrandMapping (or an operator confirmed it with a ManualMatch).
+
+    Regression guard for the removed "window-coverage fallback", which credited
+    LMRB-confirmed TC spots with NO brand mapping to any planned slot whose date +
+    time window + duration happened to cover them.  That inflated Aired for
+    unmapped brands and leaked one advertiser's spot into another's count.
+    """
+
+    def setUp(self):
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        self.tc_report = make_tc_report(self.account, schedule=self.schedule)
+        ensure_tc_tolerance(5)
+
+    def _confirmed_tc(self, tc_theme, advt_theme=None):
+        """Create an LMRB-confirmed TCRow in the default 20:00-21:00 planned slot."""
+        tc = make_tc_row(self.account, self.tc_report, tc_theme=tc_theme)
+        lr = make_lmrb_row(self.account, advt_theme=advt_theme or tc_theme)
+        tc.is_lmrb_confirmed = True
+        tc.matched_lmrb = lr
+        tc.save()
+        return tc, lr
+
+    def test_brand_with_no_mapping_is_not_aired(self):
+        """A brand with no BrandMapping shows Aired=0, even with a covering TC spot."""
+        make_schedule_row(self.account, self.schedule, brand="Brand X")
+        self._confirmed_tc("Totally Unmapped Theme")
+
+        row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
+        self.assertEqual(row["planned"], 1)
+        self.assertEqual(row["aired"], 0, "Unmapped brand must not be credited as aired")
+        self.assertEqual(row["third_party"], 0)
+        self.assertEqual(row["missed"], 1, "Unmapped brand's planned spot is Missed")
+
+    def test_unmapped_spot_does_not_leak_into_another_brand(self):
+        """
+        Brand A is mapped but did not air.  An unrelated advertiser's unmapped spot
+        falling inside Brand A's window must not be counted as Brand A airing.
+        """
+        make_brand_mapping(self.account, brand="Brand A", tc_theme="TC Theme A")
+        make_schedule_row(self.account, self.schedule, brand="Brand A")
+        self._confirmed_tc("Some Other Advertiser")
+
+        row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
+        self.assertEqual(row["product"], "Brand A")
+        self.assertEqual(row["aired"], 0, "Another brand's spot must not count here")
+        self.assertEqual(row["missed"], 1)
+
+    def test_mapped_brand_that_aired_still_counts(self):
+        """Control: a correctly mapped brand that genuinely aired is still Aired=1."""
+        make_brand_mapping(self.account, brand="Brand A", tc_theme="TC Theme A")
+        make_schedule_row(self.account, self.schedule, brand="Brand A")
+        make_tc_row(self.account, self.tc_report, tc_theme="TC Theme A")
+        make_lmrb_row(self.account, advt_theme="Theme A")
+
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
+        self.assertEqual(row["aired"], 1)
+        self.assertEqual(row["missed"], 0)
+
+    def test_manual_match_still_counts_without_mapping(self):
+        """An operator's ManualMatch is explicit evidence and still counts as Aired."""
+        sr = make_schedule_row(self.account, self.schedule, brand="Brand X")
+        _tc, lr = self._confirmed_tc("Totally Unmapped Theme")
+        user = make_user()
+        ManualMatch.objects.create(
+            account=self.account,
+            channel=CHANNEL,
+            month=MONTH,
+            match_mode="schedule_lmrb",
+            schedule_row=sr,
+            lmrb_row=lr,
+            matched_by=user,
+        )
+
+        row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
+        self.assertEqual(row["aired"], 1, "ManualMatch is explicit operator evidence")
+        self.assertEqual(row["missed"], 0)
