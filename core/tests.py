@@ -1901,3 +1901,186 @@ class ScheduleSupersedeBugTest(TestCase):
             "LMRB row is permanently locked even after old schedule is superseded. "
             "It cannot be matched against the new schedule.",
         )
+
+
+class UnmappedThemeNotAiredTest(TestCase):
+    """
+    A TC spot only counts as Aired when its tc_theme resolves to the brand via
+    BrandMapping (or an operator confirmed it with a ManualMatch).
+
+    Regression guard for the removed "window-coverage fallback", which credited
+    LMRB-confirmed TC spots with NO brand mapping to any planned slot whose date +
+    time window + duration happened to cover them.  That inflated Aired for
+    unmapped brands and leaked one advertiser's spot into another's count.
+    """
+
+    def setUp(self):
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        self.tc_report = make_tc_report(self.account, schedule=self.schedule)
+        ensure_tc_tolerance(5)
+
+    def _confirmed_tc(self, tc_theme, advt_theme=None):
+        """Create an LMRB-confirmed TCRow in the default 20:00-21:00 planned slot."""
+        tc = make_tc_row(self.account, self.tc_report, tc_theme=tc_theme)
+        lr = make_lmrb_row(self.account, advt_theme=advt_theme or tc_theme)
+        tc.is_lmrb_confirmed = True
+        tc.matched_lmrb = lr
+        tc.save()
+        return tc, lr
+
+    def test_brand_with_no_mapping_is_not_aired(self):
+        """A brand with no BrandMapping shows Aired=0, even with a covering TC spot."""
+        make_schedule_row(self.account, self.schedule, brand="Brand X")
+        self._confirmed_tc("Totally Unmapped Theme")
+
+        row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
+        self.assertEqual(row["planned"], 1)
+        self.assertEqual(row["aired"], 0, "Unmapped brand must not be credited as aired")
+        self.assertEqual(row["third_party"], 0)
+        self.assertEqual(row["missed"], 1, "Unmapped brand's planned spot is Missed")
+
+    def test_unmapped_spot_does_not_leak_into_another_brand(self):
+        """
+        Brand A is mapped but did not air.  An unrelated advertiser's unmapped spot
+        falling inside Brand A's window must not be counted as Brand A airing.
+        """
+        make_brand_mapping(self.account, brand="Brand A", tc_theme="TC Theme A")
+        make_schedule_row(self.account, self.schedule, brand="Brand A")
+        self._confirmed_tc("Some Other Advertiser")
+
+        row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
+        self.assertEqual(row["product"], "Brand A")
+        self.assertEqual(row["aired"], 0, "Another brand's spot must not count here")
+        self.assertEqual(row["missed"], 1)
+
+    def test_mapped_brand_that_aired_still_counts(self):
+        """Control: a correctly mapped brand that genuinely aired is still Aired=1."""
+        make_brand_mapping(self.account, brand="Brand A", tc_theme="TC Theme A")
+        make_schedule_row(self.account, self.schedule, brand="Brand A")
+        make_tc_row(self.account, self.tc_report, tc_theme="TC Theme A")
+        make_lmrb_row(self.account, advt_theme="Theme A")
+
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
+        self.assertEqual(row["aired"], 1)
+        self.assertEqual(row["missed"], 0)
+
+    def test_manual_match_still_counts_without_mapping(self):
+        """An operator's ManualMatch is explicit evidence and still counts as Aired."""
+        sr = make_schedule_row(self.account, self.schedule, brand="Brand X")
+        _tc, lr = self._confirmed_tc("Totally Unmapped Theme")
+        user = make_user()
+        ManualMatch.objects.create(
+            account=self.account,
+            channel=CHANNEL,
+            month=MONTH,
+            match_mode="schedule_lmrb",
+            schedule_row=sr,
+            lmrb_row=lr,
+            matched_by=user,
+        )
+
+        row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
+        self.assertEqual(row["aired"], 1, "ManualMatch is explicit operator evidence")
+        self.assertEqual(row["missed"], 0)
+
+
+class BrandMappingDeleteViewTest(TestCase):
+    """Deleting brand mapping data from /dashboard/brand-mappings/.
+
+    Three delete paths exist:
+      - 'delete'        → one LMRB theme row (chip ✕)
+      - 'delete_group'  → every row of one (brand, product, duration) group
+      - 'delete_bulk'   → every row of the ticked groups
+    """
+
+    URL = "/dashboard/brand-mappings/"
+
+    def setUp(self):
+        self.account = make_account()
+        self.other   = make_account("Other Account")
+        self.admin   = make_user(email="admin@test.com", role="admin")
+        self.ops     = make_user(email="ops2@test.com", role="operations")
+        self.ops.accounts.add(self.account)
+
+        # Brand A: two LMRB theme variants in one group
+        self.a1 = BrandMapping.objects.create(
+            account=self.account, brand="Brand A", theme="Theme A (Sin)",
+            tc_theme="TC A", duration=30)
+        self.a2 = BrandMapping.objects.create(
+            account=self.account, brand="Brand A", theme="Theme A (Tam)",
+            tc_theme="TC A", duration=30)
+        # Brand B: separate group
+        self.b1 = BrandMapping.objects.create(
+            account=self.account, brand="Brand B", theme="Theme B", tc_theme="TC B")
+
+    def _login(self, user):
+        self.client.force_login(user)
+
+    def test_delete_group_removes_every_theme_row_of_the_brand(self):
+        self._login(self.admin)
+        resp = self.client.post(self.URL, {
+            "action": "delete_group", "mapping_id": self.a1.id})
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(BrandMapping.objects.filter(brand="Brand A").exists())
+        self.assertTrue(BrandMapping.objects.filter(id=self.b1.id).exists())
+
+    def test_delete_group_keeps_other_duration_group(self):
+        """Groups are keyed on (brand, product, duration) — a different duration
+        for the same brand is a different mapping and must survive."""
+        a_any = BrandMapping.objects.create(
+            account=self.account, brand="Brand A", theme="Theme A any", duration=None)
+        self._login(self.admin)
+        self.client.post(self.URL, {"action": "delete_group", "mapping_id": self.a1.id})
+        self.assertTrue(BrandMapping.objects.filter(id=a_any.id).exists())
+        self.assertFalse(BrandMapping.objects.filter(id=self.a2.id).exists())
+
+    def test_delete_bulk_removes_all_listed_ids(self):
+        self._login(self.admin)
+        ids = f"{self.a1.id},{self.a2.id},{self.b1.id}"
+        resp = self.client.post(self.URL, {"action": "delete_bulk", "mapping_ids": ids})
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(BrandMapping.objects.count(), 0)
+
+    def test_delete_bulk_ignores_junk_ids(self):
+        self._login(self.admin)
+        self.client.post(self.URL, {
+            "action": "delete_bulk", "mapping_ids": f"abc,,{self.b1.id},999999"})
+        self.assertFalse(BrandMapping.objects.filter(id=self.b1.id).exists())
+        self.assertTrue(BrandMapping.objects.filter(id=self.a1.id).exists())
+
+    def test_delete_group_denied_for_account_user_has_no_access_to(self):
+        foreign = BrandMapping.objects.create(
+            account=self.other, brand="Foreign", theme="Foreign Theme")
+        self._login(self.ops)
+        self.client.post(self.URL, {"action": "delete_group", "mapping_id": foreign.id})
+        self.assertTrue(BrandMapping.objects.filter(id=foreign.id).exists())
+
+    def test_delete_bulk_skips_rows_outside_user_accounts(self):
+        foreign = BrandMapping.objects.create(
+            account=self.other, brand="Foreign", theme="Foreign Theme")
+        self._login(self.ops)
+        self.client.post(self.URL, {
+            "action": "delete_bulk", "mapping_ids": f"{self.b1.id},{foreign.id}"})
+        self.assertTrue(BrandMapping.objects.filter(id=foreign.id).exists())
+        self.assertFalse(BrandMapping.objects.filter(id=self.b1.id).exists())
+
+    def test_delete_redirect_keeps_the_active_filters(self):
+        self._login(self.admin)
+        resp = self.client.post(
+            f"{self.URL}?account={self.account.id}&channel={CHANNEL}&month={MONTH}",
+            {"action": "delete_group", "mapping_id": self.a1.id})
+        self.assertIn(f"account={self.account.id}", resp["Location"])
+        self.assertIn("channel=", resp["Location"])
+        self.assertIn("month=", resp["Location"])
+
+    def test_table_renders_delete_controls(self):
+        self._login(self.admin)
+        resp = self.client.get(f"{self.URL}?account={self.account.id}")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('value="delete_group"', html)
+        self.assertIn('id="bulkDeleteForm"', html)
+        # Brand A's checkbox carries both of its LMRB theme row ids
+        self.assertIn(f'data-ids="{self.a1.id},{self.a2.id}"', html)
