@@ -1866,6 +1866,21 @@ def monitoring_delete_group(request, group_id):
 
 # ── Brand mappings ────────────────────────────────────────────────────────────
 
+def _brand_mapping_redirect(request, account_id=''):
+    """Back to the brand-mappings table, keeping the account/channel/month filter
+    the user was looking at (the form posts to the current URL, so the filters
+    are still in request.GET)."""
+    from urllib.parse import urlencode
+    params = {}
+    if account_id:
+        params['account'] = account_id
+    for key in ('channel', 'month'):
+        val = request.GET.get(key, '').strip()
+        if val:
+            params[key] = val
+    return '/dashboard/brand-mappings/' + (f'?{urlencode(params)}' if params else '')
+
+
 @login_required
 def brand_mapping_list(request):
     user       = request.user
@@ -2002,7 +2017,54 @@ def brand_mapping_list(request):
             else:
                 mapping.delete()
                 messages.success(request, 'Mapping deleted.')
-            return redirect(f'/dashboard/brand-mappings/?account={account_id or saved_acc}')
+            return redirect(_brand_mapping_redirect(request, account_id or saved_acc))
+
+        elif action == 'delete_group':
+            # Delete every LMRB-theme row of one (brand, product, duration) group —
+            # i.e. the whole visual row in the table, not just one theme chip.
+            mapping_id = request.POST.get('mapping_id')
+            mapping    = get_object_or_404(BrandMapping, id=mapping_id)
+            saved_acc  = mapping.account_id
+            if not _is_admin(user) and mapping.account not in account_qs:
+                messages.error(request, 'No access to that mapping.')
+            else:
+                group = BrandMapping.objects.filter(
+                    account=mapping.account, brand=mapping.brand,
+                    duration=mapping.duration, product=mapping.product,
+                )
+                n = group.count()
+                group.delete()
+                messages.success(
+                    request,
+                    f'Deleted {n} mapping row{"s" if n != 1 else ""} for {mapping.brand}.')
+            return redirect(_brand_mapping_redirect(request, account_id or saved_acc))
+
+        elif action == 'delete_bulk':
+            # Bulk delete from the table checkboxes. `mapping_ids` is a
+            # comma-separated list of BrandMapping ids (all rows of every
+            # selected brand group).
+            raw_ids = request.POST.get('mapping_ids', '')
+            ids     = [int(x) for x in raw_ids.split(',') if x.strip().isdigit()]
+            qs      = BrandMapping.objects.filter(id__in=ids)
+            if not _is_admin(user):
+                qs = qs.filter(account__in=account_qs)
+            n = qs.count()
+            if not ids:
+                messages.error(request, 'Nothing selected.')
+            elif not n:
+                messages.error(request, 'No access to the selected mappings.')
+            else:
+                brands = qs.values_list('brand', flat=True).distinct().count()
+                qs.delete()
+                messages.success(
+                    request,
+                    f'Deleted {n} mapping row{"s" if n != 1 else ""} '
+                    f'across {brands} brand{"s" if brands != 1 else ""}.')
+                if n < len(ids):
+                    messages.warning(
+                        request,
+                        f'{len(ids) - n} selected mapping(s) were skipped (no access).')
+            return redirect(_brand_mapping_redirect(request, account_id))
 
     mappings = BrandMapping.objects.filter(account__in=account_qs).select_related('account')
     channel_filter = request.GET.get('channel', '')
@@ -2168,8 +2230,10 @@ def brand_mapping_list(request):
                 'account_id':     bm.account_id,
                 'account_name':   bm.account.name if hasattr(bm, 'account') else '',
                 'lmrb_themes':    [],
+                'ids':            [],
             }
         _groups[gk]['lmrb_themes'].append({'id': bm.id, 'theme': bm.theme})
+        _groups[gk]['ids'].append(bm.id)
     grouped_mappings = list(_groups.values())
 
     return render(request, 'admin_panel/brand_mappings.html', {

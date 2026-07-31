@@ -471,22 +471,51 @@
       <!-- Table (grouped by brand - one row per brand/product/duration group) -->
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {% if grouped_mappings %}
+
+        <!-- Bulk selection bar (shown once at least one brand group is ticked) -->
+        <div id="bulkBar" class="hidden px-4 py-2.5 bg-red-50 border-b border-red-100 flex flex-wrap items-center gap-2">
+          <i class="fa-solid fa-trash-can text-red-500 text-xs"></i>
+          <span class="text-xs font-semibold text-red-700" id="bulkCount">0 selected</span>
+          <div class="flex-1"></div>
+          <button type="button" onclick="clearBulkSelection()"
+                  class="px-2.5 py-1 rounded-lg text-[11px] font-bold text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 transition-colors">
+            Clear
+          </button>
+          <button type="button" onclick="submitBulkDelete()"
+                  class="px-3 py-1 rounded-lg text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 transition-colors">
+            <i class="fa-solid fa-trash-can text-[9px] mr-1"></i> Delete selected
+          </button>
+        </div>
+
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
               <tr class="bg-slate-50 border-b border-slate-100">
+                <th class="px-3 py-3 w-8">
+                  <input type="checkbox" id="bulkSelectAll" onchange="toggleSelectAll(this.checked)"
+                         class="h-3.5 w-3.5 rounded border-slate-300 text-red-600 focus:ring-red-500 cursor-pointer"
+                         title="Select all brand groups">
+                </th>
                 <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Product</th>
                 <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Brand (Schedule)</th>
                 <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">LMRB Theme(s)</th>
                 <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">TC Theme(s)</th>
                 <th class="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">MapOnline Theme(s)</th>
                 <th class="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider w-16">Dur</th>
+                <th class="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider w-14">Delete</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
               {% for grp in grouped_mappings %}
               {% with first_id=grp.lmrb_themes.0.id %}
               <tr class="hover:bg-slate-50/60 transition-colors align-top">
+
+                <!-- Bulk select -->
+                <td class="px-3 py-3">
+                  <input type="checkbox" class="bm-check h-3.5 w-3.5 rounded border-slate-300 text-red-600 focus:ring-red-500 cursor-pointer"
+                         data-ids="{{ grp.ids|join:"," }}" onchange="onRowCheck()"
+                         title="Select this brand group">
+                </td>
 
                 <!-- Product -->
                 <td class="px-3 py-3">
@@ -603,6 +632,21 @@
                   {% endif %}
                 </td>
 
+                <!-- Delete whole brand group -->
+                <td class="px-3 py-3 text-center">
+                  <form method="post" class="inline"
+                        onsubmit="return confirm('Delete the mapping for {{ grp.brand|escapejs }}{% if grp.product %} ({{ grp.product|escapejs }}){% endif %}?\n\nThis removes all {{ grp.lmrb_themes|length }} LMRB theme{{ grp.lmrb_themes|length|pluralize }} plus its TC / MapOnline themes. This cannot be undone.')">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="delete_group">
+                    <input type="hidden" name="mapping_id" value="{{ first_id }}">
+                    <button type="submit"
+                            class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-[11px] text-slate-300 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition-colors"
+                            title="Delete this brand mapping (all its themes)">
+                      <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                  </form>
+                </td>
+
               </tr>
               {% endwith %}
               {% endfor %}
@@ -613,6 +657,10 @@
           <i class="fa-solid fa-layer-group text-slate-400 text-xs"></i>
           <span class="text-xs text-slate-500">{{ grouped_mappings|length }} brand group{{ grouped_mappings|length|pluralize }}</span>
           <span class="text-xs text-slate-400">({{ mappings|length }} LMRB theme{{ mappings|length|pluralize }} total)</span>
+          <span class="text-xs text-slate-400 ml-auto">
+            <i class="fa-solid fa-circle-info text-[10px] mr-1"></i>
+            Tick rows to delete several at once, or use the trash icon for one brand.
+          </span>
         </div>
         {% else %}
         <div class="py-16 text-center">
@@ -624,6 +672,14 @@
         </div>
         {% endif %}
       </div>
+
+      <!-- Bulk delete carrier form — kept outside the table so it never nests
+           inside the per-row forms. Filled in by submitBulkDelete(). -->
+      <form method="post" id="bulkDeleteForm" class="hidden">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="delete_bulk">
+        <input type="hidden" name="mapping_ids" id="bulkIds">
+      </form>
     </div>
   </div>
 </div>
@@ -1581,5 +1637,60 @@ _renderMaponlineChips('add');
     {% endif %}
   }
 })();
+
+// ── Bulk delete of brand mappings ────────────────────────────────────────────
+function _bmChecks() {
+  return Array.prototype.slice.call(document.querySelectorAll('.bm-check'));
+}
+
+function _bmSelectedIds() {
+  const ids = [];
+  _bmChecks().forEach(cb => {
+    if (cb.checked) {
+      (cb.dataset.ids || '').split(',').forEach(id => { if (id) ids.push(id); });
+    }
+  });
+  return ids;
+}
+
+function onRowCheck() {
+  const checks   = _bmChecks();
+  const selected = checks.filter(cb => cb.checked);
+  const bar      = document.getElementById('bulkBar');
+  const label    = document.getElementById('bulkCount');
+  const all      = document.getElementById('bulkSelectAll');
+
+  if (label) {
+    const rows = _bmSelectedIds().length;
+    label.textContent = selected.length + ' brand' + (selected.length === 1 ? '' : 's')
+                      + ' selected (' + rows + ' mapping row' + (rows === 1 ? '' : 's') + ')';
+  }
+  if (bar) bar.classList.toggle('hidden', selected.length === 0);
+  if (all) {
+    all.checked       = selected.length > 0 && selected.length === checks.length;
+    all.indeterminate = selected.length > 0 && selected.length < checks.length;
+  }
+}
+
+function toggleSelectAll(checked) {
+  _bmChecks().forEach(cb => { cb.checked = checked; });
+  onRowCheck();
+}
+
+function clearBulkSelection() {
+  toggleSelectAll(false);
+}
+
+function submitBulkDelete() {
+  const ids = _bmSelectedIds();
+  if (!ids.length) return;
+  const brands = _bmChecks().filter(cb => cb.checked).length;
+  const msg = 'Delete ' + brands + ' brand mapping' + (brands === 1 ? '' : 's')
+            + ' (' + ids.length + ' mapping row' + (ids.length === 1 ? '' : 's') + ')?\n\n'
+            + 'This cannot be undone.';
+  if (!confirm(msg)) return;
+  document.getElementById('bulkIds').value = ids.join(',');
+  document.getElementById('bulkDeleteForm').submit();
+}
 </script>
 {% endblock %}

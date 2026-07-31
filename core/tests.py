@@ -1984,3 +1984,103 @@ class UnmappedThemeNotAiredTest(TestCase):
         row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
         self.assertEqual(row["aired"], 1, "ManualMatch is explicit operator evidence")
         self.assertEqual(row["missed"], 0)
+
+
+class BrandMappingDeleteViewTest(TestCase):
+    """Deleting brand mapping data from /dashboard/brand-mappings/.
+
+    Three delete paths exist:
+      - 'delete'        → one LMRB theme row (chip ✕)
+      - 'delete_group'  → every row of one (brand, product, duration) group
+      - 'delete_bulk'   → every row of the ticked groups
+    """
+
+    URL = "/dashboard/brand-mappings/"
+
+    def setUp(self):
+        self.account = make_account()
+        self.other   = make_account("Other Account")
+        self.admin   = make_user(email="admin@test.com", role="admin")
+        self.ops     = make_user(email="ops2@test.com", role="operations")
+        self.ops.accounts.add(self.account)
+
+        # Brand A: two LMRB theme variants in one group
+        self.a1 = BrandMapping.objects.create(
+            account=self.account, brand="Brand A", theme="Theme A (Sin)",
+            tc_theme="TC A", duration=30)
+        self.a2 = BrandMapping.objects.create(
+            account=self.account, brand="Brand A", theme="Theme A (Tam)",
+            tc_theme="TC A", duration=30)
+        # Brand B: separate group
+        self.b1 = BrandMapping.objects.create(
+            account=self.account, brand="Brand B", theme="Theme B", tc_theme="TC B")
+
+    def _login(self, user):
+        self.client.force_login(user)
+
+    def test_delete_group_removes_every_theme_row_of_the_brand(self):
+        self._login(self.admin)
+        resp = self.client.post(self.URL, {
+            "action": "delete_group", "mapping_id": self.a1.id})
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(BrandMapping.objects.filter(brand="Brand A").exists())
+        self.assertTrue(BrandMapping.objects.filter(id=self.b1.id).exists())
+
+    def test_delete_group_keeps_other_duration_group(self):
+        """Groups are keyed on (brand, product, duration) — a different duration
+        for the same brand is a different mapping and must survive."""
+        a_any = BrandMapping.objects.create(
+            account=self.account, brand="Brand A", theme="Theme A any", duration=None)
+        self._login(self.admin)
+        self.client.post(self.URL, {"action": "delete_group", "mapping_id": self.a1.id})
+        self.assertTrue(BrandMapping.objects.filter(id=a_any.id).exists())
+        self.assertFalse(BrandMapping.objects.filter(id=self.a2.id).exists())
+
+    def test_delete_bulk_removes_all_listed_ids(self):
+        self._login(self.admin)
+        ids = f"{self.a1.id},{self.a2.id},{self.b1.id}"
+        resp = self.client.post(self.URL, {"action": "delete_bulk", "mapping_ids": ids})
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(BrandMapping.objects.count(), 0)
+
+    def test_delete_bulk_ignores_junk_ids(self):
+        self._login(self.admin)
+        self.client.post(self.URL, {
+            "action": "delete_bulk", "mapping_ids": f"abc,,{self.b1.id},999999"})
+        self.assertFalse(BrandMapping.objects.filter(id=self.b1.id).exists())
+        self.assertTrue(BrandMapping.objects.filter(id=self.a1.id).exists())
+
+    def test_delete_group_denied_for_account_user_has_no_access_to(self):
+        foreign = BrandMapping.objects.create(
+            account=self.other, brand="Foreign", theme="Foreign Theme")
+        self._login(self.ops)
+        self.client.post(self.URL, {"action": "delete_group", "mapping_id": foreign.id})
+        self.assertTrue(BrandMapping.objects.filter(id=foreign.id).exists())
+
+    def test_delete_bulk_skips_rows_outside_user_accounts(self):
+        foreign = BrandMapping.objects.create(
+            account=self.other, brand="Foreign", theme="Foreign Theme")
+        self._login(self.ops)
+        self.client.post(self.URL, {
+            "action": "delete_bulk", "mapping_ids": f"{self.b1.id},{foreign.id}"})
+        self.assertTrue(BrandMapping.objects.filter(id=foreign.id).exists())
+        self.assertFalse(BrandMapping.objects.filter(id=self.b1.id).exists())
+
+    def test_delete_redirect_keeps_the_active_filters(self):
+        self._login(self.admin)
+        resp = self.client.post(
+            f"{self.URL}?account={self.account.id}&channel={CHANNEL}&month={MONTH}",
+            {"action": "delete_group", "mapping_id": self.a1.id})
+        self.assertIn(f"account={self.account.id}", resp["Location"])
+        self.assertIn("channel=", resp["Location"])
+        self.assertIn("month=", resp["Location"])
+
+    def test_table_renders_delete_controls(self):
+        self._login(self.admin)
+        resp = self.client.get(f"{self.URL}?account={self.account.id}")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('value="delete_group"', html)
+        self.assertIn('id="bulkDeleteForm"', html)
+        # Brand A's checkbox carries both of its LMRB theme row ids
+        self.assertIn(f'data-ids="{self.a1.id},{self.a2.id}"', html)

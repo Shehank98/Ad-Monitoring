@@ -272,6 +272,20 @@ duration (int, optional) ← if set, mapping only applies when duration matches 
 >   `"Unlimited Fiber - 20 Sec extra"`. Pipe-separated values and wildcard can be
 >   combined: `"Theme A|Theme B*"`.
 
+**Deleting mappings** — `/dashboard/brand-mappings/` (POST actions on `brand_mapping_list`):
+
+| Action | Scope deleted |
+|--------|---------------|
+| `delete` | One `BrandMapping` row (the ✕ on an LMRB theme chip) |
+| `delete_group` | Every row of one `(account, brand, product, duration)` group — the whole table row, i.e. all LMRB theme variants plus the TC / MapOnline themes shown against them |
+| `delete_bulk` | Every row of the ticked brand groups; `mapping_ids` is a comma-separated id list built by the table checkboxes |
+
+> Non-admin users can only delete mappings for accounts in their `user.accounts`;
+> `delete_bulk` silently skips out-of-scope ids and reports how many were skipped.
+> Deletion is immediate and permanent — there is no soft-delete. Removing a mapping
+> makes its brand unresolvable, so the Summary Sheet will report `Aired = 0` /
+> `Missed = Planned` for it until a new mapping is added (see Section 9).
+
 ### `TransmissionReport`
 One record per TC file upload.
 ```
