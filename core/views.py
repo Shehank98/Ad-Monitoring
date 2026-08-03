@@ -2599,6 +2599,44 @@ def brand_mapping_quick_add(request):
     return JsonResponse({'ok': True, 'created': created, 'updated': updated, 'skipped': skipped})
 
 
+@login_required
+@require_POST
+def brand_mapping_quick_delete(request):
+    """AJAX: delete BrandMapping rows from the Quick Map 'Currently mapped' panel.
+
+    Body JSON — one of:
+        {account_id, mapping_id}   → delete that single mapping row
+        {account_id, brand}        → delete every mapping row of that brand
+    Returns {ok, deleted}.
+    """
+    import json as _json
+    user = request.user
+    try:
+        body = _json.loads(request.body)
+    except (ValueError, TypeError):
+        return JsonResponse({'ok': False, 'error': 'Invalid JSON.'}, status=400)
+
+    acc_id     = str(body.get('account_id', '')).strip()
+    mapping_id = str(body.get('mapping_id', '')).strip()
+    brand      = str(body.get('brand', '')).strip()
+
+    if not acc_id or not _account_access(user, acc_id):
+        return JsonResponse({'ok': False, 'error': 'No access to that brand.'}, status=403)
+    if not (mapping_id or brand):
+        return JsonResponse({'ok': False, 'error': 'Nothing to delete.'}, status=400)
+
+    # Always scoped to the account the picker is on, so an id from another
+    # account can never be deleted through this endpoint.
+    qs = BrandMapping.objects.filter(account_id=acc_id)
+    qs = qs.filter(id=mapping_id) if mapping_id else qs.filter(brand=brand)
+
+    n = qs.count()
+    if not n:
+        return JsonResponse({'ok': False, 'error': 'Mapping not found.'}, status=404)
+    qs.delete()
+    return JsonResponse({'ok': True, 'deleted': n})
+
+
 # ── Monitoring Dashboard (Items 3 + 4) ───────────────────────────────────────
 
 @login_required
