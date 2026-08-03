@@ -96,6 +96,10 @@ Wrong role → HTTP 403 (renders `403.html`), not a redirect.
 /schedules/<pk>/delete/                   → schedule_delete
 
 /brand-mappings/                          → brand_mapping_list
+/brand-mappings/quick/                    → brand_mapping_quick        (guided Quick Map picker)
+/brand-mappings/quick/detail/             → brand_mapping_detail       (AJAX: mappings for one brand)
+/brand-mappings/quick/add/                → brand_mapping_quick_add    (AJAX POST: create/enrich)
+/brand-mappings/quick/delete/             → brand_mapping_quick_delete (AJAX POST: delete one / all of a brand)
 /brand-mappings/options/                  → brand_mapping_options     (AJAX: account options)
 /brand-mappings/channels/                 → brand_mapping_channels    (AJAX: channels for account)
 /brand-mappings/months/                   → brand_mapping_months      (AJAX: months for channel)
@@ -279,6 +283,13 @@ duration (int, optional) ← if set, mapping only applies when duration matches 
 | `delete` | One `BrandMapping` row (the ✕ on an LMRB theme chip) |
 | `delete_group` | Every row of one `(account, brand, product, duration)` group — the whole table row, i.e. all LMRB theme variants plus the TC / MapOnline themes shown against them |
 | `delete_bulk` | Every row of the ticked brand groups; `mapping_ids` is a comma-separated id list built by the table checkboxes |
+
+The Quick Map picker deletes through its own AJAX endpoint,
+`/dashboard/brand-mappings/quick/delete/` (`brand_mapping_quick_delete`, POST JSON):
+`{account_id, mapping_id}` deletes one row (🗑 next to a mapped theme),
+`{account_id, brand}` deletes every row of that brand ("Delete all"). The queryset
+is always filtered to the posted `account_id`, so an id belonging to another
+account returns 404 rather than deleting.
 
 > Non-admin users can only delete mappings for accounts in their `user.accounts`;
 > `delete_bulk` silently skips out-of-scope ids and reports how many were skipped.

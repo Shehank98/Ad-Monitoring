@@ -266,6 +266,24 @@
       .catch(function () { renderEditor(editor, brand, { mappings: [], schedule_durations: [] }); });
   }
 
+  // Delete mappings straight from the picker. payload is {mapping_id} for one
+  // row or {brand} for every row of the brand. Reloads options afterwards so
+  // the Mapped / Not mapped badges and counters reflect the deletion.
+  function _quickDelete(payload, brand, btn) {
+    btn.disabled = true;
+    payload.account_id = elAcc.value;
+    fetch('/dashboard/brand-mappings/quick/delete/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+      body: JSON.stringify(payload),
+    }).then(r => r.json()).then(function (d) {
+      btn.disabled = false;
+      if (!d.ok) { toast(d.error || 'Delete failed.', false); return; }
+      toast(brand + ': ' + d.deleted + ' mapping' + (d.deleted === 1 ? '' : 's') + ' deleted.', true);
+      loadOptions();
+    }).catch(function () { btn.disabled = false; toast('Network error.', false); });
+  }
+
   function renderEditor(editor, brand, detail) {
     editor.innerHTML = '';
     var maps = detail.mappings || [];
@@ -281,15 +299,37 @@
           '<td class="py-1 pr-3 font-medium text-slate-700">' + esc(m.theme) + '</td>' +
           '<td class="py-1 pr-3 text-slate-600">' + esc(tc) + '</td>' +
           '<td class="py-1 pr-3 text-indigo-600 font-bold whitespace-nowrap">' + esc(d) + '</td>' +
-          '<td class="py-1 text-slate-500">' + esc(m.product || '') + '</td></tr>';
+          '<td class="py-1 pr-3 text-slate-500">' + esc(m.product || '') + '</td>' +
+          '<td class="py-1 text-right">' +
+            '<button type="button" class="js-del-one w-5 h-5 rounded text-[10px] text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors" ' +
+              'data-id="' + m.id + '" data-theme="' + esc(m.theme) + '" title="Delete this mapping">' +
+              '<i class="fa-solid fa-trash-can"></i></button>' +
+          '</td></tr>';
       }).join('');
       cur.className = 'rounded-lg border border-emerald-200 bg-emerald-50/50 p-3';
       cur.innerHTML =
-        '<p class="text-xs font-bold text-emerald-700 mb-1.5"><i class="fa-solid fa-check mr-1"></i>Currently mapped (' + maps.length + ')</p>' +
+        '<div class="flex items-center gap-2 mb-1.5">' +
+          '<p class="text-xs font-bold text-emerald-700"><i class="fa-solid fa-check mr-1"></i>Currently mapped (' + maps.length + ')</p>' +
+          '<button type="button" class="js-del-all ml-auto text-[10px] font-bold px-2 py-0.5 rounded-md text-red-600 bg-white border border-red-200 hover:bg-red-50 transition-colors">' +
+            '<i class="fa-solid fa-trash-can text-[9px] mr-1"></i>Delete all</button>' +
+        '</div>' +
         '<div class="overflow-x-auto"><table class="w-full text-[11px]"><thead><tr class="text-slate-400 text-left">' +
-          '<th class="pr-3 font-semibold">LMRB Theme</th><th class="pr-3 font-semibold">TC Theme</th><th class="pr-3 font-semibold">Dur</th><th class="font-semibold">Product</th></tr></thead>' +
+          '<th class="pr-3 font-semibold">LMRB Theme</th><th class="pr-3 font-semibold">TC Theme</th><th class="pr-3 font-semibold">Dur</th><th class="pr-3 font-semibold">Product</th><th></th></tr></thead>' +
           '<tbody>' + rows + '</tbody></table></div>' +
-        '<p class="text-[10px] text-slate-400 mt-1.5">Edit or remove these on the <a class="underline" href="/dashboard/brand-mappings/?account=' + encodeURIComponent(elAcc.value) + '">detailed table</a>.</p>';
+        '<p class="text-[10px] text-slate-400 mt-1.5">Deleting is permanent - the brand reports Missed until it is mapped again. Full editing is on the <a class="underline" href="/dashboard/brand-mappings/?account=' + encodeURIComponent(elAcc.value) + '">detailed table</a>.</p>';
+
+      // ── Delete handlers ───────────────────────────────────────────────────
+      cur.querySelectorAll('.js-del-one').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          if (!confirm('Delete the mapping "' + this.dataset.theme + '" for ' + brand + '?\n\nThis cannot be undone.')) return;
+          _quickDelete({ mapping_id: this.dataset.id }, brand, this);
+        });
+      });
+      cur.querySelector('.js-del-all').addEventListener('click', function () {
+        if (!confirm('Delete all ' + maps.length + ' mapping' + (maps.length === 1 ? '' : 's') +
+                     ' for ' + brand + '?\n\nThis cannot be undone.')) return;
+        _quickDelete({ brand: brand }, brand, this);
+      });
     } else {
       cur.className = 'rounded-lg border border-slate-200 bg-white p-3 text-[11px] text-slate-400';
       cur.innerHTML = '<i class="fa-solid fa-circle-info mr-1"></i>No mappings yet for this brand.';
