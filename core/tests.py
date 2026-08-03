@@ -2084,3 +2084,77 @@ class BrandMappingDeleteViewTest(TestCase):
         self.assertIn('id="bulkDeleteForm"', html)
         # Brand A's checkbox carries both of its LMRB theme row ids
         self.assertIn(f'data-ids="{self.a1.id},{self.a2.id}"', html)
+
+
+class BrandMappingQuickDeleteTest(TestCase):
+    """The Quick Map picker's delete button (/dashboard/brand-mappings/quick/delete/).
+
+    Accepts either {mapping_id} (one row) or {brand} (every row of the brand),
+    always scoped to the posted account.
+    """
+
+    URL = "/dashboard/brand-mappings/quick/delete/"
+
+    def setUp(self):
+        self.account = make_account()
+        self.other   = make_account("Other Account")
+        self.admin   = make_user(email="admin3@test.com", role="admin")
+        self.ops     = make_user(email="ops3@test.com", role="operations")
+        self.ops.accounts.add(self.account)
+
+        self.a1 = BrandMapping.objects.create(
+            account=self.account, brand="Brand A", theme="Theme A (Sin)", duration=30)
+        self.a2 = BrandMapping.objects.create(
+            account=self.account, brand="Brand A", theme="Theme A (Tam)", duration=30)
+        self.b1 = BrandMapping.objects.create(
+            account=self.account, brand="Brand B", theme="Theme B")
+
+    def _post(self, payload):
+        return self.client.post(self.URL, payload, content_type="application/json")
+
+    def test_delete_single_mapping_row(self):
+        self.client.force_login(self.admin)
+        resp = self._post({"account_id": self.account.id, "mapping_id": self.a1.id})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["ok"])
+        self.assertEqual(resp.json()["deleted"], 1)
+        self.assertFalse(BrandMapping.objects.filter(id=self.a1.id).exists())
+        self.assertTrue(BrandMapping.objects.filter(id=self.a2.id).exists())
+
+    def test_delete_all_rows_of_a_brand(self):
+        self.client.force_login(self.admin)
+        resp = self._post({"account_id": self.account.id, "brand": "Brand A"})
+        self.assertEqual(resp.json()["deleted"], 2)
+        self.assertFalse(BrandMapping.objects.filter(brand="Brand A").exists())
+        self.assertTrue(BrandMapping.objects.filter(id=self.b1.id).exists())
+
+    def test_delete_is_scoped_to_the_posted_account(self):
+        """An id from another account can't be deleted by posting our account."""
+        foreign = BrandMapping.objects.create(
+            account=self.other, brand="Foreign", theme="Foreign Theme")
+        self.client.force_login(self.admin)
+        resp = self._post({"account_id": self.account.id, "mapping_id": foreign.id})
+        self.assertEqual(resp.status_code, 404)
+        self.assertTrue(BrandMapping.objects.filter(id=foreign.id).exists())
+
+    def test_denied_for_account_user_has_no_access_to(self):
+        foreign = BrandMapping.objects.create(
+            account=self.other, brand="Foreign", theme="Foreign Theme")
+        self.client.force_login(self.ops)
+        resp = self._post({"account_id": self.other.id, "mapping_id": foreign.id})
+        self.assertEqual(resp.status_code, 403)
+        self.assertTrue(BrandMapping.objects.filter(id=foreign.id).exists())
+
+    def test_empty_payload_is_rejected(self):
+        self.client.force_login(self.admin)
+        resp = self._post({"account_id": self.account.id})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(BrandMapping.objects.count(), 3)
+
+    def test_get_is_not_allowed(self):
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.get(self.URL).status_code, 405)
+
+    def test_quick_page_renders(self):
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.get("/dashboard/brand-mappings/quick/").status_code, 200)
