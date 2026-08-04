@@ -22,6 +22,7 @@ from accounts.models import User
 from core.models import (
     Account,
     BrandMapping,
+    Channel,
     LMRBRow,
     ManualMatch,
     MatchResult,
@@ -2233,6 +2234,21 @@ class MapOnlineComputeScopeTest(TestCase):
             ScheduleRow.objects.filter(is_maponline_matched=True).count(), 1
         )
 
+    def test_extra_aired_carries_aired_programme(self):
+        """Unconsumed MapOnline rows surface in Extra Aired with the aired
+        programme (LMRBRow.program, from the file's 'Prg Name' column)."""
+        # A second MapOnline spot of the same brand that has no planned slot to
+        # claim it → it becomes Extra Aired.
+        make_lmrb_row(
+            self.account, advt_theme="MO Theme A", advt_time="23:45:00",
+            duration=30, source="maponline",
+        )
+        # Give both MapOnline rows an aired programme.
+        LMRBRow.objects.filter(source="maponline").update(program="Prime Time Show")
+        res = self.compute(self.account.id, CHANNEL, MONTH)
+        self.assertTrue(res["extra"])
+        self.assertTrue(all(r["programme"] == "Prime Time Show" for r in res["extra"]))
+
     def test_unmapped_maponline_theme_not_matched(self):
         """A MapOnline row whose theme has no maponline_theme mapping is not matched."""
         # Different brand row with no maponline_theme mapping at all.
@@ -2242,6 +2258,36 @@ class MapOnlineComputeScopeTest(TestCase):
         # Brand B has no maponline mapping → shows up as No Brand Mapping, not matched.
         matched_brands = {r["brand"] for r in res["matched"]}
         self.assertNotIn("Brand B", matched_brands)
+
+
+class MapOnlineProgrammeParseTest(TestCase):
+    """MapOnline parsing must read the aired programme from the 'Prg Name' column."""
+
+    def test_prg_name_populates_program(self):
+        import pandas as pd
+        from core.views import _parse_lmrb_rows
+        account = make_account()
+        Channel.objects.create(name="TV - Sirasa TV")
+        df = pd.DataFrame([{
+            "Channel":    "Tv - Sirasa TV",
+            "Prg Date":   "2026-07-01",
+            "Prg Name":   "Fifa World Cup 2026 - Fra Vs Swe",
+            "Prg Start":  "2:15",
+            "Product":    "Coca Cola",
+            "Theme":      "Tani With Friends (30)(Sin)",
+            "Ad Start":   "2:53:08",
+            "Ad Dur":     30,
+            "Language":   "SINHALA",
+            "Advertiser": "Coca Cola Beverages Ltd",
+            "Category":   "Aerated Soft Drinks",
+        }])
+        inserted = _parse_lmrb_rows(df, "maponline", account)
+        self.assertEqual(inserted, 1)
+        row = LMRBRow.objects.get(source="maponline")
+        self.assertEqual(row.program, "Fifa World Cup 2026 - Fra Vs Swe")
+        self.assertEqual(row.advt_theme, "Tani With Friends (30)(Sin)")
+        self.assertEqual(row.advt_time, "2:53:08")
+        self.assertEqual(row.duration, 30)
 
 
 class MapOnlineColoredStatusMapTest(TestCase):
