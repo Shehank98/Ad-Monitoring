@@ -678,7 +678,7 @@ function setSource(idx, src, accountId, channel, month) {
   const exports = document.getElementById('exports-' + idx);
   if (src === 'maponline') {
     if (note) note.innerHTML =
-      '<i class="fa-solid fa-eye mr-1"></i>View-only preliminary check — does not affect official results, the Summary Sheet, or PDFs.';
+      '<i class="fa-solid fa-map mr-1"></i>Preliminary MapOnline check — separate from the official MediaWatch results (Summary, PDFs, Dashboard).';
     if (exports) exports.style.display = 'none';
   } else {
     if (note) note.textContent = '';

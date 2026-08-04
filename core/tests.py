@@ -2192,16 +2192,46 @@ class MapOnlineComputeScopeTest(TestCase):
         self.assertEqual(len(res["matched"]), 1)
         self.assertEqual(res["matched"][0]["brand"], "Brand A")
 
-    def test_is_view_only_no_persistence(self):
-        """compute_maponline_scope must not write match state or lock flags."""
-        self.compute(self.account.id, CHANNEL, MONTH)
+    def test_locks_maponline_rows_but_not_mediawatch(self):
+        """persist=True locks the MapOnline-specific fields one-to-one, but never
+        touches MediaWatch state (is_matched) or writes MatchResult."""
+        self.compute(self.account.id, CHANNEL, MONTH)  # persist defaults to True
         self.sr.refresh_from_db()
         self.lr.refresh_from_db()
+        # MapOnline locks set
+        self.assertTrue(self.sr.is_maponline_matched)
+        self.assertEqual(self.sr.matched_maponline_lmrb_id, self.lr.id)
+        self.assertTrue(self.lr.is_maponline_schedule_matched)
+        # MediaWatch / official state untouched
         self.assertFalse(self.sr.is_matched)
-        self.assertFalse(self.sr.is_maponline_matched)
         self.assertFalse(self.lr.is_matched)
-        self.assertFalse(self.lr.is_maponline_schedule_matched)
         self.assertEqual(MatchResult.objects.count(), 0)
+
+    def test_persist_false_writes_nothing(self):
+        """persist=False computes the breakdown without any DB writes."""
+        res = self.compute(self.account.id, CHANNEL, MONTH, persist=False)
+        self.assertEqual(len(res["matched"]), 1)
+        self.sr.refresh_from_db()
+        self.lr.refresh_from_db()
+        self.assertFalse(self.sr.is_maponline_matched)
+        self.assertFalse(self.lr.is_maponline_schedule_matched)
+
+    def test_same_ad_not_matched_twice(self):
+        """One MapOnline row cannot be matched to two schedule rows (one-to-one lock)."""
+        # A second identical schedule row, but only one MapOnline observation exists.
+        make_schedule_row(
+            self.account, self.schedule, brand="Brand A",
+            date=DATE, start_time="20:00:00", end_time="21:00:00", duration=30,
+        )
+        res = self.compute(self.account.id, CHANNEL, MONTH)
+        self.assertEqual(res["planned"], 2)
+        self.assertEqual(len(res["matched"]), 1)   # only one row can claim the single spot
+        # The single MapOnline row is locked to exactly one schedule row.
+        self.lr.refresh_from_db()
+        self.assertTrue(self.lr.is_maponline_schedule_matched)
+        self.assertEqual(
+            ScheduleRow.objects.filter(is_maponline_matched=True).count(), 1
+        )
 
     def test_unmapped_maponline_theme_not_matched(self):
         """A MapOnline row whose theme has no maponline_theme mapping is not matched."""
@@ -2212,6 +2242,101 @@ class MapOnlineComputeScopeTest(TestCase):
         # Brand B has no maponline mapping → shows up as No Brand Mapping, not matched.
         matched_brands = {r["brand"] for r in res["matched"]}
         self.assertNotIn("Brand B", matched_brands)
+
+
+class MapOnlineColoredStatusMapTest(TestCase):
+    """verification.colored_schedule.build_status_map_from_maponline."""
+
+    def setUp(self):
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        make_schedule_row(self.account, self.schedule)  # Test Show, 20:00:00, 30s, 2025-01-15
+        BrandMapping.objects.create(
+            account=self.account, brand="Brand A", theme="Theme A",
+            maponline_theme="MO Theme A",
+        )
+        make_lmrb_row(
+            self.account, advt_theme="MO Theme A", advt_time="20:30:00",
+            duration=30, source="maponline",
+        )
+
+    def test_status_map_marks_matched_slot(self):
+        from verification.colored_schedule import build_status_map_from_maponline
+        sm = build_status_map_from_maponline(self.account.id, CHANNEL, MONTH)
+        slot = ("test show", "20:00:00", 30)
+        self.assertIn(slot, sm)
+        self.assertEqual(sm[slot]["2025-01-15"]["matched"], 1)
+
+    def test_none_when_no_maponline_data(self):
+        from verification.colored_schedule import build_status_map_from_maponline
+        LMRBRow.objects.filter(source="maponline").delete()
+        self.assertIsNone(
+            build_status_map_from_maponline(self.account.id, CHANNEL, MONTH)
+        )
+
+    def test_status_map_build_does_not_lock(self):
+        """The export builder uses persist=False — it must not lock rows."""
+        from verification.colored_schedule import build_status_map_from_maponline
+        build_status_map_from_maponline(self.account.id, CHANNEL, MONTH)
+        self.assertFalse(
+            ScheduleRow.objects.filter(is_maponline_matched=True).exists()
+        )
+
+
+class MapOnlineColoredSheetIntegrationTest(TestCase):
+    """build_original_and_colored_wb produces a 'MapOnline Colored' sheet."""
+
+    def _make_pivot_bytes(self):
+        import io as _io
+        import datetime as _dt
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        # Header row: PROGRAM | DAY | TIME | END | DUR | <date>
+        ws.append(["PROGRAM", "DAY", "TIME", "END", "DUR", _dt.date(2025, 1, 15)])
+        # Data row: one planned spot for "Test Show" at 20:00 / 30s on 15 Jan.
+        ws.append(["Test Show", "Wed", _dt.time(20, 0, 0), _dt.time(21, 0, 0), 30, 1])
+        buf = _io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    def setUp(self):
+        from django.core.files.base import ContentFile
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        self.schedule.file.save("pivot.xlsx", ContentFile(self._make_pivot_bytes()), save=True)
+        make_schedule_row(
+            self.account, self.schedule, brand="Brand A", programme="Test Show",
+            date=DATE, start_time="20:00:00", end_time="21:00:00", duration=30,
+        )
+        BrandMapping.objects.create(
+            account=self.account, brand="Brand A", theme="Theme A",
+            maponline_theme="MO Theme A",
+        )
+        make_lmrb_row(
+            self.account, advt_theme="MO Theme A", advt_time="20:30:00",
+            duration=30, source="maponline",
+        )
+
+    def test_workbook_has_maponline_colored_sheet(self):
+        from verification.colored_schedule import (
+            build_original_and_colored_wb, build_status_map_from_maponline,
+        )
+        colors = {
+            'aired': '#22c55e', 'not_aired': '#ef4444', 'late_telecast': '#a855f7',
+            'programme_mismatch': '#f97316', 'extra_aired': '#3b82f6',
+            'planned': '#94a3b8', 'manual_override': '#14b8a6', 'aired_less': '#f59e0b',
+        }
+        mo_map = build_status_map_from_maponline(self.account.id, CHANNEL, MONTH)
+        self.assertIsNotNone(mo_map)
+        wb, detected = build_original_and_colored_wb(
+            self.schedule.pk, colors, status_map=None, maponline_status_map=mo_map,
+        )
+        self.assertTrue(detected)
+        self.assertIn("MapOnline Colored", wb.sheetnames)
+        # The single planned cell (F2) on the MapOnline sheet should be coloured.
+        cell = wb["MapOnline Colored"]["F2"]
+        self.assertEqual(cell.fill.fill_type, "solid")
 
 
 class MapOnlinePurgeTest(TestCase):
