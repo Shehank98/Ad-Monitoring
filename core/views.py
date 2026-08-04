@@ -7522,21 +7522,36 @@ def _reconciliation_colors():
 
 
 def _build_combined_export_wb(schedule, colors, status_map):
-    """Assemble the 4-sheet reconciliation export workbook:
+    """Assemble the reconciliation export workbook:
 
       1) Original Schedule    — exact copy of the uploaded file (formatting preserved)
-      2) Colored Schedule     — same layout with reconciliation colours applied
+      2) Colored Schedule     — same layout with MediaWatch reconciliation colours
+      2b) MapOnline Colored   — same layout coloured from MapOnline (only when
+                                MapOnline data exists for the scope)
       3) Summary              — same content as the Summary Sheet Excel download
       4) Matched LMRB Cuts    — matched LMRB records
 
-    Sheets 1–2 come from the original Firebase file (never rebuilt from the DB);
-    sheets 3–4 come from reconciliation data.
+    The schedule sheets come from the original Firebase file (never rebuilt from
+    the DB); the Summary / Matched sheets come from reconciliation data.
     """
-    from verification.colored_schedule import build_original_and_colored_wb
+    from verification.colored_schedule import (
+        build_original_and_colored_wb, build_status_map_from_maponline,
+    )
     from verification.tc_engine import build_summary_data
     from verification.media_recon import build_recon_context
 
-    wb, _detected = build_original_and_colored_wb(schedule.pk, colors, status_map)
+    # Optional extra sheet coloured from MapOnline data (independent of MediaWatch).
+    maponline_status_map = None
+    try:
+        maponline_status_map = build_status_map_from_maponline(
+            schedule.account_id, schedule.channel, schedule.month,
+        )
+    except Exception:
+        logger.exception('build_status_map_from_maponline failed for schedule pk=%s', schedule.pk)
+
+    wb, _detected = build_original_and_colored_wb(
+        schedule.pk, colors, status_map, maponline_status_map=maponline_status_map,
+    )
 
     account = schedule.account
     channel = schedule.channel

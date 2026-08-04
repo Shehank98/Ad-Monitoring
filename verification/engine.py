@@ -806,15 +806,24 @@ def _maponline_extra_rows(df):
     return rows
 
 
-def compute_maponline_scope(account_id, channel, month):
+def compute_maponline_scope(account_id, channel, month, persist=True):
     """
-    View-only MapOnline verification: match ScheduleRows against MapOnline
-    LMRBRows (source='maponline') using BrandMapping.maponline_theme, and return
-    the results for display **without persisting anything**.
+    MapOnline verification: match ScheduleRows against MapOnline LMRBRows
+    (source='maponline') using BrandMapping.maponline_theme, and return the
+    results for display.
 
-    This never writes MatchResult, never sets any lock flag, and never touches the
-    authoritative MediaWatch reconciliation, the Summary Sheet, PDFs, or the
-    Monitoring Dashboard.  It is used only by the Verify Ads MapOnline toggle.
+    Row locking (persist=True, the default):
+      The scope's MapOnline locks are cleared, the whole scope is re-matched in
+      one pass (so a MapOnline raw row is consumed at most once — same one-to-one
+      guarantee as the MediaWatch engine), then the matched pairs are locked using
+      the SEPARATE MapOnline fields (ScheduleRow.is_maponline_matched /
+      LMRBRow.is_maponline_schedule_matched).  This prevents the same ad being
+      matched twice while keeping MapOnline fully isolated: it never writes
+      MatchResult, never touches is_matched / MediaWatch state, and never affects
+      the Summary Sheet, PDFs, or the Monitoring Dashboard.
+
+    persist=False computes and returns the same breakdown WITHOUT any DB writes
+    (used by the colored-schedule export so a download has no side effects).
 
     Returns a dict with matched / prog_mismatch / late_telecast / not_aired /
     no_mapping / extra display-row lists plus a summary and planned/last_data info.
@@ -861,6 +870,30 @@ def compute_maponline_scope(account_id, channel, month):
         'planned': planned, 'max_data_date': str(max_maponline_date) if max_maponline_date else None,
     }
 
+    # ── Reset this scope's MapOnline locks so each run re-matches from scratch ──
+    # (keeps the returned breakdown complete and prevents stale one-to-one locks).
+    if persist:
+        scope_sch_ids = list(
+            ScheduleRow.objects.filter(
+                account_id=account_id, channel=channel, month=month,
+                ad_type='COMMERCIAL BENEFITS',
+            ).values_list('id', flat=True)
+        )
+        if makeup_schedules:
+            scope_sch_ids += list(
+                ScheduleRow.objects.filter(
+                    schedule__in=makeup_schedules, ad_type='COMMERCIAL BENEFITS',
+                ).values_list('id', flat=True)
+            )
+        LMRBRow.objects.filter(
+            maponline_schedule_matches__id__in=scope_sch_ids,
+        ).update(is_maponline_schedule_matched=False)
+        ScheduleRow.objects.filter(id__in=scope_sch_ids).update(
+            is_maponline_matched=False,
+            matched_maponline_lmrb=None,
+            maponline_matched_at=None,
+        )
+
     # Build MapOnline LMRB pool (source='maponline' only; skip manually-locked rows)
     lmrb_qs = LMRBRow.objects.filter(
         _lmrb_channel_q(channel), account_id=account_id,
@@ -879,6 +912,7 @@ def compute_maponline_scope(account_id, channel, month):
         return empty
 
     matched, prog_mis, late, not_aired, no_mapping, extra = [], [], [], [], [], []
+    lock_pairs = []   # (schedule_row_id, lmrb_row_id) to lock when persist=True
     global_consumed_idx: set = set()
 
     schedules_to_run = (active_schedules if active_schedules else [None]) + makeup_schedules
@@ -914,6 +948,37 @@ def compute_maponline_scope(account_id, channel, month):
         # extra_df is recomputed per schedule against the shared consumed set; the
         # last schedule's leftover pool is the authoritative leftover set.
         extra = _maponline_extra_rows(extra_df)
+
+        # Collect (schedule, lmrb) pairs consumed this pass so we can lock them.
+        # matched / programme_mismatch / late_telecast each consume one LMRB row.
+        for _df in (m_df, pm_df, late_df):
+            if _df is None or _df.empty:
+                continue
+            for _, _r in _df.iterrows():
+                _sid = _r.get('_sch_row_id')
+                _lid = _r.get('_lmrb_row_id')
+                if _sid and _lid:
+                    lock_pairs.append((_sid, _lid))
+
+    # ── Persist MapOnline locks (separate fields — never affects MediaWatch) ────
+    if persist and lock_pairs:
+        now = timezone.now()
+        sch_updates = [
+            ScheduleRow(
+                id=sid, is_maponline_matched=True,
+                matched_maponline_lmrb_id=lid, maponline_matched_at=now,
+            )
+            for sid, lid in lock_pairs
+        ]
+        lmrb_updates = [
+            LMRBRow(id=lid, is_maponline_schedule_matched=True)
+            for _sid, lid in lock_pairs
+        ]
+        ScheduleRow.objects.bulk_update(
+            sch_updates,
+            ['is_maponline_matched', 'matched_maponline_lmrb_id', 'maponline_matched_at'],
+        )
+        LMRBRow.objects.bulk_update(lmrb_updates, ['is_maponline_schedule_matched'])
 
     return {
         'matched':       matched,
