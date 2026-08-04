@@ -57,6 +57,14 @@
   .vtab-panel { display:none; }
   .vtab-panel.active { display:block; }
 
+  /* ── Data-source toggle ── */
+  .src-btn { padding:.3rem .8rem; font-size:.72rem; font-weight:600; color:#64748b;
+             background:#fff; border:none; cursor:pointer; transition:background .15s,color .15s;
+             white-space:nowrap; }
+  .src-btn + .src-btn { border-left:1px solid #e2e8f0; }
+  .src-btn:hover { background:#f1f5f9; }
+  .src-btn.active { background:#2563eb; color:#fff; }
+
   /* ── Result table ── */
   .res-table { width:100%; font-size:.78rem; border-collapse:collapse; }
   .res-table th { background:#f8fafc; color:#64748b; font-size:.68rem; font-weight:700;
@@ -364,6 +372,22 @@
           </div>
         </div>
 
+        <!-- Data source toggle: MediaWatch (authoritative) / MapOnline (view-only) -->
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Data source</span>
+          <div class="src-toggle inline-flex rounded-lg border border-slate-200 overflow-hidden">
+            <button id="src-mw-{{ idx }}" class="src-btn active"
+                    onclick="setSource({{ idx }},'mediawatch','{{ row.account_id }}','{{ row.channel|escapejs }}','{{ row.month|escapejs }}')">
+              <i class="fa-solid fa-database mr-1"></i>MediaWatch
+            </button>
+            <button id="src-mo-{{ idx }}" class="src-btn"
+                    onclick="setSource({{ idx }},'maponline','{{ row.account_id }}','{{ row.channel|escapejs }}','{{ row.month|escapejs }}')">
+              <i class="fa-solid fa-map mr-1"></i>MapOnline
+            </button>
+          </div>
+          <span id="src-note-{{ idx }}" class="text-[11px] text-slate-400"></span>
+        </div>
+
         <!-- Result tabs -->
         <div id="results-{{ idx }}">
           <div class="text-xs text-slate-400 py-8 text-center" id="results-loading-{{ idx }}">
@@ -394,7 +418,7 @@
               <button class="vtab-btn" onclick="switchVtab({{ idx }},'nomap',this)">
                 No Mapping <span class="ml-1 text-[10px] font-bold text-slate-400" id="tc-nomap-{{ idx }}"></span>
               </button>
-              <div class="ml-auto flex items-center gap-2 flex-shrink-0 pr-2">
+              <div id="exports-{{ idx }}" class="ml-auto flex items-center gap-2 flex-shrink-0 pr-2">
                 <a href="/verify/export-missed/?account_id={{ row.account_id }}&channel={{ row.channel|urlencode }}&month={{ row.month|urlencode }}"
                    class="text-xs text-red-600 hover:text-red-800 hover:underline flex items-center gap-1" target="_blank"
                    title="Missed Ad Report PDF - confirmed not-aired spots within LMRB coverage (send to channel for makeup)">
@@ -558,7 +582,12 @@ function renderResults(idx, data) {
 
   loadEl.classList.add('hidden');
 
+  const isMap = (_source[idx] === 'maponline');
+
   if (!data.has_results) {
+    emptyEl.innerHTML = isMap
+      ? '<i class="fa-solid fa-circle-info mr-1"></i> No MapOnline data or matches for this scope. Upload MapOnline data and map MapOnline themes to see results.'
+      : '<i class="fa-solid fa-circle-info mr-1"></i> Not yet verified. Click <strong>Run</strong> to verify this campaign.';
     emptyEl.classList.remove('hidden');
     return;
   }
@@ -606,7 +635,9 @@ function renderResults(idx, data) {
   document.getElementById('vtab-matched-' + idx).innerHTML = buildTable(data.matched,      false);
   document.getElementById('vtab-mis-' + idx).innerHTML     = buildTable(data.prog_mismatch,false);
   document.getElementById('vtab-late-' + idx).innerHTML    = buildTable(data.late_telecast, false);
-  document.getElementById('vtab-notaired-'+idx).innerHTML  = buildNotAiredTable(data.not_aired, data.extra, idx);
+  document.getElementById('vtab-notaired-'+idx).innerHTML  = isMap
+    ? buildTable(data.not_aired, false)
+    : buildNotAiredTable(data.not_aired, data.extra, idx);
   document.getElementById('vtab-extra-' + idx).innerHTML   = buildExtraTable(data.extra);
   document.getElementById('vtab-nomap-' + idx).innerHTML   = buildTable(data.no_mapping,   false);
 
@@ -619,6 +650,7 @@ function renderResults(idx, data) {
 
 // ── Toggle row expansion + load results on first open ────────────────────────
 const _loaded = {};  // track which rows have been fetched
+const _source = {};  // per-row selected data source: 'mediawatch' | 'maponline'
 
 function toggleDetail(idx, accountId, channel, month) {
   const detail = document.getElementById('detail-' + idx);
@@ -632,8 +664,46 @@ function toggleDetail(idx, accountId, channel, month) {
   }
 }
 
+// ── Data source toggle (MediaWatch = official, MapOnline = view-only) ─────────
+function setSource(idx, src, accountId, channel, month) {
+  if ((_source[idx] || 'mediawatch') === src) return;
+  _source[idx] = src;
+
+  const mw = document.getElementById('src-mw-' + idx);
+  const mo = document.getElementById('src-mo-' + idx);
+  if (mw) mw.classList.toggle('active', src === 'mediawatch');
+  if (mo) mo.classList.toggle('active', src === 'maponline');
+
+  const note    = document.getElementById('src-note-' + idx);
+  const exports = document.getElementById('exports-' + idx);
+  if (src === 'maponline') {
+    if (note) note.innerHTML =
+      '<i class="fa-solid fa-eye mr-1"></i>View-only preliminary check — does not affect official results, the Summary Sheet, or PDFs.';
+    if (exports) exports.style.display = 'none';
+  } else {
+    if (note) note.textContent = '';
+    if (exports) exports.style.display = '';
+  }
+
+  // Clear panels + show loading, then fetch from the selected source
+  ['all','matched','mis','late','notaired','extra','nomap'].forEach(t => {
+    const el = document.getElementById(`vtab-${t}-${idx}`);
+    if (el) el.innerHTML = '';
+  });
+  document.getElementById('results-tabs-' + idx).classList.add('hidden');
+  document.getElementById('results-empty-' + idx).classList.add('hidden');
+  document.getElementById('kpi-bar-' + idx).classList.add('hidden');
+  const loadEl = document.getElementById('results-loading-' + idx);
+  loadEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading results…';
+  loadEl.classList.remove('hidden');
+  _loaded[idx] = true;
+  fetchResults(idx, accountId, channel, month);
+}
+
 function fetchResults(idx, accountId, channel, month) {
-  const url = `/verify/load-results/?account_id=${encodeURIComponent(accountId)}&channel=${encodeURIComponent(channel)}&month=${encodeURIComponent(month)}`;
+  const src  = _source[idx] || 'mediawatch';
+  const base = src === 'maponline' ? '/verify/maponline-results/' : '/verify/load-results/';
+  const url  = `${base}?account_id=${encodeURIComponent(accountId)}&channel=${encodeURIComponent(channel)}&month=${encodeURIComponent(month)}`;
   fetch(url)
     .then(r => r.json())
     .then(data => {
@@ -727,6 +797,15 @@ function runVerify(e, idx, accountId, channel, month) {
 
       btn.disabled  = false;
       btn.innerHTML = '<i class="fa-solid fa-play text-emerald-500"></i> Run';
+
+      // Run is MediaWatch-only — force the source toggle back to MediaWatch.
+      _source[idx] = 'mediawatch';
+      document.getElementById('src-mw-' + idx)?.classList.add('active');
+      document.getElementById('src-mo-' + idx)?.classList.remove('active');
+      const _note = document.getElementById('src-note-' + idx);
+      if (_note) _note.textContent = '';
+      const _exp = document.getElementById('exports-' + idx);
+      if (_exp) _exp.style.display = '';
 
       // Reset and reload detail panel
       delete _loaded[idx];

@@ -1478,20 +1478,30 @@ def monitoring_upload(request):
                 f'{"MapOnline" if data_type == "maponline" else "MediaWatch (LMRB)"} - '
                 f'{account} - {len(channel_metas)} channel(s): {ch_names}. Uploaded successfully.')
 
-            # Auto-run verification then send not-aired email notification.
-            # MapOnline → preliminary engine; MediaWatch → final engine.
-            # The wrapper thread runs the engine first, then emails recipients.
-            try:
-                import threading
-                t = threading.Thread(
-                    target=_run_verification_then_email,
-                    args=(account.id,),
-                    kwargs={'is_maponline': data_type == 'maponline'},
-                    daemon=True,
-                )
-                t.start()
-            except Exception as e:
-                print(f"[monitoring_upload] auto-verification error (non-fatal): {e}")
+            if data_type == 'maponline':
+                # MapOnline is a view-only preliminary check (Verify Ads toggle).
+                # It never feeds the authoritative reconciliation, so we do NOT
+                # run the engine or send not-aired emails here.  Instead enforce
+                # the 30-day retention: drop MapOnline data older than the window.
+                try:
+                    from core.maponline_cleanup import purge_old_maponline_data
+                    purge_old_maponline_data()
+                except Exception as e:
+                    print(f"[monitoring_upload] maponline purge error (non-fatal): {e}")
+            else:
+                # MediaWatch (authoritative): auto-run verification then email
+                # the not-aired notification. The wrapper thread runs the engine
+                # first, then emails recipients.
+                try:
+                    import threading
+                    t = threading.Thread(
+                        target=_run_verification_then_email,
+                        args=(account.id,),
+                        daemon=True,
+                    )
+                    t.start()
+                except Exception as e:
+                    print(f"[monitoring_upload] auto-verification error (non-fatal): {e}")
 
             # WhatsApp: notify officers for any channel/month with missed spots
             try:
@@ -2673,8 +2683,6 @@ def monitoring_dashboard(request):
     lmrb_matched_rows   = []
     lmrb_unmatched_rows = []
     extra_aired_rows    = []
-    maponline_summary   = []
-    has_maponline_data  = False
 
     if account_id:
         try:
@@ -3346,30 +3354,10 @@ def monitoring_dashboard(request):
             lmrb_qs.filter(is_matched=False, source='mediawatch').order_by('date', 'advt_time')
         )
 
-        # ── MapOnline preliminary summary (for MapOnline Preliminary tab) ─────
-        # ScheduleRows matched against MapOnline data, grouped by brand/duration.
-        _maponline_sch_rows = list(
-            _sr_base.filter(ad_type='COMMERCIAL BENEFITS')
-            .select_related('matched_maponline_lmrb')
-            .order_by('date', 'brand')
-        )
-        _maponline_brand_map = {}
-        for _sr in _maponline_sch_rows:
-            key = (_sr.brand, _sr.duration)
-            entry = _maponline_brand_map.setdefault(key, {
-                'brand': _sr.brand, 'duration': _sr.duration,
-                'planned': 0, 'maponline_aired': 0,
-            })
-            entry['planned'] += 1
-            if _sr.is_maponline_matched:
-                entry['maponline_aired'] += 1
-        maponline_summary = []
-        for entry in sorted(_maponline_brand_map.values(), key=lambda x: x['brand']):
-            entry['maponline_missed'] = max(0, entry['planned'] - entry['maponline_aired'])
-            maponline_summary.append(entry)
-        has_maponline_data = LMRBRow.objects.filter(
-            account_id=account_id, channel__iexact=channel, source='maponline',
-        ).exists()
+        # MapOnline is intentionally excluded from the Monitoring Dashboard.
+        # It is a view-only preliminary check available on the Verify Ads page
+        # (MediaWatch/MapOnline toggle) and never feeds the authoritative
+        # dashboard, which is MediaWatch (LMRB) only.
 
         # ── Extra Aired rows ─────────────────────────────────────────────────
         # LMRB rows in the schedule period that are NOT matched, NOT
@@ -3643,8 +3631,6 @@ def monitoring_dashboard(request):
         'lmrb_matched_rows':         lmrb_matched_rows,
         'lmrb_unmatched_rows':       lmrb_unmatched_rows,
         'extra_aired_rows':          extra_aired_rows,
-        'maponline_summary':         maponline_summary if selected_account and channel and month else [],
-        'has_maponline_data':        has_maponline_data if selected_account and channel and month else False,
         'theme_analysis':            theme_analysis,
         'theme_analysis_json':       theme_analysis_json,
         'spon_kw_breakdown':         spon_kw_breakdown if selected_account and channel and month else [],
@@ -10215,15 +10201,12 @@ def _notify_missed_spots_email(account_id):
             print(f'[email notify] Failed to send email for {channel}/{month}: {exc}')
 
 
-def _run_verification_then_email(account_id, is_maponline=False):
-    """Thread target: run verification engine then send not-aired email notification."""
+def _run_verification_then_email(account_id):
+    """Thread target: run the MediaWatch verification engine then send the
+    not-aired email notification.  MapOnline is view-only and never routed here."""
     try:
-        if is_maponline:
-            from verification.engine import auto_run_maponline_for_account
-            auto_run_maponline_for_account(account_id)
-        else:
-            from verification.engine import auto_run_all_for_account
-            auto_run_all_for_account(account_id)
+        from verification.engine import auto_run_all_for_account
+        auto_run_all_for_account(account_id)
     except Exception as exc:
         print(f'[verify thread] engine error (non-fatal): {exc}')
     try:
