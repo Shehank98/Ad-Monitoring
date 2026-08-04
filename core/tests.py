@@ -2338,10 +2338,11 @@ class MapOnlineColoredSheetIntegrationTest(TestCase):
         import openpyxl
         wb = openpyxl.Workbook()
         ws = wb.active
-        # Header row: PROGRAM | DAY | TIME | END | DUR | <date>
-        ws.append(["PROGRAM", "DAY", "TIME", "END", "DUR", _dt.date(2025, 1, 15)])
-        # Data row: one planned spot for "Test Show" at 20:00 / 30s on 15 Jan.
-        ws.append(["Test Show", "Wed", _dt.time(20, 0, 0), _dt.time(21, 0, 0), 30, 1])
+        # Header row: PROGRAM | DAY | TIME | END | DUR | <15 Jan> | <16 Jan>
+        ws.append(["PROGRAM", "DAY", "TIME", "END", "DUR",
+                   _dt.date(2025, 1, 15), _dt.date(2025, 1, 16)])
+        # Data row: one planned spot on the 15th AND one on the 16th.
+        ws.append(["Test Show", "Wed", _dt.time(20, 0, 0), _dt.time(21, 0, 0), 30, 1, 1])
         buf = _io.BytesIO()
         wb.save(buf)
         return buf.getvalue()
@@ -2380,9 +2381,34 @@ class MapOnlineColoredSheetIntegrationTest(TestCase):
         )
         self.assertTrue(detected)
         self.assertIn("MapOnline Colored", wb.sheetnames)
-        # The single planned cell (F2) on the MapOnline sheet should be coloured.
-        cell = wb["MapOnline Colored"]["F2"]
-        self.assertEqual(cell.fill.fill_type, "solid")
+        # 15 Jan (F2) has MapOnline data → coloured.
+        self.assertEqual(wb["MapOnline Colored"]["F2"].fill.fill_type, "solid")
+        # 16 Jan (G2) is beyond the latest MapOnline date (15 Jan) → left
+        # uncoloured, because there is no data for it yet.
+        self.assertIn(wb["MapOnline Colored"]["G2"].fill.fill_type, (None, "none"))
+
+    def test_mediawatch_sheet_capped_at_mediawatch_date(self):
+        """The MediaWatch sheet must not colour past the latest MediaWatch date,
+        even when MapOnline data extends further."""
+        from verification.colored_schedule import (
+            build_original_and_colored_wb, build_status_map_from_maponline,
+        )
+        # MediaWatch data only on 15 Jan; MapOnline extends to 16 Jan.
+        make_lmrb_row(
+            self.account, advt_theme="Theme A", advt_time="20:30:00",
+            duration=30, source="mediawatch", date=datetime.date(2025, 1, 15),
+        )
+        colors = {
+            'aired': '#22c55e', 'not_aired': '#ef4444', 'late_telecast': '#a855f7',
+            'programme_mismatch': '#f97316', 'extra_aired': '#3b82f6',
+            'planned': '#94a3b8', 'manual_override': '#14b8a6', 'aired_less': '#f59e0b',
+        }
+        mo_map = build_status_map_from_maponline(self.account.id, CHANNEL, MONTH)
+        wb, _ = build_original_and_colored_wb(
+            self.schedule.pk, colors, status_map=None, maponline_status_map=mo_map,
+        )
+        # 16 Jan (G2) on the MediaWatch sheet is beyond MediaWatch's data → uncoloured.
+        self.assertIn(wb["Colored Schedule"]["G2"].fill.fill_type, (None, "none"))
 
 
 class MapOnlinePurgeTest(TestCase):

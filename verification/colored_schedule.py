@@ -330,9 +330,12 @@ def build_status_map_from_tc(account_id, channel, month) -> dict:
             if nb not in brand_themes:
                 brand_themes[nb] = _lmrb_themes_for_brand(sr.brand, sr.duration, lmrb_theme_map)
 
-        # Observed LMRB tag count per (brand, date).
+        # Observed LMRB tag count per (brand, date).  MediaWatch only — MapOnline
+        # rows must not leak into the authoritative (MediaWatch) coloured sheet.
         aired_bd: dict = _dd(lambda: _dd(int))
-        lq = _LR.objects.filter(_lmrb_channel_q(channel), account_id=account_id).exclude(advt_theme='')
+        lq = (_LR.objects.filter(_lmrb_channel_q(channel), account_id=account_id,
+                                 source='mediawatch')
+              .exclude(advt_theme=''))
         if dmin and dmax:
             lq = lq.filter(date__range=(dmin, dmax))
         for lr in lq.values('advt_theme', 'product', 'date'):
@@ -1361,9 +1364,26 @@ def build_original_and_colored_wb(schedule_pk, colors: dict, status_map=None,
         )
         return wb, False
 
+    # Latest available monitoring date per source, so each sheet is only coloured
+    # up to the data it actually has.  Without this the MediaWatch sheet would
+    # colour date columns beyond the MediaWatch data (e.g. plotting to the 31st
+    # when MediaWatch only runs to the 28th) — those future cells have no data
+    # yet and must be left uncoloured (planned), not painted.
+    from django.db.models import Max as _Max
+    from core.models import LMRBRow as _LMRB
+    from verification.engine import _lmrb_channel_q as _chq
+
+    def _src_max_date(src):
+        return _LMRB.objects.filter(
+            _chq(schedule.channel), account_id=schedule.account_id, source=src,
+        ).aggregate(d=_Max('date'))['d']
+
+    mw_cap = _src_max_date('mediawatch')
+    mo_cap = _src_max_date('maponline')
+
     _apply_status_colors_inplace(
         ws_color, ws_vals, header_row_idx, col_map, date_col_map,
-        status_map, fills, status_to_fill,
+        status_map, fills, status_to_fill, max_data_date=mw_cap,
     )
 
     # Optional extra sheet coloured from MapOnline matching (independent source).
@@ -1372,23 +1392,35 @@ def build_original_and_colored_wb(schedule_pk, colors: dict, status_map=None,
         ws_mo.title = 'MapOnline Colored'
         _apply_status_colors_inplace(
             ws_mo, ws_vals, header_row_idx, col_map, date_col_map,
-            maponline_status_map, fills, status_to_fill,
+            maponline_status_map, fills, status_to_fill, max_data_date=mo_cap,
         )
 
     return wb, True
 
 
 def _apply_status_colors_inplace(ws_color, ws_vals, header_row_idx, col_map,
-                                 date_col_map, status_map, fills, status_to_fill):
+                                 date_col_map, status_map, fills, status_to_fill,
+                                 max_data_date=None):
     """Paint reconciliation status colours onto an exact copy of the pivot sheet.
 
     Shared by the MediaWatch "Colored Schedule" sheet and the "MapOnline Colored"
     sheet — both use the same {slot_key: {date: {status counts}}} status_map shape,
     so the colouring is identical; only the source of the map differs.
+
+    max_data_date caps the colouring: date columns AFTER it are left uncoloured
+    (there is no monitoring data for them yet, so painting them would be wrong).
+    Each sheet is capped at its own source's latest data date.
     """
     from datetime import time as _t, datetime as _dtt
     from openpyxl.styles import Font, Alignment
     from openpyxl.comments import Comment
+
+    # Normalise the cap to a 'YYYY-MM-DD' string (date_col_map values are strings,
+    # which sort chronologically as plain strings).
+    cap_str = None
+    if max_data_date is not None:
+        cap_str = (max_data_date.strftime('%Y-%m-%d')
+                   if hasattr(max_data_date, 'strftime') else str(max_data_date))
 
     # Per-slot late arrivals INTO each date (planned date is RED, actual date PURPLE).
     late_in: dict = {}
@@ -1425,6 +1457,10 @@ def _apply_status_colors_inplace(ws_color, ws_vals, header_row_idx, col_map,
         slot_late_in  = late_in.get(slot_key, {})
 
         for src_col, date_str in date_col_map.items():
+            # Beyond the source's latest data date → no data yet; leave the cell
+            # uncoloured rather than painting a status we can't know.
+            if cap_str and date_str > cap_str:
+                continue
             raw_v = ws_vals.cell(r, src_col).value
             try:
                 planned = int(float(raw_v)) if raw_v not in (None, '') else 0
