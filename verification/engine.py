@@ -783,29 +783,6 @@ def _maponline_display_rows(df):
     return rows
 
 
-def _maponline_extra_rows(df):
-    """Convert the Extra Aired DataFrame from match_ads into display dicts."""
-    if df is None or df.empty:
-        return []
-    rows = []
-    for _, r in df.iterrows():
-        aired_date = r.get('Date')
-        rows.append({
-            'brand':      r.get('Theme', '') or '',
-            'theme':      r.get('Theme', '') or '',
-            'duration':   (int(r['Duration'])
-                           if pd.notna(r.get('Duration')) and str(r.get('Duration')).strip() not in ('', 'nan')
-                           else None),
-            'programme':  r.get('Programme', '') or '',
-            'aired_date': str(aired_date.date()) if hasattr(aired_date, 'date')
-                          else (str(aired_date) if aired_date not in (None, '') and pd.notna(aired_date) else ''),
-            'air_time':   str(r.get('Air_Time', '') or ''),
-            'source':     r.get('Source', '') or 'maponline',
-            'status':     'Extra Aired',
-        })
-    return rows
-
-
 def compute_maponline_scope(account_id, channel, month, persist=True):
     """
     MapOnline verification: match ScheduleRows against MapOnline LMRBRows
@@ -932,7 +909,7 @@ def compute_maponline_scope(account_id, channel, month, persist=True):
         if sch_df.empty:
             continue
 
-        m_df, pm_df, late_df, na_df, extra_df, consumed = match_ads(
+        m_df, pm_df, late_df, na_df, _extra_df, consumed = match_ads(
             sch_df, mon_pool, brand_theme_map,
             pre_matched_idx=global_consumed_idx,
             max_verify_date=max_verify_ts,
@@ -945,9 +922,6 @@ def compute_maponline_scope(account_id, channel, month, persist=True):
         # na_df mixes 'Not Aired' and 'No Brand Mapping' statuses — split them.
         for disp in _maponline_display_rows(na_df):
             (no_mapping if disp['status'] == 'No Brand Mapping' else not_aired).append(disp)
-        # extra_df is recomputed per schedule against the shared consumed set; the
-        # last schedule's leftover pool is the authoritative leftover set.
-        extra = _maponline_extra_rows(extra_df)
 
         # Collect (schedule, lmrb) pairs consumed this pass so we can lock them.
         # matched / programme_mismatch / late_telecast each consume one LMRB row.
@@ -979,6 +953,28 @@ def compute_maponline_scope(account_id, channel, month, persist=True):
             ['is_maponline_matched', 'matched_maponline_lmrb_id', 'maponline_matched_at'],
         )
         LMRBRow.objects.bulk_update(lmrb_updates, ['is_maponline_schedule_matched'])
+
+    # ── Extra Aired: MapOnline rows left unconsumed across all schedules ────────
+    # Built from the leftover pool (not match_ads's per-pass extra_df) so it can
+    # carry the aired programme (LMRBRow.program, sourced from the file's Prg Name
+    # column) — same as the MediaWatch engine's extra rows.
+    for idx, mon_row in mon_pool.iterrows():
+        if idx in global_consumed_idx:
+            continue
+        aired = mon_row.get('Date', '')
+        extra.append({
+            'brand':      mon_row.get('Advt_Theme', '') or '',
+            'theme':      mon_row.get('Advt_Theme', '') or '',
+            'duration':   (int(mon_row['Dur'])
+                           if pd.notna(mon_row.get('Dur')) and str(mon_row.get('Dur')).strip() not in ('', 'nan')
+                           else None),
+            'programme':  mon_row.get('Program', '') or '',
+            'aired_date': str(aired.date()) if hasattr(aired, 'date')
+                          else (str(aired) if aired not in (None, '') and pd.notna(aired) else ''),
+            'air_time':   str(mon_row.get('Advt_time', '') or ''),
+            'source':     mon_row.get('_source', '') or 'maponline',
+            'status':     'Extra Aired',
+        })
 
     return {
         'matched':       matched,
