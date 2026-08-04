@@ -1,1 +1,1 @@
-web: python manage.py migrate --no-input && python manage.py collectstatic --no-input --clear && python manage.py ensure_superadmin && gunicorn ad_monitor.wsgi --log-file - --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+web: python manage.py migrate --no-input && python manage.py collectstatic --no-input --clear && python manage.py ensure_superadmin && python manage.py purge_maponline && gunicorn ad_monitor.wsgi --log-file - --bind 0.0.0.0:$PORT --workers 2 --timeout 120
