@@ -145,6 +145,25 @@ class Schedule(models.Model):
         return f'{self.account} | {self.channel} | {self.month} | v{self.version} | #{self.schedule_number}'
 
 
+class ScheduleTemplate(models.Model):
+    """A sample schedule Excel uploaded by an admin as a downloadable template.
+
+    Only the latest upload is used (ordered by -uploaded_at).  Every user can
+    download it from the Upload Schedule page; only admins can upload/replace it.
+    """
+    file              = models.FileField(upload_to='schedule_templates/')
+    original_filename = models.CharField(max_length=255)
+    uploaded_by       = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                          null=True, blank=True, related_name='uploaded_schedule_templates')
+    uploaded_at       = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f'ScheduleTemplate | {self.original_filename}'
+
+
 class MonitoringData(models.Model):
     """A MapOnline or MediaWatch data file uploaded by Operations.
 

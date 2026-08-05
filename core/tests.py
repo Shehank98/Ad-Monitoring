@@ -2260,6 +2260,58 @@ class MapOnlineComputeScopeTest(TestCase):
         self.assertNotIn("Brand B", matched_brands)
 
 
+class ScheduleTemplateTest(TestCase):
+    """Admin-uploaded sample schedule template: admin upload, everyone downloads."""
+
+    URL_UPLOAD = "/dashboard/schedules/template/upload/"
+    URL_DOWNLOAD = "/dashboard/schedules/template/download/"
+
+    def _xlsx(self, name="template.xlsx"):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        return SimpleUploadedFile(
+            name, b"PK\x03\x04 fake xlsx bytes",
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    def setUp(self):
+        from core.models import ScheduleTemplate
+        self.ScheduleTemplate = ScheduleTemplate
+        self.admin = make_user(email="admin@test.com", role="admin")
+        self.staff = make_user(email="ops@test.com", role="operations")
+
+    def test_admin_can_upload_template(self):
+        self.client.force_login(self.admin)
+        resp = self.client.post(self.URL_UPLOAD, {"file": self._xlsx()})
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self.ScheduleTemplate.objects.count(), 1)
+        self.assertEqual(self.ScheduleTemplate.objects.first().original_filename, "template.xlsx")
+
+    def test_upload_replaces_previous(self):
+        self.client.force_login(self.admin)
+        self.client.post(self.URL_UPLOAD, {"file": self._xlsx("first.xlsx")})
+        self.client.post(self.URL_UPLOAD, {"file": self._xlsx("second.xlsx")})
+        self.assertEqual(self.ScheduleTemplate.objects.count(), 1)
+        self.assertEqual(self.ScheduleTemplate.objects.first().original_filename, "second.xlsx")
+
+    def test_non_admin_cannot_upload(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(self.URL_UPLOAD, {"file": self._xlsx()})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(self.ScheduleTemplate.objects.count(), 0)
+
+    def test_any_user_can_download(self):
+        self.client.force_login(self.admin)
+        self.client.post(self.URL_UPLOAD, {"file": self._xlsx()})
+        self.client.force_login(self.staff)          # a non-admin
+        resp = self.client.get(self.URL_DOWNLOAD)
+        self.assertEqual(resp.status_code, 200)
+
+    def test_download_without_template_redirects(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.URL_DOWNLOAD)
+        self.assertEqual(resp.status_code, 302)
+
+
 class MapOnlineProgrammeParseTest(TestCase):
     """MapOnline parsing must read the aired programme from the 'Prg Name' column."""
 

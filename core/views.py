@@ -27,6 +27,7 @@ from .forms import AccountForm, ChannelForm, MonitoringUploadForm, ScheduleUploa
 from .models import (
     Account, AuditLog, BrandMapping, Channel, ChannelOfficer, Client,
     LMRBRow, ManualMatch, MatchResult, MonitoringData, Schedule, ScheduleRow,
+    ScheduleTemplate,
     SpotNote, SponsorshipLmrbAssignment, SummaryReportMeta, SystemSetting,
     TcChannelPrompt,
     TCRow, TcLmrbMatch, TransmissionReport,
@@ -846,6 +847,7 @@ def schedule_upload(request):
         'upload_summary': upload_summary,
         'parent_schedule_choices': parent_schedule_choices,
         'all_channels': list(Channel.objects.order_by('name').values_list('name', flat=True)),
+        'schedule_template': ScheduleTemplate.objects.first(),
     })
 
 
@@ -1140,6 +1142,47 @@ def schedule_download(request, pk):
         return HttpResponse('No file associated with this schedule.', status=404)
     fname = schedule.original_filename or schedule.file.name.split('/')[-1]
     return _serve_file(schedule.file, fname)
+
+
+@login_required
+@role_required(['super_admin', 'admin'])
+@require_POST
+def schedule_template_upload(request):
+    """Admin uploads (or replaces) the sample schedule template shown on the
+    Upload Schedule page.  Only the latest template is kept."""
+    uploaded = request.FILES.get('file')
+    if not uploaded:
+        messages.error(request, 'Please choose an Excel file to upload as the template.')
+        return redirect('schedule_upload')
+
+    name_lower = uploaded.name.lower()
+    if not name_lower.endswith(('.xlsx', '.xls')):
+        messages.error(request, 'The sample template must be an Excel file (.xlsx or .xls).')
+        return redirect('schedule_upload')
+
+    # Replace any existing template (keep only the latest).
+    for old in ScheduleTemplate.objects.all():
+        old.file.delete(save=False)
+        old.delete()
+
+    ScheduleTemplate.objects.create(
+        file=uploaded,
+        original_filename=uploaded.name,
+        uploaded_by=request.user,
+    )
+    messages.success(request, 'Sample schedule template uploaded.')
+    return redirect('schedule_upload')
+
+
+@login_required
+def schedule_template_download(request):
+    """Serve the current sample schedule template to any logged-in user."""
+    template = ScheduleTemplate.objects.first()   # ordering = -uploaded_at
+    if not template or not template.file:
+        messages.error(request, 'No sample schedule template has been uploaded yet.')
+        return redirect('schedule_upload')
+    fname = template.original_filename or template.file.name.split('/')[-1]
+    return _serve_file(template.file, fname)
 
 
 @login_required
