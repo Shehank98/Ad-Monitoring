@@ -36,6 +36,46 @@
     </div>
   </div>
 
+  <!-- ── Sample schedule template ────────────────────────────────────────── -->
+  <div class="bg-white border border-slate-200 rounded-2xl p-5">
+    <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+      <span class="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center shrink-0">
+        <i class="fa-solid fa-file-excel text-emerald-600"></i>
+      </span>
+      <div class="flex-1 min-w-0">
+        <p class="font-bold text-slate-800 text-sm">Sample Schedule Template</p>
+        {% if schedule_template %}
+          <p class="text-xs text-slate-500 truncate">
+            {{ schedule_template.original_filename }} &middot;
+            uploaded {{ schedule_template.uploaded_at|date:"d M Y" }}
+          </p>
+        {% else %}
+          <p class="text-xs text-slate-400">No template uploaded yet. Download it to see the expected format.</p>
+        {% endif %}
+      </div>
+      {% if schedule_template %}
+        <a href="/dashboard/schedules/template/download/"
+           class="btn-secondary text-xs inline-flex items-center gap-1.5 shrink-0">
+          <i class="fa-solid fa-download"></i> Download template
+        </a>
+      {% endif %}
+    </div>
+
+    {% if request.user.role in "super_admin,admin" %}
+    <form method="post" action="/dashboard/schedules/template/upload/" enctype="multipart/form-data"
+          class="mt-4 pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center gap-3">
+      {% csrf_token %}
+      <input type="file" name="file" accept=".xlsx,.xls" required
+             class="text-xs text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0
+                    file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200" />
+      <button type="submit" class="btn-primary text-xs inline-flex items-center gap-1.5 shrink-0">
+        <i class="fa-solid fa-upload"></i> {% if schedule_template %}Replace template{% else %}Upload template{% endif %}
+      </button>
+      <span class="text-[11px] text-slate-400">Admins only &middot; .xlsx / .xls</span>
+    </form>
+    {% endif %}
+  </div>
+
   <!-- ── Upload summary (shown after a successful upload) ─────────────────── -->
   {% if upload_summary %}
   <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5">
