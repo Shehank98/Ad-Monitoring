@@ -1146,9 +1146,13 @@ def schedule_download(request, pk):
 def schedule_delete(request, pk):
     schedule = get_object_or_404(Schedule, pk=pk)
     user     = request.user
-    today    = date_cls.today()
 
-    if _is_admin(user) or (schedule.uploaded_by == user and schedule.uploaded_at.date() == today):
+    # Any user may delete a schedule they can see.  Non-admins are still scoped to
+    # their own accounts (the same accounts the schedule list is filtered to), so
+    # this can't delete another account's schedule via a hand-typed URL.
+    can_delete = _is_admin(user) or schedule.account in user.accounts.all()
+
+    if can_delete:
         # Before deleting: clean up all associated data to maintain integrity
         sch_row_ids = list(schedule.rows.values_list('id', flat=True))
 
@@ -1176,7 +1180,7 @@ def schedule_delete(request, pk):
         schedule.delete()
         messages.success(request, 'Schedule deleted.')
     else:
-        messages.error(request, 'You can only delete schedules you uploaded today.')
+        messages.error(request, 'You do not have access to delete this schedule.')
     return redirect('/dashboard/schedules/')
 
 
