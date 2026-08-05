@@ -20,7 +20,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.db.models import Min, Max
 
 from core.models import Account, LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow
-from .engine import run_scope, active_schedule_ids
+from .engine import run_scope, active_schedule_ids, compute_maponline_scope, _lmrb_channel_q
 
 
 # ── Auth helpers ───────────────────────────────────────────────────────────────
@@ -555,6 +555,76 @@ def load_results(request):
             'no_mapping':    len(no_mapping),
         },
         'last_run': last_run.strftime('%d %b %Y %H:%M') if last_run else None,
+    })
+
+
+@login_required
+def maponline_results(request):
+    """GET — view-only MapOnline verification results for a scope.
+
+    Computed live from MapOnline monitoring data (source='maponline') via
+    compute_maponline_scope(); nothing is persisted or locked.  Returns the same
+    JSON shape as load_results so the Verify Ads front-end can render it with the
+    existing table renderer when the user flips the source toggle to MapOnline.
+    """
+    account_id = request.GET.get('account_id')
+    channel    = request.GET.get('channel')
+    month      = request.GET.get('month')
+    if not all([account_id, channel, month]):
+        return JsonResponse({'ok': False, 'error': 'Missing params'})
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied'})
+
+    try:
+        res = compute_maponline_scope(account_id, channel, month)
+    except Exception as e:
+        import traceback
+        return JsonResponse({'ok': False, 'error': str(e), 'detail': traceback.format_exc()})
+
+    matched       = res['matched']
+    prog_mismatch = res['prog_mismatch']
+    late_telecast = res['late_telecast']
+    not_aired     = res['not_aired']
+    extra         = res['extra']
+    no_mapping    = res['no_mapping']
+    planned       = res['planned']
+
+    processed = len(matched) + len(prog_mismatch) + len(late_telecast) \
+        + len(not_aired) + len(no_mapping)
+    # Rows not yet reachable — beyond the latest MapOnline date, or manually
+    # reconciled (skipped by the auto engine).  Surfaced only as a count.
+    pending = max(0, planned - processed)
+
+    has_maponline_data = LMRBRow.objects.filter(
+        _lmrb_channel_q(channel), account_id=account_id, source='maponline',
+    ).exists()
+
+    return JsonResponse({
+        'ok':            True,
+        'source':        'maponline',
+        'has_data':      has_maponline_data,
+        'has_results':   processed > 0 or planned > 0,
+        'total':         processed,
+        'matched':       matched,
+        'prog_mismatch': prog_mismatch,
+        'late_telecast': late_telecast,
+        'not_aired':     not_aired,
+        'extra':         extra,
+        'no_mapping':    no_mapping,
+        'pending_rows':  [],
+        'summary': {
+            'total':         processed,
+            'planned':       planned,
+            'pending':       pending,
+            'matched':       len(matched),
+            'prog_mismatch': len(prog_mismatch),
+            'late_telecast': len(late_telecast),
+            'not_aired':     len(not_aired),
+            'extra':         len(extra),
+            'no_mapping':    len(no_mapping),
+        },
+        'last_run':      None,
+        'max_data_date': res.get('max_data_date'),
     })
 
 

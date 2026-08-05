@@ -22,6 +22,7 @@ from accounts.models import User
 from core.models import (
     Account,
     BrandMapping,
+    Channel,
     LMRBRow,
     ManualMatch,
     MatchResult,
@@ -2158,3 +2159,328 @@ class BrandMappingQuickDeleteTest(TestCase):
     def test_quick_page_renders(self):
         self.client.force_login(self.admin)
         self.assertEqual(self.client.get("/dashboard/brand-mappings/quick/").status_code, 200)
+
+
+# ── MapOnline verification (view-only) + retention ─────────────────────────────
+
+class MapOnlineComputeScopeTest(TestCase):
+    """verification.engine.compute_maponline_scope — view-only MapOnline matching.
+
+    Uses BrandMapping.maponline_theme and source='maponline' rows, and must NOT
+    persist any match state or lock flag (it feeds only the Verify Ads toggle).
+    """
+
+    def setUp(self):
+        from verification.engine import compute_maponline_scope
+        self.compute = compute_maponline_scope
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        self.sr = make_schedule_row(self.account, self.schedule)  # Brand A, 20:00–21:00, 30s
+        # MapOnline theme name differs from the MediaWatch theme — mapped separately.
+        BrandMapping.objects.create(
+            account=self.account, brand="Brand A", theme="Theme A",
+            maponline_theme="MO Theme A",
+        )
+        # A matching MapOnline observation (in-window, same duration).
+        self.lr = make_lmrb_row(
+            self.account, advt_theme="MO Theme A", advt_time="20:30:00",
+            duration=30, source="maponline",
+        )
+
+    def test_matches_via_maponline_theme(self):
+        res = self.compute(self.account.id, CHANNEL, MONTH)
+        self.assertEqual(res["planned"], 1)
+        self.assertEqual(len(res["matched"]), 1)
+        self.assertEqual(res["matched"][0]["brand"], "Brand A")
+
+    def test_locks_maponline_rows_but_not_mediawatch(self):
+        """persist=True locks the MapOnline-specific fields one-to-one, but never
+        touches MediaWatch state (is_matched) or writes MatchResult."""
+        self.compute(self.account.id, CHANNEL, MONTH)  # persist defaults to True
+        self.sr.refresh_from_db()
+        self.lr.refresh_from_db()
+        # MapOnline locks set
+        self.assertTrue(self.sr.is_maponline_matched)
+        self.assertEqual(self.sr.matched_maponline_lmrb_id, self.lr.id)
+        self.assertTrue(self.lr.is_maponline_schedule_matched)
+        # MediaWatch / official state untouched
+        self.assertFalse(self.sr.is_matched)
+        self.assertFalse(self.lr.is_matched)
+        self.assertEqual(MatchResult.objects.count(), 0)
+
+    def test_persist_false_writes_nothing(self):
+        """persist=False computes the breakdown without any DB writes."""
+        res = self.compute(self.account.id, CHANNEL, MONTH, persist=False)
+        self.assertEqual(len(res["matched"]), 1)
+        self.sr.refresh_from_db()
+        self.lr.refresh_from_db()
+        self.assertFalse(self.sr.is_maponline_matched)
+        self.assertFalse(self.lr.is_maponline_schedule_matched)
+
+    def test_same_ad_not_matched_twice(self):
+        """One MapOnline row cannot be matched to two schedule rows (one-to-one lock)."""
+        # A second identical schedule row, but only one MapOnline observation exists.
+        make_schedule_row(
+            self.account, self.schedule, brand="Brand A",
+            date=DATE, start_time="20:00:00", end_time="21:00:00", duration=30,
+        )
+        res = self.compute(self.account.id, CHANNEL, MONTH)
+        self.assertEqual(res["planned"], 2)
+        self.assertEqual(len(res["matched"]), 1)   # only one row can claim the single spot
+        # The single MapOnline row is locked to exactly one schedule row.
+        self.lr.refresh_from_db()
+        self.assertTrue(self.lr.is_maponline_schedule_matched)
+        self.assertEqual(
+            ScheduleRow.objects.filter(is_maponline_matched=True).count(), 1
+        )
+
+    def test_extra_aired_carries_aired_programme(self):
+        """Unconsumed MapOnline rows surface in Extra Aired with the aired
+        programme (LMRBRow.program, from the file's 'Prg Name' column)."""
+        # A second MapOnline spot of the same brand that has no planned slot to
+        # claim it → it becomes Extra Aired.
+        make_lmrb_row(
+            self.account, advt_theme="MO Theme A", advt_time="23:45:00",
+            duration=30, source="maponline",
+        )
+        # Give both MapOnline rows an aired programme.
+        LMRBRow.objects.filter(source="maponline").update(program="Prime Time Show")
+        res = self.compute(self.account.id, CHANNEL, MONTH)
+        self.assertTrue(res["extra"])
+        self.assertTrue(all(r["programme"] == "Prime Time Show" for r in res["extra"]))
+
+    def test_unmapped_maponline_theme_not_matched(self):
+        """A MapOnline row whose theme has no maponline_theme mapping is not matched."""
+        # Different brand row with no maponline_theme mapping at all.
+        sched2 = make_schedule(self.account, schedule_number="102")
+        make_schedule_row(self.account, sched2, brand="Brand B")
+        res = self.compute(self.account.id, CHANNEL, MONTH)
+        # Brand B has no maponline mapping → shows up as No Brand Mapping, not matched.
+        matched_brands = {r["brand"] for r in res["matched"]}
+        self.assertNotIn("Brand B", matched_brands)
+
+
+class MapOnlineProgrammeParseTest(TestCase):
+    """MapOnline parsing must read the aired programme from the 'Prg Name' column."""
+
+    def test_prg_name_populates_program(self):
+        import pandas as pd
+        from core.views import _parse_lmrb_rows
+        account = make_account()
+        Channel.objects.create(name="TV - Sirasa TV")
+        df = pd.DataFrame([{
+            "Channel":    "Tv - Sirasa TV",
+            "Prg Date":   "2026-07-01",
+            "Prg Name":   "Fifa World Cup 2026 - Fra Vs Swe",
+            "Prg Start":  "2:15",
+            "Product":    "Coca Cola",
+            "Theme":      "Tani With Friends (30)(Sin)",
+            "Ad Start":   "2:53:08",
+            "Ad Dur":     30,
+            "Language":   "SINHALA",
+            "Advertiser": "Coca Cola Beverages Ltd",
+            "Category":   "Aerated Soft Drinks",
+        }])
+        inserted = _parse_lmrb_rows(df, "maponline", account)
+        self.assertEqual(inserted, 1)
+        row = LMRBRow.objects.get(source="maponline")
+        self.assertEqual(row.program, "Fifa World Cup 2026 - Fra Vs Swe")
+        self.assertEqual(row.advt_theme, "Tani With Friends (30)(Sin)")
+        self.assertEqual(row.advt_time, "2:53:08")
+        self.assertEqual(row.duration, 30)
+
+
+class MapOnlineColoredStatusMapTest(TestCase):
+    """verification.colored_schedule.build_status_map_from_maponline."""
+
+    def setUp(self):
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        make_schedule_row(self.account, self.schedule)  # Test Show, 20:00:00, 30s, 2025-01-15
+        BrandMapping.objects.create(
+            account=self.account, brand="Brand A", theme="Theme A",
+            maponline_theme="MO Theme A",
+        )
+        make_lmrb_row(
+            self.account, advt_theme="MO Theme A", advt_time="20:30:00",
+            duration=30, source="maponline",
+        )
+
+    def test_status_map_marks_matched_slot(self):
+        from verification.colored_schedule import build_status_map_from_maponline
+        sm = build_status_map_from_maponline(self.account.id, CHANNEL, MONTH)
+        slot = ("test show", "20:00:00", 30)
+        self.assertIn(slot, sm)
+        self.assertEqual(sm[slot]["2025-01-15"]["matched"], 1)
+
+    def test_none_when_no_maponline_data(self):
+        from verification.colored_schedule import build_status_map_from_maponline
+        LMRBRow.objects.filter(source="maponline").delete()
+        self.assertIsNone(
+            build_status_map_from_maponline(self.account.id, CHANNEL, MONTH)
+        )
+
+    def test_status_map_build_does_not_lock(self):
+        """The export builder uses persist=False — it must not lock rows."""
+        from verification.colored_schedule import build_status_map_from_maponline
+        build_status_map_from_maponline(self.account.id, CHANNEL, MONTH)
+        self.assertFalse(
+            ScheduleRow.objects.filter(is_maponline_matched=True).exists()
+        )
+
+
+class MapOnlineColoredSheetIntegrationTest(TestCase):
+    """build_original_and_colored_wb produces a 'MapOnline Colored' sheet."""
+
+    def _make_pivot_bytes(self):
+        import io as _io
+        import datetime as _dt
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        # Header row: PROGRAM | DAY | TIME | END | DUR | <15 Jan> | <16 Jan>
+        ws.append(["PROGRAM", "DAY", "TIME", "END", "DUR",
+                   _dt.date(2025, 1, 15), _dt.date(2025, 1, 16)])
+        # Data row: one planned spot on the 15th AND one on the 16th.
+        ws.append(["Test Show", "Wed", _dt.time(20, 0, 0), _dt.time(21, 0, 0), 30, 1, 1])
+        buf = _io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    def setUp(self):
+        from django.core.files.base import ContentFile
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        self.schedule.file.save("pivot.xlsx", ContentFile(self._make_pivot_bytes()), save=True)
+        make_schedule_row(
+            self.account, self.schedule, brand="Brand A", programme="Test Show",
+            date=DATE, start_time="20:00:00", end_time="21:00:00", duration=30,
+        )
+        BrandMapping.objects.create(
+            account=self.account, brand="Brand A", theme="Theme A",
+            maponline_theme="MO Theme A",
+        )
+        make_lmrb_row(
+            self.account, advt_theme="MO Theme A", advt_time="20:30:00",
+            duration=30, source="maponline",
+        )
+
+    def test_workbook_has_maponline_colored_sheet(self):
+        from verification.colored_schedule import (
+            build_original_and_colored_wb, build_status_map_from_maponline,
+        )
+        colors = {
+            'aired': '#22c55e', 'not_aired': '#ef4444', 'late_telecast': '#a855f7',
+            'programme_mismatch': '#f97316', 'extra_aired': '#3b82f6',
+            'planned': '#94a3b8', 'manual_override': '#14b8a6', 'aired_less': '#f59e0b',
+        }
+        mo_map = build_status_map_from_maponline(self.account.id, CHANNEL, MONTH)
+        self.assertIsNotNone(mo_map)
+        wb, detected = build_original_and_colored_wb(
+            self.schedule.pk, colors, status_map=None, maponline_status_map=mo_map,
+        )
+        self.assertTrue(detected)
+        self.assertIn("MapOnline Colored", wb.sheetnames)
+        # 15 Jan (F2) has MapOnline data → coloured.
+        self.assertEqual(wb["MapOnline Colored"]["F2"].fill.fill_type, "solid")
+        # 16 Jan (G2) is beyond the latest MapOnline date (15 Jan) → left
+        # uncoloured, because there is no data for it yet.
+        self.assertIn(wb["MapOnline Colored"]["G2"].fill.fill_type, (None, "none"))
+
+    def test_mediawatch_sheet_capped_at_mediawatch_date(self):
+        """The MediaWatch sheet must not colour past the latest MediaWatch date,
+        even when MapOnline data extends further."""
+        from verification.colored_schedule import (
+            build_original_and_colored_wb, build_status_map_from_maponline,
+        )
+        # MediaWatch data only on 15 Jan; MapOnline extends to 16 Jan.
+        make_lmrb_row(
+            self.account, advt_theme="Theme A", advt_time="20:30:00",
+            duration=30, source="mediawatch", date=datetime.date(2025, 1, 15),
+        )
+        colors = {
+            'aired': '#22c55e', 'not_aired': '#ef4444', 'late_telecast': '#a855f7',
+            'programme_mismatch': '#f97316', 'extra_aired': '#3b82f6',
+            'planned': '#94a3b8', 'manual_override': '#14b8a6', 'aired_less': '#f59e0b',
+        }
+        mo_map = build_status_map_from_maponline(self.account.id, CHANNEL, MONTH)
+        wb, _ = build_original_and_colored_wb(
+            self.schedule.pk, colors, status_map=None, maponline_status_map=mo_map,
+        )
+        # 16 Jan (G2) on the MediaWatch sheet is beyond MediaWatch's data → uncoloured.
+        self.assertIn(wb["Colored Schedule"]["G2"].fill.fill_type, (None, "none"))
+
+
+class MapOnlinePurgeTest(TestCase):
+    """core.maponline_cleanup.purge_old_maponline_data — 30-day retention."""
+
+    def setUp(self):
+        import uuid as _uuid
+        from django.utils import timezone
+        from core.models import MonitoringData
+        self.MonitoringData = MonitoringData
+        self.account = make_account()
+        old = timezone.now() - datetime.timedelta(days=40)
+
+        # Old MapOnline upload + its LMRB row (should be purged).
+        self.old_batch = _uuid.uuid4()
+        old_md = MonitoringData.objects.create(
+            account=self.account, data_type="maponline", channel=CHANNEL,
+            file="monitoring/old.xlsx", original_filename="old.xlsx",
+            file_group_id=str(self.old_batch), row_count=1,
+        )
+        MonitoringData.objects.filter(id=old_md.id).update(uploaded_at=old)
+        old_row = LMRBRow.objects.create(
+            account=self.account, channel=CHANNEL, date=DATE,
+            advt_theme="Old", advt_time="20:00:00", duration=30,
+            source="maponline", batch_id=self.old_batch,
+            dedup_key=LMRBRow.make_dedup_key(self.account.id, CHANNEL, DATE, "20:00:00", "Old", 30),
+        )
+        LMRBRow.objects.filter(id=old_row.id).update(uploaded_at=old)
+
+        # Recent MapOnline upload + row (should be kept).
+        self.recent_batch = _uuid.uuid4()
+        MonitoringData.objects.create(
+            account=self.account, data_type="maponline", channel=CHANNEL,
+            file="monitoring/new.xlsx", original_filename="new.xlsx",
+            file_group_id=str(self.recent_batch), row_count=1,
+        )
+        LMRBRow.objects.create(
+            account=self.account, channel=CHANNEL, date=DATE,
+            advt_theme="Fresh", advt_time="21:00:00", duration=30,
+            source="maponline", batch_id=self.recent_batch,
+            dedup_key=LMRBRow.make_dedup_key(self.account.id, CHANNEL, DATE, "21:00:00", "Fresh", 30),
+        )
+
+        # Old MediaWatch upload + row (must be untouched — different source).
+        mw_md = MonitoringData.objects.create(
+            account=self.account, data_type="mediawatch", channel=CHANNEL,
+            file="monitoring/mw.xlsx", original_filename="mw.xlsx", row_count=1,
+        )
+        MonitoringData.objects.filter(id=mw_md.id).update(uploaded_at=old)
+        mw_row = LMRBRow.objects.create(
+            account=self.account, channel=CHANNEL, date=DATE,
+            advt_theme="MW", advt_time="22:00:00", duration=30,
+            source="mediawatch",
+            dedup_key=LMRBRow.make_dedup_key(self.account.id, CHANNEL, DATE, "22:00:00", "MW", 30),
+        )
+        LMRBRow.objects.filter(id=mw_row.id).update(uploaded_at=old)
+
+    def test_purges_only_old_maponline(self):
+        from core.maponline_cleanup import purge_old_maponline_data
+        result = purge_old_maponline_data(days=30)
+
+        self.assertEqual(result["monitoring_deleted"], 1)
+        self.assertEqual(result["lmrb_deleted"], 1)
+        # Old MapOnline gone
+        self.assertFalse(LMRBRow.objects.filter(advt_theme="Old").exists())
+        self.assertFalse(
+            self.MonitoringData.objects.filter(file_group_id=str(self.old_batch)).exists()
+        )
+        # Recent MapOnline kept
+        self.assertTrue(LMRBRow.objects.filter(advt_theme="Fresh").exists())
+        # MediaWatch kept regardless of age
+        self.assertTrue(LMRBRow.objects.filter(advt_theme="MW").exists())
+        self.assertTrue(
+            self.MonitoringData.objects.filter(data_type="mediawatch").exists()
+        )

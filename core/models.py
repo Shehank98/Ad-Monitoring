@@ -212,8 +212,10 @@ class ScheduleRow(models.Model):
     )
     matched_at   = models.DateTimeField(null=True, blank=True)
 
-    # MapOnline preliminary match — independent of the LMRB final match above.
-    # Set by run_maponline_scope(); does NOT block LMRB matching.
+    # MapOnline preliminary match — set by compute_maponline_scope() (Verify Ads
+    # MapOnline toggle).  Separate from is_matched (MediaWatch), so MapOnline
+    # matching locks its own rows one-to-one WITHOUT affecting the authoritative
+    # MediaWatch reconciliation, the Summary Sheet, PDFs, or the dashboard.
     is_maponline_matched   = models.BooleanField(default=False, db_index=True)
     matched_maponline_lmrb = models.ForeignKey(
         'LMRBRow', on_delete=models.SET_NULL,
@@ -292,8 +294,9 @@ class LMRBRow(models.Model):
     # Sponsorship reconciliation lock (set after Step 1 auto or Step 2 manual)
     is_sponsorship_matched = models.BooleanField(default=False, db_index=True)
 
-    # MapOnline preliminary matching lock — set when this row is consumed by the
-    # MapOnline engine.  Separate from is_matched (which is LMRB/MediaWatch only).
+    # MapOnline matching lock — set by compute_maponline_scope() when this row is
+    # consumed by MapOnline matching.  Separate from is_matched (MediaWatch), so a
+    # MapOnline raw row is claimed at most once without touching MediaWatch state.
     is_maponline_schedule_matched = models.BooleanField(default=False, db_index=True)
 
     # Manual reconciliation lock — permanently locked once a ManualMatch is created

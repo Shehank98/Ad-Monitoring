@@ -330,9 +330,12 @@ def build_status_map_from_tc(account_id, channel, month) -> dict:
             if nb not in brand_themes:
                 brand_themes[nb] = _lmrb_themes_for_brand(sr.brand, sr.duration, lmrb_theme_map)
 
-        # Observed LMRB tag count per (brand, date).
+        # Observed LMRB tag count per (brand, date).  MediaWatch only — MapOnline
+        # rows must not leak into the authoritative (MediaWatch) coloured sheet.
         aired_bd: dict = _dd(lambda: _dd(int))
-        lq = _LR.objects.filter(_lmrb_channel_q(channel), account_id=account_id).exclude(advt_theme='')
+        lq = (_LR.objects.filter(_lmrb_channel_q(channel), account_id=account_id,
+                                 source='mediawatch')
+              .exclude(advt_theme=''))
         if dmin and dmax:
             lq = lq.filter(date__range=(dmin, dmax))
         for lr in lq.values('advt_theme', 'product', 'date'):
@@ -410,6 +413,63 @@ def build_status_map_auto(account_id, channel, month):
         return build_status_map(account_id, channel, month)
 
     return None
+
+
+def build_status_map_from_maponline(account_id, channel, month) -> dict | None:
+    """Build the per-slot, per-date status map from MapOnline matching.
+
+    Uses compute_maponline_scope(persist=False) (read-only — no locks written for
+    an export) and maps its result rows onto the same {slot_key: {date: {...}}}
+    shape the colouring code expects:
+        matched            → green
+        programme_mismatch → orange
+        late_telecast      → planned date RED + actual date PURPLE
+        not_aired/no_mapping → red
+
+    Returns None when there is no MapOnline data for the scope (so the export
+    simply omits the extra sheet).
+    """
+    from core.models import LMRBRow
+    from verification.engine import compute_maponline_scope, _lmrb_channel_q
+
+    has_maponline = LMRBRow.objects.filter(
+        _lmrb_channel_q(channel), account_id=account_id, source='maponline',
+    ).exists()
+    if not has_maponline:
+        return None
+
+    res = compute_maponline_scope(account_id, channel, month, persist=False)
+
+    status_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    late_actual_map: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+
+    def _slot(r):
+        return (_normalize(r.get('programme')),
+                _normalize(r.get('planned_start')),
+                r.get('duration') or 0)
+
+    for r in res.get('matched', []):
+        if r.get('planned_date'):
+            status_map[_slot(r)][r['planned_date']]['matched'] += 1
+    for r in res.get('prog_mismatch', []):
+        if r.get('planned_date'):
+            status_map[_slot(r)][r['planned_date']]['programme_mismatch'] += 1
+    for r in res.get('late_telecast', []):
+        if not r.get('planned_date'):
+            continue
+        status_map[_slot(r)][r['planned_date']]['not_aired'] += 1
+        if r.get('aired_date'):
+            late_actual_map[_slot(r)][r['planned_date']][r['aired_date']] += 1
+    for r in res.get('not_aired', []) + res.get('no_mapping', []):
+        if r.get('planned_date'):
+            status_map[_slot(r)][r['planned_date']]['not_aired'] += 1
+
+    for slot_key, date_dict in late_actual_map.items():
+        for date_str, actual_dict in date_dict.items():
+            status_map[slot_key][date_str]['late_actual'] = dict(actual_dict)
+            status_map[slot_key][date_str]['late_to'] = dict(actual_dict)
+
+    return dict(status_map)
 
 
 # ── Pivot structure detection (openpyxl-based) ───────────────────────────────
@@ -1209,12 +1269,17 @@ def _fmt_date(date_str: str) -> str:
 
 # ── Combined export: Original + Colored sheets from the uploaded file ──────────
 
-def build_original_and_colored_wb(schedule_pk, colors: dict, status_map=None):
+def build_original_and_colored_wb(schedule_pk, colors: dict, status_map=None,
+                                  maponline_status_map=None):
     """
     Build a workbook whose FIRST sheet is the user's original uploaded schedule
     (exact copy — all formatting, merged cells, column widths, row heights and
     formulas preserved) and SECOND sheet is the same layout with reconciliation
     status colours applied IN-PLACE.
+
+    When maponline_status_map is provided, a THIRD sheet ("MapOnline Colored") is
+    added — the same pivot layout coloured from MapOnline matching results, so the
+    schedule can be eyeballed against MapOnline independently of MediaWatch.
 
     The original Firebase file is the single source of truth for visual
     presentation; sheets are never rebuilt from database rows.  openpyxl's
@@ -1299,6 +1364,64 @@ def build_original_and_colored_wb(schedule_pk, colors: dict, status_map=None):
         )
         return wb, False
 
+    # Latest available monitoring date per source, so each sheet is only coloured
+    # up to the data it actually has.  Without this the MediaWatch sheet would
+    # colour date columns beyond the MediaWatch data (e.g. plotting to the 31st
+    # when MediaWatch only runs to the 28th) — those future cells have no data
+    # yet and must be left uncoloured (planned), not painted.
+    from django.db.models import Max as _Max
+    from core.models import LMRBRow as _LMRB
+    from verification.engine import _lmrb_channel_q as _chq
+
+    def _src_max_date(src):
+        return _LMRB.objects.filter(
+            _chq(schedule.channel), account_id=schedule.account_id, source=src,
+        ).aggregate(d=_Max('date'))['d']
+
+    mw_cap = _src_max_date('mediawatch')
+    mo_cap = _src_max_date('maponline')
+
+    _apply_status_colors_inplace(
+        ws_color, ws_vals, header_row_idx, col_map, date_col_map,
+        status_map, fills, status_to_fill, max_data_date=mw_cap,
+    )
+
+    # Optional extra sheet coloured from MapOnline matching (independent source).
+    if maponline_status_map is not None:
+        ws_mo = wb.copy_worksheet(ws_orig)
+        ws_mo.title = 'MapOnline Colored'
+        _apply_status_colors_inplace(
+            ws_mo, ws_vals, header_row_idx, col_map, date_col_map,
+            maponline_status_map, fills, status_to_fill, max_data_date=mo_cap,
+        )
+
+    return wb, True
+
+
+def _apply_status_colors_inplace(ws_color, ws_vals, header_row_idx, col_map,
+                                 date_col_map, status_map, fills, status_to_fill,
+                                 max_data_date=None):
+    """Paint reconciliation status colours onto an exact copy of the pivot sheet.
+
+    Shared by the MediaWatch "Colored Schedule" sheet and the "MapOnline Colored"
+    sheet — both use the same {slot_key: {date: {status counts}}} status_map shape,
+    so the colouring is identical; only the source of the map differs.
+
+    max_data_date caps the colouring: date columns AFTER it are left uncoloured
+    (there is no monitoring data for them yet, so painting them would be wrong).
+    Each sheet is capped at its own source's latest data date.
+    """
+    from datetime import time as _t, datetime as _dtt
+    from openpyxl.styles import Font, Alignment
+    from openpyxl.comments import Comment
+
+    # Normalise the cap to a 'YYYY-MM-DD' string (date_col_map values are strings,
+    # which sort chronologically as plain strings).
+    cap_str = None
+    if max_data_date is not None:
+        cap_str = (max_data_date.strftime('%Y-%m-%d')
+                   if hasattr(max_data_date, 'strftime') else str(max_data_date))
+
     # Per-slot late arrivals INTO each date (planned date is RED, actual date PURPLE).
     late_in: dict = {}
     if status_map:
@@ -1334,6 +1457,10 @@ def build_original_and_colored_wb(schedule_pk, colors: dict, status_map=None):
         slot_late_in  = late_in.get(slot_key, {})
 
         for src_col, date_str in date_col_map.items():
+            # Beyond the source's latest data date → no data yet; leave the cell
+            # uncoloured rather than painting a status we can't know.
+            if cap_str and date_str > cap_str:
+                continue
             raw_v = ws_vals.cell(r, src_col).value
             try:
                 planned = int(float(raw_v)) if raw_v not in (None, '') else 0
@@ -1378,4 +1505,3 @@ def build_original_and_colored_wb(schedule_pk, colors: dict, status_map=None):
                 cell.comment = Comment('\n'.join(parts), 'Ad Monitor')
 
     _write_legend(ws_color, ws_vals.max_row + 3, fills)
-    return wb, True
