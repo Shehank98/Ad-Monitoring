@@ -16,7 +16,7 @@ Run with:
 
 import datetime
 from django.db import IntegrityError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from accounts.models import User
 from core.models import (
@@ -2258,6 +2258,34 @@ class MapOnlineComputeScopeTest(TestCase):
         # Brand B has no maponline mapping → shows up as No Brand Mapping, not matched.
         matched_brands = {r["brand"] for r in res["matched"]}
         self.assertNotIn("Brand B", matched_brands)
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class TcConvertAccessTest(TestCase):
+    """Convert TC (AI) is open to all users; the AI Conversion Prompt UI is hidden."""
+
+    def test_non_admin_can_open_convert_page(self):
+        planner = make_user(email="planner@test.com", role="planner")
+        self.client.force_login(planner)
+        resp = self.client.get("/dashboard/tc/pdf-convert/")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_convert_page_hides_ai_conversion_prompt(self):
+        planner = make_user(email="planner2@test.com", role="planner")
+        self.client.force_login(planner)
+        html = self.client.get("/dashboard/tc/pdf-convert/").content.decode()
+        self.assertNotIn("AI Conversion Prompt", html)
+        self.assertIn("Upload TC PDF", html)   # section still present, renumbered
+
+    def test_channel_prompt_get_open_to_all(self):
+        planner = make_user(email="planner3@test.com", role="planner")
+        self.client.force_login(planner)
+        resp = self.client.get("/dashboard/tc/channel-prompt/?channel=Tv - Derana")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json().get("ok"))
 
 
 class ScheduleTemplateTest(TestCase):

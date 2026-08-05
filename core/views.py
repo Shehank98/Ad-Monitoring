@@ -4596,9 +4596,12 @@ def tc_channel_prompt_save(request):
 
 
 @login_required
-@role_required(['super_admin', 'admin', 'operations'])
 def tc_channel_prompt_get(request):
-    """Return the saved prompt for a channel (blank -> the starter template)."""
+    """Return the saved prompt for a channel (blank -> the starter template).
+
+    Read-only and available to all logged-in users: the Convert TC (AI) page
+    reads the saved channel prompt so the AI override still applies for everyone,
+    even though the prompt-editing UI is hidden. Saving remains admin/operations."""
     channel = request.GET.get('channel', '').strip()
     row = TcChannelPrompt.objects.filter(channel=channel).first() if channel else None
     return JsonResponse({
@@ -4612,7 +4615,6 @@ def tc_channel_prompt_get(request):
 
 
 @login_required
-@role_required(['super_admin', 'admin', 'operations'])
 def tc_pdf_convert(request):
     """
     GET  - render the PDF TC converter page.
