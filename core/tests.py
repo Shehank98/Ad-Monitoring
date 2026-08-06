@@ -2288,6 +2288,31 @@ class BrandMappingLmrbChannelTest(TestCase):
         resp = self.client.get(self.URL, {"account_id": self.account.id, "channel": "Derana"})
         self.assertIn("Derana Theme A", resp.json()["themes"])
 
+    def _narrow_schedule(self):
+        """A schedule whose date range (Feb 1–5) does NOT cover the LMRB row (Jan 15)."""
+        return Schedule.objects.create(
+            account=self.account, channel="TV - Derana", month="February 2025",
+            schedule_number="201", file="s.xlsx", original_filename="s.xlsx",
+            start_date=datetime.date(2025, 2, 1), end_date=datetime.date(2025, 2, 5), version=1,
+        )
+
+    def test_theme_shown_even_outside_schedule_date_range(self):
+        self._narrow_schedule()
+        self.client.force_login(self.admin)
+        resp = self.client.get(self.URL, {"account_id": self.account.id, "channel": "TV - Derana"})
+        # LMRB (Jan 15) is outside the schedule window (Feb 1–5) but must still show
+        # at account/channel level — otherwise uploaded LMRB looks missing.
+        self.assertIn("Derana Theme A", resp.json()["themes"])
+
+    def test_schedule_drilldown_still_scopes_by_date(self):
+        sch = self._narrow_schedule()
+        self.client.force_login(self.admin)
+        resp = self.client.get(self.URL, {
+            "account_id": self.account.id, "channel": "TV - Derana", "schedule_id": sch.id,
+        })
+        # When drilled into a specific schedule, the out-of-range theme is scoped out.
+        self.assertNotIn("Derana Theme A", resp.json()["themes"])
+
 
 class SponsorshipTagDurationTest(TestCase):
     """A sponsorship tag logged at different durations in Schedule/LMRB/TC must
