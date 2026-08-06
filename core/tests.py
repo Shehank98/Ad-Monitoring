@@ -2264,6 +2264,55 @@ class MapOnlineComputeScopeTest(TestCase):
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 })
+class DiagnoseScopeTest(TestCase):
+    """verification.engine.diagnose_scope — 'why didn't this match?' reasons."""
+
+    def setUp(self):
+        from verification.engine import diagnose_scope
+        self.diagnose = diagnose_scope
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+
+    def _reason_for(self, brand):
+        rows = self.diagnose(self.account.id, CHANNEL, MONTH)
+        return next((r["reason"] for r in rows if r["brand"] == brand), None)
+
+    def test_no_brand_mapping_reason(self):
+        make_schedule_row(self.account, self.schedule, brand="Unmapped Brand")
+        reason = self._reason_for("Unmapped Brand")
+        self.assertIn("No Brand Mapping", reason)
+
+    def test_duration_mismatch_reason(self):
+        make_brand_mapping(self.account, brand="Brand D", theme="Theme D", duration=30)
+        make_schedule_row(self.account, self.schedule, brand="Brand D", duration=30)
+        # LMRB has the theme but at 15s, not 30s
+        make_lmrb_row(self.account, advt_theme="Theme D", duration=15,
+                      advt_time="20:15:00", source="mediawatch")
+        reason = self._reason_for("Brand D")
+        self.assertIn("duration", reason.lower())
+
+    def test_should_match_reason_flags_stale_or_old_build(self):
+        """An in-window LMRB spot exists but the row is unmatched → 'should match'."""
+        make_brand_mapping(self.account, brand="Brand E", theme="Theme E", duration=30)
+        make_schedule_row(self.account, self.schedule, brand="Brand E",
+                          start_time="20:00:00", end_time="21:00:00", duration=30)
+        make_lmrb_row(self.account, advt_theme="Theme E", advt_time="20:30:00",
+                      duration=30, source="mediawatch")  # in-window, unmatched
+        reason = self._reason_for("Brand E")
+        self.assertIn("should match", reason.lower())
+
+    def test_theme_not_found_reason(self):
+        make_brand_mapping(self.account, brand="Brand F", theme="Theme F", duration=30)
+        make_schedule_row(self.account, self.schedule, brand="Brand F", duration=30)
+        # No LMRB rows at all for Theme F
+        reason = self._reason_for("Brand F")
+        self.assertIn("No LMRB spot", reason)
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
 class TcConvertAccessTest(TestCase):
     """Convert TC (AI) is open to all users; the AI Conversion Prompt UI is hidden."""
 

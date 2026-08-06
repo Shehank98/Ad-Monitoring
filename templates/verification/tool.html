@@ -635,9 +635,18 @@ function renderResults(idx, data) {
   document.getElementById('vtab-matched-' + idx).innerHTML = buildTable(data.matched,      false);
   document.getElementById('vtab-mis-' + idx).innerHTML     = buildTable(data.prog_mismatch,false);
   document.getElementById('vtab-late-' + idx).innerHTML    = buildTable(data.late_telecast, false);
-  document.getElementById('vtab-notaired-'+idx).innerHTML  = isMap
-    ? buildTable(data.not_aired, false)
-    : buildNotAiredTable(data.not_aired, data.extra, idx);
+  if (isMap) {
+    document.getElementById('vtab-notaired-'+idx).innerHTML = buildTable(data.not_aired, false);
+  } else {
+    const diagBtn = (data.not_aired && data.not_aired.length)
+      ? `<div class="mb-2"><button onclick="diagnoseNotAired(${idx})"
+             class="text-xs px-2.5 py-1 rounded-lg bg-slate-800 text-white hover:bg-slate-900">
+             <i class="fa-solid fa-circle-question mr-1"></i>Why didn't these match?</button></div>
+         <div id="diag-${idx}" class="mb-3"></div>`
+      : '';
+    document.getElementById('vtab-notaired-'+idx).innerHTML =
+      diagBtn + buildNotAiredTable(data.not_aired, data.extra, idx);
+  }
   document.getElementById('vtab-extra-' + idx).innerHTML   = buildExtraTable(data.extra);
   document.getElementById('vtab-nomap-' + idx).innerHTML   = buildTable(data.no_mapping,   false);
 
@@ -646,6 +655,37 @@ function renderResults(idx, data) {
   window._verifyData[idx] = data;
 
   tabsEl.classList.remove('hidden');
+}
+
+// ── "Why didn't this match?" diagnostic (MediaWatch Not-Aired rows) ──────────
+function diagnoseNotAired(idx) {
+  const sc = (window._scope || {})[idx];
+  if (!sc) return;
+  const box = document.getElementById('diag-' + idx);
+  if (!box) return;
+  box.innerHTML = '<span class="text-xs text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Analysing why each spot didn\'t match…</span>';
+  const url = `/verify/diagnose/?account_id=${encodeURIComponent(sc.accountId)}&channel=${encodeURIComponent(sc.channel)}&month=${encodeURIComponent(sc.month)}`;
+  fetch(url)
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) { box.innerHTML = `<span class="text-red-500 text-xs">${esc(d.error || 'Error')}</span>`; return; }
+      if (!d.rows || !d.rows.length) { box.innerHTML = '<span class="text-xs text-slate-400">No unmatched rows to explain.</span>'; return; }
+      let h = '<table class="res-table"><thead><tr>'
+        + '<th>Brand</th><th>Dur</th><th>Planned Date</th><th>Window</th><th>Why not matched</th>'
+        + '</tr></thead><tbody>';
+      for (const r of d.rows) {
+        h += '<tr>'
+          + `<td class="font-medium">${esc(r.brand)}</td>`
+          + `<td>${r.duration ? r.duration + 's' : '-'}</td>`
+          + `<td>${esc(r.date) || '-'}</td>`
+          + `<td class="font-mono text-[11px]">${esc(r.planned_start)}–${esc(r.planned_end)}</td>`
+          + `<td class="text-slate-600">${esc(r.reason)}</td>`
+          + '</tr>';
+      }
+      h += '</tbody></table>';
+      box.innerHTML = h;
+    })
+    .catch(e => { box.innerHTML = `<span class="text-red-500 text-xs">Failed: ${esc(e.message)}</span>`; });
 }
 
 // ── Toggle row expansion + load results on first open ────────────────────────
@@ -701,6 +741,8 @@ function setSource(idx, src, accountId, channel, month) {
 }
 
 function fetchResults(idx, accountId, channel, month) {
+  window._scope = window._scope || {};
+  window._scope[idx] = { accountId, channel, month };
   const src  = _source[idx] || 'mediawatch';
   const base = src === 'maponline' ? '/verify/maponline-results/' : '/verify/load-results/';
   const url  = `${base}?account_id=${encodeURIComponent(accountId)}&channel=${encodeURIComponent(channel)}&month=${encodeURIComponent(month)}`;
