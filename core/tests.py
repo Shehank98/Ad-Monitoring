@@ -2264,6 +2264,31 @@ class MapOnlineComputeScopeTest(TestCase):
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 })
+class BrandMappingLmrbChannelTest(TestCase):
+    """brand_mapping_options must surface LMRB themes even when the schedule
+    channel carries a 'TV - ' prefix but LMRB is stored under the clean name."""
+
+    URL = "/dashboard/brand-mappings/options/"
+
+    def setUp(self):
+        self.account = make_account()
+        self.admin = make_user(email="admin@test.com", role="admin")
+        # LMRB stored under the clean channel name "Derana"
+        make_lmrb_row(self.account, advt_theme="Derana Theme A", channel="Derana",
+                      source="mediawatch", advt_time="20:00:00", duration=30)
+
+    def test_prefixed_channel_still_finds_lmrb_themes(self):
+        self.client.force_login(self.admin)
+        resp = self.client.get(self.URL, {"account_id": self.account.id, "channel": "TV - Derana"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Derana Theme A", resp.json()["themes"])
+
+    def test_clean_channel_also_finds_themes(self):
+        self.client.force_login(self.admin)
+        resp = self.client.get(self.URL, {"account_id": self.account.id, "channel": "Derana"})
+        self.assertIn("Derana Theme A", resp.json()["themes"])
+
+
 class SponsorshipTagDurationTest(TestCase):
     """A sponsorship tag logged at different durations in Schedule/LMRB/TC must
     still match 3-way (TC confirmed by LMRB), ignoring duration."""

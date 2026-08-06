@@ -2193,9 +2193,12 @@ def brand_mapping_list(request):
         sch_dates = Schedule.objects.filter(
             account_id=account_id, channel=channel_filter, month=month_filter,
         ).aggregate(s=Min('start_date'), e=Max('end_date'))
-        lmrb_qs = LMRBRow.objects.filter(
-            account_id=account_id, channel__iexact=channel_filter,
-        ).exclude(advt_theme='')
+        from verification.engine import _lmrb_channel_q as _chq
+        lmrb_qs = (
+            LMRBRow.objects.filter(account_id=account_id)
+            .filter(_chq(channel_filter))
+            .exclude(advt_theme='')
+        )
         if sch_dates['s']:
             lmrb_qs = lmrb_qs.filter(date__gte=sch_dates['s'])
         if sch_dates['e']:
@@ -2346,9 +2349,13 @@ def brand_mapping_options(request):
     sch_dates = Schedule.objects.filter(**sch_filter).aggregate(s=Min('start_date'), e=Max('end_date'))
 
     # ── LMRB base queryset (channel + date scoped) ─────────────────────────
+    # Match the channel the same prefix-tolerant way the reconciliation engine
+    # does: schedule channels carry a 'TV - ' prefix while LMRB channels may be
+    # stored clean (e.g. 'Derana'), so a plain exact match would hide the data.
+    from verification.engine import _lmrb_channel_q
     lmrb_base = LMRBRow.objects.filter(account_id=account_id)
     if channel:
-        lmrb_base = lmrb_base.filter(channel__iexact=channel)
+        lmrb_base = lmrb_base.filter(_lmrb_channel_q(channel))
     if sch_dates['s']:
         lmrb_base = lmrb_base.filter(date__gte=sch_dates['s'])
     if sch_dates['e']:
