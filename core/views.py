@@ -2446,6 +2446,19 @@ def brand_mapping_options(request):
     )
     mapped_brands = [b for b in brands if b.lower().strip() in mapped_brand_set]
 
+    # ── Per-brand products (from Schedule) ────────────────────────────────────
+    # Lets the Quick Map narrow the LMRB theme list to a clicked brand: a theme
+    # is relevant to the brand when its LMRB product matches one of the brand's
+    # schedule products (fallback: brand-name word overlap, done client-side).
+    brand_products = {}
+    bp_qs = ScheduleRow.objects.filter(account_id=account_id).exclude(brand='')
+    if schedule_id:
+        bp_qs = bp_qs.filter(schedule_id=schedule_id)
+    elif channel:
+        bp_qs = bp_qs.filter(schedule__channel=channel)
+    for row in bp_qs.exclude(product='').values('brand', 'product').distinct():
+        brand_products.setdefault(row['brand'], []).append(row['product'])
+
     return JsonResponse({
         'brands': brands, 'themes': themes, 'tc_themes': tc_themes,
         'products': products, 'mapped_themes': mapped_themes,
@@ -2454,6 +2467,7 @@ def brand_mapping_options(request):
         'mapped_brands': mapped_brands,
         'theme_durations': theme_durations,
         'tc_theme_durations': tc_theme_durations,
+        'brand_products': brand_products,
     })
 
 

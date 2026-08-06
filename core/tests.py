@@ -2264,6 +2264,38 @@ class MapOnlineComputeScopeTest(TestCase):
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 })
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class QuickMapTest(TestCase):
+    """Quick Map: account-level scope (no channel/month filter) + per-brand products."""
+
+    def setUp(self):
+        self.account = make_account()
+        self.admin = make_user(email="admin@test.com", role="admin")
+        self.schedule = make_schedule(self.account)
+        sr = make_schedule_row(self.account, self.schedule, brand="Ceylinco Life -15Sec")
+        sr.product = "Ceylinco Life"
+        sr.save(update_fields=["product"])
+
+    def test_options_returns_brand_products(self):
+        self.client.force_login(self.admin)
+        resp = self.client.get("/dashboard/brand-mappings/options/", {"account_id": self.account.id})
+        self.assertEqual(resp.status_code, 200)
+        bp = resp.json().get("brand_products", {})
+        self.assertIn("Ceylinco Life -15Sec", bp)
+        self.assertIn("Ceylinco Life", bp["Ceylinco Life -15Sec"])
+
+    def test_quick_page_has_no_channel_month_filters(self):
+        self.client.force_login(self.admin)
+        html = self.client.get("/dashboard/brand-mappings/quick/").content.decode()
+        self.assertEqual(200, self.client.get("/dashboard/brand-mappings/quick/").status_code)
+        self.assertNotIn('id="q-channel"', html)
+        self.assertNotIn('id="q-month"', html)
+        self.assertIn('id="q-account"', html)
+
+
 class BrandMappingLmrbChannelTest(TestCase):
     """brand_mapping_options must surface LMRB themes even when the schedule
     channel carries a 'TV - ' prefix but LMRB is stored under the clean name."""
