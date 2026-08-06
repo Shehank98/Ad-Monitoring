@@ -2264,6 +2264,69 @@ class MapOnlineComputeScopeTest(TestCase):
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 })
+class SponsorshipTagDurationTest(TestCase):
+    """A sponsorship tag logged at different durations in Schedule/LMRB/TC must
+    still match 3-way (TC confirmed by LMRB), ignoring duration."""
+
+    def _tc_row(self, tc_report, tc_theme, duration, aired_time, date=DATE):
+        key = TCRow.make_dedup_key(self.account.id, CHANNEL, date, aired_time, tc_theme, duration)
+        return TCRow.objects.create(
+            account=self.account, tc_report=tc_report, channel=CHANNEL, date=date,
+            programme="Show", tc_theme=tc_theme, duration=duration,
+            aired_time=aired_time, dedup_key=key,
+        )
+
+    def setUp(self):
+        ensure_tc_tolerance(5)
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        # SPONSORSHIP tag planned at 5s
+        make_schedule_row(
+            self.account, self.schedule, brand="Tag Brand", programme="Show",
+            duration=5, ad_type="SPONSORSHIP", start_time="20:00:00", end_time="20:05:00",
+        )
+        # Mapping: LMRB theme + TC theme (mapping duration 5s)
+        make_brand_mapping(self.account, brand="Tag Brand", theme="Tag Theme",
+                           tc_theme="Tag TC", duration=5)
+        # LMRB logs the tag under BOTH 5s and 10s (mediawatch)
+        make_lmrb_row(self.account, advt_theme="Tag Theme", advt_time="20:00:03",
+                      duration=5, source="mediawatch")
+        make_lmrb_row(self.account, advt_theme="Tag Theme", advt_time="20:00:02",
+                      duration=10, source="mediawatch")
+        # TC logs it at 8s
+        self.tc_report = make_tc_report(self.account, schedule=self.schedule)
+        self.tc = self._tc_row(self.tc_report, "Tag TC", 8, "20:00:00")
+
+    def test_tc_confirmed_by_lmrb_ignoring_duration(self):
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        self.tc.refresh_from_db()
+        self.assertTrue(self.tc.is_lmrb_confirmed,
+                        "TC 8s tag should be LMRB-confirmed via a 5s/10s LMRB row")
+
+    def test_summary_counts_tag_as_aired(self):
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        data = build_summary_data(self.account.id, CHANNEL, MONTH)
+        spon_rows = [r for sec in data["sponsorship"] for r in sec["rows"]]
+        tag = next((r for r in spon_rows if r["product"] == "Tag Brand"), None)
+        self.assertIsNotNone(tag)
+        self.assertGreaterEqual(tag["aired"], 1, "Tag should count as aired despite duration differences")
+
+    def test_commercial_still_requires_matching_duration(self):
+        """Duration-ignore must NOT leak into commercial matching."""
+        make_schedule_row(self.account, self.schedule, brand="Comm Brand",
+                          programme="Show2", duration=30, ad_type="COMMERCIAL BENEFITS",
+                          start_time="21:00:00", end_time="21:05:00")
+        make_brand_mapping(self.account, brand="Comm Brand", theme="Comm Theme",
+                           tc_theme="Comm TC", duration=30)
+        make_lmrb_row(self.account, advt_theme="Comm Theme", advt_time="21:00:02",
+                      duration=15, source="mediawatch")  # wrong duration
+        comm_tc = self._tc_row(self.tc_report, "Comm TC", 30, "21:00:00")
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        comm_tc.refresh_from_db()
+        self.assertFalse(comm_tc.is_lmrb_confirmed,
+                         "Commercial must not confirm against a different-duration LMRB row")
+
+
 class DiagnoseScopeTest(TestCase):
     """verification.engine.diagnose_scope — 'why didn't this match?' reasons."""
 

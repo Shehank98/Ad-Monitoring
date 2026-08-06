@@ -146,6 +146,22 @@ def _tc_themes_for_brand(brand: str, duration, tc_theme_map: dict) -> list[str]:
     return themes
 
 
+def _all_tc_themes_for_brand(brand: str, tc_theme_map: dict) -> list[str]:
+    """All normalised tc_themes mapped to a brand at ANY duration.
+    Used for SPONSORSHIP tags, whose logged duration is unreliable across sources."""
+    return [ntc for (ntc, _dur) in tc_theme_map.get(_normalize(brand), [])]
+
+
+def _all_lmrb_pairs_for_brand(brand: str, lmrb_theme_map: dict) -> list[tuple]:
+    """All (norm_theme, norm_product) pairs for a brand at ANY duration (sponsorship tags)."""
+    out = []
+    for entry in lmrb_theme_map.get(_normalize(brand), []):
+        nt = entry[0]
+        p  = entry[2] if len(entry) > 2 else ''
+        out.append((nt, p))
+    return out
+
+
 def _build_reverse_tc_theme_map(account_id):
     """
     Returns {norm_tc_theme: [(norm_brand, duration_or_None), ...]}
@@ -330,6 +346,35 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
     time_tolerance = get_setting_int('tc_lmrb_time_tolerance', 5)
     print(f"[reconcile_tc] TC-LMRB time tolerance: ±{time_tolerance}s")
 
+    # ── Sponsorship tags: duration-agnostic LMRB confirmation ─────────────────
+    # A sponsorship "tag" is logged at different durations in each source
+    # (Schedule 5s, LMRB 5s & 10s, TC 8s), so for TC rows that resolve to a
+    # SPONSORSHIP brand we confirm against LMRB on channel + date + time only,
+    # ignoring duration.  Commercial TC rows keep exact-duration matching.
+    _spon_brands = {
+        _normalize(b) for b in ScheduleRow.objects.filter(
+            account_id=account_id, channel__iexact=channel, month=month,
+            ad_type='SPONSORSHIP',
+        ).values_list('brand', flat=True).distinct()
+    }
+    _spon_tc_patterns = []   # (tc_theme_pattern_norm, brand_norm)
+    for _nb in _spon_brands:
+        for (_ntc, _d) in tc_theme_map.get(_nb, []):
+            _spon_tc_patterns.append((_ntc, _nb))
+    # Date-only LMRB index (all durations), built from the duration-keyed index.
+    _lmrb_by_date: dict = {}
+    for (_nchan, _d, _dur), _rows in lmrb_index.items():
+        _lmrb_by_date.setdefault((_nchan, _d), []).extend(_rows)
+
+    def _spon_brands_for_tc_theme(tc_theme_norm):
+        hits = []
+        for pat, nb in _spon_tc_patterns:
+            matched = (tc_theme_norm.startswith(pat[:-1]) if pat.endswith('*')
+                       else tc_theme_norm == pat)
+            if matched:
+                hits.append(nb)
+        return hits
+
     # ── STEP 1: TC ↔ LMRB (ground-truth confirmation, runs FIRST) ────────────
     # For each TCRow find the best matching LMRBRow by time proximity.
     # Theme validation: tc_theme → reverse map → brand → expected LMRB themes.
@@ -344,16 +389,27 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
         if tc_secs is None:
             continue
         dur = int(tcrow.duration) if tcrow.duration else None
-        key = (_normalize(tcrow.channel), tcrow.date, dur)
-        candidates = lmrb_index.get(key, [])
+        tc_theme_norm = _normalize(tcrow.tc_theme)
+        spon_hits = _spon_brands_for_tc_theme(tc_theme_norm)
 
-        # Build expected LMRB (theme, product) pairs via tc_theme → brand → lmrb_theme chain.
-        # TCRows whose tc_theme has no BrandMapping entry skip theme validation
-        # (they may still confirm by time alone).
-        brands = _brands_for_tc_theme(tcrow.tc_theme, dur, reverse_tc_theme_map)
-        expected_lmrb_pairs: list = []  # list of (norm_theme, norm_product)
-        for brand in brands:
-            expected_lmrb_pairs.extend(_lmrb_themes_for_brand(brand, dur, lmrb_theme_map))
+        if spon_hits:
+            # Sponsorship tag → ignore duration: candidates are all LMRB rows on
+            # this channel+date, and expected themes span all durations.
+            candidates = _lmrb_by_date.get((_normalize(tcrow.channel), tcrow.date), [])
+            expected_lmrb_pairs: list = []
+            for _nb in spon_hits:
+                expected_lmrb_pairs.extend(_all_lmrb_pairs_for_brand(_nb, lmrb_theme_map))
+        else:
+            key = (_normalize(tcrow.channel), tcrow.date, dur)
+            candidates = lmrb_index.get(key, [])
+
+            # Build expected LMRB (theme, product) pairs via tc_theme → brand → lmrb_theme chain.
+            # TCRows whose tc_theme has no BrandMapping entry skip theme validation
+            # (they may still confirm by time alone).
+            brands = _brands_for_tc_theme(tcrow.tc_theme, dur, reverse_tc_theme_map)
+            expected_lmrb_pairs = []  # list of (norm_theme, norm_product)
+            for brand in brands:
+                expected_lmrb_pairs.extend(_lmrb_themes_for_brand(brand, dur, lmrb_theme_map))
 
         best = None
         best_diff = time_tolerance + 1
@@ -1026,7 +1082,10 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
             #    (deduped by LMRB row) — genuine tag airings are no longer reported
             #    as missed just because the engine could not pin them to a row.
             tc_theme_ids: set = set()
-            tc_themes_spon = _tc_themes_for_brand(brand, dur, tc_theme_map)
+            # Sponsorship tags: their duration differs across Schedule/LMRB/TC, so
+            # resolve the tag's tc_themes at ANY duration and do NOT filter the
+            # confirmed TC rows by duration — count any confirmed spot of this tag.
+            tc_themes_spon = _all_tc_themes_for_brand(brand, tc_theme_map)
             if tc_themes_spon:
                 _tcq = TCRow.objects.filter(
                     account_id=account_id, channel=channel,
@@ -1042,8 +1101,6 @@ def build_summary_data(account_id, channel, month, schedule_id=None):
                     else:
                         _tq |= Q(tc_theme__iexact=t)
                 _tcq = _tcq.filter(_tq)
-                if dur_int is not None:
-                    _tcq = _tcq.filter(duration=dur_int)
                 tc_theme_ids = set(_tcq.values_list('matched_lmrb_id', flat=True))
 
             all_aired_ids  = tc_lmrb_ids | spon_lmrb_ids | tc_theme_ids
