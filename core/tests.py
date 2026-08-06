@@ -2264,6 +2264,168 @@ class MapOnlineComputeScopeTest(TestCase):
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 })
+class BrandMappingLmrbChannelTest(TestCase):
+    """brand_mapping_options must surface LMRB themes even when the schedule
+    channel carries a 'TV - ' prefix but LMRB is stored under the clean name."""
+
+    URL = "/dashboard/brand-mappings/options/"
+
+    def setUp(self):
+        self.account = make_account()
+        self.admin = make_user(email="admin@test.com", role="admin")
+        # LMRB stored under the clean channel name "Derana"
+        make_lmrb_row(self.account, advt_theme="Derana Theme A", channel="Derana",
+                      source="mediawatch", advt_time="20:00:00", duration=30)
+
+    def test_prefixed_channel_still_finds_lmrb_themes(self):
+        self.client.force_login(self.admin)
+        resp = self.client.get(self.URL, {"account_id": self.account.id, "channel": "TV - Derana"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Derana Theme A", resp.json()["themes"])
+
+    def test_clean_channel_also_finds_themes(self):
+        self.client.force_login(self.admin)
+        resp = self.client.get(self.URL, {"account_id": self.account.id, "channel": "Derana"})
+        self.assertIn("Derana Theme A", resp.json()["themes"])
+
+    def _narrow_schedule(self):
+        """A schedule whose date range (Feb 1–5) does NOT cover the LMRB row (Jan 15)."""
+        return Schedule.objects.create(
+            account=self.account, channel="TV - Derana", month="February 2025",
+            schedule_number="201", file="s.xlsx", original_filename="s.xlsx",
+            start_date=datetime.date(2025, 2, 1), end_date=datetime.date(2025, 2, 5), version=1,
+        )
+
+    def test_theme_shown_even_outside_schedule_date_range(self):
+        self._narrow_schedule()
+        self.client.force_login(self.admin)
+        resp = self.client.get(self.URL, {"account_id": self.account.id, "channel": "TV - Derana"})
+        # LMRB (Jan 15) is outside the schedule window (Feb 1–5) but must still show
+        # at account/channel level — otherwise uploaded LMRB looks missing.
+        self.assertIn("Derana Theme A", resp.json()["themes"])
+
+    def test_schedule_drilldown_still_scopes_by_date(self):
+        sch = self._narrow_schedule()
+        self.client.force_login(self.admin)
+        resp = self.client.get(self.URL, {
+            "account_id": self.account.id, "channel": "TV - Derana", "schedule_id": sch.id,
+        })
+        # When drilled into a specific schedule, the out-of-range theme is scoped out.
+        self.assertNotIn("Derana Theme A", resp.json()["themes"])
+
+
+class SponsorshipTagDurationTest(TestCase):
+    """A sponsorship tag logged at different durations in Schedule/LMRB/TC must
+    still match 3-way (TC confirmed by LMRB), ignoring duration."""
+
+    def _tc_row(self, tc_report, tc_theme, duration, aired_time, date=DATE):
+        key = TCRow.make_dedup_key(self.account.id, CHANNEL, date, aired_time, tc_theme, duration)
+        return TCRow.objects.create(
+            account=self.account, tc_report=tc_report, channel=CHANNEL, date=date,
+            programme="Show", tc_theme=tc_theme, duration=duration,
+            aired_time=aired_time, dedup_key=key,
+        )
+
+    def setUp(self):
+        ensure_tc_tolerance(5)
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        # SPONSORSHIP tag planned at 5s
+        make_schedule_row(
+            self.account, self.schedule, brand="Tag Brand", programme="Show",
+            duration=5, ad_type="SPONSORSHIP", start_time="20:00:00", end_time="20:05:00",
+        )
+        # Mapping: LMRB theme + TC theme (mapping duration 5s)
+        make_brand_mapping(self.account, brand="Tag Brand", theme="Tag Theme",
+                           tc_theme="Tag TC", duration=5)
+        # LMRB logs the tag under BOTH 5s and 10s (mediawatch)
+        make_lmrb_row(self.account, advt_theme="Tag Theme", advt_time="20:00:03",
+                      duration=5, source="mediawatch")
+        make_lmrb_row(self.account, advt_theme="Tag Theme", advt_time="20:00:02",
+                      duration=10, source="mediawatch")
+        # TC logs it at 8s
+        self.tc_report = make_tc_report(self.account, schedule=self.schedule)
+        self.tc = self._tc_row(self.tc_report, "Tag TC", 8, "20:00:00")
+
+    def test_tc_confirmed_by_lmrb_ignoring_duration(self):
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        self.tc.refresh_from_db()
+        self.assertTrue(self.tc.is_lmrb_confirmed,
+                        "TC 8s tag should be LMRB-confirmed via a 5s/10s LMRB row")
+
+    def test_summary_counts_tag_as_aired(self):
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        data = build_summary_data(self.account.id, CHANNEL, MONTH)
+        spon_rows = [r for sec in data["sponsorship"] for r in sec["rows"]]
+        tag = next((r for r in spon_rows if r["product"] == "Tag Brand"), None)
+        self.assertIsNotNone(tag)
+        self.assertGreaterEqual(tag["aired"], 1, "Tag should count as aired despite duration differences")
+
+    def test_commercial_still_requires_matching_duration(self):
+        """Duration-ignore must NOT leak into commercial matching."""
+        make_schedule_row(self.account, self.schedule, brand="Comm Brand",
+                          programme="Show2", duration=30, ad_type="COMMERCIAL BENEFITS",
+                          start_time="21:00:00", end_time="21:05:00")
+        make_brand_mapping(self.account, brand="Comm Brand", theme="Comm Theme",
+                           tc_theme="Comm TC", duration=30)
+        make_lmrb_row(self.account, advt_theme="Comm Theme", advt_time="21:00:02",
+                      duration=15, source="mediawatch")  # wrong duration
+        comm_tc = self._tc_row(self.tc_report, "Comm TC", 30, "21:00:00")
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        comm_tc.refresh_from_db()
+        self.assertFalse(comm_tc.is_lmrb_confirmed,
+                         "Commercial must not confirm against a different-duration LMRB row")
+
+
+class DiagnoseScopeTest(TestCase):
+    """verification.engine.diagnose_scope — 'why didn't this match?' reasons."""
+
+    def setUp(self):
+        from verification.engine import diagnose_scope
+        self.diagnose = diagnose_scope
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+
+    def _reason_for(self, brand):
+        rows = self.diagnose(self.account.id, CHANNEL, MONTH)
+        return next((r["reason"] for r in rows if r["brand"] == brand), None)
+
+    def test_no_brand_mapping_reason(self):
+        make_schedule_row(self.account, self.schedule, brand="Unmapped Brand")
+        reason = self._reason_for("Unmapped Brand")
+        self.assertIn("No Brand Mapping", reason)
+
+    def test_duration_mismatch_reason(self):
+        make_brand_mapping(self.account, brand="Brand D", theme="Theme D", duration=30)
+        make_schedule_row(self.account, self.schedule, brand="Brand D", duration=30)
+        # LMRB has the theme but at 15s, not 30s
+        make_lmrb_row(self.account, advt_theme="Theme D", duration=15,
+                      advt_time="20:15:00", source="mediawatch")
+        reason = self._reason_for("Brand D")
+        self.assertIn("duration", reason.lower())
+
+    def test_should_match_reason_flags_stale_or_old_build(self):
+        """An in-window LMRB spot exists but the row is unmatched → 'should match'."""
+        make_brand_mapping(self.account, brand="Brand E", theme="Theme E", duration=30)
+        make_schedule_row(self.account, self.schedule, brand="Brand E",
+                          start_time="20:00:00", end_time="21:00:00", duration=30)
+        make_lmrb_row(self.account, advt_theme="Theme E", advt_time="20:30:00",
+                      duration=30, source="mediawatch")  # in-window, unmatched
+        reason = self._reason_for("Brand E")
+        self.assertIn("should match", reason.lower())
+
+    def test_theme_not_found_reason(self):
+        make_brand_mapping(self.account, brand="Brand F", theme="Theme F", duration=30)
+        make_schedule_row(self.account, self.schedule, brand="Brand F", duration=30)
+        # No LMRB rows at all for Theme F
+        reason = self._reason_for("Brand F")
+        self.assertIn("No LMRB spot", reason)
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
 class TcConvertAccessTest(TestCase):
     """Convert TC (AI) is open to all users; the AI Conversion Prompt UI is hidden."""
 

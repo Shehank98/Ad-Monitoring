@@ -2193,9 +2193,12 @@ def brand_mapping_list(request):
         sch_dates = Schedule.objects.filter(
             account_id=account_id, channel=channel_filter, month=month_filter,
         ).aggregate(s=Min('start_date'), e=Max('end_date'))
-        lmrb_qs = LMRBRow.objects.filter(
-            account_id=account_id, channel__iexact=channel_filter,
-        ).exclude(advt_theme='')
+        from verification.engine import _lmrb_channel_q as _chq
+        lmrb_qs = (
+            LMRBRow.objects.filter(account_id=account_id)
+            .filter(_chq(channel_filter))
+            .exclude(advt_theme='')
+        )
         if sch_dates['s']:
             lmrb_qs = lmrb_qs.filter(date__gte=sch_dates['s'])
         if sch_dates['e']:
@@ -2346,12 +2349,20 @@ def brand_mapping_options(request):
     sch_dates = Schedule.objects.filter(**sch_filter).aggregate(s=Min('start_date'), e=Max('end_date'))
 
     # ── LMRB base queryset (channel + date scoped) ─────────────────────────
+    # Match the channel the same prefix-tolerant way the reconciliation engine
+    # does: schedule channels carry a 'TV - ' prefix while LMRB channels may be
+    # stored clean (e.g. 'Derana'), so a plain exact match would hide the data.
+    from verification.engine import _lmrb_channel_q
     lmrb_base = LMRBRow.objects.filter(account_id=account_id)
     if channel:
-        lmrb_base = lmrb_base.filter(channel__iexact=channel)
-    if sch_dates['s']:
+        lmrb_base = lmrb_base.filter(_lmrb_channel_q(channel))
+    # Only restrict LMRB themes to a date window when the user has drilled into a
+    # SPECIFIC schedule.  At account/channel/month level we must NOT date-scope:
+    # otherwise LMRB uploaded for a period not covered by an existing schedule
+    # (or with slightly different dates) is hidden and the picker looks empty.
+    if schedule_id and sch_dates['s']:
         lmrb_base = lmrb_base.filter(date__gte=sch_dates['s'])
-    if sch_dates['e']:
+    if schedule_id and sch_dates['e']:
         lmrb_base = lmrb_base.filter(date__lte=sch_dates['e'])
 
     # ── LMRB products ──────────────────────────────────────────────────────
@@ -2409,9 +2420,9 @@ def brand_mapping_options(request):
     tc_qs = TCRow.objects.filter(account_id=account_id).exclude(tc_theme='')
     if channel:
         tc_qs = tc_qs.filter(channel__iexact=channel)
-    if sch_dates['s']:
+    if schedule_id and sch_dates['s']:
         tc_qs = tc_qs.filter(date__gte=sch_dates['s'])
-    if sch_dates['e']:
+    if schedule_id and sch_dates['e']:
         tc_qs = tc_qs.filter(date__lte=sch_dates['e'])
     tc_themes = sorted(set(tc_qs.values_list('tc_theme', flat=True)))
 
