@@ -46,6 +46,8 @@ from django.utils import timezone
 from core.models import Account, BrandMapping, LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow, parse_channel_media_type
 from .processing import (
     _parse_time_to_seconds, lmrb_fingerprint, match_ads, normalize,
+    _get_themes_for_dur, _word_overlap_score,
+    _PROG_MISMATCH_TOLERANCE, _PROG_NAME_MATCH_THRESHOLD,
 )
 
 
@@ -296,6 +298,153 @@ def _makeup_schedules_for_scope(active_schedules):
 def active_schedule_ids(account_id, channel, month):
     """Return the list of Schedule PKs that are active for this scope (public helper)."""
     return [s.id for s in _active_schedules_for_scope(account_id, channel, month)]
+
+
+def _theme_pairs_match(pairs, norm_theme):
+    """True if norm_theme matches any (norm_theme_pattern, _product) pair.
+    Supports the '*' wildcard-prefix used by BrandMapping themes."""
+    for t, _p in pairs:
+        if t.endswith('*'):
+            if norm_theme.startswith(t[:-1]):
+                return True
+        elif norm_theme == t:
+            return True
+    return False
+
+
+def diagnose_scope(account_id, channel, month):
+    """Explain, per still-unmatched COMMERCIAL ScheduleRow, WHY it didn't match an
+    LMRB (MediaWatch) spot.  Read-only — used by the Verify Ads "Why didn't this
+    match?" diagnostic.  Returns a list of dicts (one per unmatched row) with a
+    plain-English `reason`.
+    """
+    brand_theme_map = _build_brand_theme_map(account_id)
+
+    # Full MediaWatch pool for the channel (no date cap) so we can also explain
+    # spots that aired on other dates or beyond the schedule window.
+    pool = list(
+        LMRBRow.objects.filter(
+            _lmrb_channel_q(channel), account_id=account_id, source='mediawatch',
+        ).values('id', 'advt_theme', 'date', 'advt_time', 'duration',
+                 'is_matched', 'matched_schedule_id', 'program')
+    )
+    for r in pool:
+        r['_nt'] = normalize(r['advt_theme'])
+        r['_secs'] = _parse_time_to_seconds(r['advt_time'])
+
+    active_ids = active_schedule_ids(account_id, channel, month)
+    rows = ScheduleRow.objects.filter(
+        schedule_id__in=active_ids, ad_type='COMMERCIAL BENEFITS',
+        is_matched=False, is_manual_matched=False,
+    ).order_by('brand', 'date', 'start_time')
+
+    def _fmt_delta(secs):
+        secs = int(secs)
+        return f'{secs // 60}m{secs % 60:02d}s'
+
+    results = []
+    for sr in rows:
+        norm_brand = normalize(sr.brand)
+        dur = sr.duration
+        pairs = _get_themes_for_dur(brand_theme_map, norm_brand, dur)
+
+        base = {
+            'schedule_row_id': sr.id,
+            'brand':    sr.brand,
+            'date':     sr.date.isoformat() if sr.date else '',
+            'duration': dur,
+            'programme': sr.programme or '',
+            'planned_start': sr.start_time or '',
+            'planned_end':   sr.end_time or '',
+        }
+
+        # ── 1. Brand mapping present for this duration? ───────────────────────
+        if not pairs:
+            if norm_brand in brand_theme_map:
+                base['reason'] = (f'Brand is mapped, but not for {dur}s. Add a mapping '
+                                  f'for this brand at {dur}s, or clear the Duration on the mapping.')
+            else:
+                base['reason'] = 'No Brand Mapping for this brand — add one in Brand Mappings.'
+            results.append(base)
+            continue
+
+        start = _parse_time_to_seconds(sr.start_time)
+        end   = _parse_time_to_seconds(sr.end_time)
+        if end == 0 and start and start > 43200:   # 21:00–00:00 means up to midnight
+            end = 86400
+
+        # ── 2. Any LMRB spot with this theme at all? ──────────────────────────
+        theme_cands = [r for r in pool if _theme_pairs_match(pairs, r['_nt'])]
+        if not theme_cands:
+            base['reason'] = ("No LMRB spot found with this brand's mapped theme(s). The aired "
+                              "spot may be logged under a different Advt_Theme — check the mapping "
+                              "text (a '*' wildcard often catches variant suffixes).")
+            results.append(base)
+            continue
+
+        # ── 3. Duration match? ────────────────────────────────────────────────
+        dur_cands = [r for r in theme_cands if r['duration'] == dur] if dur is not None else theme_cands
+        if not dur_cands:
+            other_durs = sorted({r['duration'] for r in theme_cands if r['duration'] is not None})
+            base['reason'] = (f"LMRB has this theme but at duration(s) {other_durs or 'blank'}, not "
+                              f"{dur}s. Fix the LMRB Dur, or clear the Duration on the mapping.")
+            results.append(base)
+            continue
+
+        # ── 4. Same-date analysis ─────────────────────────────────────────────
+        same_date = [r for r in dur_cands if r['date'] == sr.date]
+        if not same_date:
+            other = sorted({r['date'].isoformat() for r in dur_cands if r['date']})
+            base['reason'] = (f'No spot on {base["date"]}. This theme/duration aired on: '
+                              f'{", ".join(other)} — those show as Late Telecast (if in-window) or Extra.')
+            results.append(base)
+            continue
+
+        def _classify(r):
+            """Which pass would claim this candidate? Returns (pass, delta_secs)."""
+            s = r['_secs']
+            if s is None:
+                return (None, None)
+            if start is not None and end is not None and start <= s <= end:
+                return ('in-window (Matched)', 0)
+            if end is not None and s > end and (s - end) <= _PROG_MISMATCH_TOLERANCE:
+                return (f'{_fmt_delta(s - end)} after window (Programme Mismatch)', s - end)
+            if _word_overlap_score(sr.programme, r['program']) >= _PROG_NAME_MATCH_THRESHOLD:
+                return ('programme-name match (Programme Mismatch)', (s - end) if end else None)
+            return (None, (s - end) if end is not None else None)
+
+        free = [r for r in same_date if not r['is_matched']]
+        # A free candidate that WOULD match under some pass → should have matched.
+        matchable = [(r, _classify(r)) for r in free]
+        matchable = [(r, c) for r, c in matchable if c[0] is not None]
+        if matchable:
+            passname = matchable[0][1][0]
+            base['reason'] = (f'A matching spot aired this day ({passname}) and is still unclaimed — '
+                              f'this row should match. Click Run (reset) to re-verify; if it persists, '
+                              f'your live site may be on an older build than staging.')
+            results.append(base)
+            continue
+
+        # No free candidate would match — say why the closest fails.
+        if not free and same_date:
+            base['reason'] = ('The matching spot(s) this day were already claimed by other planned '
+                              'slots (more planned rows than aired spots that day).')
+            results.append(base)
+            continue
+
+        # Free candidates exist but none satisfy a pass (aired far outside the window
+        # and the programme name doesn't match).
+        after = [r for r in free if r['_secs'] is not None and end is not None and r['_secs'] > end]
+        if after:
+            closest = min(after, key=lambda r: r['_secs'] - end)
+            base['reason'] = (f'Aired {_fmt_delta(closest["_secs"] - end)} after the window end — beyond '
+                              f'the 10-minute Programme-Mismatch limit and the programme name doesn\'t '
+                              f'match, so it is Not Aired.')
+        else:
+            base['reason'] = 'The only same-day spot(s) aired before the planned window start.'
+        results.append(base)
+
+    return results
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────

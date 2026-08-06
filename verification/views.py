@@ -20,7 +20,10 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.db.models import Min, Max
 
 from core.models import Account, LMRBRow, MatchResult, MonitoringData, Schedule, ScheduleRow
-from .engine import run_scope, active_schedule_ids, compute_maponline_scope, _lmrb_channel_q
+from .engine import (
+    run_scope, active_schedule_ids, compute_maponline_scope, _lmrb_channel_q,
+    diagnose_scope,
+)
 
 
 # ── Auth helpers ───────────────────────────────────────────────────────────────
@@ -626,6 +629,25 @@ def maponline_results(request):
         'last_run':      None,
         'max_data_date': res.get('max_data_date'),
     })
+
+
+@login_required
+def diagnose(request):
+    """GET — explain why each still-unmatched schedule row didn't match an LMRB
+    (MediaWatch) spot for a scope.  Powers the "Why didn't this match?" panel."""
+    account_id = request.GET.get('account_id')
+    channel    = request.GET.get('channel')
+    month      = request.GET.get('month')
+    if not all([account_id, channel, month]):
+        return JsonResponse({'ok': False, 'error': 'Missing params'})
+    if not _account_access(request.user, account_id):
+        return JsonResponse({'ok': False, 'error': 'Access denied'})
+    try:
+        rows = diagnose_scope(account_id, channel, month)
+    except Exception as e:
+        import traceback
+        return JsonResponse({'ok': False, 'error': str(e), 'detail': traceback.format_exc()})
+    return JsonResponse({'ok': True, 'rows': rows})
 
 
 @login_required
