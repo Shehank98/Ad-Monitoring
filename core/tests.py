@@ -2890,3 +2890,31 @@ class TcLmrbCandidatesFilterTest(TestCase):
             [c["id"] for c in cands].index(near.id),
             [c["id"] for c in cands].index(far.id),
         )
+
+
+class SummaryExcelLandscapeTest(TestCase):
+    """Every sheet in the reconciliation Excel download must print landscape +
+    fit-to-width. The wide Matched/Unmatched LMRB sheets (21 columns) used to
+    default to portrait, which printed broken."""
+
+    def setUp(self):
+        self.account = make_account()
+
+    def _orientation(self, writer):
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        writer(ws, self.account.id, CHANNEL, MONTH)
+        return ws.page_setup.orientation, ws.page_setup.fitToWidth
+
+    def test_matched_lmrb_sheet_is_landscape(self):
+        from core.views import _write_matched_lmrb_sheet
+        orient, fit = self._orientation(_write_matched_lmrb_sheet)
+        self.assertEqual(orient, 'landscape')
+        self.assertEqual(fit, 1)
+
+    def test_unmatched_lmrb_sheet_is_landscape(self):
+        from core.views import _write_unmatched_lmrb_sheet
+        orient, fit = self._orientation(_write_unmatched_lmrb_sheet)
+        self.assertEqual(orient, 'landscape')
+        self.assertEqual(fit, 1)

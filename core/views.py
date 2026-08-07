@@ -7452,6 +7452,13 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
 
     combined = _matched_lmrb_rows(account_id, channel, month, schedule_id=schedule_id)
 
+    # Landscape + fit-all-columns-to-one-page-wide, same as the summary sheet —
+    # this sheet is 21 columns wide, so the portrait default printed broken.
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+
     HDR_FILL = PatternFill('solid', fgColor='0F2340')
     hdr_font = Font(bold=True, color='FFFFFF', size=10)
     norm     = Font(size=10)
@@ -7526,6 +7533,12 @@ def _write_unmatched_lmrb_sheet(ws, account_id, channel, month):
     if date_min and date_max:
         qs = qs.filter(date__range=(date_min, date_max))
     rows = list(qs.order_by('date', 'advt_time'))
+
+    # Landscape + fit-all-columns-to-one-page-wide, same as the summary sheet.
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
 
     HDR_FILL = PatternFill('solid', fgColor='0F2340')
     hdr_font = Font(bold=True, color='FFFFFF', size=10)
