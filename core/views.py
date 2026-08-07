@@ -2433,6 +2433,17 @@ def brand_mapping_options(request):
         tc_theme_durations.setdefault(row['tc_theme'], set()).add(row['duration'])
     tc_theme_durations = {k: sorted(v) for k, v in tc_theme_durations.items()}
 
+    # ── Which channel(s) each TC theme appears on ─────────────────────────
+    # A brand's TC code differs per channel (Derana='ABC', Hiru='BFB'), so the
+    # Quick Map picker lets the user filter the TC checklist by channel while
+    # ticking. Storage stays account-level pipe (recon resolves any variant),
+    # so this map is UI-only — {tc_theme: [channel, ...]} plus the channel list.
+    tc_theme_channels = {}
+    for row in tc_qs.exclude(channel='').values('tc_theme', 'channel').distinct():
+        tc_theme_channels.setdefault(row['tc_theme'], set()).add(row['channel'])
+    tc_theme_channels = {k: sorted(v) for k, v in tc_theme_channels.items()}
+    tc_channels = sorted({c for chans in tc_theme_channels.values() for c in chans})
+
     # ── MapOnline themes (distinct advt_theme from MapOnline source) ──────
     maponline_qs = lmrb_base.filter(source='maponline').exclude(advt_theme='')
     if product:
@@ -2467,6 +2478,8 @@ def brand_mapping_options(request):
         'mapped_brands': mapped_brands,
         'theme_durations': theme_durations,
         'tc_theme_durations': tc_theme_durations,
+        'tc_theme_channels': tc_theme_channels,
+        'tc_channels': tc_channels,
         'brand_products': brand_products,
     })
 
@@ -2642,8 +2655,17 @@ def brand_mapping_quick_add(request):
     themes   = [str(t).strip() for t in (body.get('themes') or []) if str(t).strip()]
     tc_list  = [str(t).strip() for t in (body.get('tc_themes') or []) if str(t).strip()]
     tc_theme = '|'.join(dict.fromkeys(tc_list))   # de-dup, keep order; model splits on '|'
-    maponline_theme = str(body.get('maponline_theme', '')).strip()
-    product  = str(body.get('product', '')).strip()
+    # MapOnline themes: now a multi-tick list (pipe-stored like tc_theme). Fall
+    # back to the legacy single `maponline_theme` string for backward compat.
+    mapo_list = [str(t).strip() for t in (body.get('maponline_themes') or []) if str(t).strip()]
+    if not mapo_list and str(body.get('maponline_theme', '')).strip():
+        mapo_list = [str(body.get('maponline_theme')).strip()]
+    maponline_theme = '|'.join(dict.fromkeys(mapo_list))
+    # Product is intentionally NOT saved from Quick Map. In the picker it only
+    # narrows which LMRB themes are shown; a saved product becomes an exact match
+    # constraint that silently drops correctly-themed airings (see PR #56). Blank
+    # = match any. Deliberate product constraints are set on the detailed table.
+    product  = ''
     dur_raw  = str(body.get('duration', '')).strip()
     duration = int(dur_raw) if dur_raw.isdigit() else None
 

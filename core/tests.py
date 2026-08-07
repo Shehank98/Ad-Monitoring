@@ -15,6 +15,7 @@ Run with:
 """
 
 import datetime
+import json
 from django.db import IntegrityError
 from django.test import TestCase, override_settings
 
@@ -2294,6 +2295,56 @@ class QuickMapTest(TestCase):
         self.assertNotIn('id="q-channel"', html)
         self.assertNotIn('id="q-month"', html)
         self.assertIn('id="q-account"', html)
+
+    def test_options_returns_tc_theme_channels(self):
+        # A brand's TC code differs per channel — the picker filters by channel.
+        rep_a = make_tc_report(self.account, channel="TV - Derana")
+        rep_b = make_tc_report(self.account, channel="TV - Hiru")
+        make_tc_row(self.account, rep_a, tc_theme="ABC", channel="TV - Derana")
+        make_tc_row(self.account, rep_b, tc_theme="BFB", channel="TV - Hiru")
+        self.client.force_login(self.admin)
+        d = self.client.get("/dashboard/brand-mappings/options/",
+                            {"account_id": self.account.id}).json()
+        self.assertIn("TV - Derana", d["tc_channels"])
+        self.assertIn("TV - Hiru", d["tc_channels"])
+        self.assertEqual(d["tc_theme_channels"]["ABC"], ["TV - Derana"])
+        self.assertEqual(d["tc_theme_channels"]["BFB"], ["TV - Hiru"])
+
+    def test_quick_add_stores_multi_maponline_and_never_saves_product(self):
+        self.client.force_login(self.admin)
+        resp = self.client.post(
+            "/dashboard/brand-mappings/quick/add/",
+            data=json.dumps({
+                "account_id": self.account.id,
+                "brand": "Ceylinco Life -15Sec",
+                "themes": ["Ceylinco Life_15 (Sin)"],
+                "tc_themes": ["ABC", "BFB"],
+                "maponline_themes": ["Ceylinco Gen A", "Ceylinco Gen B"],
+                "product": "Ceylinco Life",   # must be ignored (narrow-only)
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["ok"])
+        bm = BrandMapping.objects.get(account=self.account, brand="Ceylinco Life -15Sec")
+        self.assertEqual(bm.maponline_theme, "Ceylinco Gen A|Ceylinco Gen B")
+        self.assertEqual(bm.tc_theme, "ABC|BFB")
+        self.assertEqual(bm.product, "")   # product is never saved from Quick Map
+
+    def test_quick_add_backward_compat_single_maponline_theme(self):
+        self.client.force_login(self.admin)
+        self.client.post(
+            "/dashboard/brand-mappings/quick/add/",
+            data=json.dumps({
+                "account_id": self.account.id,
+                "brand": "Ceylinco Life -15Sec",
+                "themes": ["Ceylinco Life_15 (Sin)"],
+                "maponline_theme": "Legacy Single",
+            }),
+            content_type="application/json",
+        )
+        bm = BrandMapping.objects.get(account=self.account, brand="Ceylinco Life -15Sec")
+        self.assertEqual(bm.maponline_theme, "Legacy Single")
 
 
 class BrandMappingLmrbChannelTest(TestCase):
