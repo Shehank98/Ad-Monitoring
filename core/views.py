@@ -2433,6 +2433,17 @@ def brand_mapping_options(request):
         tc_theme_durations.setdefault(row['tc_theme'], set()).add(row['duration'])
     tc_theme_durations = {k: sorted(v) for k, v in tc_theme_durations.items()}
 
+    # ── Which channel(s) each TC theme appears on ─────────────────────────
+    # A brand's TC code differs per channel (Derana='ABC', Hiru='BFB'), so the
+    # Quick Map picker lets the user filter the TC checklist by channel while
+    # ticking. Storage stays account-level pipe (recon resolves any variant),
+    # so this map is UI-only — {tc_theme: [channel, ...]} plus the channel list.
+    tc_theme_channels = {}
+    for row in tc_qs.exclude(channel='').values('tc_theme', 'channel').distinct():
+        tc_theme_channels.setdefault(row['tc_theme'], set()).add(row['channel'])
+    tc_theme_channels = {k: sorted(v) for k, v in tc_theme_channels.items()}
+    tc_channels = sorted({c for chans in tc_theme_channels.values() for c in chans})
+
     # ── MapOnline themes (distinct advt_theme from MapOnline source) ──────
     maponline_qs = lmrb_base.filter(source='maponline').exclude(advt_theme='')
     if product:
@@ -2467,6 +2478,8 @@ def brand_mapping_options(request):
         'mapped_brands': mapped_brands,
         'theme_durations': theme_durations,
         'tc_theme_durations': tc_theme_durations,
+        'tc_theme_channels': tc_theme_channels,
+        'tc_channels': tc_channels,
         'brand_products': brand_products,
     })
 
@@ -2642,8 +2655,17 @@ def brand_mapping_quick_add(request):
     themes   = [str(t).strip() for t in (body.get('themes') or []) if str(t).strip()]
     tc_list  = [str(t).strip() for t in (body.get('tc_themes') or []) if str(t).strip()]
     tc_theme = '|'.join(dict.fromkeys(tc_list))   # de-dup, keep order; model splits on '|'
-    maponline_theme = str(body.get('maponline_theme', '')).strip()
-    product  = str(body.get('product', '')).strip()
+    # MapOnline themes: now a multi-tick list (pipe-stored like tc_theme). Fall
+    # back to the legacy single `maponline_theme` string for backward compat.
+    mapo_list = [str(t).strip() for t in (body.get('maponline_themes') or []) if str(t).strip()]
+    if not mapo_list and str(body.get('maponline_theme', '')).strip():
+        mapo_list = [str(body.get('maponline_theme')).strip()]
+    maponline_theme = '|'.join(dict.fromkeys(mapo_list))
+    # Product is intentionally NOT saved from Quick Map. In the picker it only
+    # narrows which LMRB themes are shown; a saved product becomes an exact match
+    # constraint that silently drops correctly-themed airings (see PR #56). Blank
+    # = match any. Deliberate product constraints are set on the detailed table.
+    product  = ''
     dur_raw  = str(body.get('duration', '')).strip()
     duration = int(dur_raw) if dur_raw.isdigit() else None
 
@@ -6822,20 +6844,29 @@ def _write_media_recon_sheet(ws, ctx):
             c.number_format = fmt
         return c
 
-    # ── Title (centered across the full width) + logo overlaid top-right ──
-    ws.merge_cells('A1:E3')
+    # ── Title (left) + logo (top-right) — mirrors the PDF/UI header layout ──
+    # Title spans A1:C3 on the left; the logo sits in the D1:E3 block on the
+    # right, the same [title | logo] split the PDF and on-screen report use.
+    for _r in (1, 2, 3):
+        ws.row_dimensions[_r].height = 20
+    ws.merge_cells('A1:C3')
     t = ws['A1']; t.value = ctx['title']
     t.font = Font(bold=True, size=18, color='1F3864')
-    t.alignment = Alignment(horizontal='center', vertical='center')
+    t.alignment = Alignment(horizontal='left', vertical='center')
+    ws.merge_cells('D1:E3')                      # reserved logo area (top-right)
     _logo_data = _recon_logo_bytes(ctx)
     if _logo_data:
+        # openpyxl needs Pillow to embed images (unlike ReportLab/PDF). Pillow is
+        # declared in requirements.txt so this succeeds; if it is ever missing,
+        # the logo silently drops here — that was the "no logo in Excel" bug.
         try:
             img = XLImage(io.BytesIO(_logo_data))
             img.height = 55
             img.width  = 150
-            ws.add_image(img, 'D1')
+            img.anchor = 'D1'
+            ws.add_image(img)
         except Exception:
-            pass
+            logger.warning('Recon Excel: could not embed logo (is Pillow installed?)', exc_info=True)
 
     # ── Info grid rows 4-7 ──
     info = [
@@ -7430,6 +7461,13 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
 
     combined = _matched_lmrb_rows(account_id, channel, month, schedule_id=schedule_id)
 
+    # Landscape + fit-all-columns-to-one-page-wide, same as the summary sheet —
+    # this sheet is 21 columns wide, so the portrait default printed broken.
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+
     HDR_FILL = PatternFill('solid', fgColor='0F2340')
     hdr_font = Font(bold=True, color='FFFFFF', size=10)
     norm     = Font(size=10)
@@ -7504,6 +7542,12 @@ def _write_unmatched_lmrb_sheet(ws, account_id, channel, month):
     if date_min and date_max:
         qs = qs.filter(date__range=(date_min, date_max))
     rows = list(qs.order_by('date', 'advt_time'))
+
+    # Landscape + fit-all-columns-to-one-page-wide, same as the summary sheet.
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
 
     HDR_FILL = PatternFill('solid', fgColor='0F2340')
     hdr_font = Font(bold=True, color='FFFFFF', size=10)
