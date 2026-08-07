@@ -557,7 +557,7 @@ async function toggleCandidates(tcRowId, btn) {
 
 function _renderCandidates(tcRowId, candidates) {
   if (!candidates.length) {
-    return '<div style="font-size:.72rem;color:#64748b;padding:.4rem 0;">No unmatched LMRB rows found for this date/duration.</div>';
+    return '<div style="font-size:.72rem;color:#64748b;padding:.4rem 0;">No unmatched LMRB rows found for this channel and date.</div>';
   }
   let html = '<table class="cand-table"><thead><tr>'
     + '<th>Time</th><th>Theme</th><th style="text-align:center;">Dur (s)</th>'

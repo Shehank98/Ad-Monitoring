@@ -9350,14 +9350,21 @@ def tc_lmrb_candidates(request):
         matched_lmrb__isnull=False,
     ).values_list('matched_lmrb_id', flat=True)
 
+    # Channel: match prefix-tolerantly (e.g. TC 'TV - Derana' ↔ LMRB 'Derana'),
+    # the same way the reconciliation engine does — plain iexact silently dropped
+    # rows whose channel string carried a media-type prefix on only one side.
+    # Duration: no longer required to match. This is a manual picker used exactly
+    # when the auto engine failed (often because durations differ, e.g. TC 30s vs
+    # LMRB 29s), so we show every unmatched LMRB row for the same channel+date and
+    # let the operator pick — sorted by closest air-time first.
+    from verification.engine import _lmrb_channel_q
     qs = LMRBRow.objects.filter(
+        _lmrb_channel_q(tr.channel),
         account_id=tr.account_id,
-        channel__iexact=tr.channel,
         date=tr.date,
-        duration=tr.duration,
         is_manual_matched=False,
         is_sponsorship_matched=False,
-    ).exclude(id__in=already_used).order_by('advt_time')[:100]
+    ).exclude(id__in=already_used).order_by('advt_time')
 
     tc_secs = _time_to_secs_local(tr.aired_time)
     candidates = []
@@ -9374,7 +9381,10 @@ def tc_lmrb_candidates(request):
             'programme': lr.program or '',
             'gap_secs':  gap,
         })
+    # Sort by closest air-time first, THEN cap — so the 100 shown are the 100
+    # nearest the TC time, not just the 100 earliest in the day.
     candidates.sort(key=lambda x: x['gap_secs'] if x['gap_secs'] is not None else 99999)
+    candidates = candidates[:100]
     return JsonResponse({'ok': True, 'candidates': candidates})
 
 
