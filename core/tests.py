@@ -2945,8 +2945,8 @@ class ReconExcelLogoTest(TestCase):
             def close(self): pass
         return FakeLogo()
 
-    def test_logo_embeds_and_title_left(self):
-        import io, zipfile, openpyxl
+    def _build_sheet(self):
+        import openpyxl
         from verification.tc_engine import build_summary_data
         from verification.media_recon import build_recon_context
         from core.views import _write_media_recon_sheet
@@ -2955,9 +2955,26 @@ class ReconExcelLogoTest(TestCase):
         ctx['logo'] = self._fake_logo()
         wb = openpyxl.Workbook(); ws = wb.active
         _write_media_recon_sheet(ws, ctx)
-        self.assertEqual(ws['A1'].alignment.horizontal, 'left')
+        return wb, ws
+
+    def test_logo_embeds_and_landscape(self):
+        import io, zipfile
+        wb, ws = self._build_sheet()
+        self.assertEqual(ws['A1'].alignment.horizontal, 'center')
         self.assertEqual(ws.page_setup.orientation, 'landscape')
         buf = io.BytesIO(); wb.save(buf); buf.seek(0)
         names = zipfile.ZipFile(buf).namelist()
         self.assertTrue(any('media/image' in n for n in names),
                         "client logo must be embedded in the recon sheet")
+
+    def test_new_summary_labels_and_header_colour(self):
+        """Spot table uses the New_Summary labels and light-blue (BDD7EE)
+        section headers, matching the on-screen report / New_Summary template."""
+        _wb, ws = self._build_sheet()
+        header_texts = {ws.cell(13, c).value for c in range(1, 6)}
+        self.assertIn('Schedule', header_texts)
+        self.assertIn('Transmission Report', header_texts)
+        self.assertIn('Nielsen Report', header_texts)
+        self.assertNotIn('Schedule (Planned)', header_texts)
+        # light-blue header fill
+        self.assertEqual(ws.cell(13, 1).fill.fgColor.rgb[-6:], 'BDD7EE')

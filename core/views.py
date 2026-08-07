@@ -6815,10 +6815,12 @@ def _write_media_recon_sheet(ws, ctx):
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
     left   = Alignment(horizontal='left', vertical='center', wrap_text=True)
     right  = Alignment(horizontal='right', vertical='center')
-    hdr_fill  = PatternFill('solid', fgColor='1F3864')      # dark navy
-    sub_fill  = PatternFill('solid', fgColor='D9E1F2')       # light blue
-    tot_fill  = PatternFill('solid', fgColor='FCE4D6')       # light orange
-    white_bold = Font(bold=True, color='FFFFFF', size=11)
+    # Colours match the New_Summary template: light-blue section headers with
+    # dark bold text, grey info / cost labels, light-orange totals.
+    hdr_fill  = PatternFill('solid', fgColor='BDD7EE')      # light blue section headers
+    sub_fill  = PatternFill('solid', fgColor='D9D9D9')       # grey info / cost labels
+    tot_fill  = PatternFill('solid', fgColor='FCE4D6')       # light orange totals
+    hdr_font  = Font(bold=True, color='000000', size=11)     # dark bold on light-blue headers
     bold  = Font(bold=True, size=10)
     norm  = Font(size=10)
     money_fmt = '#,##0.00'
@@ -6844,15 +6846,15 @@ def _write_media_recon_sheet(ws, ctx):
             c.number_format = fmt
         return c
 
-    # ── Title (left) + logo (top-right) — mirrors the PDF/UI header layout ──
-    # Title spans A1:C3 on the left; the logo sits in the D1:E3 block on the
-    # right, the same [title | logo] split the PDF and on-screen report use.
+    # ── Title (centered across A:C) + logo (top-right) — New_Summary header ──
+    # Title spans A1:C3; the logo sits in the D1:E3 block on the right, the same
+    # [title | logo] split the on-screen report and PDF use.
     for _r in (1, 2, 3):
         ws.row_dimensions[_r].height = 20
     ws.merge_cells('A1:C3')
     t = ws['A1']; t.value = ctx['title']
     t.font = Font(bold=True, size=18, color='1F3864')
-    t.alignment = Alignment(horizontal='left', vertical='center')
+    t.alignment = Alignment(horizontal='center', vertical='center')
     ws.merge_cells('D1:E3')                      # reserved logo area (top-right)
     _logo_data = _recon_logo_bytes(ctx)
     if _logo_data:
@@ -6887,7 +6889,7 @@ def _write_media_recon_sheet(ws, ctx):
     # ── Medium block rows 9-10 ──
     med_hdr = ['Medium', 'Channel/Publication', 'Specification', 'Schedule Value']
     for j, h in enumerate(med_hdr):
-        cell(f'{get_column_letter(1+j)}9', h, font=white_bold, align=center, fill=hdr_fill)
+        cell(f'{get_column_letter(1+j)}9', h, font=hdr_font, align=center, fill=hdr_fill)
     med_val = [ctx['medium'], ctx['channel_publication'], ctx['specification'], ctx['schedule_value']]
     for j, v in enumerate(med_val):
         cell(f'{get_column_letter(1+j)}10', v, align=center)
@@ -6895,13 +6897,13 @@ def _write_media_recon_sheet(ws, ctx):
     # ── No. of Spots table ──
     r = 12
     ws.merge_cells(f'C{r}:E{r}')
-    cell(f'C{r}', 'No of Spots', font=white_bold, align=center, fill=hdr_fill)
+    cell(f'C{r}', 'No of Spots', font=hdr_font, align=center, fill=hdr_fill)
     cell(f'A{r}', '', fill=hdr_fill); cell(f'B{r}', '', fill=hdr_fill)
     r = 13
     for ref, txt in [(f'A{r}', 'Scheduling Month'), (f'B{r}', 'Spot/VA Duration'),
-                     (f'C{r}', 'Schedule (Planned)'), (f'D{r}', 'Transmission (Aired)'),
-                     (f'E{r}', 'Nielsen (3rd Party)')]:
-        cell(ref, txt, font=white_bold, align=center, fill=hdr_fill)
+                     (f'C{r}', 'Schedule'), (f'D{r}', 'Transmission Report'),
+                     (f'E{r}', 'Nielsen Report')]:
+        cell(ref, txt, font=hdr_font, align=center, fill=hdr_fill)
     start = 14
     spots = ctx['spots'] or [{'brand': '', 'dur': '', 'planned': 0, 'aired': 0, 'third_party': 0}]
     for i, sp in enumerate(spots):
@@ -6924,11 +6926,11 @@ def _write_media_recon_sheet(ws, ctx):
     # ── Transmission Report Details (deviations) ──
     r = tr + 2
     ws.merge_cells(f'A{r}:E{r}')
-    cell(f'A{r}', 'Transmission Report Details - Commercials / VA', font=white_bold, align=center, fill=hdr_fill)
+    cell(f'A{r}', 'Transmission Report Details - Commercials / VA', font=hdr_font, align=center, fill=hdr_fill)
     r += 1
     for ref, txt in [(f'A{r}', 'Spot/VA Duration'), (f'B{r}', 'Deviated'), (f'C{r}', 'Not Aired'),
                      (f'D{r}', 'Reason / Solution'), (f'E{r}', 'Deviated Value (To be deducted)')]:
-        cell(ref, txt, font=white_bold, align=center, fill=hdr_fill)
+        cell(ref, txt, font=hdr_font, align=center, fill=hdr_fill)
     dstart = r + 1
     devs = ctx['deviations'] or [{'brand': '', 'dur': '', 'deviated': '', 'not_aired': '', 'reason': '', 'dev_value': ''}]
     for i, dv in enumerate(devs):
