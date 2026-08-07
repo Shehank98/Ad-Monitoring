@@ -27,28 +27,14 @@
 
   <!-- Scope selector -->
   <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      <div>
-        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Brand (Account) <span class="text-red-400">*</span></label>
-        <select id="q-account" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
-          <option value="">Select account…</option>
-          {% for acc in accounts %}<option value="{{ acc.id }}">{{ acc.name }}</option>{% endfor %}
-        </select>
-      </div>
-      <div>
-        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Channel <span class="text-slate-300 normal-case font-medium">(optional)</span></label>
-        <select id="q-channel" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400" disabled>
-          <option value="">All channels</option>
-        </select>
-      </div>
-      <div>
-        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Month <span class="text-slate-300 normal-case font-medium">(optional)</span></label>
-        <select id="q-month" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400" disabled>
-          <option value="">All months</option>
-        </select>
-      </div>
+    <div class="max-w-md">
+      <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Brand (Account) <span class="text-red-400">*</span></label>
+      <select id="q-account" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+        <option value="">Select account…</option>
+        {% for acc in accounts %}<option value="{{ acc.id }}">{{ acc.name }}</option>{% endfor %}
+      </select>
     </div>
-    <p class="text-[11px] text-slate-400 mt-2"><i class="fa-solid fa-circle-info mr-1"></i> Choosing a channel &amp; month narrows the theme lists to exactly what aired in that period.</p>
+    <p class="text-[11px] text-slate-400 mt-2"><i class="fa-solid fa-circle-info mr-1"></i> Pick an account. Click a brand below and tick the LMRB / TC themes for it — the theme list is narrowed to each brand automatically.</p>
   </div>
 
   <!-- Coverage summary -->
@@ -92,8 +78,6 @@
 (function () {
   var csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
   var elAcc = document.getElementById('q-account');
-  var elChan = document.getElementById('q-channel');
-  var elMonth = document.getElementById('q-month');
   var elCards = document.getElementById('q-cards');
   var OPTS = null;              // last loaded options payload
   var mappedThemeSet = new Set();
@@ -110,30 +94,50 @@
   function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function show(id, on) { var e = document.getElementById(id); if (e) e.classList.toggle('hidden', !on); }
 
-  // ── Scope cascades ──────────────────────────────────────────────────────────
-  elAcc.addEventListener('change', function () {
-    elChan.innerHTML = '<option value="">All channels</option>'; elChan.disabled = true;
-    elMonth.innerHTML = '<option value="">All months</option>'; elMonth.disabled = true;
-    if (!this.value) { reset(); return; }
-    fetch('/dashboard/brand-mappings/channels/?account_id=' + encodeURIComponent(this.value))
-      .then(r => r.json()).then(d => {
-        (d.channels || []).forEach(function (ch) { elChan.insertAdjacentHTML('beforeend', '<option value="' + esc(ch) + '">' + esc(ch) + '</option>'); });
-        elChan.disabled = false;
+  // Narrow the LMRB theme list to a clicked brand:
+  //  1) themes whose LMRB product matches one of the brand's schedule products;
+  //  2) else themes whose text shares a word with the brand name;
+  //  3) else all themes (never hide everything).
+  // Themes already mapped to this brand are always included.
+  function themesForBrand(brand, allThemes, preSet) {
+    var tpm = OPTS.theme_product_map || {};
+    var bp  = (OPTS.brand_products && OPTS.brand_products[brand]) || [];
+    var bpSet = new Set(bp.map(function (p) { return String(p).toLowerCase().trim(); }));
+    var out = [];
+    if (bpSet.size) {
+      out = allThemes.filter(function (t) {
+        var p = String(tpm[t] || '').toLowerCase().trim();
+        return p && bpSet.has(p);
       });
-    loadOptions();
-  });
-  elChan.addEventListener('change', function () {
-    elMonth.innerHTML = '<option value="">All months</option>'; elMonth.disabled = true;
-    if (this.value) {
-      fetch('/dashboard/brand-mappings/months/?account_id=' + encodeURIComponent(elAcc.value) + '&channel=' + encodeURIComponent(this.value))
-        .then(r => r.json()).then(d => {
-          (d.months || []).forEach(function (m) { elMonth.insertAdjacentHTML('beforeend', '<option value="' + esc(m) + '">' + esc(m) + '</option>'); });
-          elMonth.disabled = false;
-        });
     }
+    if (!out.length) {
+      var words = String(brand).toLowerCase()
+        .replace(/\(.*?\)/g, ' ').replace(/[-_]/g, ' ')
+        .replace(/\b\d+\s*sec\b/g, ' ').replace(/\b\d+\b/g, ' ')
+        .split(/\s+/).filter(function (w) { return w.length >= 3; });
+      if (words.length) {
+        out = allThemes.filter(function (t) {
+          var tl = String(t).toLowerCase();
+          return words.some(function (w) { return tl.indexOf(w) !== -1; });
+        });
+      }
+    }
+    if (!out.length) out = allThemes.slice();
+    if (preSet && preSet.size) {
+      var have = new Set(out.map(function (t) { return t.toLowerCase().trim(); }));
+      allThemes.forEach(function (t) {
+        var k = t.toLowerCase().trim();
+        if (preSet.has(k) && !have.has(k)) { out.push(t); have.add(k); }
+      });
+    }
+    return out;
+  }
+
+  // ── Account selection (no channel/month scope — map at account level) ────────
+  elAcc.addEventListener('change', function () {
+    if (!this.value) { reset(); return; }
     loadOptions();
   });
-  elMonth.addEventListener('change', loadOptions);
   document.getElementById('q-show-mapped').addEventListener('change', render);
 
   function reset() {
@@ -146,8 +150,6 @@
     show('q-empty', false); show('q-none', false); show('q-coverage', false); show('q-loading', true);
     elCards.innerHTML = '';
     var qs = '?account_id=' + encodeURIComponent(elAcc.value);
-    if (elChan.value)  qs += '&channel=' + encodeURIComponent(elChan.value);
-    if (elMonth.value) qs += '&month='   + encodeURIComponent(elMonth.value);
     fetch('/dashboard/brand-mappings/options/' + qs)
       .then(r => r.json())
       .then(function (d) {
@@ -258,8 +260,6 @@
   function buildEditor(editor, brand) {
     editor.innerHTML = '<p class="text-xs text-slate-400 py-2"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading current mapping…</p>';
     var qs = '?account_id=' + encodeURIComponent(elAcc.value) + '&brand=' + encodeURIComponent(brand);
-    if (elChan.value)  qs += '&channel=' + encodeURIComponent(elChan.value);
-    if (elMonth.value) qs += '&month='   + encodeURIComponent(elMonth.value);
     fetch('/dashboard/brand-mappings/quick/detail/' + qs)
       .then(r => r.json())
       .then(function (d) { renderEditor(editor, brand, d); })
@@ -351,12 +351,37 @@
     var preTc = new Set();
     maps.forEach(function (m) { (m.tc_themes || []).forEach(function (t) { preTc.add(String(t).toLowerCase().trim()); }); });
 
-    var lmrb = checklist('LMRB Theme *', OPTS.themes || [], { mappedSet: mappedThemeSet, durMap: OPTS.theme_durations || {}, preselect: preLmrb, emptyMsg: 'No LMRB themes in this scope - upload monitoring data or widen the scope.' });
+    // LMRB themes narrowed to this brand, with a toggle to reveal all.
+    var allThemes = OPTS.themes || [];
+    var narrowed  = themesForBrand(brand, allThemes, preLmrb);
+    var lmrbHolder = document.createElement('div');
+    var currentLmrb = null;
+    var showAllThemes = false;
+    function buildLmrb() {
+      lmrbHolder.innerHTML = '';
+      var items = showAllThemes ? allThemes : narrowed;
+      currentLmrb = checklist('LMRB Theme *', items, { mappedSet: mappedThemeSet, durMap: OPTS.theme_durations || {}, preselect: preLmrb, emptyMsg: 'No LMRB themes for this brand — click “Show all”, or upload monitoring data.' });
+      var bar = document.createElement('div');
+      bar.className = 'flex items-center justify-between mb-1';
+      bar.innerHTML = '<span class="text-[10px] text-slate-400">' +
+        (showAllThemes ? ('Showing all ' + allThemes.length + ' account themes')
+                       : ('Showing ' + items.length + ' theme(s) matched to this brand')) + '</span>';
+      var tgl = document.createElement('button');
+      tgl.type = 'button';
+      tgl.className = 'text-[10px] font-bold text-emerald-600 hover:underline';
+      tgl.textContent = showAllThemes ? '↩ Only this brand’s themes' : ('Show all account themes (' + allThemes.length + ')');
+      tgl.addEventListener('click', function () { showAllThemes = !showAllThemes; buildLmrb(); });
+      bar.appendChild(tgl);
+      lmrbHolder.appendChild(bar);
+      lmrbHolder.appendChild(currentLmrb.wrap);
+    }
+    buildLmrb();
+
     var tc   = checklist('TC Theme', OPTS.tc_themes || [], { durMap: OPTS.tc_theme_durations || {}, preselect: preTc, emptyMsg: 'No TC themes in this scope.' });
 
     var grid = document.createElement('div');
     grid.className = 'grid grid-cols-1 sm:grid-cols-2 gap-4';
-    grid.appendChild(lmrb.wrap); grid.appendChild(tc.wrap);
+    grid.appendChild(lmrbHolder); grid.appendChild(tc.wrap);
 
     // Advanced (MapOnline / Product / Duration)
     var adv = document.createElement('details');
@@ -393,17 +418,13 @@
       chip.addEventListener('click', function () { adv.querySelector('.js-duration').value = this.dataset.d; });
     });
 
-    // Auto-suggest product from the first selected LMRB theme
-    lmrb.wrap.querySelector('.js-list').addEventListener('change', function () {
-      var sel = lmrb.getSelected();
-      var pi = adv.querySelector('.js-product');
-      if (sel.length && !pi.value && OPTS.theme_product_map && OPTS.theme_product_map[sel[0]]) {
-        pi.value = OPTS.theme_product_map[sel[0]];
-      }
-    });
+    // NOTE: product is intentionally NOT auto-filled. A saved product makes the
+    // matching engine require the LMRB spot's product to match exactly, which
+    // silently drops correctly-themed airings. Leave it blank (matches any
+    // product) unless the operator deliberately sets it to disambiguate a TAG.
 
     actions.querySelector('.js-save').addEventListener('click', function () {
-      var themes = lmrb.getSelected();
+      var themes = currentLmrb.getSelected();
       if (!themes.length) { toast('Pick at least one LMRB theme.', false); return; }
       var btn = this; btn.disabled = true;
       var payload = {

@@ -2264,6 +2264,38 @@ class MapOnlineComputeScopeTest(TestCase):
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 })
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class QuickMapTest(TestCase):
+    """Quick Map: account-level scope (no channel/month filter) + per-brand products."""
+
+    def setUp(self):
+        self.account = make_account()
+        self.admin = make_user(email="admin@test.com", role="admin")
+        self.schedule = make_schedule(self.account)
+        sr = make_schedule_row(self.account, self.schedule, brand="Ceylinco Life -15Sec")
+        sr.product = "Ceylinco Life"
+        sr.save(update_fields=["product"])
+
+    def test_options_returns_brand_products(self):
+        self.client.force_login(self.admin)
+        resp = self.client.get("/dashboard/brand-mappings/options/", {"account_id": self.account.id})
+        self.assertEqual(resp.status_code, 200)
+        bp = resp.json().get("brand_products", {})
+        self.assertIn("Ceylinco Life -15Sec", bp)
+        self.assertIn("Ceylinco Life", bp["Ceylinco Life -15Sec"])
+
+    def test_quick_page_has_no_channel_month_filters(self):
+        self.client.force_login(self.admin)
+        html = self.client.get("/dashboard/brand-mappings/quick/").content.decode()
+        self.assertEqual(200, self.client.get("/dashboard/brand-mappings/quick/").status_code)
+        self.assertNotIn('id="q-channel"', html)
+        self.assertNotIn('id="q-month"', html)
+        self.assertIn('id="q-account"', html)
+
+
 class BrandMappingLmrbChannelTest(TestCase):
     """brand_mapping_options must surface LMRB themes even when the schedule
     channel carries a 'TV - ' prefix but LMRB is stored under the clean name."""
@@ -2725,4 +2757,85 @@ class MapOnlinePurgeTest(TestCase):
         self.assertTrue(LMRBRow.objects.filter(advt_theme="MW").exists())
         self.assertTrue(
             self.MonitoringData.objects.filter(data_type="mediawatch").exists()
+        )
+
+
+class TcLmrbCandidatesFilterTest(TestCase):
+    """The 'Find LMRB Match' picker (tc_lmrb_candidates) must find LMRB rows
+    even when the channel string carries a media-type prefix on only one side,
+    and regardless of the LMRB row's duration — it is a manual fallback used
+    exactly when the auto engine (which requires exact channel + duration)
+    failed. Date still has to match. Locked rows stay hidden.
+    """
+
+    def setUp(self):
+        from django.test import Client
+
+        self.account = make_account()
+        # TC row stores the prefixed channel form ('TV - Sirasa TV'); the
+        # LMRB rows store the clean form ('Sirasa TV').
+        self.tc_report = make_tc_report(self.account, channel="TV - Sirasa TV")
+        self.tc_row = make_tc_row(
+            self.account, self.tc_report,
+            channel="TV - Sirasa TV", date=DATE,
+            aired_time="20:30:00", duration=30,
+        )
+        self.user = make_user(email="ops-cand@test.com", role="super_admin")
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _mk_lmrb(self, advt_theme, advt_time, duration, channel="Sirasa TV", date=DATE):
+        return LMRBRow.objects.create(
+            account=self.account, channel=channel, date=date,
+            advt_theme=advt_theme, advt_time=advt_time, duration=duration,
+            source="maponline",
+            dedup_key=LMRBRow.make_dedup_key(
+                self.account.id, channel, date, advt_time, advt_theme, duration
+            ),
+        )
+
+    def _fetch_ids(self):
+        resp = self.client.get(
+            "/dashboard/tc/lmrb-candidates/", {"tc_row_id": self.tc_row.id}
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["ok"], data)
+        return {c["id"] for c in data["candidates"]}
+
+    def test_channel_prefix_and_any_duration_show_up(self):
+        # Same duration, clean channel — must show despite prefixed TC channel.
+        same_dur = self._mk_lmrb("Theme A", "20:30:05", 30)
+        # Different duration — must ALSO show now (any duration).
+        diff_dur = self._mk_lmrb("Theme A 15", "20:30:20", 15)
+        ids = self._fetch_ids()
+        self.assertIn(same_dur.id, ids)
+        self.assertIn(diff_dur.id, ids)
+
+    def test_other_date_excluded(self):
+        other_day = self._mk_lmrb(
+            "Theme A", "20:30:05", 30, date=datetime.date(2025, 1, 16)
+        )
+        self.assertNotIn(other_day.id, self._fetch_ids())
+
+    def test_locked_rows_excluded(self):
+        spon = self._mk_lmrb("Spon", "20:30:05", 30)
+        LMRBRow.objects.filter(id=spon.id).update(is_sponsorship_matched=True)
+        man = self._mk_lmrb("Man", "20:30:06", 30)
+        LMRBRow.objects.filter(id=man.id).update(is_manual_matched=True)
+        ids = self._fetch_ids()
+        self.assertNotIn(spon.id, ids)
+        self.assertNotIn(man.id, ids)
+
+    def test_sorted_by_time_gap(self):
+        far = self._mk_lmrb("Far", "21:00:00", 30)   # 30 min gap
+        near = self._mk_lmrb("Near", "20:30:02", 15)  # 2 sec gap, diff duration
+        resp = self.client.get(
+            "/dashboard/tc/lmrb-candidates/", {"tc_row_id": self.tc_row.id}
+        )
+        cands = resp.json()["candidates"]
+        self.assertEqual(cands[0]["id"], near.id)
+        self.assertLess(
+            [c["id"] for c in cands].index(near.id),
+            [c["id"] for c in cands].index(far.id),
         )
