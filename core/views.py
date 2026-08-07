@@ -2446,6 +2446,19 @@ def brand_mapping_options(request):
     )
     mapped_brands = [b for b in brands if b.lower().strip() in mapped_brand_set]
 
+    # ── Per-brand products (from Schedule) ────────────────────────────────────
+    # Lets the Quick Map narrow the LMRB theme list to a clicked brand: a theme
+    # is relevant to the brand when its LMRB product matches one of the brand's
+    # schedule products (fallback: brand-name word overlap, done client-side).
+    brand_products = {}
+    bp_qs = ScheduleRow.objects.filter(account_id=account_id).exclude(brand='')
+    if schedule_id:
+        bp_qs = bp_qs.filter(schedule_id=schedule_id)
+    elif channel:
+        bp_qs = bp_qs.filter(schedule__channel=channel)
+    for row in bp_qs.exclude(product='').values('brand', 'product').distinct():
+        brand_products.setdefault(row['brand'], []).append(row['product'])
+
     return JsonResponse({
         'brands': brands, 'themes': themes, 'tc_themes': tc_themes,
         'products': products, 'mapped_themes': mapped_themes,
@@ -2454,6 +2467,7 @@ def brand_mapping_options(request):
         'mapped_brands': mapped_brands,
         'theme_durations': theme_durations,
         'tc_theme_durations': tc_theme_durations,
+        'brand_products': brand_products,
     })
 
 
@@ -9336,14 +9350,21 @@ def tc_lmrb_candidates(request):
         matched_lmrb__isnull=False,
     ).values_list('matched_lmrb_id', flat=True)
 
+    # Channel: match prefix-tolerantly (e.g. TC 'TV - Derana' ↔ LMRB 'Derana'),
+    # the same way the reconciliation engine does — plain iexact silently dropped
+    # rows whose channel string carried a media-type prefix on only one side.
+    # Duration: no longer required to match. This is a manual picker used exactly
+    # when the auto engine failed (often because durations differ, e.g. TC 30s vs
+    # LMRB 29s), so we show every unmatched LMRB row for the same channel+date and
+    # let the operator pick — sorted by closest air-time first.
+    from verification.engine import _lmrb_channel_q
     qs = LMRBRow.objects.filter(
+        _lmrb_channel_q(tr.channel),
         account_id=tr.account_id,
-        channel__iexact=tr.channel,
         date=tr.date,
-        duration=tr.duration,
         is_manual_matched=False,
         is_sponsorship_matched=False,
-    ).exclude(id__in=already_used).order_by('advt_time')[:100]
+    ).exclude(id__in=already_used).order_by('advt_time')
 
     tc_secs = _time_to_secs_local(tr.aired_time)
     candidates = []
@@ -9360,7 +9381,10 @@ def tc_lmrb_candidates(request):
             'programme': lr.program or '',
             'gap_secs':  gap,
         })
+    # Sort by closest air-time first, THEN cap — so the 100 shown are the 100
+    # nearest the TC time, not just the 100 earliest in the day.
     candidates.sort(key=lambda x: x['gap_secs'] if x['gap_secs'] is not None else 99999)
+    candidates = candidates[:100]
     return JsonResponse({'ok': True, 'candidates': candidates})
 
 
