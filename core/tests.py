@@ -2918,3 +2918,46 @@ class SummaryExcelLandscapeTest(TestCase):
         orient, fit = self._orientation(_write_unmatched_lmrb_sheet)
         self.assertEqual(orient, 'landscape')
         self.assertEqual(fit, 1)
+
+
+class ReconExcelLogoTest(TestCase):
+    """The reconciliation Excel summary must embed the client logo (openpyxl
+    needs Pillow — declared in requirements) and lay the header out like the
+    PDF/UI: title on the left, logo top-right."""
+
+    # 1x1-ish valid PNG
+    PNG = (b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x10\x00\x00\x00\x10'
+           b'\x08\x06\x00\x00\x00\x1f\xf3\xffa\x00\x00\x00\x19IDATx\x9cc\xfc\xcf'
+           b'\xc0\xf0\x1f\x8a\x01\x08\x18\x18\x00\x00\xff\xff\x03\x00\x06\x05\x02'
+           b'\x9f\xe7\x86\xf1\xc4\x00\x00\x00\x00IEND\xaeB`\x82')
+
+    def setUp(self):
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        make_schedule_row(self.account, self.schedule, brand="Brand A", duration=30)
+
+    def _fake_logo(self):
+        import io as _io
+        png = self.PNG
+        class FakeLogo:
+            def open(self, mode='rb'): return _io.BytesIO(png)
+            def read(self): return png
+            def close(self): pass
+        return FakeLogo()
+
+    def test_logo_embeds_and_title_left(self):
+        import io, zipfile, openpyxl
+        from verification.tc_engine import build_summary_data
+        from verification.media_recon import build_recon_context
+        from core.views import _write_media_recon_sheet
+        data = build_summary_data(self.account.id, CHANNEL, MONTH)
+        ctx = build_recon_context(self.account, CHANNEL, MONTH, None, data, schedule=self.schedule)
+        ctx['logo'] = self._fake_logo()
+        wb = openpyxl.Workbook(); ws = wb.active
+        _write_media_recon_sheet(ws, ctx)
+        self.assertEqual(ws['A1'].alignment.horizontal, 'left')
+        self.assertEqual(ws.page_setup.orientation, 'landscape')
+        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+        names = zipfile.ZipFile(buf).namelist()
+        self.assertTrue(any('media/image' in n for n in names),
+                        "client logo must be embedded in the recon sheet")

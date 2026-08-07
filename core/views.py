@@ -6844,20 +6844,29 @@ def _write_media_recon_sheet(ws, ctx):
             c.number_format = fmt
         return c
 
-    # ── Title (centered across the full width) + logo overlaid top-right ──
-    ws.merge_cells('A1:E3')
+    # ── Title (left) + logo (top-right) — mirrors the PDF/UI header layout ──
+    # Title spans A1:C3 on the left; the logo sits in the D1:E3 block on the
+    # right, the same [title | logo] split the PDF and on-screen report use.
+    for _r in (1, 2, 3):
+        ws.row_dimensions[_r].height = 20
+    ws.merge_cells('A1:C3')
     t = ws['A1']; t.value = ctx['title']
     t.font = Font(bold=True, size=18, color='1F3864')
-    t.alignment = Alignment(horizontal='center', vertical='center')
+    t.alignment = Alignment(horizontal='left', vertical='center')
+    ws.merge_cells('D1:E3')                      # reserved logo area (top-right)
     _logo_data = _recon_logo_bytes(ctx)
     if _logo_data:
+        # openpyxl needs Pillow to embed images (unlike ReportLab/PDF). Pillow is
+        # declared in requirements.txt so this succeeds; if it is ever missing,
+        # the logo silently drops here — that was the "no logo in Excel" bug.
         try:
             img = XLImage(io.BytesIO(_logo_data))
             img.height = 55
             img.width  = 150
-            ws.add_image(img, 'D1')
+            img.anchor = 'D1'
+            ws.add_image(img)
         except Exception:
-            pass
+            logger.warning('Recon Excel: could not embed logo (is Pillow installed?)', exc_info=True)
 
     # ── Info grid rows 4-7 ──
     info = [
