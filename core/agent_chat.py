@@ -30,16 +30,40 @@ API_URL_TMPL = 'https://generativelanguage.googleapis.com/v1beta/models/{model}:
 REQUEST_TIMEOUT = 60
 
 PERSONA = """\
-You are Nova, a sharp, friendly colleague who helps media operations staff figure
-out why a scheduled TV spot got marked "Not Aired" when they suspect it actually
-did air.
+You are Nova, the assistant for the Ogilvy Nova ad-verification system. You are
+not a search box; you are a colleague with full read access to the entire system
+(every account, channel, schedule, LMRB record, TC record, and mapping) who can
+take real actions on the user's behalf: opening pages, generating reports, and
+downloading files. You live in a persistent panel available on every screen, not
+tied to whatever page the user happens to be on.
 
-You are talking directly to a human in a live chat. Be conversational, concise,
-and show your work — cite actual times/channels/theme names you find, don't
-hand-wave. You are NOT filling out a form; you're having a quick back-and-forth
-like a coworker who happens to be very fast at cross-checking spreadsheets.
+You are talking directly to a human in a live chat. Be conversational and concise
+— a coworker doing a quick favour, not a form. Confirm what you did in one line;
+don't narrate your process unless asked. Cite the actual schedule numbers /
+times / theme names you find; never hand-wave.
 
-You can be opened two ways:
+How you behave:
+  * If the user names a schedule number, brand, channel or month — even with no
+    other context — look it up yourself with lookup_schedule / lookup_by_brand.
+    Never ask "which one do you mean" if you can resolve it; only ask when it's
+    genuinely ambiguous (e.g. two schedules match).
+  * If the user asks to see / open / view something ("show me schedule 4521",
+    "open the Dettol June summary"), find it and call the matching open_* tool so
+    the browser actually navigates — don't just describe where to click.
+  * If the user asks to download / export a summary, call generate_summary_report
+    so it actually downloads — don't tell them where the button is.
+  * Navigation, opening pages and downloading reports are safe and immediate — do
+    them without asking. Anything that CHANGES data (a mapping, a match, a
+    setting) or SENDS a report to a client always needs an explicit confirmation
+    in this chat first, no matter how confident you are.
+  * If you can't find what they asked about, say so plainly and ask what would
+    narrow it down — don't guess and act on a guess.
+
+A page-context hint may be prepended to a message (e.g. "[context: currently on
+the Summary Sheet for account_id=…]") so "this"/"it" resolve — but you can always
+look up anything else in the system regardless of what page they're on.
+
+When investigating unmatched spots you can be working from two starting points:
   * On the Summary Sheet for a whole scope (account + channel + month). The user
     does NOT know any schedule_id or tc_row_id — never ask for one, find
     everything yourself. Use list_unmatched_spots for the headline numbers (they
@@ -89,6 +113,14 @@ force a match. A genuine miss is a valid answer.
 
 # Tools Nova may call. Deterministic implementations live in agent_tools.
 AVAILABLE_TOOLS = {
+    # lookup / navigation / reports (Tier 1 — act immediately)
+    'lookup_schedule':             agent_tools.lookup_schedule,
+    'lookup_by_brand':             agent_tools.lookup_by_brand,
+    'open_summary_sheet':          agent_tools.open_summary_sheet,
+    'open_schedule_detail':        agent_tools.open_schedule_detail,
+    'open_mapping_page':           agent_tools.open_mapping_page,
+    'generate_summary_report':     agent_tools.generate_summary_report,
+    # investigation
     'list_unmatched_spots':        agent_tools.list_unmatched_spots,
     'investigate_all_unmatched':   agent_tools.investigate_all_unmatched,
     'get_schedule_row_context':    agent_tools.get_schedule_row_context,
@@ -96,12 +128,47 @@ AVAILABLE_TOOLS = {
     'check_brand_mapping':         agent_tools.check_brand_mapping,
     'audit_brand_mapping':         agent_tools.audit_brand_mapping,
     'diagnose_unmatched_tc_spot':  agent_tools.diagnose_unmatched_tc_spot,
+    # data-changing (Tier 3 — confirm first)
     'propose_manual_match':        agent_tools.propose_manual_match,
     'propose_tc_lmrb_match':       agent_tools.propose_tc_lmrb_match,
+    'propose_mapping_fix':         agent_tools.propose_mapping_fix,
 }
 
 # Gemini REST function declarations (plain dicts — same schema shape the SDK uses).
 FUNCTION_DECLARATIONS = [
+    {'name': 'lookup_schedule',
+     'description': 'System-wide search for a schedule by its schedule number or id (not scoped to the current page). Returns account, channel, month and schedule_id.',
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'schedule_number_or_id': {'type': 'STRING'}}, 'required': ['schedule_number_or_id']}},
+    {'name': 'lookup_by_brand',
+     'description': 'Find the scopes (account, channel, month) that carry a brand, anywhere in the system. Optional month filter.',
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'brand': {'type': 'STRING'}, 'month': {'type': 'STRING'}}, 'required': ['brand']}},
+    {'name': 'open_summary_sheet',
+     'description': "Open (navigate to) the Reconciliation / Summary Sheet for a scope. Use when the user asks to see/open/view a summary.",
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'account_id': {'type': 'INTEGER'}, 'channel': {'type': 'STRING'},
+         'month': {'type': 'STRING'}}, 'required': ['account_id', 'channel', 'month']}},
+    {'name': 'open_schedule_detail',
+     'description': "Open (navigate to) the three-way TC detail for the scope a schedule spot belongs to.",
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'schedule_row_id': {'type': 'INTEGER'}}, 'required': ['schedule_row_id']}},
+    {'name': 'open_mapping_page',
+     'description': "Open (navigate to) the Quick Map brand-mapping screen for an account.",
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'account_id': {'type': 'INTEGER'}, 'brand': {'type': 'STRING'}}, 'required': ['account_id']}},
+    {'name': 'generate_summary_report',
+     'description': "Generate and download the Summary report for a scope. format is 'xlsx' (default) or 'pdf'. Use when the user asks to download/export a summary.",
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'account_id': {'type': 'INTEGER'}, 'channel': {'type': 'STRING'},
+         'month': {'type': 'STRING'}, 'format': {'type': 'STRING'}},
+         'required': ['account_id', 'channel', 'month']}},
+    {'name': 'propose_mapping_fix',
+     'description': "Name a BrandMapping fix (which tc_theme to add to which brand) with reasoning. Does NOT apply it — the operator applies it on the mapping screen. Use after diagnose_unmatched_tc_spot.",
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'account_id': {'type': 'INTEGER'}, 'brand': {'type': 'STRING'},
+         'tc_theme': {'type': 'STRING'}, 'reasoning': {'type': 'STRING'}},
+         'required': ['account_id', 'brand', 'tc_theme', 'reasoning']}},
     {'name': 'list_unmatched_spots',
      'description': "List the deviations (Missed/'Not Aired' and Extra, per brand) for a (account, channel, month) scope EXACTLY as the Summary Sheet shows them — commercial AND sponsorship. Returns total_missed, total_extra and a per-brand breakdown, each with unmatched_schedule_row_ids for drill-down.",
      'parameters': {'type': 'OBJECT', 'properties': {
@@ -195,26 +262,32 @@ def _call_gemini(contents, api_key, model):
 
 def _run_turn(contents, user, api_key, model, max_steps: int = 6):
     """Drive one user turn over REST: let Gemini call tools (functionCall parts)
-    until it returns text. Returns (reply_text, updated_contents)."""
+    until it returns text. Returns (reply_text, updated_contents, actions) where
+    actions are the navigate/download results the browser must execute."""
+    actions = []
     for _ in range(max_steps):
         data = _call_gemini(contents, api_key, model)
         candidates = data.get('candidates') or []
         if not candidates:
-            return "I couldn't get a response from the AI backend — try again.", contents
+            return "I couldn't get a response from the AI backend — try again.", contents, actions
         parts = (candidates[0].get('content') or {}).get('parts') or []
         contents.append({'role': 'model', 'parts': parts})
         calls = [p['functionCall'] for p in parts if p.get('functionCall')]
         if not calls:
             text = ''.join(p.get('text', '') for p in parts)
-            return text or "…", contents
+            return text or "…", contents, actions
         tool_parts = []
         for call in calls:
             result = _dispatch_tool(call.get('name'), call.get('args') or {}, user)
+            # Navigation/download are read-only, reversible (Tier 1) — the browser
+            # executes them. Collect them to return alongside the reply.
+            if isinstance(result, dict) and result.get('action') in ('navigate', 'download'):
+                actions.append({k: result[k] for k in ('action', 'url') if k in result})
             tool_parts.append({'functionResponse': {'name': call.get('name'), 'response': result}})
         # Gemini REST: function results go back in a 'user'-role content.
         contents.append({'role': 'user', 'parts': tool_parts})
     return ("I'm going back and forth too much on this one — can you tell me more "
-            "specifically what you're checking?"), contents
+            "specifically what you're checking?"), contents, actions
 
 
 def _persist_text_only(contents):
@@ -231,16 +304,21 @@ def _persist_text_only(contents):
 @login_required
 @require_POST
 def chat_with_nova(request):
-    """POST either
-        {"schedule_row_id": 123, "message": "why is this not aired?"}   (one spot)
-      or
-        {"account_id": 1, "channel": "Sirasa TV", "month": "January 2025",
-         "message": "which spots didn't match?"}                        (whole scope)
-    -> {"reply": "..."}"""
+    """Global, system-wide chat. One continuous conversation per USER (not per
+    page), so context carries across the whole app.
+
+    POST {"message": "open schedule 4521"}                         (global)
+      or {"message": "...", "schedule_row_id": 123}                (page context)
+      or {"message": "...", "account_id": 1, "channel": "..", "month": ".."}
+    -> {"reply": "...", "actions": [{"action":"navigate"|"download","url":".."}]}
+
+    Any page context (schedule_row_id / scope) is passed as a hint so Nova knows
+    what "this" refers to; it can still look up ANY other schedule/brand/scope."""
     try:
         body = json.loads(request.body)
     except (ValueError, TypeError):
-        return JsonResponse({'reply': 'Sorry, I could not read that message.'}, status=400)
+        return JsonResponse({'reply': 'Sorry, I could not read that message.', 'actions': []},
+                            status=400)
 
     schedule_row_id = body.get('schedule_row_id')
     account_id = body.get('account_id')
@@ -248,39 +326,40 @@ def chat_with_nova(request):
     month = (body.get('month') or '').strip()
     user_message = (body.get('message') or '').strip()
     if not user_message:
-        return JsonResponse({'reply': 'Ask me something about the spot or scope.'}, status=400)
-    if not schedule_row_id and not (account_id and channel and month):
-        return JsonResponse({'reply': 'Please open me on a spot or a summary scope first.'},
-                            status=400)
+        return JsonResponse({'reply': 'Ask me anything — a schedule number, a brand, '
+                                      'or why a spot didn’t match.', 'actions': []}, status=400)
 
-    # Per-brand access check for scope-level chats (per-spot access is enforced by
-    # the row belonging to an account the tools read; scope needs an explicit gate).
-    from core.views import _account_access  # lazy import — avoids any import cycle
-    if account_id and not _account_access(request.user, account_id):
-        return JsonResponse({'reply': 'You don’t have access to that brand.'}, status=403)
+    # Scope context, when supplied, is gated by per-brand access.
+    if account_id:
+        from core.views import _account_access  # lazy import — avoids any import cycle
+        if not _account_access(request.user, account_id):
+            return JsonResponse({'reply': 'You don’t have access to that brand.', 'actions': []},
+                                status=403)
 
     api_key, model = _gemini_settings()
     if not api_key:
         return JsonResponse({'reply': "Nova isn't configured yet — set GEMINI_API_KEY "
-                                      "to enable the investigation chat."})
+                                      "to enable the assistant.", 'actions': []})
 
+    # One conversation per user (global panel). Prepend a short page-context hint
+    # to this message when the page provided one, so "this"/"it" resolve.
+    session_key = f'nova_chat_{request.user.id}'
+    hint = ''
     if schedule_row_id:
-        session_key = f'nova_chat_{schedule_row_id}'
-        opener = f"I'm looking at schedule_row_id={schedule_row_id}. {user_message}"
-    else:
-        session_key = f'nova_scope_{account_id}_{channel}_{month}'
-        opener = (f"I'm reviewing the reconciliation Summary Sheet for "
-                  f"account_id={account_id}, channel='{channel}', month='{month}'. "
-                  f"{user_message}")
+        hint = f"[context: currently viewing schedule_row_id={schedule_row_id}] "
+    elif account_id and channel and month:
+        hint = (f"[context: currently on the Summary Sheet for account_id={account_id}, "
+                f"channel='{channel}', month='{month}'] ")
     history = request.session.get(session_key, [])
-    history.append({'role': 'user', 'parts': [{'text': opener if not history else user_message}]})
+    history.append({'role': 'user', 'parts': [{'text': hint + user_message}]})
 
     try:
-        reply, contents = _run_turn(history, request.user, api_key, model)
+        reply, contents, actions = _run_turn(history, request.user, api_key, model)
     except requests.exceptions.RequestException as exc:
-        return JsonResponse({'reply': f'Nova could not reach the AI backend: {exc}'}, status=502)
+        return JsonResponse({'reply': f'Nova could not reach the AI backend: {exc}', 'actions': []},
+                            status=502)
     except Exception as exc:  # pragma: no cover - surfaces upstream/LLM errors
-        return JsonResponse({'reply': f'Nova hit an error: {exc}'}, status=502)
+        return JsonResponse({'reply': f'Nova hit an error: {exc}', 'actions': []}, status=502)
 
     request.session[session_key] = _persist_text_only(contents)
-    return JsonResponse({'reply': reply})
+    return JsonResponse({'reply': reply, 'actions': actions})

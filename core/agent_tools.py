@@ -487,3 +487,100 @@ def propose_tc_lmrb_match(tc_row_id: int, lmrb_row_id: int,
     TCRow.objects.filter(id=tc.id).update(is_lmrb_confirmed=True, matched_lmrb_id=lr.id)
     LMRBRow.objects.filter(id=lr.id).update(is_manual_matched=True)
     return {'status': 'created', 'match_id': mm.id}
+
+
+# ── Nova v2: system-wide lookup + navigation/report ACTIONS ──────────────────
+# Navigation/download are read-only and reversible (Tier 1): the tool returns an
+# {'action': 'navigate'|'download', 'url': ...} that the browser executes. URLs
+# point at the REAL existing routes (see core/urls.py) — no new endpoints.
+
+from urllib.parse import urlencode  # noqa: E402
+
+
+def lookup_schedule(schedule_number_or_id) -> dict:
+    """System-wide search for a schedule by its schedule_number or id (NOT scoped
+    to the current page/account). Returns the scope(s) so Nova can open them."""
+    from core.models import Schedule
+    val = str(schedule_number_or_id).strip()
+    from django.db.models import Q as _Q
+    q = _Q(schedule_number__iexact=val)
+    if val.isdigit():
+        q |= _Q(id=int(val))
+    schedules = list(Schedule.objects.select_related('account').filter(q).order_by('-version')[:10])
+    if not schedules:
+        return {'found': False}
+    matches = [{
+        'schedule_id': s.id, 'schedule_number': s.schedule_number,
+        'account': s.account.name if s.account_id else '', 'account_id': s.account_id,
+        'channel': s.channel, 'month': s.month, 'row_count': s.row_count,
+    } for s in schedules]
+    out = {'found': True, 'count': len(matches), 'matches': matches}
+    out.update(matches[0])  # convenience: top match fields at the root
+    return out
+
+
+def lookup_by_brand(brand: str, month: str = None) -> dict:
+    """Find the distinct scopes (account, channel, month) that carry a brand,
+    anywhere in the system. Optionally filter by month."""
+    qs = ScheduleRow.objects.select_related('schedule', 'schedule__account').filter(
+        brand__icontains=(brand or '').strip())
+    if month:
+        qs = qs.filter(month=month)
+    seen, out = set(), []
+    for r in qs.order_by('brand')[:400]:
+        key = (r.account_id, r.channel, r.month, r.brand)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({'account': r.schedule.account.name if r.schedule and r.schedule.account_id else '',
+                    'account_id': r.account_id, 'channel': r.channel,
+                    'month': r.month, 'brand': r.brand})
+        if len(out) >= 10:
+            break
+    return {'matches': out}
+
+
+def open_summary_sheet(account_id: int, channel: str, month: str, schedule_id=None) -> dict:
+    """Navigate to the Reconciliation / Summary Sheet for a scope."""
+    params = {'account_id': account_id, 'channel': channel, 'month': month}
+    if schedule_id:
+        params['schedule_id'] = schedule_id
+    return {'action': 'navigate', 'url': '/dashboard/summary/?' + urlencode(params)}
+
+
+def open_schedule_detail(schedule_row_id: int) -> dict:
+    """Navigate to the three-way TC detail for the scope a spot belongs to."""
+    try:
+        row = ScheduleRow.objects.get(id=schedule_row_id)
+    except ScheduleRow.DoesNotExist:
+        return {'error': f'schedule_row_id {schedule_row_id} not found'}
+    return {'action': 'navigate',
+            'url': '/dashboard/tc/detail/?' + urlencode(
+                {'account_id': row.account_id, 'channel': row.channel, 'month': row.month})}
+
+
+def open_mapping_page(account_id: int, brand: str = '') -> dict:
+    """Navigate to the Quick Map (brand mapping) screen for an account."""
+    return {'action': 'navigate',
+            'url': '/dashboard/brand-mappings/quick/?' + urlencode({'account': account_id})}
+
+
+def generate_summary_report(account_id: int, channel: str, month: str,
+                            format: str = 'xlsx', schedule_id=None) -> dict:
+    """Return a download action for the Summary report. Reuses the existing
+    server-side export routes (summary_excel / summary_pdf) — no new generator."""
+    params = {'account_id': account_id, 'channel': channel, 'month': month}
+    if schedule_id:
+        params['schedule_id'] = schedule_id
+    is_pdf = str(format).lower() in ('pdf', 'p')
+    base = '/dashboard/summary/pdf/' if is_pdf else '/dashboard/summary/excel/'
+    return {'action': 'download', 'url': base + '?' + urlencode(params),
+            'format': 'pdf' if is_pdf else 'xlsx'}
+
+
+def propose_mapping_fix(account_id: int, brand: str, tc_theme: str, reasoning: str) -> dict:
+    """TIER 3 — names a BrandMapping fix, does NOT apply it. Nova presents this and
+    the operator applies it on the mapping screen (open_mapping_page)."""
+    return {'action': 'confirm_required',
+            'fix': {'account_id': account_id, 'brand': brand, 'tc_theme': tc_theme},
+            'reasoning': reasoning}
