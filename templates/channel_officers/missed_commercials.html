@@ -201,6 +201,11 @@
             {% else %}
               <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">Not Aired</span>
             {% endif %}
+            <button type="button"
+                    onclick="openNova({{ row.sr_id }}, '{{ row.mr.brand|escapejs }} {{ row.mr.duration|default:'' }}s')"
+                    class="ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-900 text-white hover:bg-slate-700">
+              <i class="fa-solid fa-wand-magic-sparkles text-[9px] mr-0.5"></i>Ask Nova
+            </button>
           </td>
 
           <!-- MO Notes (editable) -->
@@ -368,4 +373,6 @@ function dismissNotifications() {
 })();
 {% endif %}
 </script>
+
+{% include 'agent/_nova_widget.html' %}
 {% endblock %}

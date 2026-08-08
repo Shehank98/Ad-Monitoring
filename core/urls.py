@@ -1,5 +1,6 @@
 from django.urls import path, include
 from . import views
+from . import agent_chat
 from accounts import views as acc_views
 
 urlpatterns = [
@@ -161,4 +162,7 @@ urlpatterns = [
     path('whatsapp/test/',                 views.whatsapp_test,             name='whatsapp_test'),
     path('whatsapp/tc-reminders/',         views.whatsapp_send_tc_reminders, name='whatsapp_send_tc_reminders'),
     path('whatsapp/webhook/',              views.whatsapp_webhook,           name='whatsapp_webhook'),
+
+    # Investigation Agent ("Nova") — chat about a "Not Aired" spot
+    path('nova-chat/',                     agent_chat.chat_with_nova,        name='nova_chat'),
 ]

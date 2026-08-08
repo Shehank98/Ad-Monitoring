@@ -2978,3 +2978,136 @@ class ReconExcelLogoTest(TestCase):
         self.assertNotIn('Schedule (Planned)', header_texts)
         # light-blue header fill
         self.assertEqual(ws.cell(13, 1).fill.fgColor.rgb[-6:], 'BDD7EE')
+
+
+class AgentToolsTest(TestCase):
+    """Deterministic shared tool layer (core/agent_tools.py) used by both the
+    Nova chat agent and the future background agent."""
+
+    def setUp(self):
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        self.sr = make_schedule_row(self.account, self.schedule, brand="Brand A",
+                                    start_time="20:00:00", end_time="21:00:00", duration=30)
+        # LMRB stored under clean channel name; schedule channel is CHANNEL.
+        self.lmrb = make_lmrb_row(self.account, advt_theme="Theme A", channel=CHANNEL,
+                                  advt_time="20:05:00", duration=30, source="mediawatch")
+
+    def test_get_schedule_row_context(self):
+        from core.agent_tools import get_schedule_row_context
+        ctx = get_schedule_row_context(self.sr.id)
+        self.assertEqual(ctx["brand"], "Brand A")
+        self.assertEqual(ctx["channel"], CHANNEL)
+        self.assertEqual(ctx["account_id"], self.account.id)
+
+    def test_search_lmrb_candidates_ignores_programme_and_uses_window(self):
+        from core.agent_tools import search_lmrb_candidates
+        out = search_lmrb_candidates(CHANNEL, str(DATE), "20:00:00", window_minutes=60)
+        ids = [c["lmrb_row_id"] for c in out["candidates"]]
+        self.assertIn(self.lmrb.id, ids)
+        # 5 minutes from planned
+        cand = next(c for c in out["candidates"] if c["lmrb_row_id"] == self.lmrb.id)
+        self.assertEqual(cand["minutes_from_planned"], 5.0)
+        self.assertFalse(cand["already_locked"])
+
+    def test_search_lmrb_candidates_channel_prefix_tolerant(self):
+        from core.agent_tools import search_lmrb_candidates
+        # TC/schedule side carries the 'TV - ' prefix; LMRB is clean.
+        out = search_lmrb_candidates("TV - " + CHANNEL, str(DATE), "20:00:00")
+        self.assertIn(self.lmrb.id, [c["lmrb_row_id"] for c in out["candidates"]])
+
+    def test_check_brand_mapping(self):
+        from core.agent_tools import check_brand_mapping
+        make_brand_mapping(self.account, brand="Brand A", theme="Theme A", tc_theme="TC A")
+        out = check_brand_mapping(self.account.id, "Brand A")
+        self.assertTrue(out["is_mapped"])
+        self.assertIn("Theme A", out["mapped_lmrb_themes"])
+
+    def test_propose_manual_match_refuses_without_confirmation(self):
+        from core.agent_tools import propose_manual_match
+        out = propose_manual_match(self.sr.id, self.lmrb.id, confirmed_by_user=False)
+        self.assertEqual(out["status"], "not_created")
+        self.assertFalse(ManualMatch.objects.filter(schedule_row=self.sr).exists())
+
+    def test_propose_manual_match_creates_and_locks_when_confirmed(self):
+        from core.agent_tools import propose_manual_match
+        out = propose_manual_match(self.sr.id, self.lmrb.id, confirmed_by_user=True)
+        self.assertEqual(out["status"], "created")
+        self.sr.refresh_from_db(); self.lmrb.refresh_from_db()
+        self.assertTrue(self.sr.is_manual_matched)
+        self.assertTrue(self.lmrb.is_manual_matched)
+        mm = ManualMatch.objects.get(schedule_row=self.sr)
+        self.assertEqual(mm.match_mode, "schedule_lmrb")
+        self.assertEqual(mm.lmrb_row_id, self.lmrb.id)
+
+
+class MappingGuardianTest(TestCase):
+    """Upload & Mapping Guardian (Tier 1 — advisory, non-blocking)."""
+
+    def setUp(self):
+        self.account = make_account(name="Milo")
+
+    def test_validate_upload_blocks_without_account(self):
+        from core.agent_tools import validate_upload_selection
+        out = validate_upload_selection("schedule", account_id=None)
+        self.assertTrue(out["block"])
+
+    def test_validate_upload_warns_on_brand_mismatch(self):
+        from core.agent_tools import validate_upload_selection
+        out = validate_upload_selection("lmrb", account_id=self.account.id,
+                                        brand_hint_from_filename="Coca Cola")
+        self.assertFalse(out["block"])
+        self.assertTrue(out["warnings"])
+
+    def test_audit_flags_product_without_duration(self):
+        from core.agent_tools import audit_brand_mapping
+        BrandMapping.objects.create(account=self.account, brand="Milo 5s",
+                                    theme="Milo Gen", product="Milo", duration=None)
+        out = audit_brand_mapping(self.account.id, "Milo 5s")
+        self.assertFalse(out["is_clean"])
+        self.assertTrue(any("Product filter" in w for w in out["warnings"]))
+
+    def test_audit_flags_theme_mapped_to_other_brand(self):
+        from core.agent_tools import audit_brand_mapping
+        BrandMapping.objects.create(account=self.account, brand="Milo 5s", theme="Shared Theme")
+        BrandMapping.objects.create(account=self.account, brand="Other Brand", theme="Shared Theme")
+        out = audit_brand_mapping(self.account.id, "Milo 5s")
+        self.assertTrue(any("already mapped to a different brand" in w for w in out["warnings"]))
+
+    def test_audit_clean_mapping(self):
+        from core.agent_tools import audit_brand_mapping
+        BrandMapping.objects.create(account=self.account, brand="Milo 5s",
+                                    theme="Milo Gen 5", tc_theme="MILO 05")
+        out = audit_brand_mapping(self.account.id, "Milo 5s")
+        self.assertTrue(out["is_clean"])
+
+
+class NovaChatEndpointTest(TestCase):
+    """Nova chat endpoint degrades gracefully when Gemini isn't configured, and
+    requires auth."""
+
+    def setUp(self):
+        from django.test import Client
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        self.sr = make_schedule_row(self.account, self.schedule, brand="Brand A")
+        self.user = make_user(email="nova@test.com", role="operations")
+        self.client = Client()
+
+    def test_requires_login(self):
+        resp = self.client.post("/dashboard/nova-chat/",
+                                data=json.dumps({"schedule_row_id": self.sr.id, "message": "hi"}),
+                                content_type="application/json")
+        self.assertIn(resp.status_code, (302, 403))
+
+    def test_graceful_without_gemini_key(self):
+        import os
+        from unittest import mock
+        self.client.force_login(self.user)
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": ""}, clear=False):
+            resp = self.client.post(
+                "/dashboard/nova-chat/",
+                data=json.dumps({"schedule_row_id": self.sr.id, "message": "why not aired?"}),
+                content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("configured", resp.json()["reply"].lower())
