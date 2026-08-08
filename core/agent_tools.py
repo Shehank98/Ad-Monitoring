@@ -308,34 +308,69 @@ def diagnose_unmatched_tc_spot(tc_row_id: int) -> dict:
 
 # ── Scope-level tool: enumerate the unmatched spots for a Summary Sheet ───────
 
-def list_unmatched_spots(account_id: int, channel: str, month: str, limit: int = 60) -> dict:
-    """List the spots that did NOT reconcile for a (account, channel, month)
-    scope — Not Aired, No Brand Mapping, Programme Mismatch and Late Telecast —
-    so Nova can enumerate them on the Summary Sheet and then investigate each by
-    schedule_row_id. Reads MatchResult (the persisted reconciliation outcome)."""
-    from core.models import MatchResult
-    NOT_OK = ['not_aired', 'no_mapping', 'programme_mismatch', 'late_telecast']
-    qs = (MatchResult.objects
-          .filter(account_id=account_id, channel=channel, month=month, status__in=NOT_OK)
-          .order_by('status', 'brand', 'scheduled_date'))
-    total = qs.count()
-    rows = []
-    for mr in qs[:limit]:
-        rows.append({
-            'schedule_row_id': mr.schedule_row_id,
-            'brand': mr.brand,
-            'programme': mr.programme or '',
-            'date': str(mr.scheduled_date) if mr.scheduled_date else '',
-            'planned_start': mr.planned_start or '',
-            'planned_end': mr.planned_end or '',
-            'duration': mr.duration,
-            'status': mr.status,
+def list_unmatched_spots(account_id: int, channel: str, month: str,
+                         schedule_id=None, limit: int = 100) -> dict:
+    """List the deviations (Missed / Extra) for a (account, channel, month) scope
+    EXACTLY as the Summary Sheet shows them.
+
+    This reads verification.tc_engine.build_summary_data — the SAME source the
+    Summary Sheet and its 'Transmission Report Details' deviation table use — so
+    Nova's counts always agree with what the user sees. (The previous version read
+    MatchResult, which is only written by the commercial Schedule↔LMRB engine, so
+    sponsorship/tag deviations showed as 0 while the summary showed them.)
+
+    For each deviating brand it also lists the underlying unmatched ScheduleRow
+    ids, so Nova can drill into individual spots with get_schedule_row_context /
+    search_lmrb_candidates.
+    """
+    from verification.tc_engine import build_summary_data
+    sid = int(schedule_id) if schedule_id else None
+    data = build_summary_data(account_id, channel, month, schedule_id=sid)
+
+    deviations = []
+    total_missed = total_extra = 0
+
+    def _add(row, kind, programme=''):
+        nonlocal total_missed, total_extra
+        missed = row.get('missed', 0) or 0
+        extra = row.get('extra', 0) or 0
+        if not (missed or extra):
+            return
+        total_missed += missed
+        total_extra += extra
+        deviations.append({
+            'brand': row.get('product') or programme or '',
+            'duration': row.get('dur'),
+            'planned': row.get('planned', 0) or 0,
+            'aired': row.get('aired', 0) or 0,
+            'third_party': row.get('third_party', 0) or 0,
+            'missed': missed,
+            'extra': extra,
+            'kind': kind,
+            'programme': programme,
         })
-    # Small per-status tally so Nova can summarise ("12 Not Aired, 3 No Mapping").
-    counts = {}
-    for s in NOT_OK:
-        c = qs.filter(status=s).count()
-        if c:
-            counts[s] = c
-    return {'scope': {'account_id': account_id, 'channel': channel, 'month': month},
-            'total_unmatched': total, 'counts': counts, 'spots': rows}
+
+    for row in (data.get('commercial') or []):
+        _add(row, 'commercial')
+    for section in (data.get('sponsorship') or []):
+        for row in (section.get('rows') or []):
+            _add(row, 'sponsorship', section.get('programme', ''))
+
+    # Attach the actual unmatched ScheduleRow ids per deviating brand for drill-down.
+    for dev in deviations:
+        srq = ScheduleRow.objects.filter(
+            account_id=account_id, channel__iexact=channel, month=month,
+            brand=dev['brand'], is_matched=False, is_manual_matched=False,
+        )
+        if sid:
+            srq = srq.filter(schedule_id=sid)
+        if dev['duration'] is not None:
+            srq = srq.filter(duration=dev['duration'])
+        dev['unmatched_schedule_row_ids'] = list(srq.values_list('id', flat=True)[:limit])
+
+    return {
+        'scope': {'account_id': account_id, 'channel': channel, 'month': month},
+        'total_missed': total_missed,     # matches the summary's "Not Aired" total
+        'total_extra': total_extra,
+        'deviations': deviations,
+    }

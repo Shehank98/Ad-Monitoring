@@ -3040,25 +3040,18 @@ class AgentToolsTest(TestCase):
         self.assertEqual(mm.match_mode, "schedule_lmrb")
         self.assertEqual(mm.lmrb_row_id, self.lmrb.id)
 
-    def test_list_unmatched_spots(self):
+    def test_list_unmatched_spots_matches_summary(self):
+        """list_unmatched_spots must read the SAME source as the Summary Sheet
+        (build_summary_data), so its counts agree — including sponsorship/tag
+        deviations that MatchResult never records. Here Brand A is planned but
+        nothing aired, so it shows as Missed and carries the schedule row id."""
         from core.agent_tools import list_unmatched_spots
-        MatchResult.objects.create(
-            account=self.account, channel=CHANNEL, month=MONTH, brand="Brand A",
-            programme="Show", scheduled_date=DATE, planned_start="20:00:00",
-            duration=30, status="not_aired", schedule_row=self.sr)
-        MatchResult.objects.create(
-            account=self.account, channel=CHANNEL, month=MONTH, brand="Brand B",
-            scheduled_date=DATE, status="no_mapping")
-        MatchResult.objects.create(  # a matched one must be excluded
-            account=self.account, channel=CHANNEL, month=MONTH, brand="Brand C",
-            scheduled_date=DATE, status="matched")
         out = list_unmatched_spots(self.account.id, CHANNEL, MONTH)
-        self.assertEqual(out["total_unmatched"], 2)
-        self.assertEqual(out["counts"].get("not_aired"), 1)
-        self.assertEqual(out["counts"].get("no_mapping"), 1)
-        brands = [s["brand"] for s in out["spots"]]
-        self.assertIn("Brand A", brands)
-        self.assertNotIn("Brand C", brands)
+        self.assertGreaterEqual(out["total_missed"], 1)
+        dev = next((d for d in out["deviations"] if d["brand"] == "Brand A"), None)
+        self.assertIsNotNone(dev, out)
+        self.assertGreaterEqual(dev["missed"], 1)
+        self.assertIn(self.sr.id, dev["unmatched_schedule_row_ids"])
 
     def test_diagnose_unmatched_tc_spot_finds_theme_mapped_elsewhere(self):
         """A TC theme unmapped for this account but mapped under a brand in
