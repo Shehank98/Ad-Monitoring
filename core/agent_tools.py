@@ -22,7 +22,7 @@ from datetime import datetime
 from difflib import SequenceMatcher
 
 from core.models import (
-    Account, BrandMapping, LMRBRow, ManualMatch, ScheduleRow,
+    Account, BrandMapping, LMRBRow, ManualMatch, ScheduleRow, TCRow,
 )
 from verification.engine import _lmrb_channel_q
 
@@ -230,3 +230,77 @@ def audit_brand_mapping(account_id: int, brand: str) -> dict:
             )
 
     return {'warnings': warnings, 'is_clean': len(warnings) == 0}
+
+
+# ── Root-Cause Finder (Tier 2 — evidence only; a human still edits mappings) ──
+
+def diagnose_unmatched_tc_spot(tc_row_id: int) -> dict:
+    """Given a TC spot that failed to reconcile, search its RAW tc_theme string
+    against every BrandMapping in the WHOLE system (not just this account) to
+    find where the same/similar theme is already recognised, and cross-check
+    LMRB for the same slot. Surfaces the specific 'missing mapping' or 'wrong
+    brand' fix. Never edits a mapping — that stays human (Tier 2/3)."""
+    try:
+        tc = TCRow.objects.select_related('account').get(id=tc_row_id)
+    except TCRow.DoesNotExist:
+        return {'error': f'tc_row_id {tc_row_id} not found'}
+
+    raw = (tc.tc_theme or '').strip()
+    raw_l = raw.lower()
+
+    exact_elsewhere, fuzzy = [], []
+    for m in (BrandMapping.objects.exclude(tc_theme='').exclude(tc_theme__isnull=True)
+              .select_related('account')):
+        for variant in m.tc_theme.split('|'):
+            v = variant.strip()
+            if not v:
+                continue
+            vl = v.lower()
+            # wildcard-aware exact: 'X*' matches themes starting with 'X'
+            is_exact = (raw_l.startswith(vl[:-1]) if vl.endswith('*') else raw_l == vl)
+            if is_exact:
+                exact_elsewhere.append({
+                    'brand': m.brand, 'account_id': m.account_id,
+                    'account_name': getattr(m.account, 'name', None),
+                    'same_account': m.account_id == tc.account_id,
+                    'matched_variant': v,
+                })
+            elif raw_l:
+                score = SequenceMatcher(None, raw_l, vl.rstrip('*')).ratio()
+                if score > 0.55:
+                    fuzzy.append({
+                        'brand': m.brand, 'account_id': m.account_id,
+                        'account_name': getattr(m.account, 'name', None),
+                        'matched_variant': v, 'similarity': round(score, 2),
+                        'same_account': m.account_id == tc.account_id,
+                    })
+    fuzzy.sort(key=lambda c: -c['similarity'])
+
+    # LMRB echo: same channel/date within 5 min of the TC aired time — confirms
+    # the ad is real and shows which brand its LMRB theme already maps to.
+    tc_time = _parse_hms(tc.aired_time)
+    lmrb_confirmation = []
+    if tc_time is not None:
+        for r in LMRBRow.objects.filter(_lmrb_channel_q(tc.channel), date=tc.date):
+            rt = _parse_hms(r.advt_time)
+            if rt is None or abs((rt - tc_time).total_seconds()) > 300:
+                continue
+            bm = BrandMapping.objects.filter(
+                account_id=tc.account_id, theme__iexact=(r.advt_theme or '')).first()
+            lmrb_confirmation.append({
+                'lmrb_theme': r.advt_theme,
+                'aired_time': str(r.advt_time),
+                'mapped_to_brand': bm.brand if bm else None,
+            })
+
+    return {
+        'raw_tc_theme': raw,
+        'channel': tc.channel,
+        'date': str(tc.date),
+        'duration': tc.duration,
+        'currently_assigned_account': getattr(tc.account, 'name', None),
+        'currently_assigned_account_id': tc.account_id,
+        'exact_match_elsewhere': exact_elsewhere,
+        'fuzzy_candidates': fuzzy[:5],
+        'lmrb_confirmation': lmrb_confirmation,
+    }
