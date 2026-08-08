@@ -304,3 +304,38 @@ def diagnose_unmatched_tc_spot(tc_row_id: int) -> dict:
         'fuzzy_candidates': fuzzy[:5],
         'lmrb_confirmation': lmrb_confirmation,
     }
+
+
+# ── Scope-level tool: enumerate the unmatched spots for a Summary Sheet ───────
+
+def list_unmatched_spots(account_id: int, channel: str, month: str, limit: int = 60) -> dict:
+    """List the spots that did NOT reconcile for a (account, channel, month)
+    scope — Not Aired, No Brand Mapping, Programme Mismatch and Late Telecast —
+    so Nova can enumerate them on the Summary Sheet and then investigate each by
+    schedule_row_id. Reads MatchResult (the persisted reconciliation outcome)."""
+    from core.models import MatchResult
+    NOT_OK = ['not_aired', 'no_mapping', 'programme_mismatch', 'late_telecast']
+    qs = (MatchResult.objects
+          .filter(account_id=account_id, channel=channel, month=month, status__in=NOT_OK)
+          .order_by('status', 'brand', 'scheduled_date'))
+    total = qs.count()
+    rows = []
+    for mr in qs[:limit]:
+        rows.append({
+            'schedule_row_id': mr.schedule_row_id,
+            'brand': mr.brand,
+            'programme': mr.programme or '',
+            'date': str(mr.scheduled_date) if mr.scheduled_date else '',
+            'planned_start': mr.planned_start or '',
+            'planned_end': mr.planned_end or '',
+            'duration': mr.duration,
+            'status': mr.status,
+        })
+    # Small per-status tally so Nova can summarise ("12 Not Aired, 3 No Mapping").
+    counts = {}
+    for s in NOT_OK:
+        c = qs.filter(status=s).count()
+        if c:
+            counts[s] = c
+    return {'scope': {'account_id': account_id, 'channel': channel, 'month': month},
+            'total_unmatched': total, 'counts': counts, 'spots': rows}
