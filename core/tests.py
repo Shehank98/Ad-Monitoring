@@ -3040,6 +3040,22 @@ class AgentToolsTest(TestCase):
         self.assertEqual(mm.match_mode, "schedule_lmrb")
         self.assertEqual(mm.lmrb_row_id, self.lmrb.id)
 
+    def test_diagnose_unmatched_tc_spot_finds_theme_mapped_elsewhere(self):
+        """A TC theme unmapped for this account but mapped under a brand in
+        ANOTHER account should surface as an exact match elsewhere."""
+        from core.agent_tools import diagnose_unmatched_tc_spot
+        rep = make_tc_report(self.account, channel=CHANNEL)
+        tc = make_tc_row(self.account, rep, tc_theme="SIGNAL PLUS PROMO 30",
+                         channel=CHANNEL, duration=30)
+        other = make_account(name="Other Co")
+        make_brand_mapping(other, brand="Signal Plus", theme="Signal Plus_30",
+                           tc_theme="SIGNAL PLUS PROMO 30")
+        out = diagnose_unmatched_tc_spot(tc.id)
+        self.assertEqual(out["raw_tc_theme"], "SIGNAL PLUS PROMO 30")
+        brands = [e["brand"] for e in out["exact_match_elsewhere"]]
+        self.assertIn("Signal Plus", brands)
+        self.assertFalse(out["exact_match_elsewhere"][0]["same_account"])
+
 
 class MappingGuardianTest(TestCase):
     """Upload & Mapping Guardian (Tier 1 — advisory, non-blocking)."""
@@ -3100,14 +3116,39 @@ class NovaChatEndpointTest(TestCase):
                                 content_type="application/json")
         self.assertIn(resp.status_code, (302, 403))
 
+    @override_settings(GEMINI_API_KEY="")
     def test_graceful_without_gemini_key(self):
-        import os
+        self.client.force_login(self.user)
+        resp = self.client.post(
+            "/dashboard/nova-chat/",
+            data=json.dumps({"schedule_row_id": self.sr.id, "message": "why not aired?"}),
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("configured", resp.json()["reply"].lower())
+
+    @override_settings(GEMINI_API_KEY="test-key")
+    def test_rest_function_calling_loop(self):
+        """With a key set, Nova should (1) call a tool via the REST functionCall
+        protocol, then (2) return the model's final text. We mock requests.post
+        so no real Gemini call is made."""
         from unittest import mock
         self.client.force_login(self.user)
-        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": ""}, clear=False):
+
+        def fake_response(status, payload):
+            m = mock.Mock(); m.status_code = status; m.json.return_value = payload
+            m.text = json.dumps(payload); return m
+
+        turn1 = {"candidates": [{"content": {"parts": [
+            {"functionCall": {"name": "get_schedule_row_context",
+                              "args": {"schedule_row_id": self.sr.id}}}]}}]}
+        turn2 = {"candidates": [{"content": {"parts": [
+            {"text": "This spot is on Sirasa TV; let me check LMRB."}]}}]}
+        with mock.patch("core.agent_chat.requests.post",
+                        side_effect=[fake_response(200, turn1), fake_response(200, turn2)]) as post:
             resp = self.client.post(
                 "/dashboard/nova-chat/",
                 data=json.dumps({"schedule_row_id": self.sr.id, "message": "why not aired?"}),
                 content_type="application/json")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("configured", resp.json()["reply"].lower())
+        self.assertIn("Sirasa TV", resp.json()["reply"])
+        self.assertEqual(post.call_count, 2)  # tool round-trip + final text

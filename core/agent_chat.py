@@ -6,24 +6,28 @@ but got marked "Not Aired" (usually a programme-name mismatch or a mapping gap).
 Nova is conversational, shows its work, and NEVER links a match on its own — it
 only creates a ManualMatch after the live user explicitly confirms a candidate
 (Tier 3). All DB access goes through the shared deterministic tools in
-core/agent_tools.py, which both this agent and the background Reconciliation
-Agent reuse.
+core/agent_tools.py, which both this agent and the future background agent reuse.
 
-Gemini: uses the google-genai SDK (GEMINI_API_KEY, model gemini-2.5-flash). The
-SDK is imported lazily so this module always loads (and the deterministic tools
-stay unit-testable) even where the package/key is absent; the endpoint then
-returns a friendly "not configured" message instead of 500-ing.
+Gemini: called over the SAME REST endpoint the TC PDF converter already uses
+(verification/tc_converters/gemini_ai.py) — generativelanguage.googleapis.com
+with the x-goog-api-key header read from settings.GEMINI_API_KEY. No extra
+dependency; if the TC converter works in an environment, so does Nova. When the
+key is absent the endpoint degrades gracefully instead of erroring.
 """
 from __future__ import annotations
 
 import json
-import os
 
-from django.http import JsonResponse
+import requests
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 
 from core import agent_tools
+
+API_URL_TMPL = 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
+REQUEST_TIMEOUT = 60
 
 PERSONA = """\
 You are Nova, a sharp, friendly colleague who helps media operations staff figure
@@ -53,6 +57,10 @@ Your method when a user asks about a spot:
    audit_brand_mapping and tell the user the exact fix (e.g. "clear the Product
    field on this mapping") — don't just report that it's broken, tell them what
    to do about it.
+7. If a spot has no schedule/LMRB match and no obvious mapping problem from
+   audit_brand_mapping, run diagnose_unmatched_tc_spot to search the raw theme
+   across the WHOLE system before concluding it's a genuine miss — then name the
+   specific brand-mapping fix (which brand to add the theme to, or move it to).
 
 If nothing plausible turns up even with a wide window, say so honestly — don't
 force a match. A genuine miss is a valid answer.
@@ -60,110 +68,122 @@ force a match. A genuine miss is a valid answer.
 
 # Tools Nova may call. Deterministic implementations live in agent_tools.
 AVAILABLE_TOOLS = {
-    'get_schedule_row_context': agent_tools.get_schedule_row_context,
-    'search_lmrb_candidates':   agent_tools.search_lmrb_candidates,
-    'check_brand_mapping':      agent_tools.check_brand_mapping,
-    'propose_manual_match':     agent_tools.propose_manual_match,
-    'audit_brand_mapping':      agent_tools.audit_brand_mapping,
+    'get_schedule_row_context':   agent_tools.get_schedule_row_context,
+    'search_lmrb_candidates':     agent_tools.search_lmrb_candidates,
+    'check_brand_mapping':        agent_tools.check_brand_mapping,
+    'audit_brand_mapping':        agent_tools.audit_brand_mapping,
+    'diagnose_unmatched_tc_spot': agent_tools.diagnose_unmatched_tc_spot,
+    'propose_manual_match':       agent_tools.propose_manual_match,
 }
 
+# Gemini REST function declarations (plain dicts — same schema shape the SDK uses).
+FUNCTION_DECLARATIONS = [
+    {'name': 'get_schedule_row_context',
+     'description': 'Get the planned details of a scheduled spot the user is asking about.',
+     'parameters': {'type': 'OBJECT', 'properties': {'schedule_row_id': {'type': 'INTEGER'}},
+                    'required': ['schedule_row_id']}},
+    {'name': 'search_lmrb_candidates',
+     'description': 'Search LMRB for possible airings near a planned time, ignoring exact programme name.',
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'channel': {'type': 'STRING'}, 'date': {'type': 'STRING'},
+         'planned_time': {'type': 'STRING'}, 'window_minutes': {'type': 'INTEGER'}},
+         'required': ['channel', 'date', 'planned_time']}},
+    {'name': 'check_brand_mapping',
+     'description': 'Check if a brand has an active BrandMapping and what themes it maps to.',
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'account_id': {'type': 'INTEGER'}, 'brand': {'type': 'STRING'}},
+         'required': ['account_id', 'brand']}},
+    {'name': 'audit_brand_mapping',
+     'description': "Audit a brand's mappings for common mistakes (product-without-duration, wrong-brand theme, unmapped theme).",
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'account_id': {'type': 'INTEGER'}, 'brand': {'type': 'STRING'}},
+         'required': ['account_id', 'brand']}},
+    {'name': 'diagnose_unmatched_tc_spot',
+     'description': "Search a failed TC spot's raw theme across the WHOLE system to find which brand it should map to (missing/wrong mapping).",
+     'parameters': {'type': 'OBJECT', 'properties': {'tc_row_id': {'type': 'INTEGER'}},
+                    'required': ['tc_row_id']}},
+    {'name': 'propose_manual_match',
+     'description': 'Create a manual match, but ONLY when the user has explicitly confirmed this candidate in chat.',
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'schedule_row_id': {'type': 'INTEGER'}, 'lmrb_row_id': {'type': 'INTEGER'},
+         'confirmed_by_user': {'type': 'BOOLEAN'}},
+         'required': ['schedule_row_id', 'lmrb_row_id', 'confirmed_by_user']}},
+]
 
-def _tool_declarations(types):
-    """Build the Gemini function declarations (needs the SDK's types module)."""
-    return [types.Tool(function_declarations=[
-        types.FunctionDeclaration(
-            name='get_schedule_row_context',
-            description='Get the planned details of a scheduled spot the user is asking about.',
-            parameters={'type': 'OBJECT', 'properties': {
-                'schedule_row_id': {'type': 'INTEGER'}}, 'required': ['schedule_row_id']},
-        ),
-        types.FunctionDeclaration(
-            name='search_lmrb_candidates',
-            description='Search LMRB for possible airings near a planned time, ignoring exact programme name.',
-            parameters={'type': 'OBJECT', 'properties': {
-                'channel': {'type': 'STRING'}, 'date': {'type': 'STRING'},
-                'planned_time': {'type': 'STRING'}, 'window_minutes': {'type': 'INTEGER'}},
-                'required': ['channel', 'date', 'planned_time']},
-        ),
-        types.FunctionDeclaration(
-            name='check_brand_mapping',
-            description='Check if a brand has an active BrandMapping and what themes it maps to.',
-            parameters={'type': 'OBJECT', 'properties': {
-                'account_id': {'type': 'INTEGER'}, 'brand': {'type': 'STRING'}},
-                'required': ['account_id', 'brand']},
-        ),
-        types.FunctionDeclaration(
-            name='audit_brand_mapping',
-            description="Audit a brand's mappings for common mistakes (product-without-duration, wrong-brand theme, unmapped theme).",
-            parameters={'type': 'OBJECT', 'properties': {
-                'account_id': {'type': 'INTEGER'}, 'brand': {'type': 'STRING'}},
-                'required': ['account_id', 'brand']},
-        ),
-        types.FunctionDeclaration(
-            name='propose_manual_match',
-            description='Create a manual match, but ONLY when the user has explicitly confirmed this candidate in chat.',
-            parameters={'type': 'OBJECT', 'properties': {
-                'schedule_row_id': {'type': 'INTEGER'}, 'lmrb_row_id': {'type': 'INTEGER'},
-                'confirmed_by_user': {'type': 'BOOLEAN'}},
-                'required': ['schedule_row_id', 'lmrb_row_id', 'confirmed_by_user']},
-        ),
-    ])]
+
+def _gemini_settings():
+    key = getattr(settings, 'GEMINI_API_KEY', '') or ''
+    model = getattr(settings, 'GEMINI_TC_MODEL', '') or 'gemini-2.5-flash'
+    return key, model
 
 
 def _dispatch_tool(name, args, user):
-    fn = AVAILABLE_TOOLS[name]
-    kwargs = dict(args)
+    fn = AVAILABLE_TOOLS.get(name)
+    if fn is None:
+        return {'error': f'unknown tool {name}'}
+    kwargs = dict(args or {})
     # propose_manual_match is Tier 3 — attach the authenticated user so the
-    # ManualMatch records who confirmed it. The agent still cannot act unless
-    # confirmed_by_user is True (enforced inside the tool).
+    # ManualMatch records who confirmed it. The tool still refuses to act
+    # unless confirmed_by_user is True.
     if name == 'propose_manual_match':
         kwargs['user'] = user
     return fn(**kwargs)
 
 
-def _run_turn(conversation, user, max_steps: int = 6):
-    """Drive one user turn: let Gemini call tools until it produces text.
-    Returns (reply_text, updated_conversation_as_dicts)."""
-    from google import genai            # lazy: keeps module import-safe
-    from google.genai import types
+def _call_gemini(contents, api_key, model):
+    payload = {
+        'system_instruction': {'parts': [{'text': PERSONA}]},
+        'contents': contents,
+        'tools': [{'functionDeclarations': FUNCTION_DECLARATIONS}],
+        'generationConfig': {'temperature': 0},
+    }
+    resp = requests.post(
+        API_URL_TMPL.format(model=model),
+        headers={'x-goog-api-key': api_key, 'Content-Type': 'application/json'},
+        json=payload, timeout=REQUEST_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        detail = ''
+        try:
+            detail = resp.json().get('error', {}).get('message', '')
+        except Exception:
+            pass
+        raise RuntimeError(f'Gemini API error {resp.status_code}: {detail or resp.text[:200]}')
+    return resp.json()
 
-    client = genai.Client(api_key=os.environ['GEMINI_API_KEY'])
-    contents = [
-        types.Content(role=c['role'],
-                      parts=[types.Part(text=p['text']) for p in c['parts']])
-        for c in conversation
-    ]
+
+def _run_turn(contents, user, api_key, model, max_steps: int = 6):
+    """Drive one user turn over REST: let Gemini call tools (functionCall parts)
+    until it returns text. Returns (reply_text, updated_contents)."""
     for _ in range(max_steps):
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=PERSONA, tools=_tool_declarations(types)),
-        )
-        candidate = response.candidates[0]
-        contents.append(candidate.content)
-        calls = [p.function_call for p in candidate.content.parts if p.function_call]
+        data = _call_gemini(contents, api_key, model)
+        candidates = data.get('candidates') or []
+        if not candidates:
+            return "I couldn't get a response from the AI backend — try again.", contents
+        parts = (candidates[0].get('content') or {}).get('parts') or []
+        contents.append({'role': 'model', 'parts': parts})
+        calls = [p['functionCall'] for p in parts if p.get('functionCall')]
         if not calls:
-            text = ''.join(p.text for p in candidate.content.parts if p.text)
-            return text, _contents_to_dicts(contents)
+            text = ''.join(p.get('text', '') for p in parts)
+            return text or "…", contents
         tool_parts = []
         for call in calls:
-            result = _dispatch_tool(call.name, dict(call.args), user)
-            tool_parts.append(types.Part(function_response=types.FunctionResponse(
-                name=call.name, response=result)))
-        contents.append(types.Content(role='tool', parts=tool_parts))
+            result = _dispatch_tool(call.get('name'), call.get('args') or {}, user)
+            tool_parts.append({'functionResponse': {'name': call.get('name'), 'response': result}})
+        # Gemini REST: function results go back in a 'user'-role content.
+        contents.append({'role': 'user', 'parts': tool_parts})
     return ("I'm going back and forth too much on this one — can you tell me more "
-            "specifically what you're checking?"), _contents_to_dicts(contents)
+            "specifically what you're checking?"), contents
 
 
-def _contents_to_dicts(contents):
-    """Serialise only the plain-text turns back to the session (tool call/result
-    parts are transient and rebuilt each turn from context we keep in text)."""
+def _persist_text_only(contents):
+    """Keep only plain-text user/model turns in the session; tool call/response
+    parts are transient and rebuilt from context each turn."""
     out = []
     for c in contents:
-        texts = [p.text for p in getattr(c, 'parts', []) if getattr(p, 'text', None)]
-        if texts and c.role in ('user', 'model'):
-            out.append({'role': c.role, 'parts': [{'text': t} for t in texts]})
+        texts = [p['text'] for p in c.get('parts', []) if p.get('text')]
+        if texts and c.get('role') in ('user', 'model'):
+            out.append({'role': c['role'], 'parts': [{'text': t} for t in texts]})
     return out
 
 
@@ -183,26 +203,22 @@ def chat_with_nova(request):
         return JsonResponse({'reply': 'Please tell me which spot and what you want to check.'},
                             status=400)
 
-    if not (os.environ.get('GEMINI_API_KEY') or ''):
+    api_key, model = _gemini_settings()
+    if not api_key:
         return JsonResponse({'reply': "Nova isn't configured yet — set GEMINI_API_KEY "
                                       "to enable the investigation chat."})
 
     session_key = f'nova_chat_{schedule_row_id}'
     history = request.session.get(session_key, [])
-    if not history:
-        history.append({'role': 'user', 'parts': [{'text':
-            f'I\'m looking at schedule_row_id={schedule_row_id}. {user_message}'}]})
-    else:
-        history.append({'role': 'user', 'parts': [{'text': user_message}]})
+    first = f"I'm looking at schedule_row_id={schedule_row_id}. {user_message}"
+    history.append({'role': 'user', 'parts': [{'text': first if not history else user_message}]})
 
     try:
-        reply, history = _run_turn(history, request.user)
-    except ModuleNotFoundError:
-        return JsonResponse({'reply': "Nova's AI backend (google-genai) isn't installed "
-                                      "in this environment yet."})
-    except Exception as exc:  # pragma: no cover - network/LLM failure surface
-        return JsonResponse({'reply': f'Nova hit an error talking to the AI backend: {exc}'},
-                            status=502)
+        reply, contents = _run_turn(history, request.user, api_key, model)
+    except requests.exceptions.RequestException as exc:
+        return JsonResponse({'reply': f'Nova could not reach the AI backend: {exc}'}, status=502)
+    except Exception as exc:  # pragma: no cover - surfaces upstream/LLM errors
+        return JsonResponse({'reply': f'Nova hit an error: {exc}'}, status=502)
 
-    request.session[session_key] = history
+    request.session[session_key] = _persist_text_only(contents)
     return JsonResponse({'reply': reply})

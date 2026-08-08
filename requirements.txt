@@ -13,6 +13,5 @@ xlrd>=2.0
 fpdf>=1.7
 reportlab>=4.0
 pdfplumber>=0.11
-google-genai>=1.0
 requests>=2.31
 firebase-admin>=6.5
