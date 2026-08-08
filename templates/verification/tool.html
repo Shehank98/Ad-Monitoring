@@ -718,7 +718,7 @@ function setSource(idx, src, accountId, channel, month) {
   const exports = document.getElementById('exports-' + idx);
   if (src === 'maponline') {
     if (note) note.innerHTML =
-      '<i class="fa-solid fa-map mr-1"></i>Preliminary MapOnline check — separate from the official MediaWatch results (Summary, PDFs, Dashboard).';
+      '<i class="fa-solid fa-map mr-1"></i>Preliminary MapOnline check - separate from the official MediaWatch results (Summary, PDFs, Dashboard).';
     if (exports) exports.style.display = 'none';
   } else {
     if (note) note.textContent = '';
@@ -840,7 +840,7 @@ function runVerify(e, idx, accountId, channel, month) {
       btn.disabled  = false;
       btn.innerHTML = '<i class="fa-solid fa-play text-emerald-500"></i> Run';
 
-      // Run is MediaWatch-only — force the source toggle back to MediaWatch.
+      // Run is MediaWatch-only - force the source toggle back to MediaWatch.
       _source[idx] = 'mediawatch';
       document.getElementById('src-mw-' + idx)?.classList.add('active');
       document.getElementById('src-mo-' + idx)?.classList.remove('active');

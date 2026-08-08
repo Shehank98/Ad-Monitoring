@@ -2,19 +2,19 @@
 Shared, deterministic tool layer for the Ogilvy Nova agents.
 
 These functions are the ONLY way the agents touch the database. They wrap the
-real models/engines (see verification/engine.py, tc_engine.py) — they never
+real models/engines (see verification/engine.py, tc_engine.py) - they never
 reimplement matching logic. Both the Investigation Agent ("Nova", core/
 agent_chat.py) and the future background Reconciliation Agent call the same
 functions here, so behaviour and guardrails stay identical across both.
 
 Design rules baked in:
-  * Never guess a brand match by time proximity alone — mapping is required
+  * Never guess a brand match by time proximity alone - mapping is required
     evidence. These tools surface candidates and mapping state; they do not
     auto-link on similarity.
   * Honour ALL FOUR LMRBRow lock flags (is_matched, is_sponsorship_matched,
     is_manual_matched, is_tc_lmrb_matched) so a row is never double-claimed.
   * propose_manual_match is Tier-3 (always human): it refuses to act unless
-    confirmed_by_user is True — the live chat confirmation IS that human step.
+    confirmed_by_user is True - the live chat confirmation IS that human step.
 """
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def search_lmrb_candidates(channel: str, date: str, planned_time: str,
                            window_minutes: int = 60) -> dict:
     """Search LMRB for possible airings near a planned time on the same
     channel/date, IGNORING exact programme-name matching (programme names differ
-    between sources — that mismatch is usually the real bug). Channel matching is
+    between sources - that mismatch is usually the real bug). Channel matching is
     prefix-tolerant ('TV - X' vs 'X'). Sorted by closeness to the planned time.
     """
     planned = _parse_hms(planned_time)
@@ -104,7 +104,7 @@ def search_lmrb_candidates(channel: str, date: str, planned_time: str,
 def check_brand_mapping(account_id: int, brand: str) -> dict:
     """Check whether a brand has an active BrandMapping and what it maps to.
     A brand with no mapping (or the wrong theme mapped) is very often the real
-    cause of a 'Not Aired' — not a genuine miss."""
+    cause of a 'Not Aired' - not a genuine miss."""
     mappings = BrandMapping.objects.filter(account_id=account_id, brand=brand)
     return {
         'is_mapped': mappings.exists(),
@@ -116,7 +116,7 @@ def check_brand_mapping(account_id: int, brand: str) -> dict:
 
 def propose_manual_match(schedule_row_id: int, lmrb_row_id: int,
                          confirmed_by_user: bool, user=None) -> dict:
-    """TIER 3 — always human. Create a schedule_lmrb ManualMatch, but ONLY when
+    """TIER 3 - always human. Create a schedule_lmrb ManualMatch, but ONLY when
     the live user has explicitly confirmed this candidate. The agent never
     self-authorises a lock. Honours the row-level locks on both sides."""
     if not confirmed_by_user:
@@ -147,12 +147,12 @@ def propose_manual_match(schedule_row_id: int, lmrb_row_id: int,
     return {'status': 'created', 'match_id': mm.id}
 
 
-# ── Upload & Mapping Guardian (Tier 1 — advisory, never destructive) ─────────
+# ── Upload & Mapping Guardian (Tier 1 - advisory, never destructive) ─────────
 
 def validate_upload_selection(step: str, account_id, brand_hint_from_filename: str = None) -> dict:
     """Runs before a Schedule/LMRB/TC upload commits.
 
-    Hard-blocks when no Account was selected (the #1 mistake — the file would
+    Hard-blocks when no Account was selected (the #1 mistake - the file would
     have nowhere to reconcile). Soft-warns when the filename suggests a
     different brand than the one selected (wrong-tab / copy-paste mistake).
     """
@@ -160,7 +160,7 @@ def validate_upload_selection(step: str, account_id, brand_hint_from_filename: s
         return {
             'block': True,
             'warnings': [],
-            'message': (f'No brand (Account) is selected for this {step} upload — '
+            'message': (f'No brand (Account) is selected for this {step} upload - '
                         f'pick the brand first, otherwise this file has nowhere to '
                         f'go and will not reconcile against anything.'),
         }
@@ -173,7 +173,7 @@ def validate_upload_selection(step: str, account_id, brand_hint_from_filename: s
             if sim < 0.4:
                 warnings.append(
                     f"This file's name suggests '{brand_hint_from_filename}', but "
-                    f"you've selected '{account.name}' — double-check you picked the "
+                    f"you've selected '{account.name}' - double-check you picked the "
                     f"right brand before saving."
                 )
         except Account.DoesNotExist:
@@ -183,7 +183,7 @@ def validate_upload_selection(step: str, account_id, brand_hint_from_filename: s
 
 def audit_brand_mapping(account_id: int, brand: str) -> dict:
     """Runs right after a Quick Map save. Returns plain-language warnings about
-    the common mapping mistakes — never blocks, just flags:
+    the common mapping mistakes - never blocks, just flags:
       1. a Product filter set without a Duration (the silent-drop footgun);
       2. a theme already mapped to a different brand in this account;
       3. an unmapped LMRB theme that looks like it belongs to this brand.
@@ -191,12 +191,12 @@ def audit_brand_mapping(account_id: int, brand: str) -> dict:
     warnings = []
     mappings = list(BrandMapping.objects.filter(account_id=account_id, brand=brand))
 
-    # 1. product filter set without a duration — forces exact-product match
+    # 1. product filter set without a duration - forces exact-product match
     for m in mappings:
         if m.product and not m.duration:
             warnings.append(
                 f"Your mapping for '{brand}' → '{m.theme}' has a Product filter set "
-                f"without a Duration — this forces an exact-product match and can "
+                f"without a Duration - this forces an exact-product match and can "
                 f"silently drop real airings. Clear Product unless you're deliberately "
                 f"narrowing it."
             )
@@ -209,7 +209,7 @@ def audit_brand_mapping(account_id: int, brand: str) -> dict:
         ).exclude(brand=brand):
             warnings.append(
                 f"Theme '{c.theme}' is already mapped to a different brand "
-                f"('{c.brand}') in this account — check this isn't a mix-up between "
+                f"('{c.brand}') in this account - check this isn't a mix-up between "
                 f"two brands."
             )
 
@@ -226,20 +226,20 @@ def audit_brand_mapping(account_id: int, brand: str) -> dict:
         if SequenceMatcher(None, key, brand.lower()).ratio() > 0.6:
             warnings.append(
                 f"There's an unmapped LMRB theme '{theme}' that looks like it might "
-                f"belong to '{brand}' — did you forget to include it?"
+                f"belong to '{brand}' - did you forget to include it?"
             )
 
     return {'warnings': warnings, 'is_clean': len(warnings) == 0}
 
 
-# ── Root-Cause Finder (Tier 2 — evidence only; a human still edits mappings) ──
+# ── Root-Cause Finder (Tier 2 - evidence only; a human still edits mappings) ──
 
 def diagnose_unmatched_tc_spot(tc_row_id: int) -> dict:
     """Given a TC spot that failed to reconcile, search its RAW tc_theme string
     against every BrandMapping in the WHOLE system (not just this account) to
     find where the same/similar theme is already recognised, and cross-check
     LMRB for the same slot. Surfaces the specific 'missing mapping' or 'wrong
-    brand' fix. Never edits a mapping — that stays human (Tier 2/3)."""
+    brand' fix. Never edits a mapping - that stays human (Tier 2/3)."""
     try:
         tc = TCRow.objects.select_related('account').get(id=tc_row_id)
     except TCRow.DoesNotExist:
@@ -276,7 +276,7 @@ def diagnose_unmatched_tc_spot(tc_row_id: int) -> dict:
                     })
     fuzzy.sort(key=lambda c: -c['similarity'])
 
-    # LMRB echo: same channel/date within 5 min of the TC aired time — confirms
+    # LMRB echo: same channel/date within 5 min of the TC aired time - confirms
     # the ad is real and shows which brand its LMRB theme already maps to.
     tc_time = _parse_hms(tc.aired_time)
     lmrb_confirmation = []
@@ -313,8 +313,8 @@ def list_unmatched_spots(account_id: int, channel: str, month: str,
     """List the deviations (Missed / Extra) for a (account, channel, month) scope
     EXACTLY as the Summary Sheet shows them.
 
-    This reads verification.tc_engine.build_summary_data — the SAME source the
-    Summary Sheet and its 'Transmission Report Details' deviation table use — so
+    This reads verification.tc_engine.build_summary_data - the SAME source the
+    Summary Sheet and its 'Transmission Report Details' deviation table use - so
     Nova's counts always agree with what the user sees. (The previous version read
     MatchResult, which is only written by the commercial Schedule↔LMRB engine, so
     sponsorship/tag deviations showed as 0 while the summary showed them.)
@@ -380,8 +380,8 @@ def list_unmatched_spots(account_id: int, channel: str, month: str,
 
 def investigate_all_unmatched(account_id: int, channel: str, month: str,
                               schedule_id=None, max_spots: int = 25) -> dict:
-    """Investigate EVERY unmatched spot in a scope in one call — both the missed
-    schedule spots AND the unmatched TC spots — so Nova can work from the Summary
+    """Investigate EVERY unmatched spot in a scope in one call - both the missed
+    schedule spots AND the unmatched TC spots - so Nova can work from the Summary
     Sheet without the user supplying any schedule_id / tc_row_id.
 
     For each missed schedule spot: the closest LMRB airing (programme-agnostic,
@@ -420,7 +420,7 @@ def investigate_all_unmatched(account_id: int, channel: str, month: str,
             seen += 1
 
     # 2) Unmatched TC spots for the scope (schedule-matched or extra, but not
-    #    LMRB-confirmed) — the ones the Summary counts against Aired.
+    #    LMRB-confirmed) - the ones the Summary counts against Aired.
     tcq = (TCRow.objects.filter(account_id=account_id, channel__iexact=channel,
                                 tc_report__month=month, is_lmrb_confirmed=False)
            .order_by('date', 'aired_time'))
@@ -457,8 +457,8 @@ def investigate_all_unmatched(account_id: int, channel: str, month: str,
 
 def propose_tc_lmrb_match(tc_row_id: int, lmrb_row_id: int,
                           confirmed_by_user: bool, user=None) -> dict:
-    """TIER 3 — always human. Link a TC spot to an LMRB row (match_mode='tc_lmrb')
-    once the live user confirms — for TC spots that have no schedule row. Sets the
+    """TIER 3 - always human. Link a TC spot to an LMRB row (match_mode='tc_lmrb')
+    once the live user confirms - for TC spots that have no schedule row. Sets the
     TC row LMRB-confirmed and locks the LMRB row. Never acts unprompted."""
     if not confirmed_by_user:
         return {'status': 'not_created', 'reason': 'awaiting explicit user confirmation'}
@@ -492,7 +492,7 @@ def propose_tc_lmrb_match(tc_row_id: int, lmrb_row_id: int,
 # ── Nova v2: system-wide lookup + navigation/report ACTIONS ──────────────────
 # Navigation/download are read-only and reversible (Tier 1): the tool returns an
 # {'action': 'navigate'|'download', 'url': ...} that the browser executes. URLs
-# point at the REAL existing routes (see core/urls.py) — no new endpoints.
+# point at the REAL existing routes (see core/urls.py) - no new endpoints.
 
 from urllib.parse import urlencode  # noqa: E402
 
@@ -568,7 +568,7 @@ def open_mapping_page(account_id: int, brand: str = '') -> dict:
 def generate_summary_report(account_id: int, channel: str, month: str,
                             format: str = 'xlsx', schedule_id=None) -> dict:
     """Return a download action for the Summary report. Reuses the existing
-    server-side export routes (summary_excel / summary_pdf) — no new generator."""
+    server-side export routes (summary_excel / summary_pdf) - no new generator."""
     params = {'account_id': account_id, 'channel': channel, 'month': month}
     if schedule_id:
         params['schedule_id'] = schedule_id
@@ -579,7 +579,7 @@ def generate_summary_report(account_id: int, channel: str, month: str,
 
 
 def propose_mapping_fix(account_id: int, brand: str, tc_theme: str, reasoning: str) -> dict:
-    """TIER 3 — names a BrandMapping fix, does NOT apply it. Nova presents this and
+    """TIER 3 - names a BrandMapping fix, does NOT apply it. Nova presents this and
     the operator applies it on the mapping screen (open_mapping_page)."""
     return {'action': 'confirm_required',
             'fix': {'account_id': account_id, 'brand': brand, 'tc_theme': tc_theme},

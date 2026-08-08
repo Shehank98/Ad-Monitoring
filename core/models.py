@@ -53,7 +53,7 @@ class Client(models.Model):
     """A top-level client that groups one or more Accounts.
 
     Examples: 'Nestlé' groups Milo, Maggi, Lactogrow, etc.
-    User access is assigned at Client level — access to a Client grants
+    User access is assigned at Client level - access to a Client grants
     access to all Accounts under it.
     """
     name       = models.CharField(max_length=200, unique=True)
@@ -93,14 +93,14 @@ class Schedule(models.Model):
     """An ad schedule Excel file uploaded by a Planner.
 
     month, start_date, end_date and version are all auto-detected / auto-set
-    from the uploaded file — planners no longer need to enter these manually.
+    from the uploaded file - planners no longer need to enter these manually.
     version auto-increments per (account, channel) so new uploads are trackable.
     """
     account           = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='schedules')
     channel           = models.CharField(max_length=200)
     media_type        = models.CharField(
         max_length=10, choices=MEDIA_TYPE_CHOICES, blank=True, default='',
-        help_text='TV / Radio / Press — auto-detected from channel name prefix at upload',
+        help_text='TV / Radio / Press - auto-detected from channel name prefix at upload',
     )
     month             = models.CharField(max_length=50)
     schedule_number   = models.CharField(max_length=50)
@@ -110,7 +110,7 @@ class Schedule(models.Model):
     # Auto-detected from file
     start_date        = models.DateField(null=True, blank=True)
     end_date          = models.DateField(null=True, blank=True)
-    # Version — auto-incremented per (account, channel, month) on each new upload
+    # Version - auto-incremented per (account, channel, month) on each new upload
     version           = models.PositiveIntegerField(default=1)
     # Superseded by a later replacement upload with the same schedule_number
     is_superseded     = models.BooleanField(default=False)
@@ -213,7 +213,7 @@ class ScheduleRow(models.Model):
 
     brand       = models.CharField(max_length=200)
     product     = models.CharField(max_length=200, blank=True, default='',
-                    help_text='Product name — should match LMRB Product field')
+                    help_text='Product name - should match LMRB Product field')
     programme   = models.CharField(max_length=200, blank=True)
     date        = models.DateField(null=True, blank=True)
     start_time  = models.CharField(max_length=30, blank=True)
@@ -221,9 +221,9 @@ class ScheduleRow(models.Model):
     duration    = models.IntegerField(null=True, blank=True)
     ad_type          = models.CharField(max_length=100, blank=True)   # 'COMMERCIAL BENEFITS' | 'SPONSORSHIP'
     sponsorship_type = models.CharField(max_length=100, blank=True, default='',
-                         help_text='Type of sponsorship e.g. BB, Tag, Opening/Closing — set at upload')
+                         help_text='Type of sponsorship e.g. BB, Tag, Opening/Closing - set at upload')
 
-    # Row-level locking — commercial reconciliation
+    # Row-level locking - commercial reconciliation
     is_matched   = models.BooleanField(default=False, db_index=True)
     matched_lmrb = models.ForeignKey(
         'LMRBRow', on_delete=models.SET_NULL,
@@ -231,7 +231,7 @@ class ScheduleRow(models.Model):
     )
     matched_at   = models.DateTimeField(null=True, blank=True)
 
-    # MapOnline preliminary match — set by compute_maponline_scope() (Verify Ads
+    # MapOnline preliminary match - set by compute_maponline_scope() (Verify Ads
     # MapOnline toggle).  Separate from is_matched (MediaWatch), so MapOnline
     # matching locks its own rows one-to-one WITHOUT affecting the authoritative
     # MediaWatch reconciliation, the Summary Sheet, PDFs, or the dashboard.
@@ -242,7 +242,7 @@ class ScheduleRow(models.Model):
     )
     maponline_matched_at   = models.DateTimeField(null=True, blank=True)
 
-    # Manual reconciliation lock — set when a ManualMatch record is created for
+    # Manual reconciliation lock - set when a ManualMatch record is created for
     # this row.  Prevents the engine from counting it as Not Aired and stops it
     # from being re-processed in future auto runs.
     is_manual_matched = models.BooleanField(default=False, db_index=True)
@@ -294,15 +294,15 @@ class LMRBRow(models.Model):
     cost          = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     day           = models.CharField(max_length=20, blank=True, default='')
 
-    # Dedup key — SHA-256 of all meaningful columns.
+    # Dedup key - SHA-256 of all meaningful columns.
     # Uploading the same file twice skips existing rows (append-only, no replace).
     dedup_key   = models.CharField(max_length=64, unique=True)
 
-    # Upload batch identifier — same UUID as MonitoringData.file_group_id so that
+    # Upload batch identifier - same UUID as MonitoringData.file_group_id so that
     # deleting a MonitoringData group also removes all its LMRBRows.
     batch_id    = models.UUIDField(null=True, blank=True, db_index=True)
 
-    # Row-level locking — commercial reconciliation
+    # Row-level locking - commercial reconciliation
     is_matched       = models.BooleanField(default=False, db_index=True)
     matched_schedule = models.ForeignKey(
         ScheduleRow, on_delete=models.SET_NULL,
@@ -313,15 +313,15 @@ class LMRBRow(models.Model):
     # Sponsorship reconciliation lock (set after Step 1 auto or Step 2 manual)
     is_sponsorship_matched = models.BooleanField(default=False, db_index=True)
 
-    # MapOnline matching lock — set by compute_maponline_scope() when this row is
+    # MapOnline matching lock - set by compute_maponline_scope() when this row is
     # consumed by MapOnline matching.  Separate from is_matched (MediaWatch), so a
     # MapOnline raw row is claimed at most once without touching MediaWatch state.
     is_maponline_schedule_matched = models.BooleanField(default=False, db_index=True)
 
-    # Manual reconciliation lock — permanently locked once a ManualMatch is created
+    # Manual reconciliation lock - permanently locked once a ManualMatch is created
     is_manual_matched = models.BooleanField(default=False, db_index=True)
 
-    # Standalone TC ↔ LMRB reconciliation lock — set when this row is matched to a
+    # Standalone TC ↔ LMRB reconciliation lock - set when this row is matched to a
     # TCRow by the schedule-less TC↔LMRB engine (verification/tc_lmrb_engine.py).
     # Acts as a global lock: the commercial, sponsorship and schedule-based TC
     # engines all skip rows where this is True so a row claimed here is never reused.
@@ -379,7 +379,7 @@ class BrandMapping(models.Model):
     )
     duration  = models.PositiveIntegerField(
         null=True, blank=True,
-        help_text='Duration in seconds (optional — leave blank to match any duration)',
+        help_text='Duration in seconds (optional - leave blank to match any duration)',
     )
 
     class Meta:
@@ -465,7 +465,7 @@ class TCRow(models.Model):
     )
     is_extra            = models.BooleanField(default=False, db_index=True)
 
-    # Standalone TC ↔ LMRB reconciliation lock — set when this TC row is matched to
+    # Standalone TC ↔ LMRB reconciliation lock - set when this TC row is matched to
     # an LMRBRow by the schedule-less TC↔LMRB engine (verification/tc_lmrb_engine.py).
     # Independent of is_lmrb_confirmed (which is owned by the schedule-based engine).
     is_tc_lmrb_matched  = models.BooleanField(default=False, db_index=True)
@@ -555,7 +555,7 @@ class SponsorshipLmrbAssignment(models.Model):
     picker in the Summary Sheet (match_type='manual').
 
     Once created, both the LMRBRow (is_sponsorship_matched=True) and the
-    SponsorshipLmrbAssignment record act as a permanent lock — the LMRB row
+    SponsorshipLmrbAssignment record act as a permanent lock - the LMRB row
     cannot be reused for any other schedule row.
 
     Constraints:
@@ -605,9 +605,9 @@ class PeriodSponsorship(models.Model):
     locks the actual LMRB appearances so they cannot be double-counted.
 
     Source:
-    - 'manual'   — created via the Period Sponsorships form (may not be in the
+    - 'manual'   - created via the Period Sponsorships form (may not be in the
                    schedule/TC at all).
-    - 'schedule' — derived by grouping SPONSORSHIP ScheduleRows for a brand;
+    - 'schedule' - derived by grouping SPONSORSHIP ScheduleRows for a brand;
                    start/end/planned_count come from that group.
 
     Theme resolution: if `theme` is set it is matched directly against
@@ -729,7 +729,7 @@ class TcLmrbThemeMap(models.Model):
 
     Maps a TC (theme, duration) pair to the LMRB (theme, duration) pair it should
     match, per account.  Unlike BrandMapping (theme-level, same-duration only),
-    this allows cross-duration pairs — e.g. TC "DIALOG 5G/29SEC" @ 29s pairing
+    this allows cross-duration pairs - e.g. TC "DIALOG 5G/29SEC" @ 29s pairing
     with LMRB "Dialog 5G Launch" @ 30s.
 
     - tc_duration NULL   → the mapping applies to any TC duration of that theme
@@ -858,7 +858,7 @@ class MatchResult(models.Model):
     # ── Result ──────────────────────────────────────────────────────────────
     status           = models.CharField(max_length=30, choices=STATUS_CHOICES)
 
-    # Fingerprint of the consumed LMRB row — kept for backward compatibility.
+    # Fingerprint of the consumed LMRB row - kept for backward compatibility.
     lmrb_fingerprint = models.CharField(max_length=64, blank=True)
 
     # Optional FK links to row-level records (populated by the DB-based engine).
@@ -882,8 +882,8 @@ class SpotNote(models.Model):
     """A note attached to a planned ad spot (ScheduleRow).
 
     One note per role per spot:
-      'mo'  — written by the Marketing Officer on the Missed Commercials page
-      'ops' — written by Operations Staff on the Verify Ads / Not Aired tab
+      'mo'  - written by the Marketing Officer on the Missed Commercials page
+      'ops' - written by Operations Staff on the Verify Ads / Not Aired tab
 
     Linked to ScheduleRow (not MatchResult) so notes survive reconciliation resets.
     """
@@ -917,7 +917,7 @@ class SpotNote(models.Model):
         ordering = ['schedule_row', 'role']
 
     def __str__(self):
-        return f'SpotNote({self.role}) — {self.schedule_row_id}'
+        return f'SpotNote({self.role}) - {self.schedule_row_id}'
 
 
 # ── Spot Notifications ────────────────────────────────────────────────────────
@@ -971,7 +971,7 @@ SETTING_DEFAULTS = [
     {
         'key': 'tc_extra_theme_aliases',
         'value': '',
-        'label': 'TC Theme — Extra Column Aliases',
+        'label': 'TC Theme - Extra Column Aliases',
         'description': (
             'Extra column names to try when detecting the ad-theme column in TC files. '
             'Comma-separated. '
@@ -983,7 +983,7 @@ SETTING_DEFAULTS = [
     {
         'key': 'tc_extra_time_aliases',
         'value': '',
-        'label': 'TC Aired Time — Extra Column Aliases',
+        'label': 'TC Aired Time - Extra Column Aliases',
         'description': (
             'Extra column names to try for the aired/broadcast time column in TC files. '
             'Comma-separated. '
@@ -995,7 +995,7 @@ SETTING_DEFAULTS = [
     {
         'key': 'tc_extra_date_aliases',
         'value': '',
-        'label': 'TC Date — Extra Column Aliases',
+        'label': 'TC Date - Extra Column Aliases',
         'description': (
             'Extra column names to try for the broadcast date column in TC files. '
             'Comma-separated. '
@@ -1006,7 +1006,7 @@ SETTING_DEFAULTS = [
     {
         'key': 'tc_extra_duration_aliases',
         'value': '',
-        'label': 'TC Duration — Extra Column Aliases',
+        'label': 'TC Duration - Extra Column Aliases',
         'description': (
             'Extra column names to try for the ad-duration column in TC files. '
             'Comma-separated. '
@@ -1017,7 +1017,7 @@ SETTING_DEFAULTS = [
     {
         'key': 'tc_extra_programme_aliases',
         'value': '',
-        'label': 'TC Programme — Extra Column Aliases',
+        'label': 'TC Programme - Extra Column Aliases',
         'description': (
             'Extra column names to try for the programme/show-name column in TC files. '
             'Comma-separated. '
@@ -1029,7 +1029,7 @@ SETTING_DEFAULTS = [
     {
         'key': 'lmrb_extra_theme_aliases',
         'value': '',
-        'label': 'LMRB Theme — Extra Column Aliases',
+        'label': 'LMRB Theme - Extra Column Aliases',
         'description': (
             'Extra column names to try for the ad-theme column in LMRB/MapOnline files. '
             'Comma-separated. '
@@ -1040,7 +1040,7 @@ SETTING_DEFAULTS = [
     {
         'key': 'lmrb_extra_time_aliases',
         'value': '',
-        'label': 'LMRB Advt Time — Extra Column Aliases',
+        'label': 'LMRB Advt Time - Extra Column Aliases',
         'description': (
             'Extra column names to try for the broadcast time column in LMRB/MapOnline files. '
             'Comma-separated. '
@@ -1051,7 +1051,7 @@ SETTING_DEFAULTS = [
     {
         'key': 'lmrb_extra_duration_aliases',
         'value': '',
-        'label': 'LMRB Duration — Extra Column Aliases',
+        'label': 'LMRB Duration - Extra Column Aliases',
         'description': (
             'Extra column names to try for the duration column in LMRB/MapOnline files. '
             'Comma-separated. '
@@ -1062,7 +1062,7 @@ SETTING_DEFAULTS = [
     {
         'key': 'lmrb_extra_date_aliases',
         'value': '',
-        'label': 'LMRB Date — Extra Column Aliases',
+        'label': 'LMRB Date - Extra Column Aliases',
         'description': (
             'Extra column names to try for the date column in LMRB/MapOnline files. '
             'Comma-separated. '
@@ -1078,7 +1078,7 @@ SETTING_DEFAULTS = [
         'description': (
             'Comma-separated keywords. If an LMRB Advt_Theme contains any of these '
             'as a case-insensitive substring, the row is classified as Sponsorship Benefits '
-            'in analytics — regardless of BrandMapping. Add more keywords as needed. '
+            'in analytics - regardless of BrandMapping. Add more keywords as needed. '
             'Default: -BB, Com Break, DJ, -Extro, -Intro, -LLogo, Tag, Time Check, -Tr'
         ),
         'category': 'lmrb_parsing',
@@ -1143,7 +1143,7 @@ SETTING_DEFAULTS = [
         'value': '',
         'label': 'Webhook Verify Token',
         'description': (
-            'A secret token you choose (any random string) — set the same value in '
+            'A secret token you choose (any random string) - set the same value in '
             'Meta Developer Console → WhatsApp → Configuration → Webhook Verify Token. '
             'Required to receive incoming WhatsApp messages for auto-registration. '
             'Example: ad-monitor-secret-2025'
@@ -1237,7 +1237,7 @@ SETTING_DEFAULTS = [
         'value': '#3b82f6',
         'label': 'Extra Aired',
         'description': ('Note: spots found in monitoring (LMRB / TC) that were NOT part of '
-                        'the booking plan — aired but never scheduled.'),
+                        'the booking plan - aired but never scheduled.'),
         'category': 'display',
     },
     {
@@ -1400,7 +1400,7 @@ class SystemSetting(models.Model):
     Site-wide configuration editable by super_admin at /dashboard/settings/.
 
     Use the module-level helpers (get_setting / get_setting_int / get_setting_list)
-    to read values from views, parsers, and engines — never query this model directly.
+    to read values from views, parsers, and engines - never query this model directly.
     Settings are auto-created with defaults when the settings page is first visited.
     """
     CATEGORY_CHOICES = [
@@ -1508,7 +1508,7 @@ class AuditLog(models.Model):
         ordering = ['-timestamp']
 
     def __str__(self):
-        return f'{self.user} — {self.action} — {self.timestamp:%Y-%m-%d %H:%M}'
+        return f'{self.user} - {self.action} - {self.timestamp:%Y-%m-%d %H:%M}'
 
 
 # ── Channel Officer ────────────────────────────────────────────────────────────
@@ -1546,7 +1546,7 @@ class ChannelOfficer(models.Model):
         unique_together = [('account', 'channel', 'name')]
 
     def __str__(self):
-        return f'{self.name} — {self.account} / {self.channel}'
+        return f'{self.name} - {self.account} / {self.channel}'
 
     @property
     def effective_whatsapp(self):

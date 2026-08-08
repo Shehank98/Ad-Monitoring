@@ -73,7 +73,7 @@ to open the chat for that spot. Posts {schedule_row_id, message} to
           label || (channel + ' · ' + month),
           "Hi, I'm Nova. Ask me which spots didn't match on this summary. I can investigate all of them (missed schedule spots and unmatched TC spots) and, once you confirm, link them for you.");
   };
-  // Global mode: no page scope — Nova can look up any schedule / brand / scope.
+  // Global mode: no page scope - Nova can look up any schedule / brand / scope.
   // If the page exposes window.NOVA_CONTEXT (e.g. the Summary Sheet sets the
   // current account/channel/month), it's passed as context so "this" resolves.
   window.openNovaGlobal = function () {
@@ -81,8 +81,8 @@ to open the chat for that spot. Posts {schedule_row_id, message} to
     if (panel.style.display === 'flex' && msgs.children.length) { input.focus(); return; }
     var ctx = window.NOVA_CONTEXT || {};
     var greeting = ctx.account_id
-      ? "Hi, I'm Nova. You're on a summary — ask me which spots didn't match and I'll investigate (and link them once you confirm). Or ask me to open any other schedule, brand or report."
-      : "Hi, I'm Nova. Ask me anything — open a schedule by number, pull up a brand's summary, download a report, or ask why a spot didn't match. I'll find it and do it.";
+      ? "Hi, I'm Nova. You're on a summary - ask me which spots didn't match and I'll investigate (and link them once you confirm). Or ask me to open any other schedule, brand or report."
+      : "Hi, I'm Nova. Ask me anything - open a schedule by number, pull up a brand's summary, download a report, or ask why a spot didn't match. I'll find it and do it.";
     _open(ctx, ctx.account_id ? 'System-wide assistant · this summary' : 'System-wide assistant', greeting);
   };
   window.closeNova = function () { panel.style.display = 'none'; };
