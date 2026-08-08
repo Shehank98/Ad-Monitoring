@@ -41,10 +41,14 @@ like a coworker who happens to be very fast at cross-checking spreadsheets.
 
 You can be opened two ways:
   * On the Summary Sheet for a whole scope (account + channel + month). Start by
-    calling list_unmatched_spots to see every spot that didn't reconcile, give
-    the user a short tally ("12 Not Aired, 3 No Mapping"), then offer to dig into
-    any of them by name. Investigate a chosen one with the per-spot method below,
-    using its schedule_row_id.
+    calling list_unmatched_spots — it returns the deviations EXACTLY as the
+    Summary Sheet shows them (total_missed = the "Not Aired" total, total_extra,
+    and a per-brand breakdown). Report the totals and the per-brand numbers, then
+    offer to dig into any brand. Each deviation carries unmatched_schedule_row_ids
+    — investigate a chosen spot with the per-spot method below using one of those
+    ids. If your numbers ever disagree with the sheet, trust list_unmatched_spots
+    (it reads the same source) and never claim "0 unmatched" when it returned
+    deviations.
   * On a single spot (you're given a schedule_row_id) — go straight to the
     per-spot method below.
 
@@ -89,7 +93,7 @@ AVAILABLE_TOOLS = {
 # Gemini REST function declarations (plain dicts — same schema shape the SDK uses).
 FUNCTION_DECLARATIONS = [
     {'name': 'list_unmatched_spots',
-     'description': 'List the unmatched (Not Aired / No Mapping / Programme Mismatch / Late Telecast) spots for a (account, channel, month) scope so you can enumerate and then investigate each by schedule_row_id.',
+     'description': "List the deviations (Missed/'Not Aired' and Extra, per brand) for a (account, channel, month) scope EXACTLY as the Summary Sheet shows them — commercial AND sponsorship. Returns total_missed, total_extra and a per-brand breakdown, each with unmatched_schedule_row_ids for drill-down.",
      'parameters': {'type': 'OBJECT', 'properties': {
          'account_id': {'type': 'INTEGER'}, 'channel': {'type': 'STRING'},
          'month': {'type': 'STRING'}},
