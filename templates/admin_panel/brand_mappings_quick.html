@@ -61,6 +61,9 @@
   <div id="q-loading" class="hidden text-center py-10 text-slate-400 text-sm"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading brands &amp; themes…</div>
   <div id="q-none" class="hidden text-center py-10 text-slate-400 text-sm">No schedule brands found for this scope. Upload a schedule first.</div>
 
+  <!-- Mapping Guardian warnings (advisory; persists across card re-render) -->
+  <div id="q-map-warnings" class="hidden"></div>
+
   <!-- Brand cards -->
   <div id="q-cards" class="space-y-3"></div>
 
@@ -93,6 +96,29 @@
   }
   function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function show(id, on) { var e = document.getElementById(id); if (e) e.classList.toggle('hidden', !on); }
+
+  // Mapping Guardian advisory banner (Tier 1 — advisory, never blocks a save).
+  function showMapWarnings(brand, warnings) {
+    var box = document.getElementById('q-map-warnings');
+    if (!box) return;
+    if (!warnings.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.className = 'rounded-2xl border border-amber-200 bg-amber-50 p-4';
+    box.innerHTML =
+      '<div class="flex items-start gap-2">' +
+        '<i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5"></i>' +
+        '<div class="flex-1">' +
+          '<p class="text-xs font-bold text-amber-800 mb-1">' + esc(brand) +
+            ' — check these before you rely on this mapping</p>' +
+          warnings.map(function (w) {
+            return '<p class="text-[11px] text-amber-800 leading-snug mb-1">• ' + esc(w) + '</p>';
+          }).join('') +
+        '</div>' +
+        '<button type="button" class="text-amber-400 hover:text-amber-700 text-xs" ' +
+          'onclick="this.closest(\'#q-map-warnings\').classList.add(\'hidden\')">✕</button>' +
+      '</div>';
+    box.classList.remove('hidden');
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 
   // Narrow the LMRB theme list to a clicked brand:
   //  1) themes whose LMRB product matches one of the brand's schedule products;
@@ -552,6 +578,11 @@
         if (d.updated) parts.push(d.updated + ' updated');
         if (d.skipped) parts.push(d.skipped + ' already existed');
         toast(brand + ': ' + (parts.join(', ') || 'no changes') + '.', true);
+        // Upload & Mapping Guardian: show advisory warnings in a persistent
+        // banner above the card list (survives the render() below, which
+        // rebuilds the cards). Flags product-without-duration, a theme mapped
+        // to another brand, and unmapped look-alike themes.
+        showMapWarnings(brand, d.warnings || []);
         // Mark brand mapped + reflect newly-mapped themes
         mappedBrandSet.add(brand.toLowerCase().trim());
         themes.forEach(function (t) { mappedThemeSet.add(t.toLowerCase().trim()); });

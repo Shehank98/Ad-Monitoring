@@ -2700,7 +2700,14 @@ def brand_mapping_quick_add(request):
                 duration=duration, product=product)
             created += 1
 
-    return JsonResponse({'ok': True, 'created': created, 'updated': updated, 'skipped': skipped})
+    # Upload & Mapping Guardian (Tier 1 — advisory): flag common mapping
+    # mistakes (product-without-duration, theme mapped to another brand,
+    # an unmapped LMRB theme that looks like this brand) right after saving.
+    from core.agent_tools import audit_brand_mapping
+    audit = audit_brand_mapping(account.id, brand)
+
+    return JsonResponse({'ok': True, 'created': created, 'updated': updated,
+                         'skipped': skipped, 'warnings': audit['warnings']})
 
 
 @login_required
