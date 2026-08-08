@@ -40,17 +40,25 @@ hand-wave. You are NOT filling out a form; you're having a quick back-and-forth
 like a coworker who happens to be very fast at cross-checking spreadsheets.
 
 You can be opened two ways:
-  * On the Summary Sheet for a whole scope (account + channel + month). Start by
-    calling list_unmatched_spots — it returns the deviations EXACTLY as the
-    Summary Sheet shows them (total_missed = the "Not Aired" total, total_extra,
-    and a per-brand breakdown). Report the totals and the per-brand numbers, then
-    offer to dig into any brand. Each deviation carries unmatched_schedule_row_ids
-    — investigate a chosen spot with the per-spot method below using one of those
-    ids. If your numbers ever disagree with the sheet, trust list_unmatched_spots
-    (it reads the same source) and never claim "0 unmatched" when it returned
-    deviations.
+  * On the Summary Sheet for a whole scope (account + channel + month). The user
+    does NOT know any schedule_id or tc_row_id — never ask for one, find
+    everything yourself. Use list_unmatched_spots for the headline numbers (they
+    match the sheet exactly; total_missed = the "Not Aired" total). Then use
+    investigate_all_unmatched to investigate EVERY unmatched spot at once — both
+    the missed schedule spots AND the unmatched TC spots — each comes back with
+    its id and the closest LMRB airing (best_candidate.lmrb_row_id). Summarise
+    what you found, and for spots with a clear candidate that is NOT already
+    locked, OFFER TO LINK THEM. When the user says yes (e.g. "yes", "link them
+    all", "fix the Milo ones"), TAKE THE ACTION: call propose_manual_match for
+    schedule spots and propose_tc_lmrb_match for TC spots, once per spot — you may
+    link several after one batch confirmation — then report exactly what you
+    linked. Never claim "0 unmatched" when the tools returned deviations.
   * On a single spot (you're given a schedule_row_id) — go straight to the
     per-spot method below.
+
+You are allowed to take real actions (linking matches), not just describe them —
+but ONLY after the user confirms in this chat. Never link a candidate that comes
+back already_locked, and never invent a match with no LMRB evidence.
 
 Your method when a user asks about a spot:
 1. Pull the ScheduleRow's real details (brand, channel, date, planned time).
@@ -81,19 +89,27 @@ force a match. A genuine miss is a valid answer.
 
 # Tools Nova may call. Deterministic implementations live in agent_tools.
 AVAILABLE_TOOLS = {
-    'list_unmatched_spots':       agent_tools.list_unmatched_spots,
-    'get_schedule_row_context':   agent_tools.get_schedule_row_context,
-    'search_lmrb_candidates':     agent_tools.search_lmrb_candidates,
-    'check_brand_mapping':        agent_tools.check_brand_mapping,
-    'audit_brand_mapping':        agent_tools.audit_brand_mapping,
-    'diagnose_unmatched_tc_spot': agent_tools.diagnose_unmatched_tc_spot,
-    'propose_manual_match':       agent_tools.propose_manual_match,
+    'list_unmatched_spots':        agent_tools.list_unmatched_spots,
+    'investigate_all_unmatched':   agent_tools.investigate_all_unmatched,
+    'get_schedule_row_context':    agent_tools.get_schedule_row_context,
+    'search_lmrb_candidates':      agent_tools.search_lmrb_candidates,
+    'check_brand_mapping':         agent_tools.check_brand_mapping,
+    'audit_brand_mapping':         agent_tools.audit_brand_mapping,
+    'diagnose_unmatched_tc_spot':  agent_tools.diagnose_unmatched_tc_spot,
+    'propose_manual_match':        agent_tools.propose_manual_match,
+    'propose_tc_lmrb_match':       agent_tools.propose_tc_lmrb_match,
 }
 
 # Gemini REST function declarations (plain dicts — same schema shape the SDK uses).
 FUNCTION_DECLARATIONS = [
     {'name': 'list_unmatched_spots',
      'description': "List the deviations (Missed/'Not Aired' and Extra, per brand) for a (account, channel, month) scope EXACTLY as the Summary Sheet shows them — commercial AND sponsorship. Returns total_missed, total_extra and a per-brand breakdown, each with unmatched_schedule_row_ids for drill-down.",
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'account_id': {'type': 'INTEGER'}, 'channel': {'type': 'STRING'},
+         'month': {'type': 'STRING'}},
+         'required': ['account_id', 'channel', 'month']}},
+    {'name': 'investigate_all_unmatched',
+     'description': 'Investigate EVERY unmatched spot in a scope at once — all missed schedule spots AND all unmatched TC spots — finding the closest LMRB airing and root cause for each. Use this on the Summary Sheet so you never need the user to give you a schedule_id or tc_row_id. Returns ids (schedule_row_id / tc_row_id) and best_candidate.lmrb_row_id you can then link on confirmation.',
      'parameters': {'type': 'OBJECT', 'properties': {
          'account_id': {'type': 'INTEGER'}, 'channel': {'type': 'STRING'},
          'month': {'type': 'STRING'}},
@@ -123,11 +139,17 @@ FUNCTION_DECLARATIONS = [
      'parameters': {'type': 'OBJECT', 'properties': {'tc_row_id': {'type': 'INTEGER'}},
                     'required': ['tc_row_id']}},
     {'name': 'propose_manual_match',
-     'description': 'Create a manual match, but ONLY when the user has explicitly confirmed this candidate in chat.',
+     'description': 'Link a SCHEDULE spot to an LMRB row, but ONLY when the user has explicitly confirmed this candidate in chat. Use once per spot; you may call it repeatedly to link several after a batch confirmation.',
      'parameters': {'type': 'OBJECT', 'properties': {
          'schedule_row_id': {'type': 'INTEGER'}, 'lmrb_row_id': {'type': 'INTEGER'},
          'confirmed_by_user': {'type': 'BOOLEAN'}},
          'required': ['schedule_row_id', 'lmrb_row_id', 'confirmed_by_user']}},
+    {'name': 'propose_tc_lmrb_match',
+     'description': 'Link a TC spot (one with no schedule row) to an LMRB row, but ONLY when the user has explicitly confirmed in chat. Use for unmatched TC spots from investigate_all_unmatched.',
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'tc_row_id': {'type': 'INTEGER'}, 'lmrb_row_id': {'type': 'INTEGER'},
+         'confirmed_by_user': {'type': 'BOOLEAN'}},
+         'required': ['tc_row_id', 'lmrb_row_id', 'confirmed_by_user']}},
 ]
 
 
@@ -142,10 +164,9 @@ def _dispatch_tool(name, args, user):
     if fn is None:
         return {'error': f'unknown tool {name}'}
     kwargs = dict(args or {})
-    # propose_manual_match is Tier 3 — attach the authenticated user so the
-    # ManualMatch records who confirmed it. The tool still refuses to act
-    # unless confirmed_by_user is True.
-    if name == 'propose_manual_match':
+    # The Tier-3 link tools record who confirmed the match; attach the
+    # authenticated user. They still refuse to act unless confirmed_by_user=True.
+    if name in ('propose_manual_match', 'propose_tc_lmrb_match'):
         kwargs['user'] = user
     return fn(**kwargs)
 

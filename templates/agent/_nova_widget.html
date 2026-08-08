@@ -65,13 +65,13 @@ to open the chat for that spot. Posts {schedule_row_id, message} to
   window.openNova = function (scheduleRowId, label) {
     _open({ schedule_row_id: scheduleRowId },
           label ? ('Spot: ' + label) : ('Spot #' + scheduleRowId),
-          "Hi — I'm Nova. Ask me why this spot is marked Not Aired and I'll cross-check the LMRB data and the brand mapping for you.");
+          "Hi, I'm Nova. Ask me why this spot is marked Not Aired and I'll cross-check the LMRB data and the brand mapping for you.");
   };
   // Scope mode (Summary Sheet): account + channel + month.
   window.openNovaScope = function (accountId, channel, month, label) {
     _open({ account_id: accountId, channel: channel, month: month },
           label || (channel + ' · ' + month),
-          "Hi — I'm Nova. Ask me which spots didn't match on this summary and I'll pull the unmatched list and dig into any of them for you.");
+          "Hi, I'm Nova. Ask me which spots didn't match on this summary. I can investigate all of them (missed schedule spots and unmatched TC spots) and, once you confirm, link them for you.");
   };
   window.closeNova = function () { panel.style.display = 'none'; };
 
