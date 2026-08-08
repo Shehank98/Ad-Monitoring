@@ -3053,6 +3053,40 @@ class AgentToolsTest(TestCase):
         self.assertGreaterEqual(dev["missed"], 1)
         self.assertIn(self.sr.id, dev["unmatched_schedule_row_ids"])
 
+    def test_investigate_all_unmatched_covers_schedule_and_tc(self):
+        """Nova can investigate everything with no IDs from the user: the missed
+        schedule spot AND an unmatched TC spot both come back, each with the
+        closest LMRB airing."""
+        from core.agent_tools import investigate_all_unmatched
+        rep = make_tc_report(self.account, channel=CHANNEL)
+        tc = make_tc_row(self.account, rep, tc_theme="Brand A TC", channel=CHANNEL,
+                         aired_time="20:05:30", duration=30)  # is_lmrb_confirmed False
+        out = investigate_all_unmatched(self.account.id, CHANNEL, MONTH)
+        # missed schedule spot (Brand A) is present with the nearby LMRB candidate
+        sched = out["missed_schedule_spots"]
+        self.assertTrue(any(s["schedule_row_id"] == self.sr.id for s in sched))
+        s0 = next(s for s in sched if s["schedule_row_id"] == self.sr.id)
+        self.assertIsNotNone(s0["best_candidate"])
+        self.assertEqual(s0["best_candidate"]["lmrb_row_id"], self.lmrb.id)
+        # the unmatched TC spot is present too
+        self.assertTrue(any(t["tc_row_id"] == tc.id for t in out["unmatched_tc_spots"]))
+
+    def test_propose_tc_lmrb_match_requires_confirmation_then_links(self):
+        from core.agent_tools import propose_tc_lmrb_match
+        rep = make_tc_report(self.account, channel=CHANNEL)
+        tc = make_tc_row(self.account, rep, tc_theme="Brand A TC", channel=CHANNEL,
+                         aired_time="20:05:30", duration=30)
+        # refuses without confirmation
+        self.assertEqual(propose_tc_lmrb_match(tc.id, self.lmrb.id, False)["status"],
+                         "not_created")
+        # links on confirmation
+        out = propose_tc_lmrb_match(tc.id, self.lmrb.id, True)
+        self.assertEqual(out["status"], "created")
+        tc.refresh_from_db(); self.lmrb.refresh_from_db()
+        self.assertTrue(tc.is_lmrb_confirmed)
+        self.assertEqual(tc.matched_lmrb_id, self.lmrb.id)
+        self.assertTrue(self.lmrb.is_manual_matched)
+
     def test_diagnose_unmatched_tc_spot_finds_theme_mapped_elsewhere(self):
         """A TC theme unmapped for this account but mapped under a brand in
         ANOTHER account should surface as an exact match elsewhere."""

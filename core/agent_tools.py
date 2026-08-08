@@ -374,3 +374,116 @@ def list_unmatched_spots(account_id: int, channel: str, month: str,
         'total_extra': total_extra,
         'deviations': deviations,
     }
+
+
+# ── Batch investigation + TC-side action (so Nova needs no IDs from the user) ──
+
+def investigate_all_unmatched(account_id: int, channel: str, month: str,
+                              schedule_id=None, max_spots: int = 25) -> dict:
+    """Investigate EVERY unmatched spot in a scope in one call — both the missed
+    schedule spots AND the unmatched TC spots — so Nova can work from the Summary
+    Sheet without the user supplying any schedule_id / tc_row_id.
+
+    For each missed schedule spot: the closest LMRB airing (programme-agnostic,
+    ±120 min) + whether the brand is mapped.
+    For each unmatched TC spot (not LMRB-confirmed): the closest LMRB airing +
+    the whole-system root-cause (diagnose_unmatched_tc_spot).
+
+    Returns everything Nova needs to (a) explain each case and (b) call
+    propose_manual_match / propose_tc_lmrb_match to actually link them on the
+    user's confirmation.
+    """
+    findings_schedule, findings_tc = [], []
+
+    # 1) Missed schedule spots (drill-down ids come straight from the summary).
+    scope = list_unmatched_spots(account_id, channel, month, schedule_id=schedule_id)
+    seen = 0
+    for dev in scope['deviations']:
+        for srid in dev.get('unmatched_schedule_row_ids', []):
+            if seen >= max_spots:
+                break
+            ctx = get_schedule_row_context(srid)
+            if 'error' in ctx:
+                continue
+            cands = search_lmrb_candidates(ctx['channel'], ctx['date'],
+                                           ctx['planned_start'], window_minutes=120)
+            best = cands['candidates'][0] if cands['candidates'] else None
+            mapping = check_brand_mapping(account_id, ctx['brand'])
+            findings_schedule.append({
+                'schedule_row_id': srid,
+                'brand': ctx['brand'], 'date': ctx['date'],
+                'planned_start': ctx['planned_start'], 'duration': ctx['duration'],
+                'is_mapped': mapping['is_mapped'],
+                'candidate_count': cands['total_found'],
+                'best_candidate': best,   # has lmrb_row_id, theme, gap, already_locked
+            })
+            seen += 1
+
+    # 2) Unmatched TC spots for the scope (schedule-matched or extra, but not
+    #    LMRB-confirmed) — the ones the Summary counts against Aired.
+    tcq = (TCRow.objects.filter(account_id=account_id, channel__iexact=channel,
+                                tc_report__month=month, is_lmrb_confirmed=False)
+           .order_by('date', 'aired_time'))
+    if schedule_id:
+        tcq = tcq.filter(tc_report__schedule_id=schedule_id)
+    for tc in tcq[:max_spots]:
+        cands = search_lmrb_candidates(tc.channel, str(tc.date), tc.aired_time,
+                                       window_minutes=120)
+        best = cands['candidates'][0] if cands['candidates'] else None
+        diag = diagnose_unmatched_tc_spot(tc.id)
+        findings_tc.append({
+            'tc_row_id': tc.id,
+            'tc_theme': tc.tc_theme, 'date': str(tc.date),
+            'aired_time': tc.aired_time, 'duration': tc.duration,
+            'is_schedule_matched': tc.is_schedule_matched,
+            'candidate_count': cands['total_found'],
+            'best_candidate': best,
+            'root_cause': {
+                'exact_match_elsewhere': diag.get('exact_match_elsewhere', []),
+                'fuzzy_candidates': diag.get('fuzzy_candidates', []),
+                'lmrb_confirmation': diag.get('lmrb_confirmation', []),
+            },
+        })
+
+    return {
+        'scope': {'account_id': account_id, 'channel': channel, 'month': month},
+        'summary_totals': {'missed': scope['total_missed'], 'extra': scope['total_extra']},
+        'missed_schedule_spots': findings_schedule,
+        'unmatched_tc_spots': findings_tc,
+        'note': ('best_candidate.already_locked=True means that LMRB row is taken '
+                 'and cannot be linked. Only propose links the user confirms.'),
+    }
+
+
+def propose_tc_lmrb_match(tc_row_id: int, lmrb_row_id: int,
+                          confirmed_by_user: bool, user=None) -> dict:
+    """TIER 3 — always human. Link a TC spot to an LMRB row (match_mode='tc_lmrb')
+    once the live user confirms — for TC spots that have no schedule row. Sets the
+    TC row LMRB-confirmed and locks the LMRB row. Never acts unprompted."""
+    if not confirmed_by_user:
+        return {'status': 'not_created', 'reason': 'awaiting explicit user confirmation'}
+    try:
+        tc = TCRow.objects.select_related('tc_report').get(id=tc_row_id)
+    except TCRow.DoesNotExist:
+        return {'status': 'error', 'reason': f'tc_row {tc_row_id} not found'}
+    try:
+        lr = LMRBRow.objects.get(id=lmrb_row_id)
+    except LMRBRow.DoesNotExist:
+        return {'status': 'error', 'reason': f'lmrb_row {lmrb_row_id} not found'}
+
+    if ManualMatch.objects.filter(tc_row=tc).exists():
+        return {'status': 'already_existed', 'reason': 'TC row already manually matched'}
+    if ManualMatch.objects.filter(lmrb_row=lr).exists():
+        return {'status': 'already_existed', 'reason': 'LMRB row already manually matched'}
+    if lr.is_sponsorship_matched or lr.is_tc_lmrb_matched:
+        return {'status': 'not_created', 'reason': 'LMRB row is locked by another engine'}
+
+    mm = ManualMatch.objects.create(
+        account_id=tc.account_id, channel=tc.channel,
+        month=tc.tc_report.month if tc.tc_report else '',
+        match_mode='tc_lmrb', tc_row=tc, lmrb_row=lr,
+        matched_by=user if (user and getattr(user, 'is_authenticated', False)) else None,
+    )
+    TCRow.objects.filter(id=tc.id).update(is_lmrb_confirmed=True, matched_lmrb_id=lr.id)
+    LMRBRow.objects.filter(id=lr.id).update(is_manual_matched=True)
+    return {'status': 'created', 'match_id': mm.id}
