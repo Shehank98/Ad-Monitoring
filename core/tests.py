@@ -3053,6 +3053,33 @@ class AgentToolsTest(TestCase):
         self.assertGreaterEqual(dev["missed"], 1)
         self.assertIn(self.sr.id, dev["unmatched_schedule_row_ids"])
 
+    def test_lookup_schedule_system_wide(self):
+        from core.agent_tools import lookup_schedule
+        out = lookup_schedule(self.schedule.schedule_number)
+        self.assertTrue(out["found"])
+        self.assertEqual(out["account_id"], self.account.id)
+        self.assertEqual(out["channel"], CHANNEL)
+        self.assertEqual(out["month"], MONTH)
+        self.assertFalse(lookup_schedule("nonexistent-999")["found"])
+
+    def test_lookup_by_brand(self):
+        from core.agent_tools import lookup_by_brand
+        out = lookup_by_brand("Brand A")
+        self.assertTrue(any(m["brand"] == "Brand A" and m["account_id"] == self.account.id
+                            for m in out["matches"]))
+
+    def test_navigation_and_report_tools_return_actions(self):
+        from core.agent_tools import (open_summary_sheet, open_mapping_page,
+                                       generate_summary_report)
+        nav = open_summary_sheet(self.account.id, CHANNEL, MONTH)
+        self.assertEqual(nav["action"], "navigate")
+        self.assertIn("/dashboard/summary/", nav["url"])
+        self.assertIn("account_id=%d" % self.account.id, nav["url"])
+        self.assertEqual(open_mapping_page(self.account.id, "Brand A")["action"], "navigate")
+        dl = generate_summary_report(self.account.id, CHANNEL, MONTH, format="pdf")
+        self.assertEqual(dl["action"], "download")
+        self.assertIn("/dashboard/summary/pdf/", dl["url"])
+
     def test_investigate_all_unmatched_covers_schedule_and_tc(self):
         """Nova can investigate everything with no IDs from the user: the missed
         schedule spot AND an unmatched TC spot both come back, each with the
@@ -3185,6 +3212,35 @@ class NovaChatEndpointTest(TestCase):
             content_type="application/json")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("configured", resp.json()["reply"].lower())  # graceful (no key)
+
+    @override_settings(GEMINI_API_KEY="test-key")
+    def test_global_mode_returns_navigate_action(self):
+        """Global chat (no page context) can look up + open a page; the endpoint
+        returns the navigate action for the browser to execute."""
+        from unittest import mock
+        self.user.role = "super_admin"; self.user.save(update_fields=["role"])
+        self.client.force_login(self.user)
+
+        def fake(status, payload):
+            m = mock.Mock(); m.status_code = status; m.json.return_value = payload
+            m.text = json.dumps(payload); return m
+
+        turn1 = {"candidates": [{"content": {"parts": [
+            {"functionCall": {"name": "open_summary_sheet",
+                              "args": {"account_id": self.account.id,
+                                       "channel": CHANNEL, "month": MONTH}}}]}}]}
+        turn2 = {"candidates": [{"content": {"parts": [
+            {"text": "Opening the summary now."}]}}]}
+        with mock.patch("core.agent_chat.requests.post",
+                        side_effect=[fake(200, turn1), fake(200, turn2)]):
+            resp = self.client.post(
+                "/dashboard/nova-chat/",
+                data=json.dumps({"message": "open the summary for that account"}),
+                content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(any(a["action"] == "navigate" and "/dashboard/summary/" in a["url"]
+                            for a in data["actions"]))
 
     @override_settings(GEMINI_API_KEY="test-key")
     def test_rest_function_calling_loop(self):

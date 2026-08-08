@@ -34,7 +34,7 @@
         {% for acc in accounts %}<option value="{{ acc.id }}">{{ acc.name }}</option>{% endfor %}
       </select>
     </div>
-    <p class="text-[11px] text-slate-400 mt-2"><i class="fa-solid fa-circle-info mr-1"></i> Pick an account. Click a brand below and tick the LMRB / TC themes for it — the theme list is narrowed to each brand automatically.</p>
+    <p class="text-[11px] text-slate-400 mt-2"><i class="fa-solid fa-circle-info mr-1"></i> Pick an account. Click a brand below and tick the LMRB / TC themes for it - the theme list is narrowed to each brand automatically.</p>
   </div>
 
   <!-- Coverage summary -->
@@ -97,7 +97,7 @@
   function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function show(id, on) { var e = document.getElementById(id); if (e) e.classList.toggle('hidden', !on); }
 
-  // Mapping Guardian advisory banner (Tier 1 — advisory, never blocks a save).
+  // Mapping Guardian advisory banner (Tier 1 - advisory, never blocks a save).
   function showMapWarnings(brand, warnings) {
     var box = document.getElementById('q-map-warnings');
     if (!box) return;
@@ -108,7 +108,7 @@
         '<i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5"></i>' +
         '<div class="flex-1">' +
           '<p class="text-xs font-bold text-amber-800 mb-1">' + esc(brand) +
-            ' — check these before you rely on this mapping</p>' +
+            ' - check these before you rely on this mapping</p>' +
           warnings.map(function (w) {
             return '<p class="text-[11px] text-amber-800 leading-snug mb-1">• ' + esc(w) + '</p>';
           }).join('') +
@@ -159,7 +159,7 @@
     return out;
   }
 
-  // ── Account selection (no channel/month scope — map at account level) ────────
+  // ── Account selection (no channel/month scope - map at account level) ────────
   elAcc.addEventListener('change', function () {
     if (!this.value) { reset(); return; }
     loadOptions();
@@ -389,7 +389,7 @@
 
     var tpm = OPTS.theme_product_map || {};
 
-    // ── Product narrow (NOT saved) — ticking a product filters WHICH LMRB /
+    // ── Product narrow (NOT saved) - ticking a product filters WHICH LMRB /
     //    MapOnline themes are shown for this brand. Product is never written to
     //    the mapping (a saved product becomes an exact match filter, PR #56). ──
     var selectedProducts = new Set();
@@ -405,7 +405,7 @@
     }
 
     var allThemes = OPTS.themes || [];
-    // Products that appear among this brand's themes — a focused narrowing aid.
+    // Products that appear among this brand's themes - a focused narrowing aid.
     var prodOptions = (function () {
       var seen = {}, out = [];
       themesForBrand(brand, allThemes, preLmrb).forEach(function (t) {
@@ -422,7 +422,7 @@
     function buildLmrb() {
       lmrbHolder.innerHTML = '';
       var items = narrowByProducts(showAllThemes ? allThemes : narrowed, preLmrb);
-      currentLmrb = checklist('LMRB Theme *', items, { mappedSet: mappedThemeSet, durMap: OPTS.theme_durations || {}, preselect: preLmrb, emptyMsg: 'No LMRB themes for this brand — click “Show all”, or upload monitoring data.' });
+      currentLmrb = checklist('LMRB Theme *', items, { mappedSet: mappedThemeSet, durMap: OPTS.theme_durations || {}, preselect: preLmrb, emptyMsg: 'No LMRB themes for this brand - click “Show all”, or upload monitoring data.' });
       var bar = document.createElement('div');
       bar.className = 'flex items-center justify-between mb-1';
       bar.innerHTML = '<span class="text-[10px] text-slate-400">' +
@@ -454,7 +454,7 @@
         return;
       }
       var items = narrowByProducts(showAllMapo ? allMapo : narrowedMapo, preMapo);
-      currentMapo = checklist('MapOnline Theme', items, { durMap: OPTS.theme_durations || {}, preselect: preMapo, emptyMsg: 'No MapOnline themes for this brand — click “Show all”.' });
+      currentMapo = checklist('MapOnline Theme', items, { durMap: OPTS.theme_durations || {}, preselect: preMapo, emptyMsg: 'No MapOnline themes for this brand - click “Show all”.' });
       var bar = document.createElement('div');
       bar.className = 'flex items-center justify-between mb-1';
       bar.innerHTML = '<span class="text-[10px] text-slate-400">' +
@@ -519,7 +519,7 @@
     grid.className = 'grid grid-cols-1 sm:grid-cols-2 gap-4';
     grid.appendChild(lmrbHolder); grid.appendChild(tcHolder);
 
-    // Duration (only remaining Advanced field — product/maponline are now lists)
+    // Duration (only remaining Advanced field - product/maponline are now lists)
     var adv = document.createElement('details');
     adv.className = 'group rounded-lg border border-slate-200 bg-white';
     adv.open = maps.length > 0;   // reveal when there's an existing duration to see
@@ -558,7 +558,7 @@
       var themes = currentLmrb.getSelected();
       if (!themes.length) { toast('Pick at least one LMRB theme.', false); return; }
       var btn = this; btn.disabled = true;
-      // product is intentionally omitted — the picker never saves a product
+      // product is intentionally omitted - the picker never saves a product
       // constraint (it only narrows the view above). Blank = match any product.
       var payload = {
         account_id: elAcc.value, brand: brand, themes: themes,
