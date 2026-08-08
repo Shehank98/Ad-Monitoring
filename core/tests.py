@@ -3040,6 +3040,26 @@ class AgentToolsTest(TestCase):
         self.assertEqual(mm.match_mode, "schedule_lmrb")
         self.assertEqual(mm.lmrb_row_id, self.lmrb.id)
 
+    def test_list_unmatched_spots(self):
+        from core.agent_tools import list_unmatched_spots
+        MatchResult.objects.create(
+            account=self.account, channel=CHANNEL, month=MONTH, brand="Brand A",
+            programme="Show", scheduled_date=DATE, planned_start="20:00:00",
+            duration=30, status="not_aired", schedule_row=self.sr)
+        MatchResult.objects.create(
+            account=self.account, channel=CHANNEL, month=MONTH, brand="Brand B",
+            scheduled_date=DATE, status="no_mapping")
+        MatchResult.objects.create(  # a matched one must be excluded
+            account=self.account, channel=CHANNEL, month=MONTH, brand="Brand C",
+            scheduled_date=DATE, status="matched")
+        out = list_unmatched_spots(self.account.id, CHANNEL, MONTH)
+        self.assertEqual(out["total_unmatched"], 2)
+        self.assertEqual(out["counts"].get("not_aired"), 1)
+        self.assertEqual(out["counts"].get("no_mapping"), 1)
+        brands = [s["brand"] for s in out["spots"]]
+        self.assertIn("Brand A", brands)
+        self.assertNotIn("Brand C", brands)
+
     def test_diagnose_unmatched_tc_spot_finds_theme_mapped_elsewhere(self):
         """A TC theme unmapped for this account but mapped under a brand in
         ANOTHER account should surface as an exact match elsewhere."""
@@ -3125,6 +3145,19 @@ class NovaChatEndpointTest(TestCase):
             content_type="application/json")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("configured", resp.json()["reply"].lower())
+
+    @override_settings(GEMINI_API_KEY="")
+    def test_scope_mode_accepted(self):
+        """Nova can be opened at Summary-Sheet scope (account+channel+month)."""
+        self.user.role = "super_admin"; self.user.save(update_fields=["role"])
+        self.client.force_login(self.user)
+        resp = self.client.post(
+            "/dashboard/nova-chat/",
+            data=json.dumps({"account_id": self.account.id, "channel": CHANNEL,
+                             "month": MONTH, "message": "which spots didn't match?"}),
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("configured", resp.json()["reply"].lower())  # graceful (no key)
 
     @override_settings(GEMINI_API_KEY="test-key")
     def test_rest_function_calling_loop(self):

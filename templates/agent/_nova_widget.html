@@ -37,7 +37,7 @@ to open the chat for that spot. Posts {schedule_row_id, message} to
   var msgs = document.getElementById('nova-messages');
   var form = document.getElementById('nova-form');
   var input = document.getElementById('nova-input');
-  var currentSpot = null;
+  var currentBase = null;   // {schedule_row_id} OR {account_id, channel, month}
 
   function csrf() { return (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || ''; }
   function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -53,26 +53,39 @@ to open the chat for that spot. Posts {schedule_row_id, message} to
     return b;
   }
 
-  window.openNova = function (scheduleRowId, label) {
-    currentSpot = scheduleRowId;
+  function _open(base, subtitle, greeting) {
+    currentBase = base;
     msgs.innerHTML = '';
-    document.getElementById('nova-subtitle').textContent = label ? ('Spot: ' + label) : ('Spot #' + scheduleRowId);
+    document.getElementById('nova-subtitle').textContent = subtitle;
     panel.style.display = 'flex';
     input.focus();
-    bubble("Hi — I'm Nova. Ask me why this spot is marked Not Aired and I'll cross-check the LMRB data and the brand mapping for you.", 'bot');
+    bubble(greeting, 'bot');
+  }
+  // Single-spot mode.
+  window.openNova = function (scheduleRowId, label) {
+    _open({ schedule_row_id: scheduleRowId },
+          label ? ('Spot: ' + label) : ('Spot #' + scheduleRowId),
+          "Hi — I'm Nova. Ask me why this spot is marked Not Aired and I'll cross-check the LMRB data and the brand mapping for you.");
+  };
+  // Scope mode (Summary Sheet): account + channel + month.
+  window.openNovaScope = function (accountId, channel, month, label) {
+    _open({ account_id: accountId, channel: channel, month: month },
+          label || (channel + ' · ' + month),
+          "Hi — I'm Nova. Ask me which spots didn't match on this summary and I'll pull the unmatched list and dig into any of them for you.");
   };
   window.closeNova = function () { panel.style.display = 'none'; };
 
   form.addEventListener('submit', function (e) {
     e.preventDefault();
     var text = input.value.trim();
-    if (!text || currentSpot == null) return;
+    if (!text || currentBase == null) return;
     bubble(text, 'user'); input.value = '';
     var thinking = bubble('…', 'bot');
+    var payload = Object.assign({ message: text }, currentBase);
     fetch('/dashboard/nova-chat/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
-      body: JSON.stringify({ schedule_row_id: currentSpot, message: text }),
+      body: JSON.stringify(payload),
     }).then(function (r) { return r.json(); }).then(function (d) {
       thinking.remove(); bubble(d.reply || 'No reply.', 'bot');
     }).catch(function () { thinking.remove(); bubble('Network error reaching Nova.', 'bot'); });

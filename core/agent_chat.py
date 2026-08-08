@@ -39,6 +39,15 @@ and show your work — cite actual times/channels/theme names you find, don't
 hand-wave. You are NOT filling out a form; you're having a quick back-and-forth
 like a coworker who happens to be very fast at cross-checking spreadsheets.
 
+You can be opened two ways:
+  * On the Summary Sheet for a whole scope (account + channel + month). Start by
+    calling list_unmatched_spots to see every spot that didn't reconcile, give
+    the user a short tally ("12 Not Aired, 3 No Mapping"), then offer to dig into
+    any of them by name. Investigate a chosen one with the per-spot method below,
+    using its schedule_row_id.
+  * On a single spot (you're given a schedule_row_id) — go straight to the
+    per-spot method below.
+
 Your method when a user asks about a spot:
 1. Pull the ScheduleRow's real details (brand, channel, date, planned time).
 2. Search LMRB for anything on that channel/date within a wide time window —
@@ -68,6 +77,7 @@ force a match. A genuine miss is a valid answer.
 
 # Tools Nova may call. Deterministic implementations live in agent_tools.
 AVAILABLE_TOOLS = {
+    'list_unmatched_spots':       agent_tools.list_unmatched_spots,
     'get_schedule_row_context':   agent_tools.get_schedule_row_context,
     'search_lmrb_candidates':     agent_tools.search_lmrb_candidates,
     'check_brand_mapping':        agent_tools.check_brand_mapping,
@@ -78,6 +88,12 @@ AVAILABLE_TOOLS = {
 
 # Gemini REST function declarations (plain dicts — same schema shape the SDK uses).
 FUNCTION_DECLARATIONS = [
+    {'name': 'list_unmatched_spots',
+     'description': 'List the unmatched (Not Aired / No Mapping / Programme Mismatch / Late Telecast) spots for a (account, channel, month) scope so you can enumerate and then investigate each by schedule_row_id.',
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'account_id': {'type': 'INTEGER'}, 'channel': {'type': 'STRING'},
+         'month': {'type': 'STRING'}},
+         'required': ['account_id', 'channel', 'month']}},
     {'name': 'get_schedule_row_context',
      'description': 'Get the planned details of a scheduled spot the user is asking about.',
      'parameters': {'type': 'OBJECT', 'properties': {'schedule_row_id': {'type': 'INTEGER'}},
@@ -190,7 +206,11 @@ def _persist_text_only(contents):
 @login_required
 @require_POST
 def chat_with_nova(request):
-    """POST {"schedule_row_id": 123, "message": "why is this not aired?"}
+    """POST either
+        {"schedule_row_id": 123, "message": "why is this not aired?"}   (one spot)
+      or
+        {"account_id": 1, "channel": "Sirasa TV", "month": "January 2025",
+         "message": "which spots didn't match?"}                        (whole scope)
     -> {"reply": "..."}"""
     try:
         body = json.loads(request.body)
@@ -198,20 +218,37 @@ def chat_with_nova(request):
         return JsonResponse({'reply': 'Sorry, I could not read that message.'}, status=400)
 
     schedule_row_id = body.get('schedule_row_id')
+    account_id = body.get('account_id')
+    channel = (body.get('channel') or '').strip()
+    month = (body.get('month') or '').strip()
     user_message = (body.get('message') or '').strip()
-    if not schedule_row_id or not user_message:
-        return JsonResponse({'reply': 'Please tell me which spot and what you want to check.'},
+    if not user_message:
+        return JsonResponse({'reply': 'Ask me something about the spot or scope.'}, status=400)
+    if not schedule_row_id and not (account_id and channel and month):
+        return JsonResponse({'reply': 'Please open me on a spot or a summary scope first.'},
                             status=400)
+
+    # Per-brand access check for scope-level chats (per-spot access is enforced by
+    # the row belonging to an account the tools read; scope needs an explicit gate).
+    from core.views import _account_access  # lazy import — avoids any import cycle
+    if account_id and not _account_access(request.user, account_id):
+        return JsonResponse({'reply': 'You don’t have access to that brand.'}, status=403)
 
     api_key, model = _gemini_settings()
     if not api_key:
         return JsonResponse({'reply': "Nova isn't configured yet — set GEMINI_API_KEY "
                                       "to enable the investigation chat."})
 
-    session_key = f'nova_chat_{schedule_row_id}'
+    if schedule_row_id:
+        session_key = f'nova_chat_{schedule_row_id}'
+        opener = f"I'm looking at schedule_row_id={schedule_row_id}. {user_message}"
+    else:
+        session_key = f'nova_scope_{account_id}_{channel}_{month}'
+        opener = (f"I'm reviewing the reconciliation Summary Sheet for "
+                  f"account_id={account_id}, channel='{channel}', month='{month}'. "
+                  f"{user_message}")
     history = request.session.get(session_key, [])
-    first = f"I'm looking at schedule_row_id={schedule_row_id}. {user_message}"
-    history.append({'role': 'user', 'parts': [{'text': first if not history else user_message}]})
+    history.append({'role': 'user', 'parts': [{'text': opener if not history else user_message}]})
 
     try:
         reply, contents = _run_turn(history, request.user, api_key, model)
