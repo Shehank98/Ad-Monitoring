@@ -346,6 +346,14 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
     time_tolerance = get_setting_int('tc_lmrb_time_tolerance', 5)
     print(f"[reconcile_tc] TC-LMRB time tolerance: ±{time_tolerance}s")
 
+    # Duration tolerance (opt-in; default 0 = exact-duration match, no change).
+    # When >0, a commercial TC row may confirm against an LMRB row whose duration
+    # differs by up to this many seconds (e.g. a 5s TC 'Tag' spot logged in LMRB
+    # at 4s or 10s). Theme + time tolerance still apply, so it never links an
+    # unrelated spot. Sponsorship tags already ignore duration entirely.
+    duration_tolerance = get_setting_int('tc_lmrb_duration_tolerance', 0)
+    print(f"[reconcile_tc] TC-LMRB duration tolerance: ±{duration_tolerance}s")
+
     # ── Sponsorship tags: duration-agnostic LMRB confirmation ─────────────────
     # A sponsorship "tag" is logged at different durations in each source
     # (Schedule 5s, LMRB 5s & 10s, TC 8s), so for TC rows that resolve to a
@@ -400,8 +408,17 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
             for _nb in spon_hits:
                 expected_lmrb_pairs.extend(_all_lmrb_pairs_for_brand(_nb, lmrb_theme_map))
         else:
-            key = (_normalize(tcrow.channel), tcrow.date, dur)
-            candidates = lmrb_index.get(key, [])
+            # Commercial: candidates on channel+date at the TC duration. When a
+            # duration tolerance is set, also accept LMRB rows within ±tolerance
+            # seconds of the TC duration (e.g. a 5s spot logged at 4s or 10s).
+            if duration_tolerance and dur is not None:
+                candidates = [
+                    c for c in _lmrb_by_date.get((_normalize(tcrow.channel), tcrow.date), [])
+                    if c[2].duration is not None
+                    and abs(int(c[2].duration) - dur) <= duration_tolerance
+                ]
+            else:
+                candidates = lmrb_index.get((_normalize(tcrow.channel), tcrow.date, dur), [])
 
             # Build expected LMRB (theme, product) pairs via tc_theme → brand → lmrb_theme chain.
             # TCRows whose tc_theme has no BrandMapping entry skip theme validation

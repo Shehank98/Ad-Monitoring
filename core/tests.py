@@ -2478,6 +2478,77 @@ class SponsorshipTagDurationTest(TestCase):
                          "Commercial must not confirm against a different-duration LMRB row")
 
 
+class TcLmrbDurationToleranceTest(TestCase):
+    """Opt-in tc_lmrb_duration_tolerance lets a commercial TC spot confirm against
+    an LMRB row whose duration differs by up to the configured number of seconds
+    (e.g. a 5s TC 'Tag' spot logged in LMRB at 4s). Off by default (tolerance=0)."""
+
+    def _set_duration_tolerance(self, seconds):
+        SystemSetting.objects.update_or_create(
+            key="tc_lmrb_duration_tolerance",
+            defaults={
+                "value": str(seconds),
+                "label": "TC-LMRB Duration Tolerance (seconds)",
+                "category": "reconciliation",
+            },
+        )
+
+    def _tc_row(self, tc_theme, duration, aired_time, date=DATE):
+        key = TCRow.make_dedup_key(self.account.id, CHANNEL, date, aired_time, tc_theme, duration)
+        return TCRow.objects.create(
+            account=self.account, tc_report=self.tc_report, channel=CHANNEL, date=date,
+            programme="Show", tc_theme=tc_theme, duration=duration,
+            aired_time=aired_time, dedup_key=key,
+        )
+
+    def setUp(self):
+        ensure_tc_tolerance(5)
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        # COMMERCIAL spot planned at 5s
+        make_schedule_row(
+            self.account, self.schedule, brand="Papare Brand", programme="Show",
+            duration=5, ad_type="COMMERCIAL BENEFITS",
+            start_time="18:00:00", end_time="18:05:00",
+        )
+        make_brand_mapping(self.account, brand="Papare Brand", theme="Tag",
+                           tc_theme="Papare TC", duration=5)
+        # LMRB logs the spot as a generic "Tag" at 4s (one second short of the TC 5s)
+        make_lmrb_row(self.account, advt_theme="Tag", advt_time="18:00:03",
+                      duration=4, source="mediawatch")
+        self.tc_report = make_tc_report(self.account, schedule=self.schedule)
+        self.tc = self._tc_row("Papare TC", 5, "18:00:00")
+
+    def test_not_confirmed_when_tolerance_zero(self):
+        """Default (tolerance=0) keeps exact-duration matching: 5s TC != 4s LMRB."""
+        self._set_duration_tolerance(0)
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        self.tc.refresh_from_db()
+        self.assertFalse(self.tc.is_lmrb_confirmed,
+                         "With tolerance 0 a 5s TC spot must not confirm against a 4s LMRB row")
+
+    def test_confirmed_when_tolerance_allows(self):
+        """With tolerance >= 1 the 5s TC spot confirms against the 4s LMRB row."""
+        self._set_duration_tolerance(1)
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        self.tc.refresh_from_db()
+        self.assertTrue(self.tc.is_lmrb_confirmed,
+                        "With tolerance 1 a 5s TC spot should confirm against a 4s LMRB row")
+        self.assertEqual(self.tc.matched_lmrb.duration, 4)
+
+    def test_tolerance_still_respects_theme(self):
+        """Duration tolerance must not link an unrelated theme."""
+        self._set_duration_tolerance(2)
+        # An unrelated LMRB row at a near duration but a different theme
+        make_lmrb_row(self.account, advt_theme="Unrelated Theme", advt_time="18:00:01",
+                      duration=6, source="mediawatch")
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        self.tc.refresh_from_db()
+        # It should still confirm against the correct "Tag" row, not the unrelated one
+        self.assertTrue(self.tc.is_lmrb_confirmed)
+        self.assertEqual(self.tc.matched_lmrb.advt_theme, "Tag")
+
+
 class DiagnoseScopeTest(TestCase):
     """verification.engine.diagnose_scope — 'why didn't this match?' reasons."""
 
