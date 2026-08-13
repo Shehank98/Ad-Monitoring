@@ -2288,13 +2288,31 @@ class QuickMapTest(TestCase):
         self.assertIn("Ceylinco Life -15Sec", bp)
         self.assertIn("Ceylinco Life", bp["Ceylinco Life -15Sec"])
 
-    def test_quick_page_has_no_channel_month_filters(self):
+    def test_quick_page_has_account_and_channel_filter_but_no_month(self):
         self.client.force_login(self.admin)
         html = self.client.get("/dashboard/brand-mappings/quick/").content.decode()
         self.assertEqual(200, self.client.get("/dashboard/brand-mappings/quick/").status_code)
-        self.assertNotIn('id="q-channel"', html)
-        self.assertNotIn('id="q-month"', html)
         self.assertIn('id="q-account"', html)
+        self.assertIn('id="q-channel"', html)   # optional channel filter restored
+        self.assertNotIn('id="q-month"', html)  # month is still not a filter
+
+    def test_options_brand_map_status_and_unmapped_themes(self):
+        from core.models import BrandMapping
+        # Brand has an LMRB theme but NO tc_theme -> tc should be False (Aired 0).
+        BrandMapping.objects.create(account=self.account, brand="Ceylinco Life -15Sec",
+                                    theme="Ceylinco_15", tc_theme="")
+        make_lmrb_row(self.account, advt_theme="ORPHAN LMRB", channel=CHANNEL,
+                      advt_time="20:00:00", duration=15, source="mediawatch")
+        rep = make_tc_report(self.account, channel=CHANNEL)
+        make_tc_row(self.account, rep, tc_theme="ORPHAN TC", channel=CHANNEL, duration=15)
+        self.client.force_login(self.admin)
+        d = self.client.get("/dashboard/brand-mappings/options/",
+                            {"account_id": self.account.id}).json()
+        st = d["brand_map_status"]["Ceylinco Life -15Sec"]
+        self.assertTrue(st["lmrb"]); self.assertFalse(st["tc"])
+        self.assertIn("ORPHAN TC", d["unmapped_tc_themes"])
+        self.assertIn("ORPHAN LMRB", d["unmapped_lmrb_themes"])
+        self.assertNotIn("Ceylinco_15", d["unmapped_lmrb_themes"])  # this one IS mapped
 
     def test_options_returns_tc_theme_channels(self):
         # A brand's TC code differs per channel — the picker filters by channel.
