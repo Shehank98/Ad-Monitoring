@@ -72,6 +72,9 @@
   <!-- Mapping Guardian warnings (advisory; persists across card re-render) -->
   <div id="q-map-warnings" class="hidden"></div>
 
+  <!-- Unmapped themes in this scope (orphans that won't reconcile) -->
+  <div id="q-unmapped-themes" class="hidden"></div>
+
   <!-- Brand cards -->
   <div id="q-cards" class="space-y-3"></div>
 
@@ -217,6 +220,27 @@
 
   function isBrandMapped(b) { return mappedBrandSet.has(b.toLowerCase().trim()); }
 
+  // Show LMRB / TC themes present in the (channel-scoped) data that no brand
+  // maps yet - these silently become Missed/Extra until someone maps them.
+  function renderUnmapped() {
+    var box = document.getElementById('q-unmapped-themes');
+    if (!box) return;
+    var tc = OPTS.unmapped_tc_themes || [];
+    var lm = OPTS.unmapped_lmrb_themes || [];
+    if (!tc.length && !lm.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    function chips(arr) {
+      return arr.slice(0, 60).map(function (t) {
+        return '<span class="text-[11px] px-2 py-0.5 rounded-full bg-white border border-amber-200 text-amber-800">' + esc(t) + '</span>';
+      }).join(' ') + (arr.length > 60 ? ' <span class="text-[10px] text-amber-500">+' + (arr.length - 60) + ' more</span>' : '');
+    }
+    box.className = 'rounded-2xl border border-amber-200 bg-amber-50 p-4';
+    box.innerHTML =
+      '<p class="text-xs font-bold text-amber-800 mb-2"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Unmapped themes in this scope - they will not reconcile until mapped to a brand</p>' +
+      (tc.length ? '<div class="mb-2"><p class="text-[10px] font-bold text-amber-600 uppercase tracking-wide mb-1">TC themes (' + tc.length + ') - unmapped TC theme means Aired 0</p><div class="flex flex-wrap gap-1">' + chips(tc) + '</div></div>' : '') +
+      (lm.length ? '<div><p class="text-[10px] font-bold text-amber-600 uppercase tracking-wide mb-1">LMRB themes (' + lm.length + ')</p><div class="flex flex-wrap gap-1">' + chips(lm) + '</div></div>' : '');
+    box.classList.remove('hidden');
+  }
+
   function render() {
     if (!OPTS) return;
     var brands = OPTS.brands || [];
@@ -227,6 +251,7 @@
     document.getElementById('q-unmapped').textContent = total - mapped;
     show('q-coverage', total > 0);
     show('q-none', total === 0);
+    renderUnmapped();
 
     var showMapped = document.getElementById('q-show-mapped').checked;
     // Unmapped first, then (optionally) mapped
@@ -243,6 +268,24 @@
     });
   }
 
+  // Completeness chips per brand. TC missing is highlighted red because a brand
+  // with no TC theme reports Aired=0 on the Summary Sheet.
+  function _mapBadges(brand) {
+    var st = (OPTS.brand_map_status && OPTS.brand_map_status[brand]) || { lmrb: false, tc: false, maponline: false };
+    function chip(label, on, warnIfOff) {
+      var cls = on ? 'bg-emerald-100 text-emerald-700'
+                   : (warnIfOff ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-400');
+      return '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded ' + cls + '">' +
+             (on ? '✓' : '✗') + ' ' + label + '</span>';
+    }
+    return '<div class="flex flex-wrap gap-1 mt-1">' +
+      chip('LMRB', st.lmrb, false) +
+      chip('TC', st.tc, true) +
+      chip('MapOnline', st.maponline, false) +
+      (!st.tc ? '<span class="text-[9px] text-red-500 font-semibold ml-1">no TC theme -> Aired 0</span>' : '') +
+    '</div>';
+  }
+
   function brandCard(brand, done) {
     var card = document.createElement('div');
     card.className = 'bg-white rounded-2xl border shadow-sm overflow-hidden ' + (done ? 'border-emerald-200' : 'border-amber-200');
@@ -250,7 +293,7 @@
       '<div class="flex items-center gap-3 px-4 py-3">' +
         '<span class="w-8 h-8 rounded-lg grid place-items-center shrink-0 ' + (done ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600') + '"><i class="fa-solid ' + (done ? 'fa-check' : 'fa-link') + '"></i></span>' +
         '<div class="min-w-0 flex-1"><p class="font-bold text-slate-800 text-sm truncate">' + esc(brand) + '</p>' +
-          '<p class="text-[11px] ' + (done ? 'text-emerald-600' : 'text-amber-600') + ' font-semibold">' + (done ? 'Mapped' : 'Not mapped yet') + '</p></div>' +
+          _mapBadges(brand) + '</div>' +
         '<button type="button" class="btn-secondary text-xs js-toggle">' + (done ? '<i class="fa-solid fa-plus"></i> Add more' : '<i class="fa-solid fa-wand-magic-sparkles"></i> Map') + '</button>' +
       '</div>' +
       '<div class="js-editor hidden border-t border-slate-100 p-4 space-y-4 bg-slate-50/50"></div>';
