@@ -2470,12 +2470,56 @@ def brand_mapping_options(request):
     for row in bp_qs.exclude(product='').values('brand', 'product').distinct():
         brand_products.setdefault(row['brand'], []).append(row['product'])
 
+    # ── Per-brand mapping completeness ────────────────────────────────────────
+    # For each brand: does it have an LMRB theme / a TC theme / a MapOnline theme
+    # mapped? A brand with NO TC theme reports Aired=0 on the Summary, so the UI
+    # can flag exactly what's missing instead of a blanket "mapped/not mapped".
+    bm_rows = list(BrandMapping.objects.filter(account_id=account_id))
+    brand_map_status = {}
+    for bm in bm_rows:
+        st = brand_map_status.setdefault(bm.brand, {'lmrb': False, 'tc': False, 'maponline': False})
+        if (bm.theme or '').strip():
+            st['lmrb'] = True
+        if (bm.tc_theme or '').strip():
+            st['tc'] = True
+        if (bm.maponline_theme or '').strip():
+            st['maponline'] = True
+
+    # ── Unmapped themes in scope (orphans that will never reconcile) ───────────
+    # Themes present in the LMRB / TC data (already channel-scoped above) that no
+    # BrandMapping resolves — wildcard '*' aware. Surfacing these lets the user
+    # catch spots that would silently show as Missed / Extra.
+    def _mapped_set(attr):
+        exact, prefix = set(), []
+        for bm in bm_rows:
+            for part in (getattr(bm, attr, '') or '').split('|'):
+                p = part.strip().lower()
+                if not p:
+                    continue
+                if p.endswith('*'):
+                    prefix.append(p[:-1])
+                else:
+                    exact.add(p)
+        return exact, prefix
+
+    def _is_mapped(theme, exact, prefix):
+        t = (theme or '').lower().strip()
+        return t in exact or any(t.startswith(p) for p in prefix)
+
+    _le, _lp = _mapped_set('theme')
+    _te, _tp = _mapped_set('tc_theme')
+    unmapped_lmrb_themes = [t for t in themes if not _is_mapped(t, _le, _lp)]
+    unmapped_tc_themes = [t for t in tc_themes if not _is_mapped(t, _te, _tp)]
+
     return JsonResponse({
         'brands': brands, 'themes': themes, 'tc_themes': tc_themes,
         'products': products, 'mapped_themes': mapped_themes,
         'theme_product_map': theme_product_map,
         'maponline_themes': maponline_themes,
         'mapped_brands': mapped_brands,
+        'brand_map_status': brand_map_status,
+        'unmapped_lmrb_themes': unmapped_lmrb_themes,
+        'unmapped_tc_themes': unmapped_tc_themes,
         'theme_durations': theme_durations,
         'tc_theme_durations': tc_theme_durations,
         'tc_theme_channels': tc_theme_channels,
