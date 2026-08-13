@@ -584,3 +584,73 @@ def propose_mapping_fix(account_id: int, brand: str, tc_theme: str, reasoning: s
     return {'action': 'confirm_required',
             'fix': {'account_id': account_id, 'brand': brand, 'tc_theme': tc_theme},
             'reasoning': reasoning}
+
+
+# ── Nova v2: smart resolvers (server builds the scope, Nova never fabricates) ──
+
+def list_schedules(brand: str = None, channel: str = None, month: str = None,
+                   account_id: int = None, limit: int = 25) -> dict:
+    """Answer 'do we have a schedule for X?' / 'any schedules?'. Searches
+    Schedules system-wide with optional brand/channel/month/account filters
+    (all case-insensitive, partial). Returns real scopes — use these, don't guess."""
+    from core.models import Schedule
+    qs = Schedule.objects.select_related('account').all()
+    if account_id:
+        qs = qs.filter(account_id=account_id)
+    if channel:
+        qs = qs.filter(channel__icontains=channel.strip())
+    if month:
+        qs = qs.filter(month__icontains=month.strip())
+    if brand:
+        sch_ids = (ScheduleRow.objects.filter(brand__icontains=brand.strip())
+                   .values_list('schedule_id', flat=True))
+        qs = qs.filter(id__in=list(sch_ids))
+    total = qs.count()
+    rows = [{
+        'schedule_id': s.id, 'schedule_number': s.schedule_number,
+        'account': s.account.name if s.account_id else '', 'account_id': s.account_id,
+        'channel': s.channel, 'month': s.month, 'row_count': s.row_count,
+    } for s in qs.order_by('-uploaded_at')[:limit]]
+    return {'total': total, 'schedules': rows}
+
+
+def open_summary_smart(brand: str = None, channel: str = None, month: str = None,
+                       account_id: int = None) -> dict:
+    """Resolve a Summary Sheet from a loose request ("open the Milo Sirasa
+    summary") and build the CORRECT url from real DB values — never from guessed
+    params. account_id, channel and month are read verbatim from the data, so the
+    month is always the stored form (e.g. 'June 2026', never '2026-06').
+
+    Returns:
+      - one match  -> {'found': True, 'action': 'navigate', 'url': ..., 'scope': {...}}
+      - several    -> {'found': True, 'action': 'choose', 'options': [...]}  (ASK the user)
+      - none       -> {'found': False}
+    """
+    qs = ScheduleRow.objects.select_related('schedule', 'schedule__account').all()
+    if account_id:
+        qs = qs.filter(account_id=account_id)
+    if brand:
+        qs = qs.filter(brand__icontains=brand.strip())
+    if channel:
+        qs = qs.filter(channel__icontains=channel.strip())
+    if month:
+        qs = qs.filter(month__icontains=month.strip())
+
+    scopes = {}
+    for r in qs[:1000]:
+        key = (r.account_id, r.channel, r.month)
+        if key not in scopes:
+            scopes[key] = r
+    if not scopes:
+        return {'found': False}
+
+    options = []
+    for (aid, ch, mo), r in scopes.items():
+        url = '/dashboard/summary/?' + urlencode({'account_id': aid, 'channel': ch, 'month': mo})
+        options.append({'account_id': aid,
+                        'account': r.schedule.account.name if r.schedule and r.schedule.account_id else '',
+                        'channel': ch, 'month': mo, 'url': url})
+    options.sort(key=lambda o: (o['account'], o['channel'], o['month']))
+    if len(options) == 1:
+        return {'found': True, 'action': 'navigate', 'url': options[0]['url'], 'scope': options[0]}
+    return {'found': True, 'action': 'choose', 'options': options[:15]}

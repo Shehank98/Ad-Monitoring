@@ -44,13 +44,22 @@ times / theme names you find; never hand-wave. Never use em dashes in your
 replies; use a plain hyphen or a comma instead.
 
 How you behave:
+  * NEVER fabricate an account_id, channel or month. Always get them from a tool
+    result first. The month is stored as a name, e.g. "June 2026" - never a date
+    like "2026-06". If you didn't get a value from a tool, you don't know it.
   * If the user names a schedule number, brand, channel or month - even with no
-    other context - look it up yourself with lookup_schedule / lookup_by_brand.
-    Never ask "which one do you mean" if you can resolve it; only ask when it's
-    genuinely ambiguous (e.g. two schedules match).
-  * If the user asks to see / open / view something ("show me schedule 4521",
-    "open the Dettol June summary"), find it and call the matching open_* tool so
-    the browser actually navigates - don't just describe where to click.
+    other context - look it up yourself: lookup_schedule for a number/id,
+    lookup_by_brand or list_schedules for a brand. Answer "is there a schedule
+    for X?" by actually calling list_schedules, not by guessing.
+  * To OPEN a summary from a loose request ("open the Milo Sirasa summary"), call
+    open_summary_smart with whatever the user gave (brand / channel / month). It
+    resolves the real scope and returns:
+      - action=navigate -> the browser opens the correct page; just confirm it.
+      - action=choose    -> there are several matches; DO NOT pick one. List them
+        ("we have these: 1) ... 2) ...") and ask which to open.
+      - found=false      -> tell them you couldn't find it and ask for more.
+    Only use open_summary_sheet directly when you already hold the exact
+    account_id/channel/month from a tool result.
   * If the user asks to download / export a summary, call generate_summary_report
     so it actually downloads - don't tell them where the button is.
   * Navigation, opening pages and downloading reports are safe and immediate - do
@@ -117,6 +126,8 @@ AVAILABLE_TOOLS = {
     # lookup / navigation / reports (Tier 1 - act immediately)
     'lookup_schedule':             agent_tools.lookup_schedule,
     'lookup_by_brand':             agent_tools.lookup_by_brand,
+    'list_schedules':              agent_tools.list_schedules,
+    'open_summary_smart':          agent_tools.open_summary_smart,
     'open_summary_sheet':          agent_tools.open_summary_sheet,
     'open_schedule_detail':        agent_tools.open_schedule_detail,
     'open_mapping_page':           agent_tools.open_mapping_page,
@@ -145,6 +156,16 @@ FUNCTION_DECLARATIONS = [
      'description': 'Find the scopes (account, channel, month) that carry a brand, anywhere in the system. Optional month filter.',
      'parameters': {'type': 'OBJECT', 'properties': {
          'brand': {'type': 'STRING'}, 'month': {'type': 'STRING'}}, 'required': ['brand']}},
+    {'name': 'list_schedules',
+     'description': "Search schedules system-wide (answers 'do we have a schedule for X?' / 'any schedules?'). All filters optional and partial/case-insensitive. Returns real scopes — use their exact account_id/channel/month, never guess.",
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'brand': {'type': 'STRING'}, 'channel': {'type': 'STRING'},
+         'month': {'type': 'STRING'}, 'account_id': {'type': 'INTEGER'}}, 'required': []}},
+    {'name': 'open_summary_smart',
+     'description': "PREFERRED way to open a summary from a loose request (e.g. 'open the Milo Sirasa summary'). Resolves the real scope server-side and builds the correct URL. If it returns action=navigate, the browser opens it. If it returns action=choose, DO NOT guess — list the options and ask the user which one. If found=false, say you couldn't find it.",
+     'parameters': {'type': 'OBJECT', 'properties': {
+         'brand': {'type': 'STRING'}, 'channel': {'type': 'STRING'},
+         'month': {'type': 'STRING'}, 'account_id': {'type': 'INTEGER'}}, 'required': []}},
     {'name': 'open_summary_sheet',
      'description': "Open (navigate to) the Reconciliation / Summary Sheet for a scope. Use when the user asks to see/open/view a summary.",
      'parameters': {'type': 'OBJECT', 'properties': {

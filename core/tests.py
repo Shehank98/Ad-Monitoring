@@ -3068,6 +3068,38 @@ class AgentToolsTest(TestCase):
         self.assertTrue(any(m["brand"] == "Brand A" and m["account_id"] == self.account.id
                             for m in out["matches"]))
 
+    def test_list_schedules(self):
+        from core.agent_tools import list_schedules
+        self.assertGreaterEqual(list_schedules(brand="Brand A")["total"], 1)
+        self.assertEqual(list_schedules(brand="does-not-exist")["total"], 0)
+        self.assertGreaterEqual(list_schedules()["total"], 1)  # "any schedules?"
+
+    def test_open_summary_smart_single_uses_real_month(self):
+        """Resolver must build the URL from real DB values — real month string
+        'January 2025', not a fabricated '2025-01' — and the real account_id."""
+        from core.agent_tools import open_summary_smart
+        out = open_summary_smart(brand="Brand A")
+        self.assertTrue(out["found"])
+        self.assertEqual(out["action"], "navigate")
+        self.assertIn("account_id=%d" % self.account.id, out["url"])
+        self.assertIn("month=January+2025", out["url"])   # urlencoded real month
+        self.assertNotIn("2025-01", out["url"])
+
+    def test_open_summary_smart_asks_when_multiple(self):
+        from core.agent_tools import open_summary_smart
+        sch2 = make_schedule(self.account, channel="TV - Hiru", schedule_number="777")
+        make_schedule_row(self.account, sch2, brand="Brand A", channel="TV - Hiru")
+        out = open_summary_smart(brand="Brand A")
+        self.assertEqual(out["action"], "choose")
+        self.assertGreaterEqual(len(out["options"]), 2)
+        channels = {o["channel"] for o in out["options"]}
+        self.assertIn(CHANNEL, channels)
+        self.assertIn("TV - Hiru", channels)
+
+    def test_open_summary_smart_not_found(self):
+        from core.agent_tools import open_summary_smart
+        self.assertFalse(open_summary_smart(brand="no-such-brand")["found"])
+
     def test_navigation_and_report_tools_return_actions(self):
         from core.agent_tools import (open_summary_sheet, open_mapping_page,
                                        generate_summary_report)
