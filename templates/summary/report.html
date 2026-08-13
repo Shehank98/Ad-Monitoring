@@ -1031,4 +1031,15 @@
 })();
 </script>
 
+{% if account_id and channel and month %}
+<!-- Give the global Nova panel (in base.html) this summary's scope as context. -->
+<script>
+  window.NOVA_CONTEXT = {
+    account_id: '{{ account_id }}',
+    channel: '{{ channel|escapejs }}',
+    month: '{{ month|escapejs }}'
+  };
+</script>
+{% endif %}
+
 {% endblock %}

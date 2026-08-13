@@ -2433,6 +2433,17 @@ def brand_mapping_options(request):
         tc_theme_durations.setdefault(row['tc_theme'], set()).add(row['duration'])
     tc_theme_durations = {k: sorted(v) for k, v in tc_theme_durations.items()}
 
+    # ── Which channel(s) each TC theme appears on ─────────────────────────
+    # A brand's TC code differs per channel (Derana='ABC', Hiru='BFB'), so the
+    # Quick Map picker lets the user filter the TC checklist by channel while
+    # ticking. Storage stays account-level pipe (recon resolves any variant),
+    # so this map is UI-only — {tc_theme: [channel, ...]} plus the channel list.
+    tc_theme_channels = {}
+    for row in tc_qs.exclude(channel='').values('tc_theme', 'channel').distinct():
+        tc_theme_channels.setdefault(row['tc_theme'], set()).add(row['channel'])
+    tc_theme_channels = {k: sorted(v) for k, v in tc_theme_channels.items()}
+    tc_channels = sorted({c for chans in tc_theme_channels.values() for c in chans})
+
     # ── MapOnline themes (distinct advt_theme from MapOnline source) ──────
     maponline_qs = lmrb_base.filter(source='maponline').exclude(advt_theme='')
     if product:
@@ -2467,6 +2478,8 @@ def brand_mapping_options(request):
         'mapped_brands': mapped_brands,
         'theme_durations': theme_durations,
         'tc_theme_durations': tc_theme_durations,
+        'tc_theme_channels': tc_theme_channels,
+        'tc_channels': tc_channels,
         'brand_products': brand_products,
     })
 
@@ -2642,8 +2655,17 @@ def brand_mapping_quick_add(request):
     themes   = [str(t).strip() for t in (body.get('themes') or []) if str(t).strip()]
     tc_list  = [str(t).strip() for t in (body.get('tc_themes') or []) if str(t).strip()]
     tc_theme = '|'.join(dict.fromkeys(tc_list))   # de-dup, keep order; model splits on '|'
-    maponline_theme = str(body.get('maponline_theme', '')).strip()
-    product  = str(body.get('product', '')).strip()
+    # MapOnline themes: now a multi-tick list (pipe-stored like tc_theme). Fall
+    # back to the legacy single `maponline_theme` string for backward compat.
+    mapo_list = [str(t).strip() for t in (body.get('maponline_themes') or []) if str(t).strip()]
+    if not mapo_list and str(body.get('maponline_theme', '')).strip():
+        mapo_list = [str(body.get('maponline_theme')).strip()]
+    maponline_theme = '|'.join(dict.fromkeys(mapo_list))
+    # Product is intentionally NOT saved from Quick Map. In the picker it only
+    # narrows which LMRB themes are shown; a saved product becomes an exact match
+    # constraint that silently drops correctly-themed airings (see PR #56). Blank
+    # = match any. Deliberate product constraints are set on the detailed table.
+    product  = ''
     dur_raw  = str(body.get('duration', '')).strip()
     duration = int(dur_raw) if dur_raw.isdigit() else None
 
@@ -2678,7 +2700,14 @@ def brand_mapping_quick_add(request):
                 duration=duration, product=product)
             created += 1
 
-    return JsonResponse({'ok': True, 'created': created, 'updated': updated, 'skipped': skipped})
+    # Upload & Mapping Guardian (Tier 1 — advisory): flag common mapping
+    # mistakes (product-without-duration, theme mapped to another brand,
+    # an unmapped LMRB theme that looks like this brand) right after saving.
+    from core.agent_tools import audit_brand_mapping
+    audit = audit_brand_mapping(account.id, brand)
+
+    return JsonResponse({'ok': True, 'created': created, 'updated': updated,
+                         'skipped': skipped, 'warnings': audit['warnings']})
 
 
 @login_required
@@ -6793,10 +6822,12 @@ def _write_media_recon_sheet(ws, ctx):
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
     left   = Alignment(horizontal='left', vertical='center', wrap_text=True)
     right  = Alignment(horizontal='right', vertical='center')
-    hdr_fill  = PatternFill('solid', fgColor='1F3864')      # dark navy
-    sub_fill  = PatternFill('solid', fgColor='D9E1F2')       # light blue
-    tot_fill  = PatternFill('solid', fgColor='FCE4D6')       # light orange
-    white_bold = Font(bold=True, color='FFFFFF', size=11)
+    # Colours match the New_Summary template: light-blue section headers with
+    # dark bold text, grey info / cost labels, light-orange totals.
+    hdr_fill  = PatternFill('solid', fgColor='BDD7EE')      # light blue section headers
+    sub_fill  = PatternFill('solid', fgColor='D9D9D9')       # grey info / cost labels
+    tot_fill  = PatternFill('solid', fgColor='FCE4D6')       # light orange totals
+    hdr_font  = Font(bold=True, color='000000', size=11)     # dark bold on light-blue headers
     bold  = Font(bold=True, size=10)
     norm  = Font(size=10)
     money_fmt = '#,##0.00'
@@ -6822,20 +6853,29 @@ def _write_media_recon_sheet(ws, ctx):
             c.number_format = fmt
         return c
 
-    # ── Title (centered across the full width) + logo overlaid top-right ──
-    ws.merge_cells('A1:E3')
+    # ── Title (centered across A:C) + logo (top-right) — New_Summary header ──
+    # Title spans A1:C3; the logo sits in the D1:E3 block on the right, the same
+    # [title | logo] split the on-screen report and PDF use.
+    for _r in (1, 2, 3):
+        ws.row_dimensions[_r].height = 20
+    ws.merge_cells('A1:C3')
     t = ws['A1']; t.value = ctx['title']
     t.font = Font(bold=True, size=18, color='1F3864')
     t.alignment = Alignment(horizontal='center', vertical='center')
+    ws.merge_cells('D1:E3')                      # reserved logo area (top-right)
     _logo_data = _recon_logo_bytes(ctx)
     if _logo_data:
+        # openpyxl needs Pillow to embed images (unlike ReportLab/PDF). Pillow is
+        # declared in requirements.txt so this succeeds; if it is ever missing,
+        # the logo silently drops here — that was the "no logo in Excel" bug.
         try:
             img = XLImage(io.BytesIO(_logo_data))
             img.height = 55
             img.width  = 150
-            ws.add_image(img, 'D1')
+            img.anchor = 'D1'
+            ws.add_image(img)
         except Exception:
-            pass
+            logger.warning('Recon Excel: could not embed logo (is Pillow installed?)', exc_info=True)
 
     # ── Info grid rows 4-7 ──
     info = [
@@ -6856,7 +6896,7 @@ def _write_media_recon_sheet(ws, ctx):
     # ── Medium block rows 9-10 ──
     med_hdr = ['Medium', 'Channel/Publication', 'Specification', 'Schedule Value']
     for j, h in enumerate(med_hdr):
-        cell(f'{get_column_letter(1+j)}9', h, font=white_bold, align=center, fill=hdr_fill)
+        cell(f'{get_column_letter(1+j)}9', h, font=hdr_font, align=center, fill=hdr_fill)
     med_val = [ctx['medium'], ctx['channel_publication'], ctx['specification'], ctx['schedule_value']]
     for j, v in enumerate(med_val):
         cell(f'{get_column_letter(1+j)}10', v, align=center)
@@ -6864,13 +6904,13 @@ def _write_media_recon_sheet(ws, ctx):
     # ── No. of Spots table ──
     r = 12
     ws.merge_cells(f'C{r}:E{r}')
-    cell(f'C{r}', 'No of Spots', font=white_bold, align=center, fill=hdr_fill)
+    cell(f'C{r}', 'No of Spots', font=hdr_font, align=center, fill=hdr_fill)
     cell(f'A{r}', '', fill=hdr_fill); cell(f'B{r}', '', fill=hdr_fill)
     r = 13
     for ref, txt in [(f'A{r}', 'Scheduling Month'), (f'B{r}', 'Spot/VA Duration'),
-                     (f'C{r}', 'Schedule (Planned)'), (f'D{r}', 'Transmission (Aired)'),
-                     (f'E{r}', 'Nielsen (3rd Party)')]:
-        cell(ref, txt, font=white_bold, align=center, fill=hdr_fill)
+                     (f'C{r}', 'Schedule'), (f'D{r}', 'Transmission Report'),
+                     (f'E{r}', 'Nielsen Report')]:
+        cell(ref, txt, font=hdr_font, align=center, fill=hdr_fill)
     start = 14
     spots = ctx['spots'] or [{'brand': '', 'dur': '', 'planned': 0, 'aired': 0, 'third_party': 0}]
     for i, sp in enumerate(spots):
@@ -6893,11 +6933,11 @@ def _write_media_recon_sheet(ws, ctx):
     # ── Transmission Report Details (deviations) ──
     r = tr + 2
     ws.merge_cells(f'A{r}:E{r}')
-    cell(f'A{r}', 'Transmission Report Details - Commercials / VA', font=white_bold, align=center, fill=hdr_fill)
+    cell(f'A{r}', 'Transmission Report Details - Commercials / VA', font=hdr_font, align=center, fill=hdr_fill)
     r += 1
     for ref, txt in [(f'A{r}', 'Spot/VA Duration'), (f'B{r}', 'Deviated'), (f'C{r}', 'Not Aired'),
                      (f'D{r}', 'Reason / Solution'), (f'E{r}', 'Deviated Value (To be deducted)')]:
-        cell(ref, txt, font=white_bold, align=center, fill=hdr_fill)
+        cell(ref, txt, font=hdr_font, align=center, fill=hdr_fill)
     dstart = r + 1
     devs = ctx['deviations'] or [{'brand': '', 'dur': '', 'deviated': '', 'not_aired': '', 'reason': '', 'dev_value': ''}]
     for i, dv in enumerate(devs):
@@ -7430,6 +7470,13 @@ def _write_matched_lmrb_sheet(ws, account_id, channel, month, schedule_id=None):
 
     combined = _matched_lmrb_rows(account_id, channel, month, schedule_id=schedule_id)
 
+    # Landscape + fit-all-columns-to-one-page-wide, same as the summary sheet —
+    # this sheet is 21 columns wide, so the portrait default printed broken.
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+
     HDR_FILL = PatternFill('solid', fgColor='0F2340')
     hdr_font = Font(bold=True, color='FFFFFF', size=10)
     norm     = Font(size=10)
@@ -7504,6 +7551,12 @@ def _write_unmatched_lmrb_sheet(ws, account_id, channel, month):
     if date_min and date_max:
         qs = qs.filter(date__range=(date_min, date_max))
     rows = list(qs.order_by('date', 'advt_time'))
+
+    # Landscape + fit-all-columns-to-one-page-wide, same as the summary sheet.
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
 
     HDR_FILL = PatternFill('solid', fgColor='0F2340')
     hdr_font = Font(bold=True, color='FFFFFF', size=10)
@@ -8312,8 +8365,9 @@ def system_settings(request):
 
     # Group settings by their category display label
     from collections import OrderedDict
-    CATEGORY_ORDER = ['reconciliation', 'display', 'tc_parsing', 'lmrb_parsing', 'whatsapp', 'email']
+    CATEGORY_ORDER = ['assistant', 'reconciliation', 'display', 'tc_parsing', 'lmrb_parsing', 'whatsapp', 'email']
     CATEGORY_LABELS = {
+        'assistant':      'Nova Assistant',
         'reconciliation': 'Reconciliation',
         'display':        'Reconciliation Colours',
         'tc_parsing':     'TC File Parsing',

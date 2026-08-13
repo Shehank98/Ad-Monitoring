@@ -27,14 +27,22 @@
 
   <!-- Scope selector -->
   <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-    <div class="max-w-md">
-      <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Brand (Account) <span class="text-red-400">*</span></label>
-      <select id="q-account" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
-        <option value="">Select account…</option>
-        {% for acc in accounts %}<option value="{{ acc.id }}">{{ acc.name }}</option>{% endfor %}
-      </select>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-3xl">
+      <div>
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Brand (Account) <span class="text-red-400">*</span></label>
+        <select id="q-account" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+          <option value="">Select account…</option>
+          {% for acc in accounts %}<option value="{{ acc.id }}">{{ acc.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Channel <span class="font-normal text-slate-300 normal-case">(optional filter)</span></label>
+        <select id="q-channel" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400" disabled>
+          <option value="">All channels</option>
+        </select>
+      </div>
     </div>
-    <p class="text-[11px] text-slate-400 mt-2"><i class="fa-solid fa-circle-info mr-1"></i> Pick an account. Click a brand below and tick the LMRB / TC themes for it — the theme list is narrowed to each brand automatically.</p>
+    <p class="text-[11px] text-slate-400 mt-2"><i class="fa-solid fa-circle-info mr-1"></i> Pick an account. Optionally pick a channel to narrow the LMRB &amp; TC themes to that channel. Click a brand below and tick the themes for it.</p>
   </div>
 
   <!-- Coverage summary -->
@@ -60,6 +68,9 @@
   </div>
   <div id="q-loading" class="hidden text-center py-10 text-slate-400 text-sm"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading brands &amp; themes…</div>
   <div id="q-none" class="hidden text-center py-10 text-slate-400 text-sm">No schedule brands found for this scope. Upload a schedule first.</div>
+
+  <!-- Mapping Guardian warnings (advisory; persists across card re-render) -->
+  <div id="q-map-warnings" class="hidden"></div>
 
   <!-- Brand cards -->
   <div id="q-cards" class="space-y-3"></div>
@@ -93,6 +104,29 @@
   }
   function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function show(id, on) { var e = document.getElementById(id); if (e) e.classList.toggle('hidden', !on); }
+
+  // Mapping Guardian advisory banner (Tier 1 - advisory, never blocks a save).
+  function showMapWarnings(brand, warnings) {
+    var box = document.getElementById('q-map-warnings');
+    if (!box) return;
+    if (!warnings.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.className = 'rounded-2xl border border-amber-200 bg-amber-50 p-4';
+    box.innerHTML =
+      '<div class="flex items-start gap-2">' +
+        '<i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5"></i>' +
+        '<div class="flex-1">' +
+          '<p class="text-xs font-bold text-amber-800 mb-1">' + esc(brand) +
+            ' - check these before you rely on this mapping</p>' +
+          warnings.map(function (w) {
+            return '<p class="text-[11px] text-amber-800 leading-snug mb-1">• ' + esc(w) + '</p>';
+          }).join('') +
+        '</div>' +
+        '<button type="button" class="text-amber-400 hover:text-amber-700 text-xs" ' +
+          'onclick="this.closest(\'#q-map-warnings\').classList.add(\'hidden\')">✕</button>' +
+      '</div>';
+    box.classList.remove('hidden');
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 
   // Narrow the LMRB theme list to a clicked brand:
   //  1) themes whose LMRB product matches one of the brand's schedule products;
@@ -133,12 +167,30 @@
     return out;
   }
 
-  // ── Account selection (no channel/month scope — map at account level) ────────
+  var elChannel = document.getElementById('q-channel');
+
+  // ── Account selection: load its channels, then load options. A channel is an
+  //    OPTIONAL filter that narrows the LMRB & TC themes to that channel. ──
   elAcc.addEventListener('change', function () {
-    if (!this.value) { reset(); return; }
+    if (!this.value) { elChannel.innerHTML = '<option value="">All channels</option>'; elChannel.disabled = true; reset(); return; }
+    loadChannels(this.value);
     loadOptions();
   });
+  elChannel.addEventListener('change', function () { if (elAcc.value) loadOptions(); });
   document.getElementById('q-show-mapped').addEventListener('change', render);
+
+  function loadChannels(accountId) {
+    elChannel.disabled = true;
+    fetch('/dashboard/brand-mappings/channels/?account_id=' + encodeURIComponent(accountId))
+      .then(r => r.json())
+      .then(function (d) {
+        var chans = d.channels || [];
+        elChannel.innerHTML = '<option value="">All channels</option>' +
+          chans.map(function (c) { return '<option value="' + esc(c) + '">' + esc(c) + '</option>'; }).join('');
+        elChannel.disabled = chans.length === 0;
+      })
+      .catch(function () { elChannel.disabled = true; });
+  }
 
   function reset() {
     OPTS = null; elCards.innerHTML = '';
@@ -150,6 +202,7 @@
     show('q-empty', false); show('q-none', false); show('q-coverage', false); show('q-loading', true);
     elCards.innerHTML = '';
     var qs = '?account_id=' + encodeURIComponent(elAcc.value);
+    if (elChannel.value) qs += '&channel=' + encodeURIComponent(elChannel.value);
     fetch('/dashboard/brand-mappings/options/' + qs)
       .then(r => r.json())
       .then(function (d) {
@@ -295,9 +348,11 @@
       var rows = maps.map(function (m) {
         var d  = (m.duration != null ? m.duration + 's' : 'any');
         var tc = (m.tc_themes && m.tc_themes.length) ? m.tc_themes.join(', ') : '-';
+        var mo = (m.maponline_theme || '').split('|').filter(function (x) { return x.trim(); }).join(', ') || '-';
         return '<tr class="border-t border-emerald-100">' +
           '<td class="py-1 pr-3 font-medium text-slate-700">' + esc(m.theme) + '</td>' +
           '<td class="py-1 pr-3 text-slate-600">' + esc(tc) + '</td>' +
+          '<td class="py-1 pr-3 text-slate-600">' + esc(mo) + '</td>' +
           '<td class="py-1 pr-3 text-indigo-600 font-bold whitespace-nowrap">' + esc(d) + '</td>' +
           '<td class="py-1 pr-3 text-slate-500">' + esc(m.product || '') + '</td>' +
           '<td class="py-1 text-right">' +
@@ -314,7 +369,7 @@
             '<i class="fa-solid fa-trash-can text-[9px] mr-1"></i>Delete all</button>' +
         '</div>' +
         '<div class="overflow-x-auto"><table class="w-full text-[11px]"><thead><tr class="text-slate-400 text-left">' +
-          '<th class="pr-3 font-semibold">LMRB Theme</th><th class="pr-3 font-semibold">TC Theme</th><th class="pr-3 font-semibold">Dur</th><th class="pr-3 font-semibold">Product</th><th></th></tr></thead>' +
+          '<th class="pr-3 font-semibold">LMRB Theme</th><th class="pr-3 font-semibold">TC Theme</th><th class="pr-3 font-semibold">MapOnline</th><th class="pr-3 font-semibold">Dur</th><th class="pr-3 font-semibold">Product</th><th></th></tr></thead>' +
           '<tbody>' + rows + '</tbody></table></div>' +
         '<p class="text-[10px] text-slate-400 mt-1.5">Deleting is permanent - the brand reports Missed until it is mapped again. Full editing is on the <a class="underline" href="/dashboard/brand-mappings/?account=' + encodeURIComponent(elAcc.value) + '">detailed table</a>.</p>';
 
@@ -351,16 +406,50 @@
     var preTc = new Set();
     maps.forEach(function (m) { (m.tc_themes || []).forEach(function (t) { preTc.add(String(t).toLowerCase().trim()); }); });
 
-    // LMRB themes narrowed to this brand, with a toggle to reveal all.
+    // MapOnline themes already mapped to THIS brand (pipe-stored, multi).
+    var preMapo = new Set();
+    maps.forEach(function (m) {
+      String(m.maponline_theme || '').split('|').forEach(function (t) {
+        var k = t.toLowerCase().trim(); if (k) preMapo.add(k);
+      });
+    });
+
+    var tpm = OPTS.theme_product_map || {};
+
+    // ── Product narrow (NOT saved) - ticking a product filters WHICH LMRB /
+    //    MapOnline themes are shown for this brand. Product is never written to
+    //    the mapping (a saved product becomes an exact match filter, PR #56). ──
+    var selectedProducts = new Set();
+    function narrowByProducts(list, preSet) {
+      if (!selectedProducts.size) return list;
+      var out = list.filter(function (t) {
+        var k = t.toLowerCase().trim();
+        if (preSet && preSet.has(k)) return true;   // keep already-mapped visible
+        var p = String(tpm[t] || '').toLowerCase().trim();
+        return p && selectedProducts.has(p);
+      });
+      return out.length ? out : list;               // never hide everything
+    }
+
     var allThemes = OPTS.themes || [];
+    // Products that appear among this brand's themes - a focused narrowing aid.
+    var prodOptions = (function () {
+      var seen = {}, out = [];
+      themesForBrand(brand, allThemes, preLmrb).forEach(function (t) {
+        var p = tpm[t]; if (p && !seen[p.toLowerCase()]) { seen[p.toLowerCase()] = 1; out.push(p); }
+      });
+      return out;
+    })();
+
+    // ── LMRB themes narrowed to this brand, with a toggle to reveal all. ──
     var narrowed  = themesForBrand(brand, allThemes, preLmrb);
     var lmrbHolder = document.createElement('div');
     var currentLmrb = null;
     var showAllThemes = false;
     function buildLmrb() {
       lmrbHolder.innerHTML = '';
-      var items = showAllThemes ? allThemes : narrowed;
-      currentLmrb = checklist('LMRB Theme *', items, { mappedSet: mappedThemeSet, durMap: OPTS.theme_durations || {}, preselect: preLmrb, emptyMsg: 'No LMRB themes for this brand — click “Show all”, or upload monitoring data.' });
+      var items = narrowByProducts(showAllThemes ? allThemes : narrowed, preLmrb);
+      currentLmrb = checklist('LMRB Theme *', items, { mappedSet: mappedThemeSet, durMap: OPTS.theme_durations || {}, preselect: preLmrb, emptyMsg: 'No LMRB themes for this brand - click “Show all”, or upload monitoring data.' });
       var bar = document.createElement('div');
       bar.className = 'flex items-center justify-between mb-1';
       bar.innerHTML = '<span class="text-[10px] text-slate-400">' +
@@ -377,13 +466,87 @@
     }
     buildLmrb();
 
-    var tc   = checklist('TC Theme', OPTS.tc_themes || [], { durMap: OPTS.tc_theme_durations || {}, preselect: preTc, emptyMsg: 'No TC themes in this scope.' });
+    // ── MapOnline themes: multi-tick checklist (same UX as LMRB), pipe-stored. ──
+    var allMapo = OPTS.maponline_themes || [];
+    var narrowedMapo = themesForBrand(brand, allMapo, preMapo);
+    var mapoHolder = document.createElement('div');
+    var currentMapo = null;
+    var showAllMapo = false;
+    function buildMapo() {
+      mapoHolder.innerHTML = '';
+      if (!allMapo.length) {
+        currentMapo = null;
+        mapoHolder.innerHTML = '<p class="text-xs font-bold text-slate-600 mb-1.5">MapOnline Theme</p>' +
+          '<p class="text-[11px] text-slate-400 rounded-lg border border-slate-200 bg-white px-3 py-3">No MapOnline data uploaded for this account.</p>';
+        return;
+      }
+      var items = narrowByProducts(showAllMapo ? allMapo : narrowedMapo, preMapo);
+      currentMapo = checklist('MapOnline Theme', items, { durMap: OPTS.theme_durations || {}, preselect: preMapo, emptyMsg: 'No MapOnline themes for this brand - click “Show all”.' });
+      var bar = document.createElement('div');
+      bar.className = 'flex items-center justify-between mb-1';
+      bar.innerHTML = '<span class="text-[10px] text-slate-400">' +
+        (showAllMapo ? ('Showing all ' + allMapo.length + ' MapOnline themes')
+                     : ('Showing ' + items.length + ' MapOnline theme(s) for this brand')) + '</span>';
+      var tgl = document.createElement('button');
+      tgl.type = 'button';
+      tgl.className = 'text-[10px] font-bold text-emerald-600 hover:underline';
+      tgl.textContent = showAllMapo ? '↩ Only this brand’s themes' : ('Show all MapOnline themes (' + allMapo.length + ')');
+      tgl.addEventListener('click', function () { showAllMapo = !showAllMapo; buildMapo(); });
+      bar.appendChild(tgl);
+      mapoHolder.appendChild(bar);
+      mapoHolder.appendChild(currentMapo.wrap);
+    }
+    buildMapo();
+
+    // ── TC themes: checklist with a per-channel filter. A brand's TC code
+    //    differs by channel (Derana=ABC, Hiru=BFB); the filter helps find the
+    //    right names. All ticked variants save into one pipe-stored tc_theme. ──
+    var allTc     = OPTS.tc_themes || [];
+    var tcChanMap = OPTS.tc_theme_channels || {};   // {tc_theme: [channel,...]}
+    var tcChannels = OPTS.tc_channels || [];
+    var tcHolder  = document.createElement('div');
+    var currentTc = null;
+    var tcChanFilter = '';                            // '' = all channels
+    function buildTc() {
+      tcHolder.innerHTML = '';
+      if (tcChannels.length > 1) {
+        var fbar = document.createElement('div');
+        fbar.className = 'flex items-center gap-2 mb-1.5';
+        fbar.innerHTML = '<span class="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Channel</span>';
+        var sel = document.createElement('select');
+        sel.className = 'flex-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400';
+        sel.innerHTML = '<option value="">All channels (' + allTc.length + ')</option>' +
+          tcChannels.map(function (c) { return '<option value="' + esc(c) + '"' + (c === tcChanFilter ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('');
+        sel.addEventListener('change', function () { tcChanFilter = this.value; buildTc(); });
+        fbar.appendChild(sel);
+        tcHolder.appendChild(fbar);
+      }
+      var items = allTc.filter(function (t) {
+        if (preTc.has(t.toLowerCase().trim())) return true;   // keep already-mapped visible
+        if (!tcChanFilter) return true;
+        return (tcChanMap[t] || []).indexOf(tcChanFilter) !== -1;
+      });
+      currentTc = checklist('TC Theme', items, { durMap: OPTS.tc_theme_durations || {}, preselect: preTc, emptyMsg: 'No TC themes in this scope.' });
+      tcHolder.appendChild(currentTc.wrap);
+    }
+    buildTc();
+
+    // ── Product narrow control (optional; not saved) ──
+    var prodHolder = document.createElement('div');
+    if (prodOptions.length) {
+      var pn = checklist('Narrow themes by product (optional, not saved)', prodOptions, { emptyMsg: 'No product info in LMRB data.' });
+      pn.wrap.addEventListener('change', function () {
+        selectedProducts = new Set(pn.getSelected().map(function (p) { return p.toLowerCase().trim(); }));
+        buildLmrb(); buildMapo();
+      });
+      prodHolder.appendChild(pn.wrap);
+    }
 
     var grid = document.createElement('div');
     grid.className = 'grid grid-cols-1 sm:grid-cols-2 gap-4';
-    grid.appendChild(lmrbHolder); grid.appendChild(tc.wrap);
+    grid.appendChild(lmrbHolder); grid.appendChild(tcHolder);
 
-    // Advanced (MapOnline / Product / Duration)
+    // Duration (only remaining Advanced field - product/maponline are now lists)
     var adv = document.createElement('details');
     adv.className = 'group rounded-lg border border-slate-200 bg-white';
     adv.open = maps.length > 0;   // reveal when there's an existing duration to see
@@ -392,17 +555,13 @@
     }).join(' ');
     adv.innerHTML =
       '<summary class="flex items-center gap-2 px-3 py-2 cursor-pointer select-none text-xs font-bold text-slate-600">' +
-        '<i class="fa-solid fa-sliders text-slate-400"></i> Advanced (Duration, Product, MapOnline)' +
+        '<i class="fa-solid fa-sliders text-slate-400"></i> Advanced (Duration)' +
         '<i class="fa-solid fa-chevron-down text-slate-300 ml-auto group-open:rotate-180 transition-transform"></i></summary>' +
-      '<div class="px-3 pb-3 pt-1 grid grid-cols-1 sm:grid-cols-3 gap-3">' +
+      '<div class="px-3 pb-3 pt-1">' +
         '<div><label class="block text-[11px] font-semibold text-slate-500 mb-1">Duration (s) <span class="font-normal text-slate-400">- schedule spot length</span></label>' +
-          '<input type="number" min="1" class="js-duration w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" placeholder="any duration">' +
+          '<input type="number" min="1" class="js-duration w-full sm:w-56 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" placeholder="any duration">' +
           (durChips ? '<div class="mt-1 flex flex-wrap gap-1">' + durChips + '</div>' : '') +
           '<p class="text-[9px] text-slate-400 mt-1">Blank = applies to any spot length. Set it to restrict this mapping to one schedule length.</p></div>' +
-        '<div><label class="block text-[11px] font-semibold text-slate-500 mb-1">Product</label>' +
-          '<input list="q-products" class="js-product w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" placeholder="optional"></div>' +
-        '<div><label class="block text-[11px] font-semibold text-slate-500 mb-1">MapOnline Theme</label>' +
-          '<input list="q-maponline" class="js-maponline w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" placeholder="optional"></div>' +
       '</div>';
 
     var actions = document.createElement('div');
@@ -411,28 +570,28 @@
       '<span class="js-hint text-[11px] text-slate-400 mr-auto"></span>' +
       '<button type="button" class="btn-primary text-xs js-save"><i class="fa-solid fa-floppy-disk"></i> Save mapping</button>';
 
-    editor.appendChild(grid); editor.appendChild(adv); editor.appendChild(actions);
+    if (prodOptions.length) editor.appendChild(prodHolder);
+    editor.appendChild(grid);
+    editor.appendChild(mapoHolder);
+    editor.appendChild(adv);
+    editor.appendChild(actions);
 
     // Duration quick-pick chips
     adv.querySelectorAll('.js-durchip').forEach(function (chip) {
       chip.addEventListener('click', function () { adv.querySelector('.js-duration').value = this.dataset.d; });
     });
 
-    // NOTE: product is intentionally NOT auto-filled. A saved product makes the
-    // matching engine require the LMRB spot's product to match exactly, which
-    // silently drops correctly-themed airings. Leave it blank (matches any
-    // product) unless the operator deliberately sets it to disambiguate a TAG.
-
     actions.querySelector('.js-save').addEventListener('click', function () {
       var themes = currentLmrb.getSelected();
       if (!themes.length) { toast('Pick at least one LMRB theme.', false); return; }
       var btn = this; btn.disabled = true;
+      // product is intentionally omitted - the picker never saves a product
+      // constraint (it only narrows the view above). Blank = match any product.
       var payload = {
         account_id: elAcc.value, brand: brand, themes: themes,
-        tc_themes: tc.getSelected(),
-        product: adv.querySelector('.js-product').value.trim(),
+        tc_themes: currentTc ? currentTc.getSelected() : [],
+        maponline_themes: currentMapo ? currentMapo.getSelected() : [],
         duration: adv.querySelector('.js-duration').value.trim(),
-        maponline_theme: adv.querySelector('.js-maponline').value.trim(),
       };
       fetch('/dashboard/brand-mappings/quick/add/', {
         method: 'POST',
@@ -446,6 +605,11 @@
         if (d.updated) parts.push(d.updated + ' updated');
         if (d.skipped) parts.push(d.skipped + ' already existed');
         toast(brand + ': ' + (parts.join(', ') || 'no changes') + '.', true);
+        // Upload & Mapping Guardian: show advisory warnings in a persistent
+        // banner above the card list (survives the render() below, which
+        // rebuilds the cards). Flags product-without-duration, a theme mapped
+        // to another brand, and unmapped look-alike themes.
+        showMapWarnings(brand, d.warnings || []);
         // Mark brand mapped + reflect newly-mapped themes
         mappedBrandSet.add(brand.toLowerCase().trim());
         themes.forEach(function (t) { mappedThemeSet.add(t.toLowerCase().trim()); });

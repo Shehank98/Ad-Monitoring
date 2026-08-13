@@ -15,6 +15,7 @@ Run with:
 """
 
 import datetime
+import json
 from django.db import IntegrityError
 from django.test import TestCase, override_settings
 
@@ -2295,6 +2296,56 @@ class QuickMapTest(TestCase):
         self.assertNotIn('id="q-month"', html)
         self.assertIn('id="q-account"', html)
 
+    def test_options_returns_tc_theme_channels(self):
+        # A brand's TC code differs per channel — the picker filters by channel.
+        rep_a = make_tc_report(self.account, channel="TV - Derana")
+        rep_b = make_tc_report(self.account, channel="TV - Hiru")
+        make_tc_row(self.account, rep_a, tc_theme="ABC", channel="TV - Derana")
+        make_tc_row(self.account, rep_b, tc_theme="BFB", channel="TV - Hiru")
+        self.client.force_login(self.admin)
+        d = self.client.get("/dashboard/brand-mappings/options/",
+                            {"account_id": self.account.id}).json()
+        self.assertIn("TV - Derana", d["tc_channels"])
+        self.assertIn("TV - Hiru", d["tc_channels"])
+        self.assertEqual(d["tc_theme_channels"]["ABC"], ["TV - Derana"])
+        self.assertEqual(d["tc_theme_channels"]["BFB"], ["TV - Hiru"])
+
+    def test_quick_add_stores_multi_maponline_and_never_saves_product(self):
+        self.client.force_login(self.admin)
+        resp = self.client.post(
+            "/dashboard/brand-mappings/quick/add/",
+            data=json.dumps({
+                "account_id": self.account.id,
+                "brand": "Ceylinco Life -15Sec",
+                "themes": ["Ceylinco Life_15 (Sin)"],
+                "tc_themes": ["ABC", "BFB"],
+                "maponline_themes": ["Ceylinco Gen A", "Ceylinco Gen B"],
+                "product": "Ceylinco Life",   # must be ignored (narrow-only)
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["ok"])
+        bm = BrandMapping.objects.get(account=self.account, brand="Ceylinco Life -15Sec")
+        self.assertEqual(bm.maponline_theme, "Ceylinco Gen A|Ceylinco Gen B")
+        self.assertEqual(bm.tc_theme, "ABC|BFB")
+        self.assertEqual(bm.product, "")   # product is never saved from Quick Map
+
+    def test_quick_add_backward_compat_single_maponline_theme(self):
+        self.client.force_login(self.admin)
+        self.client.post(
+            "/dashboard/brand-mappings/quick/add/",
+            data=json.dumps({
+                "account_id": self.account.id,
+                "brand": "Ceylinco Life -15Sec",
+                "themes": ["Ceylinco Life_15 (Sin)"],
+                "maponline_theme": "Legacy Single",
+            }),
+            content_type="application/json",
+        )
+        bm = BrandMapping.objects.get(account=self.account, brand="Ceylinco Life -15Sec")
+        self.assertEqual(bm.maponline_theme, "Legacy Single")
+
 
 class BrandMappingLmrbChannelTest(TestCase):
     """brand_mapping_options must surface LMRB themes even when the schedule
@@ -2839,3 +2890,439 @@ class TcLmrbCandidatesFilterTest(TestCase):
             [c["id"] for c in cands].index(near.id),
             [c["id"] for c in cands].index(far.id),
         )
+
+
+class SummaryExcelLandscapeTest(TestCase):
+    """Every sheet in the reconciliation Excel download must print landscape +
+    fit-to-width. The wide Matched/Unmatched LMRB sheets (21 columns) used to
+    default to portrait, which printed broken."""
+
+    def setUp(self):
+        self.account = make_account()
+
+    def _orientation(self, writer):
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        writer(ws, self.account.id, CHANNEL, MONTH)
+        return ws.page_setup.orientation, ws.page_setup.fitToWidth
+
+    def test_matched_lmrb_sheet_is_landscape(self):
+        from core.views import _write_matched_lmrb_sheet
+        orient, fit = self._orientation(_write_matched_lmrb_sheet)
+        self.assertEqual(orient, 'landscape')
+        self.assertEqual(fit, 1)
+
+    def test_unmatched_lmrb_sheet_is_landscape(self):
+        from core.views import _write_unmatched_lmrb_sheet
+        orient, fit = self._orientation(_write_unmatched_lmrb_sheet)
+        self.assertEqual(orient, 'landscape')
+        self.assertEqual(fit, 1)
+
+
+class ReconExcelLogoTest(TestCase):
+    """The reconciliation Excel summary must embed the client logo (openpyxl
+    needs Pillow — declared in requirements) and lay the header out like the
+    PDF/UI: title on the left, logo top-right."""
+
+    # 1x1-ish valid PNG
+    PNG = (b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x10\x00\x00\x00\x10'
+           b'\x08\x06\x00\x00\x00\x1f\xf3\xffa\x00\x00\x00\x19IDATx\x9cc\xfc\xcf'
+           b'\xc0\xf0\x1f\x8a\x01\x08\x18\x18\x00\x00\xff\xff\x03\x00\x06\x05\x02'
+           b'\x9f\xe7\x86\xf1\xc4\x00\x00\x00\x00IEND\xaeB`\x82')
+
+    def setUp(self):
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        make_schedule_row(self.account, self.schedule, brand="Brand A", duration=30)
+
+    def _fake_logo(self):
+        import io as _io
+        png = self.PNG
+        class FakeLogo:
+            def open(self, mode='rb'): return _io.BytesIO(png)
+            def read(self): return png
+            def close(self): pass
+        return FakeLogo()
+
+    def _build_sheet(self):
+        import openpyxl
+        from verification.tc_engine import build_summary_data
+        from verification.media_recon import build_recon_context
+        from core.views import _write_media_recon_sheet
+        data = build_summary_data(self.account.id, CHANNEL, MONTH)
+        ctx = build_recon_context(self.account, CHANNEL, MONTH, None, data, schedule=self.schedule)
+        ctx['logo'] = self._fake_logo()
+        wb = openpyxl.Workbook(); ws = wb.active
+        _write_media_recon_sheet(ws, ctx)
+        return wb, ws
+
+    def test_logo_embeds_and_landscape(self):
+        import io, zipfile
+        wb, ws = self._build_sheet()
+        self.assertEqual(ws['A1'].alignment.horizontal, 'center')
+        self.assertEqual(ws.page_setup.orientation, 'landscape')
+        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+        names = zipfile.ZipFile(buf).namelist()
+        self.assertTrue(any('media/image' in n for n in names),
+                        "client logo must be embedded in the recon sheet")
+
+    def test_new_summary_labels_and_header_colour(self):
+        """Spot table uses the New_Summary labels and light-blue (BDD7EE)
+        section headers, matching the on-screen report / New_Summary template."""
+        _wb, ws = self._build_sheet()
+        header_texts = {ws.cell(13, c).value for c in range(1, 6)}
+        self.assertIn('Schedule', header_texts)
+        self.assertIn('Transmission Report', header_texts)
+        self.assertIn('Nielsen Report', header_texts)
+        self.assertNotIn('Schedule (Planned)', header_texts)
+        # light-blue header fill
+        self.assertEqual(ws.cell(13, 1).fill.fgColor.rgb[-6:], 'BDD7EE')
+
+
+class AgentToolsTest(TestCase):
+    """Deterministic shared tool layer (core/agent_tools.py) used by both the
+    Nova chat agent and the future background agent."""
+
+    def setUp(self):
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        self.sr = make_schedule_row(self.account, self.schedule, brand="Brand A",
+                                    start_time="20:00:00", end_time="21:00:00", duration=30)
+        # LMRB stored under clean channel name; schedule channel is CHANNEL.
+        self.lmrb = make_lmrb_row(self.account, advt_theme="Theme A", channel=CHANNEL,
+                                  advt_time="20:05:00", duration=30, source="mediawatch")
+
+    def test_get_schedule_row_context(self):
+        from core.agent_tools import get_schedule_row_context
+        ctx = get_schedule_row_context(self.sr.id)
+        self.assertEqual(ctx["brand"], "Brand A")
+        self.assertEqual(ctx["channel"], CHANNEL)
+        self.assertEqual(ctx["account_id"], self.account.id)
+
+    def test_search_lmrb_candidates_ignores_programme_and_uses_window(self):
+        from core.agent_tools import search_lmrb_candidates
+        out = search_lmrb_candidates(CHANNEL, str(DATE), "20:00:00", window_minutes=60)
+        ids = [c["lmrb_row_id"] for c in out["candidates"]]
+        self.assertIn(self.lmrb.id, ids)
+        # 5 minutes from planned
+        cand = next(c for c in out["candidates"] if c["lmrb_row_id"] == self.lmrb.id)
+        self.assertEqual(cand["minutes_from_planned"], 5.0)
+        self.assertFalse(cand["already_locked"])
+
+    def test_search_lmrb_candidates_channel_prefix_tolerant(self):
+        from core.agent_tools import search_lmrb_candidates
+        # TC/schedule side carries the 'TV - ' prefix; LMRB is clean.
+        out = search_lmrb_candidates("TV - " + CHANNEL, str(DATE), "20:00:00")
+        self.assertIn(self.lmrb.id, [c["lmrb_row_id"] for c in out["candidates"]])
+
+    def test_check_brand_mapping(self):
+        from core.agent_tools import check_brand_mapping
+        make_brand_mapping(self.account, brand="Brand A", theme="Theme A", tc_theme="TC A")
+        out = check_brand_mapping(self.account.id, "Brand A")
+        self.assertTrue(out["is_mapped"])
+        self.assertIn("Theme A", out["mapped_lmrb_themes"])
+
+    def test_propose_manual_match_refuses_without_confirmation(self):
+        from core.agent_tools import propose_manual_match
+        out = propose_manual_match(self.sr.id, self.lmrb.id, confirmed_by_user=False)
+        self.assertEqual(out["status"], "not_created")
+        self.assertFalse(ManualMatch.objects.filter(schedule_row=self.sr).exists())
+
+    def test_propose_manual_match_creates_and_locks_when_confirmed(self):
+        from core.agent_tools import propose_manual_match
+        out = propose_manual_match(self.sr.id, self.lmrb.id, confirmed_by_user=True)
+        self.assertEqual(out["status"], "created")
+        self.sr.refresh_from_db(); self.lmrb.refresh_from_db()
+        self.assertTrue(self.sr.is_manual_matched)
+        self.assertTrue(self.lmrb.is_manual_matched)
+        mm = ManualMatch.objects.get(schedule_row=self.sr)
+        self.assertEqual(mm.match_mode, "schedule_lmrb")
+        self.assertEqual(mm.lmrb_row_id, self.lmrb.id)
+
+    def test_list_unmatched_spots_matches_summary(self):
+        """list_unmatched_spots must read the SAME source as the Summary Sheet
+        (build_summary_data), so its counts agree — including sponsorship/tag
+        deviations that MatchResult never records. Here Brand A is planned but
+        nothing aired, so it shows as Missed and carries the schedule row id."""
+        from core.agent_tools import list_unmatched_spots
+        out = list_unmatched_spots(self.account.id, CHANNEL, MONTH)
+        self.assertGreaterEqual(out["total_missed"], 1)
+        dev = next((d for d in out["deviations"] if d["brand"] == "Brand A"), None)
+        self.assertIsNotNone(dev, out)
+        self.assertGreaterEqual(dev["missed"], 1)
+        self.assertIn(self.sr.id, dev["unmatched_schedule_row_ids"])
+
+    def test_lookup_schedule_system_wide(self):
+        from core.agent_tools import lookup_schedule
+        out = lookup_schedule(self.schedule.schedule_number)
+        self.assertTrue(out["found"])
+        self.assertEqual(out["account_id"], self.account.id)
+        self.assertEqual(out["channel"], CHANNEL)
+        self.assertEqual(out["month"], MONTH)
+        self.assertFalse(lookup_schedule("nonexistent-999")["found"])
+
+    def test_lookup_by_brand(self):
+        from core.agent_tools import lookup_by_brand
+        out = lookup_by_brand("Brand A")
+        self.assertTrue(any(m["brand"] == "Brand A" and m["account_id"] == self.account.id
+                            for m in out["matches"]))
+
+    def test_list_schedules(self):
+        from core.agent_tools import list_schedules
+        self.assertGreaterEqual(list_schedules(brand="Brand A")["total"], 1)
+        self.assertEqual(list_schedules(brand="does-not-exist")["total"], 0)
+        self.assertGreaterEqual(list_schedules()["total"], 1)  # "any schedules?"
+
+    def test_open_summary_smart_single_uses_real_month(self):
+        """Resolver must build the URL from real DB values — real month string
+        'January 2025', not a fabricated '2025-01' — and the real account_id."""
+        from core.agent_tools import open_summary_smart
+        out = open_summary_smart(brand="Brand A")
+        self.assertTrue(out["found"])
+        self.assertEqual(out["action"], "navigate")
+        self.assertIn("account_id=%d" % self.account.id, out["url"])
+        self.assertIn("month=January+2025", out["url"])   # urlencoded real month
+        self.assertNotIn("2025-01", out["url"])
+
+    def test_open_summary_smart_asks_when_multiple(self):
+        from core.agent_tools import open_summary_smart
+        sch2 = make_schedule(self.account, channel="TV - Hiru", schedule_number="777")
+        make_schedule_row(self.account, sch2, brand="Brand A", channel="TV - Hiru")
+        out = open_summary_smart(brand="Brand A")
+        self.assertEqual(out["action"], "choose")
+        self.assertGreaterEqual(len(out["options"]), 2)
+        channels = {o["channel"] for o in out["options"]}
+        self.assertIn(CHANNEL, channels)
+        self.assertIn("TV - Hiru", channels)
+
+    def test_open_summary_smart_not_found(self):
+        from core.agent_tools import open_summary_smart
+        self.assertFalse(open_summary_smart(brand="no-such-brand")["found"])
+
+    def test_navigation_and_report_tools_return_actions(self):
+        from core.agent_tools import (open_summary_sheet, open_mapping_page,
+                                       generate_summary_report)
+        nav = open_summary_sheet(self.account.id, CHANNEL, MONTH)
+        self.assertEqual(nav["action"], "navigate")
+        self.assertIn("/dashboard/summary/", nav["url"])
+        self.assertIn("account_id=%d" % self.account.id, nav["url"])
+        self.assertEqual(open_mapping_page(self.account.id, "Brand A")["action"], "navigate")
+        dl = generate_summary_report(self.account.id, CHANNEL, MONTH, format="pdf")
+        self.assertEqual(dl["action"], "download")
+        self.assertIn("/dashboard/summary/pdf/", dl["url"])
+
+    def test_investigate_all_unmatched_covers_schedule_and_tc(self):
+        """Nova can investigate everything with no IDs from the user: the missed
+        schedule spot AND an unmatched TC spot both come back, each with the
+        closest LMRB airing."""
+        from core.agent_tools import investigate_all_unmatched
+        rep = make_tc_report(self.account, channel=CHANNEL)
+        tc = make_tc_row(self.account, rep, tc_theme="Brand A TC", channel=CHANNEL,
+                         aired_time="20:05:30", duration=30)  # is_lmrb_confirmed False
+        out = investigate_all_unmatched(self.account.id, CHANNEL, MONTH)
+        # missed schedule spot (Brand A) is present with the nearby LMRB candidate
+        sched = out["missed_schedule_spots"]
+        self.assertTrue(any(s["schedule_row_id"] == self.sr.id for s in sched))
+        s0 = next(s for s in sched if s["schedule_row_id"] == self.sr.id)
+        self.assertIsNotNone(s0["best_candidate"])
+        self.assertEqual(s0["best_candidate"]["lmrb_row_id"], self.lmrb.id)
+        # the unmatched TC spot is present too
+        self.assertTrue(any(t["tc_row_id"] == tc.id for t in out["unmatched_tc_spots"]))
+
+    def test_propose_tc_lmrb_match_requires_confirmation_then_links(self):
+        from core.agent_tools import propose_tc_lmrb_match
+        rep = make_tc_report(self.account, channel=CHANNEL)
+        tc = make_tc_row(self.account, rep, tc_theme="Brand A TC", channel=CHANNEL,
+                         aired_time="20:05:30", duration=30)
+        # refuses without confirmation
+        self.assertEqual(propose_tc_lmrb_match(tc.id, self.lmrb.id, False)["status"],
+                         "not_created")
+        # links on confirmation
+        out = propose_tc_lmrb_match(tc.id, self.lmrb.id, True)
+        self.assertEqual(out["status"], "created")
+        tc.refresh_from_db(); self.lmrb.refresh_from_db()
+        self.assertTrue(tc.is_lmrb_confirmed)
+        self.assertEqual(tc.matched_lmrb_id, self.lmrb.id)
+        self.assertTrue(self.lmrb.is_manual_matched)
+
+    def test_diagnose_unmatched_tc_spot_finds_theme_mapped_elsewhere(self):
+        """A TC theme unmapped for this account but mapped under a brand in
+        ANOTHER account should surface as an exact match elsewhere."""
+        from core.agent_tools import diagnose_unmatched_tc_spot
+        rep = make_tc_report(self.account, channel=CHANNEL)
+        tc = make_tc_row(self.account, rep, tc_theme="SIGNAL PLUS PROMO 30",
+                         channel=CHANNEL, duration=30)
+        other = make_account(name="Other Co")
+        make_brand_mapping(other, brand="Signal Plus", theme="Signal Plus_30",
+                           tc_theme="SIGNAL PLUS PROMO 30")
+        out = diagnose_unmatched_tc_spot(tc.id)
+        self.assertEqual(out["raw_tc_theme"], "SIGNAL PLUS PROMO 30")
+        brands = [e["brand"] for e in out["exact_match_elsewhere"]]
+        self.assertIn("Signal Plus", brands)
+        self.assertFalse(out["exact_match_elsewhere"][0]["same_account"])
+
+
+class MappingGuardianTest(TestCase):
+    """Upload & Mapping Guardian (Tier 1 — advisory, non-blocking)."""
+
+    def setUp(self):
+        self.account = make_account(name="Milo")
+
+    def test_validate_upload_blocks_without_account(self):
+        from core.agent_tools import validate_upload_selection
+        out = validate_upload_selection("schedule", account_id=None)
+        self.assertTrue(out["block"])
+
+    def test_validate_upload_warns_on_brand_mismatch(self):
+        from core.agent_tools import validate_upload_selection
+        out = validate_upload_selection("lmrb", account_id=self.account.id,
+                                        brand_hint_from_filename="Coca Cola")
+        self.assertFalse(out["block"])
+        self.assertTrue(out["warnings"])
+
+    def test_audit_flags_product_without_duration(self):
+        from core.agent_tools import audit_brand_mapping
+        BrandMapping.objects.create(account=self.account, brand="Milo 5s",
+                                    theme="Milo Gen", product="Milo", duration=None)
+        out = audit_brand_mapping(self.account.id, "Milo 5s")
+        self.assertFalse(out["is_clean"])
+        self.assertTrue(any("Product filter" in w for w in out["warnings"]))
+
+    def test_audit_flags_theme_mapped_to_other_brand(self):
+        from core.agent_tools import audit_brand_mapping
+        BrandMapping.objects.create(account=self.account, brand="Milo 5s", theme="Shared Theme")
+        BrandMapping.objects.create(account=self.account, brand="Other Brand", theme="Shared Theme")
+        out = audit_brand_mapping(self.account.id, "Milo 5s")
+        self.assertTrue(any("already mapped to a different brand" in w for w in out["warnings"]))
+
+    def test_audit_clean_mapping(self):
+        from core.agent_tools import audit_brand_mapping
+        BrandMapping.objects.create(account=self.account, brand="Milo 5s",
+                                    theme="Milo Gen 5", tc_theme="MILO 05")
+        out = audit_brand_mapping(self.account.id, "Milo 5s")
+        self.assertTrue(out["is_clean"])
+
+
+class NovaChatEndpointTest(TestCase):
+    """Nova chat endpoint degrades gracefully when Gemini isn't configured, and
+    requires auth."""
+
+    def setUp(self):
+        from django.test import Client
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        self.sr = make_schedule_row(self.account, self.schedule, brand="Brand A")
+        self.user = make_user(email="nova@test.com", role="operations")
+        self.client = Client()
+
+    def test_requires_login(self):
+        resp = self.client.post("/dashboard/nova-chat/",
+                                data=json.dumps({"schedule_row_id": self.sr.id, "message": "hi"}),
+                                content_type="application/json")
+        self.assertIn(resp.status_code, (302, 403))
+
+    @override_settings(GEMINI_API_KEY="")
+    def test_graceful_without_gemini_key(self):
+        self.client.force_login(self.user)
+        resp = self.client.post(
+            "/dashboard/nova-chat/",
+            data=json.dumps({"schedule_row_id": self.sr.id, "message": "why not aired?"}),
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("configured", resp.json()["reply"].lower())
+
+    @override_settings(GEMINI_API_KEY="")
+    def test_scope_mode_accepted(self):
+        """Nova can be opened at Summary-Sheet scope (account+channel+month)."""
+        self.user.role = "super_admin"; self.user.save(update_fields=["role"])
+        self.client.force_login(self.user)
+        resp = self.client.post(
+            "/dashboard/nova-chat/",
+            data=json.dumps({"account_id": self.account.id, "channel": CHANNEL,
+                             "month": MONTH, "message": "which spots didn't match?"}),
+            content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("configured", resp.json()["reply"].lower())  # graceful (no key)
+
+    @override_settings(GEMINI_API_KEY="test-key")
+    def test_global_mode_returns_navigate_action(self):
+        """Global chat (no page context) can look up + open a page; the endpoint
+        returns the navigate action for the browser to execute."""
+        from unittest import mock
+        self.user.role = "super_admin"; self.user.save(update_fields=["role"])
+        self.client.force_login(self.user)
+
+        def fake(status, payload):
+            m = mock.Mock(); m.status_code = status; m.json.return_value = payload
+            m.text = json.dumps(payload); return m
+
+        turn1 = {"candidates": [{"content": {"parts": [
+            {"functionCall": {"name": "open_summary_sheet",
+                              "args": {"account_id": self.account.id,
+                                       "channel": CHANNEL, "month": MONTH}}}]}}]}
+        turn2 = {"candidates": [{"content": {"parts": [
+            {"text": "Opening the summary now."}]}}]}
+        with mock.patch("core.agent_chat.requests.post",
+                        side_effect=[fake(200, turn1), fake(200, turn2)]):
+            resp = self.client.post(
+                "/dashboard/nova-chat/",
+                data=json.dumps({"message": "open the summary for that account"}),
+                content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(any(a["action"] == "navigate" and "/dashboard/summary/" in a["url"]
+                            for a in data["actions"]))
+
+    @override_settings(GEMINI_API_KEY="test-key")
+    def test_rest_function_calling_loop(self):
+        """With a key set, Nova should (1) call a tool via the REST functionCall
+        protocol, then (2) return the model's final text. We mock requests.post
+        so no real Gemini call is made."""
+        from unittest import mock
+        self.client.force_login(self.user)
+
+        def fake_response(status, payload):
+            m = mock.Mock(); m.status_code = status; m.json.return_value = payload
+            m.text = json.dumps(payload); return m
+
+        turn1 = {"candidates": [{"content": {"parts": [
+            {"functionCall": {"name": "get_schedule_row_context",
+                              "args": {"schedule_row_id": self.sr.id}}}]}}]}
+        turn2 = {"candidates": [{"content": {"parts": [
+            {"text": "This spot is on Sirasa TV; let me check LMRB."}]}}]}
+        with mock.patch("core.agent_chat.requests.post",
+                        side_effect=[fake_response(200, turn1), fake_response(200, turn2)]) as post:
+            resp = self.client.post(
+                "/dashboard/nova-chat/",
+                data=json.dumps({"schedule_row_id": self.sr.id, "message": "why not aired?"}),
+                content_type="application/json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Sirasa TV", resp.json()["reply"])
+        self.assertEqual(post.call_count, 2)  # tool round-trip + final text
+
+
+class NovaEnableToggleTest(TestCase):
+    """The 'Ask Nova' feature can be turned off via a SystemSetting; the context
+    processor reflects it so base.html hides the launcher."""
+
+    def _nova_enabled(self):
+        from core.context_processors import branding
+        return branding(None).get('nova_enabled')
+
+    def test_enabled_by_default(self):
+        self.assertTrue(self._nova_enabled())  # no row -> default '1'
+
+    def test_toggle_off(self):
+        SystemSetting.objects.update_or_create(
+            key='nova_enabled',
+            defaults={'value': '0', 'label': 'Ask Nova Assistant Enabled',
+                      'category': 'assistant'})
+        self.assertFalse(self._nova_enabled())
+
+    def test_toggle_on(self):
+        SystemSetting.objects.update_or_create(
+            key='nova_enabled',
+            defaults={'value': '1', 'label': 'Ask Nova Assistant Enabled',
+                      'category': 'assistant'})
+        self.assertTrue(self._nova_enabled())
