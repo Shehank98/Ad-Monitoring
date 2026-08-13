@@ -954,6 +954,17 @@ class SpotNotification(models.Model):
 # ── System Settings ───────────────────────────────────────────────────────────
 
 SETTING_DEFAULTS = [
+    # ── Nova assistant ────────────────────────────────────────────────────────
+    {
+        'key': 'nova_enabled',
+        'value': '1',
+        'label': 'Ask Nova Assistant Enabled',
+        'description': (
+            'Set to 1 to show the "Ask Nova" assistant panel on every page. '
+            'Set to 0 to hide it for everyone.'
+        ),
+        'category': 'assistant',
+    },
     # ── Reconciliation ────────────────────────────────────────────────────────
     {
         'key': 'tc_lmrb_time_tolerance',
