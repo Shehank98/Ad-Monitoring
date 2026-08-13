@@ -3300,3 +3300,29 @@ class NovaChatEndpointTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("Sirasa TV", resp.json()["reply"])
         self.assertEqual(post.call_count, 2)  # tool round-trip + final text
+
+
+class NovaEnableToggleTest(TestCase):
+    """The 'Ask Nova' feature can be turned off via a SystemSetting; the context
+    processor reflects it so base.html hides the launcher."""
+
+    def _nova_enabled(self):
+        from core.context_processors import branding
+        return branding(None).get('nova_enabled')
+
+    def test_enabled_by_default(self):
+        self.assertTrue(self._nova_enabled())  # no row -> default '1'
+
+    def test_toggle_off(self):
+        SystemSetting.objects.update_or_create(
+            key='nova_enabled',
+            defaults={'value': '0', 'label': 'Ask Nova Assistant Enabled',
+                      'category': 'assistant'})
+        self.assertFalse(self._nova_enabled())
+
+    def test_toggle_on(self):
+        SystemSetting.objects.update_or_create(
+            key='nova_enabled',
+            defaults={'value': '1', 'label': 'Ask Nova Assistant Enabled',
+                      'category': 'assistant'})
+        self.assertTrue(self._nova_enabled())

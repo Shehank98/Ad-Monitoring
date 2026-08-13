@@ -27,14 +27,22 @@
 
   <!-- Scope selector -->
   <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-    <div class="max-w-md">
-      <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Brand (Account) <span class="text-red-400">*</span></label>
-      <select id="q-account" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
-        <option value="">Select account…</option>
-        {% for acc in accounts %}<option value="{{ acc.id }}">{{ acc.name }}</option>{% endfor %}
-      </select>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-3xl">
+      <div>
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Brand (Account) <span class="text-red-400">*</span></label>
+        <select id="q-account" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400">
+          <option value="">Select account…</option>
+          {% for acc in accounts %}<option value="{{ acc.id }}">{{ acc.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Channel <span class="font-normal text-slate-300 normal-case">(optional filter)</span></label>
+        <select id="q-channel" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400" disabled>
+          <option value="">All channels</option>
+        </select>
+      </div>
     </div>
-    <p class="text-[11px] text-slate-400 mt-2"><i class="fa-solid fa-circle-info mr-1"></i> Pick an account. Click a brand below and tick the LMRB / TC themes for it - the theme list is narrowed to each brand automatically.</p>
+    <p class="text-[11px] text-slate-400 mt-2"><i class="fa-solid fa-circle-info mr-1"></i> Pick an account. Optionally pick a channel to narrow the LMRB &amp; TC themes to that channel. Click a brand below and tick the themes for it.</p>
   </div>
 
   <!-- Coverage summary -->
@@ -159,12 +167,30 @@
     return out;
   }
 
-  // ── Account selection (no channel/month scope - map at account level) ────────
+  var elChannel = document.getElementById('q-channel');
+
+  // ── Account selection: load its channels, then load options. A channel is an
+  //    OPTIONAL filter that narrows the LMRB & TC themes to that channel. ──
   elAcc.addEventListener('change', function () {
-    if (!this.value) { reset(); return; }
+    if (!this.value) { elChannel.innerHTML = '<option value="">All channels</option>'; elChannel.disabled = true; reset(); return; }
+    loadChannels(this.value);
     loadOptions();
   });
+  elChannel.addEventListener('change', function () { if (elAcc.value) loadOptions(); });
   document.getElementById('q-show-mapped').addEventListener('change', render);
+
+  function loadChannels(accountId) {
+    elChannel.disabled = true;
+    fetch('/dashboard/brand-mappings/channels/?account_id=' + encodeURIComponent(accountId))
+      .then(r => r.json())
+      .then(function (d) {
+        var chans = d.channels || [];
+        elChannel.innerHTML = '<option value="">All channels</option>' +
+          chans.map(function (c) { return '<option value="' + esc(c) + '">' + esc(c) + '</option>'; }).join('');
+        elChannel.disabled = chans.length === 0;
+      })
+      .catch(function () { elChannel.disabled = true; });
+  }
 
   function reset() {
     OPTS = null; elCards.innerHTML = '';
@@ -176,6 +202,7 @@
     show('q-empty', false); show('q-none', false); show('q-coverage', false); show('q-loading', true);
     elCards.innerHTML = '';
     var qs = '?account_id=' + encodeURIComponent(elAcc.value);
+    if (elChannel.value) qs += '&channel=' + encodeURIComponent(elChannel.value);
     fetch('/dashboard/brand-mappings/options/' + qs)
       .then(r => r.json())
       .then(function (d) {

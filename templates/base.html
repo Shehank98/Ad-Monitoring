@@ -1059,7 +1059,7 @@ document.addEventListener('click', function(e) {
 })();
 </script>
 
-{% if request.user.is_authenticated %}
+{% if request.user.is_authenticated and nova_enabled %}
 <!-- Nova - persistent system-wide assistant on every screen -->
 <button type="button" onclick="openNovaGlobal()" id="nova-launcher"
         title="Ask Nova"

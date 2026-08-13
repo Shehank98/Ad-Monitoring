@@ -8365,8 +8365,9 @@ def system_settings(request):
 
     # Group settings by their category display label
     from collections import OrderedDict
-    CATEGORY_ORDER = ['reconciliation', 'display', 'tc_parsing', 'lmrb_parsing', 'whatsapp', 'email']
+    CATEGORY_ORDER = ['assistant', 'reconciliation', 'display', 'tc_parsing', 'lmrb_parsing', 'whatsapp', 'email']
     CATEGORY_LABELS = {
+        'assistant':      'Nova Assistant',
         'reconciliation': 'Reconciliation',
         'display':        'Reconciliation Colours',
         'tc_parsing':     'TC File Parsing',

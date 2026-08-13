@@ -13,10 +13,16 @@ def _branding_url(asset_type: str) -> str:
 
 def branding(request):
     """Inject branding asset URLs into every template context."""
+    try:
+        from core.models import get_setting
+        nova_enabled = get_setting('nova_enabled', '1') != '0'
+    except Exception:
+        nova_enabled = True
     return {
         'sidebar_logo_url':    _branding_url('logo'),
         'branding_logo_url':   _branding_url('logo'),
         'branding_tartan_url': _branding_url('tartan'),
+        'nova_enabled':        nova_enabled,
     }
 
 

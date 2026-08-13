@@ -102,7 +102,7 @@
             <p class="text-[11px] text-slate-400 mt-1.5">
               Current: <strong>±{{ s.value|default:"5" }}s</strong> tolerance
             </p>
-            {% elif s.key == 'whatsapp_enabled' %}
+            {% elif s.key == 'whatsapp_enabled' or s.key == 'nova_enabled' %}
             <!-- Toggle for enable/disable -->
             <div class="flex items-center gap-3">
               <label class="relative inline-flex items-center cursor-pointer">
