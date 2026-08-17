@@ -2549,6 +2549,224 @@ class TcLmrbDurationToleranceTest(TestCase):
         self.assertEqual(self.tc.matched_lmrb.advt_theme, "Tag")
 
 
+class TcLmrbToScheduleBridgeTest(TestCase):
+    """TC → specific LMRB row → Schedule, with deterministic variant resolution.
+
+    Regression cover for the 'second variant dropping' bug: a TC row must confirm
+    against the LMRB theme paired with its OWN tc_theme (A10E → 'A 10 SEC - English'),
+    never greedily consume a sibling variant's LMRB row, and the matched LMRB row
+    must be the bridge carried into Schedule matching.
+    """
+
+    def _mk_variant_mappings(self):
+        """A 10 SEC with three separately-mapped variants (one BrandMapping row each)."""
+        make_brand_mapping(self.account, brand="A 10 SEC", theme="A 10 SEC - English",
+                           tc_theme="A10E", duration=10)
+        make_brand_mapping(self.account, brand="A 10 SEC", theme="A 10 SEC - Sinhala",
+                           tc_theme="A10S", duration=10)
+        make_brand_mapping(self.account, brand="A 10 SEC", theme="A 10 SEC - Tamil",
+                           tc_theme="A10T", duration=10)
+
+    def _sched_rows(self, n):
+        for _ in range(n):
+            make_schedule_row(self.account, self.schedule, brand="A 10 SEC", duration=10,
+                              start_time="20:00:00", end_time="21:00:00")
+
+    def setUp(self):
+        ensure_tc_tolerance(5)
+        self.account   = make_account()
+        self.schedule  = make_schedule(self.account)
+        self.tc_report = make_tc_report(self.account, schedule=self.schedule)
+
+    # ── Test 1 — Basic TC → LMRB → Schedule ────────────────────────────────────
+    def test_basic_tc_lmrb_schedule(self):
+        self._sched_rows(1)
+        make_brand_mapping(self.account, brand="A 10 SEC", theme="A 10 SEC - English",
+                           tc_theme="A10E", duration=10)
+        lmrb = make_lmrb_row(self.account, advt_theme="A 10 SEC - English",
+                             advt_time="20:31:07", duration=10)
+        tc = make_tc_row(self.account, self.tc_report, tc_theme="A10E",
+                         aired_time="20:31:05", duration=10)
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        tc.refresh_from_db()
+        self.assertTrue(tc.is_lmrb_confirmed)
+        self.assertEqual(tc.matched_lmrb_id, lmrb.id)
+        self.assertTrue(tc.is_schedule_matched)
+        self.assertIsNotNone(tc.matched_schedule_id)
+
+    # ── Test 2 — Multiple variants each get their OWN LMRB + Schedule ───────────
+    def test_multiple_variants_deterministic(self):
+        self._sched_rows(3)
+        self._mk_variant_mappings()
+        eng = make_lmrb_row(self.account, advt_theme="A 10 SEC - English",
+                            advt_time="20:31:07", duration=10)
+        sin = make_lmrb_row(self.account, advt_theme="A 10 SEC - Sinhala",
+                            advt_time="20:32:07", duration=10)
+        tam = make_lmrb_row(self.account, advt_theme="A 10 SEC - Tamil",
+                            advt_time="20:33:07", duration=10)
+        tc_e = make_tc_row(self.account, self.tc_report, tc_theme="A10E",
+                           aired_time="20:31:05", duration=10, suffix="e")
+        tc_s = make_tc_row(self.account, self.tc_report, tc_theme="A10S",
+                           aired_time="20:32:05", duration=10, suffix="s")
+        tc_t = make_tc_row(self.account, self.tc_report, tc_theme="A10T",
+                           aired_time="20:33:05", duration=10, suffix="t")
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        for tc, lmrb in ((tc_e, eng), (tc_s, sin), (tc_t, tam)):
+            tc.refresh_from_db()
+            self.assertEqual(tc.matched_lmrb_id, lmrb.id,
+                             f"{tc.tc_theme} must map to its own variant")
+            self.assertTrue(tc.is_schedule_matched)
+
+    # ── Test 3 — Several LMRB rows same theme: closest valid time wins ──────────
+    def test_multiple_lmrb_same_theme_closest_wins(self):
+        self._sched_rows(1)
+        make_brand_mapping(self.account, brand="A 10 SEC", theme="A 10 SEC - English",
+                           tc_theme="A10E", duration=10)
+        near = make_lmrb_row(self.account, advt_theme="A 10 SEC - English",
+                             advt_time="20:31:07", duration=10)  # Δ2
+        make_lmrb_row(self.account, advt_theme="A 10 SEC - English",
+                      advt_time="20:31:30", duration=10)         # Δ25
+        tc = make_tc_row(self.account, self.tc_report, tc_theme="A10E",
+                         aired_time="20:31:05", duration=10)
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        tc.refresh_from_db()
+        self.assertEqual(tc.matched_lmrb_id, near.id)
+
+    # ── Test 4 — Wrong language must NOT win even when closer in time ───────────
+    def test_correct_variant_beats_closer_wrong_language(self):
+        """This is the core regression: Sinhala is closer in time, but A10E maps
+        to English, so English must be selected (deterministic variant)."""
+        self._sched_rows(1)
+        self._mk_variant_mappings()
+        make_lmrb_row(self.account, advt_theme="A 10 SEC - Sinhala",
+                      advt_time="20:31:06", duration=10)          # Δ1 (closer, wrong lang)
+        eng = make_lmrb_row(self.account, advt_theme="A 10 SEC - English",
+                            advt_time="20:31:09", duration=10)    # Δ4 (correct lang)
+        tc = make_tc_row(self.account, self.tc_report, tc_theme="A10E",
+                         aired_time="20:31:05", duration=10)
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        tc.refresh_from_db()
+        self.assertTrue(tc.is_lmrb_confirmed)
+        self.assertEqual(tc.matched_lmrb_id, eng.id,
+                         "A10E must confirm English even though Sinhala is closer")
+
+    def test_two_variants_no_starvation(self):
+        """A10E must not consume Sinhala's row; A10S must still confirm.  Under the
+        old brand-level logic A10E (processed first) grabbed the closer Sinhala row
+        and starved A10S out of tolerance."""
+        self._sched_rows(2)
+        self._mk_variant_mappings()
+        eng = make_lmrb_row(self.account, advt_theme="A 10 SEC - English",
+                            advt_time="20:31:20", duration=10)
+        sin = make_lmrb_row(self.account, advt_theme="A 10 SEC - Sinhala",
+                            advt_time="20:31:06", duration=10)
+        tc_e = make_tc_row(self.account, self.tc_report, tc_theme="A10E",
+                           aired_time="20:31:18", duration=10, suffix="e")  # Δ2 to English
+        tc_s = make_tc_row(self.account, self.tc_report, tc_theme="A10S",
+                           aired_time="20:31:05", duration=10, suffix="s")  # Δ1 to Sinhala
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        tc_e.refresh_from_db(); tc_s.refresh_from_db()
+        self.assertEqual(tc_e.matched_lmrb_id, eng.id)
+        self.assertEqual(tc_s.matched_lmrb_id, sin.id)
+        self.assertTrue(tc_e.is_schedule_matched and tc_s.is_schedule_matched)
+
+    # ── Test 5 — LMRB matched but no Schedule slot: TC not fully matched ────────
+    def test_lmrb_matched_schedule_missing(self):
+        # Schedule exists for a DIFFERENT brand (so the scope has a date range),
+        # but there is no 'A 10 SEC' slot to match.
+        make_schedule_row(self.account, self.schedule, brand="Other Brand", duration=30)
+        make_brand_mapping(self.account, brand="A 10 SEC", theme="A 10 SEC - English",
+                           tc_theme="A10E", duration=10)
+        lmrb = make_lmrb_row(self.account, advt_theme="A 10 SEC - English",
+                             advt_time="20:31:07", duration=10)
+        tc = make_tc_row(self.account, self.tc_report, tc_theme="A10E",
+                         aired_time="20:31:05", duration=10)
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        tc.refresh_from_db()
+        self.assertTrue(tc.is_lmrb_confirmed)
+        self.assertEqual(tc.matched_lmrb_id, lmrb.id)
+        self.assertFalse(tc.is_schedule_matched)
+        self.assertTrue(tc.is_extra)
+
+    # ── Test 6 — One Schedule row, two confirmed TCs: one-to-one lock holds ─────
+    def test_schedule_one_to_one_lock(self):
+        self._sched_rows(1)  # only ONE planned slot
+        make_brand_mapping(self.account, brand="A 10 SEC", theme="A 10 SEC - English",
+                           tc_theme="A10E", duration=10)
+        make_brand_mapping(self.account, brand="A 10 SEC", theme="A 10 SEC - Sinhala",
+                           tc_theme="A10S", duration=10)
+        make_lmrb_row(self.account, advt_theme="A 10 SEC - English",
+                      advt_time="20:31:07", duration=10)
+        make_lmrb_row(self.account, advt_theme="A 10 SEC - Sinhala",
+                      advt_time="20:32:07", duration=10)
+        tc_e = make_tc_row(self.account, self.tc_report, tc_theme="A10E",
+                           aired_time="20:31:05", duration=10, suffix="e")
+        tc_s = make_tc_row(self.account, self.tc_report, tc_theme="A10S",
+                           aired_time="20:32:05", duration=10, suffix="s")
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        tc_e.refresh_from_db(); tc_s.refresh_from_db()
+        # Both confirm LMRB, but only ONE can claim the single schedule slot.
+        self.assertTrue(tc_e.is_lmrb_confirmed and tc_s.is_lmrb_confirmed)
+        matched = [t for t in (tc_e, tc_s) if t.is_schedule_matched]
+        extra   = [t for t in (tc_e, tc_s) if t.is_extra]
+        self.assertEqual(len(matched), 1, "exactly one TC may claim the one slot")
+        self.assertEqual(len(extra), 1)
+
+    # ── Test 7 — Time outside tolerance: no LMRB confirmation ──────────────────
+    def test_time_outside_tolerance_not_confirmed(self):
+        self._sched_rows(1)
+        make_brand_mapping(self.account, brand="A 10 SEC", theme="A 10 SEC - English",
+                           tc_theme="A10E", duration=10)
+        make_lmrb_row(self.account, advt_theme="A 10 SEC - English",
+                      advt_time="20:31:30", duration=10)  # Δ25 > tol 5
+        tc = make_tc_row(self.account, self.tc_report, tc_theme="A10E",
+                         aired_time="20:31:05", duration=10)
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        tc.refresh_from_db()
+        # The important invariant: no LMRB bridge is formed outside tolerance, so
+        # the spot cannot count as Aired (Aired requires is_lmrb_confirmed=True).
+        self.assertFalse(tc.is_lmrb_confirmed)
+        self.assertIsNone(tc.matched_lmrb_id)
+        # NOTE: the row may still be schedule-matched via the pre-existing Step 3
+        # fallback (TC → Schedule by tc_theme, no LMRB). That path is intentional
+        # and distinct from the LMRB-bridged path; it does not inflate Aired.
+
+    # ── Test 8 — Unmapped TC theme ─────────────────────────────────────────────
+    def test_unmapped_tc_theme_no_candidate_stays_unconfirmed(self):
+        """An unmapped tc_theme with no time-coincident LMRB row must NOT match."""
+        self._sched_rows(1)
+        make_brand_mapping(self.account, brand="A 10 SEC", theme="A 10 SEC - English",
+                           tc_theme="A10E", duration=10)
+        # LMRB row for the mapped variant only; the unmapped TC has no partner here.
+        make_lmrb_row(self.account, advt_theme="A 10 SEC - English",
+                      advt_time="20:31:07", duration=10)
+        tc = make_tc_row(self.account, self.tc_report, tc_theme="ZZZ-UNMAPPED",
+                         aired_time="05:00:00", duration=10)  # far from any LMRB time
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        tc.refresh_from_db()
+        self.assertFalse(tc.is_lmrb_confirmed)
+        self.assertFalse(tc.is_schedule_matched)
+
+    def test_unmapped_tc_theme_time_only_fallback_is_documented_behaviour(self):
+        """DOCUMENTS (does not endorse) the pre-existing legacy fallback: when a
+        tc_theme resolves to NO brand, the engine still confirms against an LMRB
+        row that matches channel+date+duration within the time tolerance, by time
+        alone.  Flagged in the report as an edge case to optionally gate behind a
+        'require mapping' setting."""
+        self._sched_rows(1)
+        make_brand_mapping(self.account, brand="A 10 SEC", theme="A 10 SEC - English",
+                           tc_theme="A10E", duration=10)
+        lmrb = make_lmrb_row(self.account, advt_theme="Some Untracked Theme",
+                             advt_time="20:31:07", duration=10)
+        tc = make_tc_row(self.account, self.tc_report, tc_theme="ZZZ-UNMAPPED",
+                         aired_time="20:31:05", duration=10)
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        tc.refresh_from_db()
+        # Current behaviour: confirmed by time alone (legacy fallback).
+        self.assertTrue(tc.is_lmrb_confirmed)
+        self.assertEqual(tc.matched_lmrb_id, lmrb.id)
+
+
 class DiagnoseScopeTest(TestCase):
     """verification.engine.diagnose_scope — 'why didn't this match?' reasons."""
 

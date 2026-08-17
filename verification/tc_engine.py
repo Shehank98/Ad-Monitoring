@@ -211,6 +211,59 @@ def _brands_for_tc_theme(tc_theme: str, duration, reverse_tc_map: dict) -> list[
     return brands
 
 
+def _build_tc_to_lmrb_theme_map(account_id):
+    """
+    Direct, per-row TC-theme → LMRB-theme map for DETERMINISTIC variant matching.
+
+    Returns {norm_tc_theme: [(norm_lmrb_theme, dur_or_None, norm_product), ...]}
+
+    Unlike the brand-level chain (_brands_for_tc_theme → _lmrb_themes_for_brand,
+    which widens a tc_theme to EVERY LMRB theme of the brand), this reads the
+    tc_theme and the LMRB theme from the SAME BrandMapping row.  So a variant
+    that is mapped on its own row resolves to exactly its paired LMRB theme:
+        (brand='A 10 SEC', theme='A 10 SEC - English', tc_theme='A10E')
+            → {'a10e': [('a 10 sec - english', 10, '')]}
+    A tc_theme may still be pipe-separated on one row; every piped value then
+    pairs with that row's single `theme` (never positional across rows).
+
+    Rows with a blank `theme` are skipped — there is nothing to pair, so those
+    tc_themes fall back to the brand-level chain in reconcile_tc.
+    """
+    mapping: dict = {}
+    for bm in (BrandMapping.objects.filter(account_id=account_id)
+               .exclude(tc_theme='').exclude(theme='')):
+        norm_theme   = _normalize(bm.theme)
+        dur          = int(bm.duration) if bm.duration is not None else None
+        norm_product = _normalize(bm.product)
+        for raw_tc in bm.tc_theme.split('|'):
+            ntc = _normalize(raw_tc)
+            if ntc:
+                mapping.setdefault(ntc, []).append((norm_theme, dur, norm_product))
+    return mapping
+
+
+def _lmrb_pairs_for_tc_theme(tc_theme, duration, tc_to_lmrb_map):
+    """Return the [(norm_lmrb_theme, norm_product)] pairs mapped DIRECTLY to this
+    tc_theme (deterministic variant resolution).  Supports a '*' wildcard suffix
+    on the stored tc_theme key and filters by duration (a mapping row's blank
+    duration applies to any).  Returns [] when the tc_theme has no direct pairing,
+    so the caller can fall back to the legacy brand-level chain.
+    """
+    nt  = _normalize(tc_theme)
+    dur = int(duration) if duration is not None else None
+    out: list = []
+    seen: set = set()
+    for stored, entries in tc_to_lmrb_map.items():
+        if stored == nt or (stored.endswith('*') and nt.startswith(stored[:-1])):
+            for theme, map_dur, product in entries:
+                if map_dur is None or map_dur == dur:
+                    key = (theme, product)
+                    if key not in seen:
+                        seen.add(key)
+                        out.append(key)
+    return out
+
+
 # ── Main reconciliation ───────────────────────────────────────────────────────
 
 @transaction.atomic
@@ -282,6 +335,8 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
     tc_theme_map         = _build_tc_theme_map(account_id)
     reverse_tc_theme_map = _build_reverse_tc_theme_map(account_id)
     lmrb_theme_map       = _build_lmrb_theme_map(account_id)
+    # Direct per-row tc_theme → LMRB-theme pairing (deterministic variant match).
+    tc_to_lmrb_theme_map = _build_tc_to_lmrb_theme_map(account_id)
 
     # ── Load ScheduleRows for scope ───────────────────────────────────────────
     sch_qs = ScheduleRow.objects.filter(
@@ -400,6 +455,7 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
         tc_theme_norm = _normalize(tcrow.tc_theme)
         spon_hits = _spon_brands_for_tc_theme(tc_theme_norm)
 
+        resolution = 'sponsorship-tag'
         if spon_hits:
             # Sponsorship tag → ignore duration: candidates are all LMRB rows on
             # this channel+date, and expected themes span all durations.
@@ -420,13 +476,26 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
             else:
                 candidates = lmrb_index.get((_normalize(tcrow.channel), tcrow.date, dur), [])
 
-            # Build expected LMRB (theme, product) pairs via tc_theme → brand → lmrb_theme chain.
-            # TCRows whose tc_theme has no BrandMapping entry skip theme validation
-            # (they may still confirm by time alone).
-            brands = _brands_for_tc_theme(tcrow.tc_theme, dur, reverse_tc_theme_map)
-            expected_lmrb_pairs = []  # list of (norm_theme, norm_product)
-            for brand in brands:
-                expected_lmrb_pairs.extend(_lmrb_themes_for_brand(brand, dur, lmrb_theme_map))
+            # Build expected LMRB (theme, product) pairs.
+            # DETERMINISTIC variant resolution first: use the LMRB theme paired
+            # with this exact tc_theme on its own BrandMapping row
+            # (A10E → 'A 10 SEC - English'), so a TC row can only confirm against
+            # its own variant and never greedily consume a sibling variant's LMRB
+            # row.  Fall back to the legacy brand-level chain
+            # (tc_theme → brand → every LMRB theme of the brand) only when the
+            # tc_theme has no direct per-row pairing, preserving existing
+            # single-mapping / wildcard behaviour.
+            resolution = 'direct'
+            expected_lmrb_pairs = _lmrb_pairs_for_tc_theme(
+                tcrow.tc_theme, dur, tc_to_lmrb_theme_map,
+            )
+            if not expected_lmrb_pairs:
+                resolution = 'brand-level'
+                brands = _brands_for_tc_theme(tcrow.tc_theme, dur, reverse_tc_theme_map)
+                for brand in brands:
+                    expected_lmrb_pairs.extend(_lmrb_themes_for_brand(brand, dur, lmrb_theme_map))
+                if not brands:
+                    resolution = 'unmapped (time-only)'
 
         best = None
         best_diff = time_tolerance + 1
@@ -458,6 +527,25 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
             tcrow.is_lmrb_confirmed = True
             tcrow.matched_lmrb_id  = lmrb_id
             tc_lmrb_updates.append(tcrow)
+
+        # ── Per-TC-row diagnostic trace (DEBUG only; off in production) ─────────
+        # Enable with logging level DEBUG on 'verification.tc_engine' to see the
+        # exact TC→LMRB decision for every row: how the tc_theme resolved, which
+        # LMRB candidates were considered, and why one won or none did.
+        if logger.isEnabledFor(logging.DEBUG):
+            cand_ids = [c[0] for c in candidates if c[0] not in used_lmrb_ids or (best and c[0] == best[0])]
+            logger.debug(
+                "TC#%s theme=%r ch=%s date=%s dur=%s time=%s | resolution=%s "
+                "expected_lmrb_themes=%s | candidates=%d %s | "
+                "MATCHED lmrb=%s theme=%r Δ=%ss (tol=%s)",
+                tcrow.id, tcrow.tc_theme, tcrow.channel, tcrow.date, dur,
+                tcrow.aired_time, resolution,
+                [t for t, _p in expected_lmrb_pairs] or 'ANY(time-only)',
+                len(candidates), cand_ids,
+                (best[0] if best else 'NONE'),
+                (best[1].advt_theme if best else ''),
+                (best_diff if best else 'n/a'), time_tolerance,
+            )
 
     confirmed_tc   = [r for r in all_tc_rows if r.id in tc_lmrb_pairs]
     unconfirmed_tc = [r for r in all_tc_rows if r.id not in tc_lmrb_pairs]
