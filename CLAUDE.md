@@ -590,10 +590,34 @@ Only brands with a non-empty `tc_theme` are included.
 > **To adjust the tolerance:** Go to `/dashboard/settings/` and change **TC–LMRB Time Tolerance (seconds)**.
 > This avoids a code change when TC and LMRB timestamps differ by more than 5 seconds.
 
+### Radio time belts (TC air time as a window)
+
+Radio TCs sometimes log a spot's air time as a **daypart belt** (a range such as
+`06:00-09:00`) instead of an exact `HH:MM:SS`. The belt string is stored as-is in
+`TCRow.aired_time` (no schema change). Step 1 (TC↔LMRB confirmation) branches per row:
+
+- **Exact time** (TV, and radio spots with a real time) → unchanged: closest LMRB
+  spot within `±tolerance`.
+- **Belt** (`_parse_time_belt()` returns a `(start, end)` range) → confirm the
+  earliest still-free LMRB spot whose exact `advt_time` falls **inside** the belt
+  window, with the same date + duration + theme/brand guards. Belts crossing
+  midnight (`end ≤ start`, e.g. `23:00-01:00`) are handled by `_secs_in_belt()`.
+
+Radio TCs list **one line per aired spot** (the belt is just that line's time), so
+matching stays greedy one-to-one against the shared `used_lmrb_ids` pool: N belt
+lines confirm at most N distinct LMRB spots (never N×M), and Aired / Extra / Missed
+are counted exactly as for TV. Exact-time rows are confirmed before belt rows so a
+wide window never steals a spot a precise row needs. Radio needs no separate flow —
+channels are already tagged via the `Radio - ` name prefix (`parse_channel_media_type`),
+and matching is format-driven, so a file mixing exact and belt times works row-by-row.
+Regression guard: `core.tests.RadioTimeBeltReconcileTest` + `TimeBeltParseTest`.
+
 ### Normalization helpers
 ```python
 def _normalize(s): return str(s).lower().strip() if s else ''
 def _time_to_secs(t): # "HH:MM:SS" → int seconds since midnight
+def _parse_time_belt(t): # "06:00-09:00" → (start_secs, end_secs) | None (exact/none)
+def _secs_in_belt(secs, belt): # membership test, handles midnight-crossing windows
 ```
 
 ---

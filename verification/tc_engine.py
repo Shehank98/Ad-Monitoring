@@ -37,6 +37,7 @@ build_summary_data(account_id, channel, month)
     re-running reconciliation.
 """
 import logging
+import re
 from datetime import date as date_type
 
 from django.db import transaction
@@ -114,6 +115,44 @@ def _time_to_secs(t: str) -> int | None:
 
 def _normalize(s: str) -> str:
     return str(s).lower().strip() if s else ''
+
+
+# Separators that may join the two ends of a radio "time belt" range.
+_BELT_SPLIT_RE = re.compile(r'\s*(?:-|–|—|to)\s*', re.IGNORECASE)
+
+
+def _parse_time_belt(t: str):
+    """Parse a radio TC 'time belt' range into (start_secs, end_secs).
+
+    Radio Transmission Certificates sometimes give an air *window* (a daypart
+    belt) instead of an exact time — e.g. '06:00-09:00'.  Returns a
+    (start_secs, end_secs) tuple of seconds-since-midnight, or None when the
+    value is not a range (an ordinary exact time, or unparseable) — in which
+    case the caller falls back to exact-time matching.
+
+    Accepts a hyphen, en/em-dash or 'to' separator and HH:MM or HH:MM:SS ends.
+    A window whose end is <= start is treated as crossing midnight
+    (e.g. '23:00-01:00'); membership tests handle the wrap.
+    """
+    if not t:
+        return None
+    parts = _BELT_SPLIT_RE.split(str(t).strip(), maxsplit=1)
+    if len(parts) != 2:
+        return None
+    start = _time_to_secs(parts[0])
+    end   = _time_to_secs(parts[1])
+    if start is None or end is None:
+        return None
+    return (start, end)
+
+
+def _secs_in_belt(secs: int, belt: tuple) -> bool:
+    """True when secs-since-midnight falls inside the belt window (inclusive),
+    handling a window that crosses midnight (end <= start)."""
+    b_start, b_end = belt
+    if b_end >= b_start:
+        return b_start <= secs <= b_end
+    return secs >= b_start or secs <= b_end
 
 
 def _build_tc_theme_map(account_id):
@@ -447,9 +486,33 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
     tc_lmrb_pairs: dict = {}    # tcrow.id → lr_obj
     tc_lmrb_updates: list = []  # TCRows with is_lmrb_confirmed set
 
-    for tcrow in all_tc_rows:
-        tc_secs = _time_to_secs(tcrow.aired_time)
-        if tc_secs is None:
+    def _theme_ok(lr_obj, expected_lmrb_pairs) -> bool:
+        """True if this LMRB row's theme+product matches the expected set.
+        When no expectation is derivable (tc_theme has no BrandMapping) the row
+        may still confirm by time alone, so return True."""
+        if not expected_lmrb_pairs:
+            return True
+        lr_theme   = _normalize(lr_obj.advt_theme)
+        lr_product = _normalize(lr_obj.product) if lr_obj.product else ''
+        # For TAG commercials: theme matches but product must also match when set.
+        return any(
+            (lr_theme.startswith(t[:-1]) if t.endswith('*') else lr_theme == t)
+            and (not p or lr_product == p)  # '' product = match any
+            for t, p in expected_lmrb_pairs
+        )
+
+    # Radio time-belt support: a TC row may carry an air *window* ("06:00-09:00")
+    # instead of an exact time (see _parse_time_belt).  Exact-time rows are
+    # confirmed FIRST so a wide belt window never claims an LMRB spot that a
+    # precise spot needs — both branches share the one-to-one used_lmrb_ids pool,
+    # so N belt lines can confirm at most N distinct LMRB spots (never N×M).
+    for tcrow in sorted(
+        all_tc_rows,
+        key=lambda r: (1 if _parse_time_belt(r.aired_time) else 0, r.date),
+    ):
+        belt    = _parse_time_belt(tcrow.aired_time)
+        tc_secs = None if belt else _time_to_secs(tcrow.aired_time)
+        if belt is None and tc_secs is None:
             continue
         dur = int(tcrow.duration) if tcrow.duration else None
         tc_theme_norm = _normalize(tcrow.tc_theme)
@@ -498,27 +561,33 @@ def reconcile_tc(account_id, channel, month, mode='smart', schedule_id=None):
                     resolution = 'unmapped (time-only)'
 
         best = None
-        best_diff = time_tolerance + 1
-        for lmrb_id, lmrb_secs, lr_obj in candidates:
-            if lmrb_id in used_lmrb_ids:
-                continue
-            if lmrb_secs is None:
-                continue
-            # Skip LMRB rows whose theme+product does not match the expected set.
-            # For TAG commercials: theme matches but product must also match when set.
-            if expected_lmrb_pairs:
-                lr_theme   = _normalize(lr_obj.advt_theme)
-                lr_product = _normalize(lr_obj.product) if lr_obj.product else ''
-                if not any(
-                    (lr_theme.startswith(t[:-1]) if t.endswith('*') else lr_theme == t)
-                    and (not p or lr_product == p)  # '' product = match any
-                    for t, p in expected_lmrb_pairs
-                ):
+        if belt is not None:
+            # Belt row: confirm the earliest still-free LMRB spot whose exact air
+            # time falls inside the belt window (one-to-one via used_lmrb_ids).
+            best_secs = None
+            for lmrb_id, lmrb_secs, lr_obj in candidates:
+                if lmrb_id in used_lmrb_ids or lmrb_secs is None:
                     continue
-            diff = abs(tc_secs - lmrb_secs)
-            if diff <= time_tolerance and diff < best_diff:
-                best_diff = diff
-                best = (lmrb_id, lr_obj)
+                if not _secs_in_belt(lmrb_secs, belt):
+                    continue
+                if not _theme_ok(lr_obj, expected_lmrb_pairs):
+                    continue
+                if best_secs is None or lmrb_secs < best_secs:
+                    best_secs = lmrb_secs
+                    best = (lmrb_id, lr_obj)
+        else:
+            # Exact-time row (TV, and radio spots that carry a real time):
+            # closest LMRB spot within ±tolerance.
+            best_diff = time_tolerance + 1
+            for lmrb_id, lmrb_secs, lr_obj in candidates:
+                if lmrb_id in used_lmrb_ids or lmrb_secs is None:
+                    continue
+                if not _theme_ok(lr_obj, expected_lmrb_pairs):
+                    continue
+                diff = abs(tc_secs - lmrb_secs)
+                if diff <= time_tolerance and diff < best_diff:
+                    best_diff = diff
+                    best = (lmrb_id, lr_obj)
 
         if best:
             lmrb_id, lr_obj = best

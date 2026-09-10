@@ -41,7 +41,11 @@ from verification.sponsorship_engine import (
     reconcile_sponsorship,
     reset_sponsorship,
 )
-from verification.tc_engine import build_summary_data, reconcile_tc
+from verification.tc_engine import (
+    _parse_time_belt,
+    build_summary_data,
+    reconcile_tc,
+)
 
 
 # ── Shared fixture helpers ────────────────────────────────────────────────────
@@ -1985,6 +1989,125 @@ class UnmappedThemeNotAiredTest(TestCase):
 
         row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
         self.assertEqual(row["aired"], 1, "ManualMatch is explicit operator evidence")
+        self.assertEqual(row["missed"], 0)
+
+
+class TimeBeltParseTest(TestCase):
+    """Unit tests for _parse_time_belt (radio TC 'time belt' ranges)."""
+
+    def test_exact_time_is_not_a_belt(self):
+        self.assertIsNone(_parse_time_belt("20:30:00"))
+        self.assertIsNone(_parse_time_belt("06:00"))
+        self.assertIsNone(_parse_time_belt(""))
+        self.assertIsNone(_parse_time_belt(None))
+
+    def test_hhmm_range_parses(self):
+        self.assertEqual(_parse_time_belt("06:00-09:00"), (6 * 3600, 9 * 3600))
+
+    def test_range_tolerates_spaces_and_seconds(self):
+        self.assertEqual(
+            _parse_time_belt(" 06:00:00 - 09:00:00 "), (6 * 3600, 9 * 3600)
+        )
+
+    def test_to_separator_parses(self):
+        self.assertEqual(_parse_time_belt("18:00 to 21:00"), (18 * 3600, 21 * 3600))
+
+
+class RadioTimeBeltReconcileTest(TestCase):
+    """Radio TC rows whose air time is a belt window (e.g. '20:00-21:00') are
+    confirmed against LMRB spots whose exact time falls inside the belt.
+
+    A belt row is one line per aired spot; the greedy one-to-one confirmation
+    (shared used_lmrb_ids pool) means N belt lines confirm at most N distinct
+    LMRB spots, so counts are never multiplied.
+    """
+
+    def setUp(self):
+        self.account = make_account()
+        self.schedule = make_schedule(self.account)
+        self.tc_report = make_tc_report(self.account, schedule=self.schedule)
+        make_brand_mapping(
+            self.account, brand="Brand A", theme="Theme A", tc_theme="TC Theme A"
+        )
+        ensure_tc_tolerance(5)
+
+    def test_belt_confirms_lmrb_inside_window(self):
+        """An LMRB spot at 20:30 falls inside a '20:00-21:00' belt → Aired=1."""
+        make_schedule_row(self.account, self.schedule, brand="Brand A")
+        make_tc_row(self.account, self.tc_report,
+                    tc_theme="TC Theme A", aired_time="20:00:00-21:00:00")
+        make_lmrb_row(self.account, advt_theme="Theme A", advt_time="20:30:00")
+
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
+        self.assertEqual(row["aired"], 1)
+        self.assertEqual(row["missed"], 0)
+
+    def test_belt_excludes_lmrb_outside_window(self):
+        """An LMRB spot at 22:30 is outside a '20:00-21:00' belt → not aired."""
+        make_schedule_row(self.account, self.schedule, brand="Brand A")
+        make_tc_row(self.account, self.tc_report,
+                    tc_theme="TC Theme A", aired_time="20:00:00-21:00:00")
+        make_lmrb_row(self.account, advt_theme="Theme A", advt_time="22:30:00")
+
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
+        self.assertEqual(row["aired"], 0)
+        self.assertEqual(row["missed"], 1)
+
+    def test_two_belt_lines_two_lmrb_not_double_counted(self):
+        """2 belt lines + 2 LMRB spots in window → Aired=2 (never 4).
+
+        Each belt line confirms a distinct LMRB spot; global dedup stops one
+        spot confirming two lines or one line grabbing both counts.
+        """
+        make_schedule_row(self.account, self.schedule, brand="Brand A")
+        make_schedule_row(self.account, self.schedule, brand="Brand A")
+        make_tc_row(self.account, self.tc_report,
+                    tc_theme="TC Theme A", aired_time="20:00:00-21:00:00", suffix="a")
+        make_tc_row(self.account, self.tc_report,
+                    tc_theme="TC Theme A", aired_time="20:00:00-21:00:00", suffix="b")
+        make_lmrb_row(self.account, advt_theme="Theme A", advt_time="20:15:00")
+        make_lmrb_row(self.account, advt_theme="Theme A", advt_time="20:45:00")
+
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
+        self.assertEqual(row["aired"], 2)
+        self.assertEqual(
+            TCRow.objects.filter(account=self.account, is_lmrb_confirmed=True).count(), 2
+        )
+
+    def test_belt_surplus_shows_as_extra(self):
+        """1 planned, 2 belt lines both airing → Aired=2, Extra=1."""
+        make_schedule_row(self.account, self.schedule, brand="Brand A")
+        make_tc_row(self.account, self.tc_report,
+                    tc_theme="TC Theme A", aired_time="20:00:00-21:00:00", suffix="a")
+        make_tc_row(self.account, self.tc_report,
+                    tc_theme="TC Theme A", aired_time="20:00:00-21:00:00", suffix="b")
+        make_lmrb_row(self.account, advt_theme="Theme A", advt_time="20:15:00")
+        make_lmrb_row(self.account, advt_theme="Theme A", advt_time="20:45:00")
+
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
+        self.assertEqual(row["aired"], 2)
+        self.assertEqual(row["extra"], 1)
+
+    def test_exact_and_belt_rows_coexist(self):
+        """The same brand can mix an exact-time TC row and a belt row → Aired=2."""
+        make_schedule_row(self.account, self.schedule, brand="Brand A")
+        make_schedule_row(self.account, self.schedule, brand="Brand A")
+        # Exact-time spot
+        make_tc_row(self.account, self.tc_report,
+                    tc_theme="TC Theme A", aired_time="20:30:00", suffix="x")
+        make_lmrb_row(self.account, advt_theme="Theme A", advt_time="20:30:00")
+        # Belt spot
+        make_tc_row(self.account, self.tc_report,
+                    tc_theme="TC Theme A", aired_time="06:00:00-09:00:00", suffix="y")
+        make_lmrb_row(self.account, advt_theme="Theme A", advt_time="07:15:00")
+
+        reconcile_tc(self.account.id, CHANNEL, MONTH, mode="reset")
+        row = build_summary_data(self.account.id, CHANNEL, MONTH)["commercial"][0]
+        self.assertEqual(row["aired"], 2)
         self.assertEqual(row["missed"], 0)
 
 
