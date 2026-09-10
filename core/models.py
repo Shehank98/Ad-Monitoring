@@ -978,6 +978,20 @@ SETTING_DEFAULTS = [
         ),
         'category': 'reconciliation',
     },
+    {
+        'key': 'tc_lmrb_duration_tolerance',
+        'value': '0',
+        'label': 'TC-LMRB Duration Tolerance (seconds)',
+        'description': (
+            'Maximum difference (±seconds) allowed between the TC spot duration and the LMRB '
+            'row duration when auto-confirming a commercial TC spot against LMRB. Default 0 '
+            'means the durations must match exactly. Increase this when the same spot is logged '
+            'at slightly different lengths in each source (e.g. a 5s TC "Tag" spot logged in '
+            'LMRB at 4s or 10s). Theme and time tolerance still apply, so an unrelated spot is '
+            'never linked. Default: 0.'
+        ),
+        'category': 'reconciliation',
+    },
     # ── TC file column aliases ─────────────────────────────────────────────────
     {
         'key': 'tc_extra_theme_aliases',
