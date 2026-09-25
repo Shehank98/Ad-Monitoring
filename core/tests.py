@@ -119,7 +119,7 @@ def make_lmrb_row(
     advt_time="20:30:00",
     duration=30,
     channel=CHANNEL,
-    source="maponline",
+    source="mediawatch",
     brk_no=None,
     pos_in_brk=None,
     advertiser="",
