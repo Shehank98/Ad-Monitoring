@@ -1,0 +1,53 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git push -u origin claude/design-system-extraction-vnav5h)",
+      "Bash(git push origin claude/design-system-extraction-vnav5h)"
+    ],
+    "deny": [
+      "Edit(./verification/**)",
+      "Write(./verification/**)",
+      "Edit(./core/**)",
+      "Write(./core/**)",
+      "Edit(./accounts/**)",
+      "Write(./accounts/**)",
+      "Edit(./templates/*.html)",
+      "Write(./templates/*.html)",
+      "Edit(./templates/accounts/**)",
+      "Write(./templates/accounts/**)",
+      "Edit(./templates/admin_panel/**)",
+      "Write(./templates/admin_panel/**)",
+      "Edit(./templates/channel_officers/**)",
+      "Write(./templates/channel_officers/**)",
+      "Edit(./templates/competitor/**)",
+      "Write(./templates/competitor/**)",
+      "Edit(./templates/dashboard/**)",
+      "Write(./templates/dashboard/**)",
+      "Edit(./templates/manual_reconciliation/**)",
+      "Write(./templates/manual_reconciliation/**)",
+      "Edit(./templates/monitoring/**)",
+      "Write(./templates/monitoring/**)",
+      "Edit(./templates/notifications/**)",
+      "Write(./templates/notifications/**)",
+      "Edit(./templates/schedules/**)",
+      "Write(./templates/schedules/**)",
+      "Edit(./templates/sponsorship/**)",
+      "Write(./templates/sponsorship/**)",
+      "Edit(./templates/summary/**)",
+      "Write(./templates/summary/**)",
+      "Edit(./templates/tc/**)",
+      "Write(./templates/tc/**)",
+      "Edit(./templates/verification/**)",
+      "Write(./templates/verification/**)",
+      "Edit(./railway.json)",
+      "Write(./railway.json)",
+      "Edit(./Procfile)",
+      "Write(./Procfile)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Bash(railway:*)",
+      "Bash(python manage.py makemigrations core:*)",
+      "Bash(python manage.py makemigrations accounts:*)"
+    ]
+  }
+}
