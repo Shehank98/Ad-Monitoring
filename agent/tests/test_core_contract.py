@@ -16,6 +16,11 @@ CONTRACT = {
     ('core.views', '_is_admin'): ['user'],
     ('core.views', '_account_qs'): ['user'],
     ('core.views', '_account_access'): ['user', 'account_id'],
+    # Phase 2 intake (read-only helpers)
+    ('core.views', '_tc_channel_prompt'): ['channel'],
+    ('core.views', '_safe_str'): ['val'],
+    ('core.views', '_safe_int'): ['val'],
+    ('core.views', '_safe_date'): ['val'],
     ('core.models', 'get_setting'): ['key', 'default'],
     ('core.models', 'get_setting_int'): ['key', 'default'],
     ('core.models', 'get_setting_list'): ['key'],
