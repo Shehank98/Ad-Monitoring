@@ -1,7 +1,7 @@
 {% extends 'agent/_base.html' %}
 {% block title %}Activity{% endblock %}
 {% block page_title %}Activity{% endblock %}
-{% block page_subtitle %}Nova agent{% endblock %}
+{% block page_subtitle %}Reconciliation Agent{% endblock %}
 {% block nova %}
 <div class="nv-head"><div class="t"><h2>Activity</h2><p>{% if request.user.role in 'super_admin,admin' %}Every logged action.{% else %}Your own logged actions.{% endif %} Agent actions will appear here with before and after values, reason and evidence, and a Revert button.</p></div></div>
 <section class="nv-panel">

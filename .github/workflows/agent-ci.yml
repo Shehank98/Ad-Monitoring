@@ -3,10 +3,13 @@
 name: agent-ci
 
 on:
-  push:
-    paths: ['agent/**', 'intake/**', 'templates/agent/**', 'ad_monitor/settings.py',
-            'requirements.txt', '.github/workflows/agent-ci.yml', 'core/**', 'verification/**']
   pull_request:
+  push:
+    branches: ['claude/design-system-extraction-vnav5h']
+
+# Least privilege: read the repository only. No secrets are used anywhere in this workflow.
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -23,7 +26,7 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 5s
           --health-timeout 5s --health-retries 10
     env:
-      SECRET_KEY: ci-only-secret
+      SECRET_KEY: ci-only-not-a-secret   # plain value, not a GitHub secret
       DEBUG: 'False'
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/admon
     steps:
