@@ -910,3 +910,24 @@ Rules: `docs/agent/BRIEF_AMENDMENT_01.md` wins over the brief. Report: `docs/age
 - **Tests:** `python manage.py test agent intake` (preview tests now in
   `agent/tests/test_preview_ui.py`). CI: `.github/workflows/agent-ci.yml` (PostgreSQL).
 - `templates/base.html` is protected: nav changes ship as patches in `docs/agent/patches/`.
+
+### Phase 1.1 — owner decisions on Phase 1
+- **External-change fingerprint** (`agent/fingerprint.py`): a per-account snapshot of
+  mappings, TC↔LMRB theme maps, manual matches, manual sponsorship, period sponsorships,
+  TC/schedule headers, the latest upload and engine-run times, and parsing settings. It is
+  stored with every `SummarySnapshot`. **V5** counts a number change as explained when an
+  AgentAction was logged or the fingerprint changed; the row-level diff is saved in
+  `AgentRun.detail['external_changes']`. A change with no explanation → NEEDS_HUMAN.
+- **AUTHORISED scopes never run engines.** They are only compared with the authorised
+  snapshot: an explained change opens an `AgentProposal(kind='amendment')` (no UI yet);
+  an unexplained one → NEEDS_HUMAN.
+- **Makeup schedules** stay per-schedule (never `schedule_id=None`). `MAKEUP_LINKED`
+  finding (info), `ScheduleStatus.makeup_linked`, audit counts. Finance billing rule: D25.
+- **Service user:** `ensure_service_user()` is person-run (no AgentAction, prints changes).
+  `sync_service_user()` is system-run: add accounts only, logs `service_user_account_sync`,
+  asserts role `operations` (else error + `Heartbeat.alert`, cycle stops). It is also the
+  default actor of `reconcile_scope`.
+- **Gate:** T3 needs `values=[…]` and refuses any value containing `*`.
+- `agent_core_audit` saves `AgentRun(kind='audit')` after its read-only transaction rolled back.
+- UI strings say "Reconciliation Agent"; the Nova chat widget is unchanged.
+- Follow-ups: `docs/agent/phase1_followups.md`.
