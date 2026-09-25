@@ -5,13 +5,16 @@ from .models import AllowedSender, InboundAttachment, InboundEmail
 
 @admin.register(AllowedSender)
 class AllowedSenderAdmin(admin.ModelAdmin):
-    list_display = ('email', 'name', 'account', 'is_active')
+    list_display = ('email_or_domain', 'channel_hint', 'active')
+    filter_horizontal = ('accounts',)
 
 
 class AttachmentInline(admin.TabularInline):
     model = InboundAttachment
+    fk_name = 'email'
     extra = 0
-    readonly_fields = ('filename', 'sha256', 'size', 'status', 'reason')
+    fields = ('filename', 'sha256', 'size', 'status', 'reason', 'suggested_schedule')
+    readonly_fields = fields
 
 
 @admin.register(InboundEmail)

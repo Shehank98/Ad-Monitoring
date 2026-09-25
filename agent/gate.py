@@ -81,21 +81,72 @@ def allowed(tier: int, account_id=None, conditions: dict | None = None, values=N
     return False                          # T4 and anything else: human only
 
 
+ACTOR_KINDS = ('agent', 'intake_runner', 'intake_fetch', 'human')
+HUMAN_ROLES = ('super_admin', 'admin')
+
+
+class IntakeModeOff(Exception):
+    """The intake runner may only write in tc_intake_mode='suggest'."""
+
+
+class FetchDisabled(Exception):
+    """Mail fetch needs AgentConfig.intake_fetch_enabled and an active AllowedSender."""
+
+
+class HumanNotAllowed(Exception):
+    """A human write needs an admin actor and every per-action condition True."""
+
+
+def _check_actor(actor_kind, tier, account_id, conditions, values, actor):
+    """The per-actor rules (owner Q6). One write path; the rules differ by who writes.
+
+    agent          kill switch (re-read) + tier rules
+    intake_runner  kill switch (re-read) + tc_intake_mode == 'suggest'
+    intake_fetch   NO kill switch; intake_fetch_enabled + >=1 active AllowedSender
+    human          NO kill switch; actor role super_admin/admin + every condition True
+    """
+    if actor_kind == 'agent':
+        ensure_enabled(account_id)
+        if tier != T0 and not allowed(tier, account_id, conditions, values):
+            raise TierNotAllowed(f'tier T{tier} is not allowed at level {effective_level(account_id)}')
+    elif actor_kind == 'intake_runner':
+        ensure_enabled(account_id)
+        if _fresh_config().tc_intake_mode != 'suggest':
+            raise IntakeModeOff('the intake runner writes only in suggest mode')
+    elif actor_kind == 'intake_fetch':
+        from intake.models import AllowedSender
+        if not _fresh_config().intake_fetch_enabled:
+            raise FetchDisabled('mail fetch is off (AgentConfig.intake_fetch_enabled=False)')
+        if not AllowedSender.objects.filter(active=True).exists():
+            raise FetchDisabled('no active AllowedSender')
+    elif actor_kind == 'human':
+        if actor is None or getattr(actor, 'role', None) not in HUMAN_ROLES:
+            raise HumanNotAllowed('only super_admin or admin may make this change')
+        bad = [k for k, v in (conditions or {}).items() if v is not True]
+        if bad:
+            raise HumanNotAllowed(f'conditions not met: {", ".join(sorted(bad))}')
+    else:
+        raise ValueError(f'unknown actor_kind {actor_kind!r}')
+
+
 def perform(*, tier: int, action_type: str, scope=None, target_model: str = '', target_pk='',
             before: dict, apply, reason: str = '', evidence: dict | None = None,
             actor=None, run=None, conditions: dict | None = None, account_id=None,
-            values=None) -> AgentAction:
-    """Run `apply()` (which returns the `after` dict) only if the gate allows it.
-    The kill switch is read again immediately before the write, for EVERY tier: perform()
-    is only ever used for writes, so even a T0 system write (e.g. the service-user account
-    sync) stops when the agent is disabled (guardian check 5)."""
+            values=None, actor_kind: str = 'agent') -> AgentAction:
+    """The one write path. Run `apply()` (which returns the `after` dict) only if the
+    rules for `actor_kind` allow it, then record an AgentAction with before and after.
+
+    The rules are checked twice: before anything else, and again immediately before
+    apply(), so a kill switch (or a mode/fetch switch) flipped in between still stops
+    the write. perform() is only used for writes, so even a T0 agent write stops when
+    the agent is disabled (guardian check 5). Human (admin) writes are not blocked by the
+    kill switch; they are logged with human_confirmed=True (owner Q6)."""
     account_id = account_id if account_id is not None else getattr(scope, 'account_id', None)
-    ensure_enabled(account_id)
-    if tier != T0 and not allowed(tier, account_id, conditions, values):
-        raise TierNotAllowed(f'tier T{tier} is not allowed at level {effective_level(account_id)}')
-    ensure_enabled(account_id)            # immediately before the write
+    _check_actor(actor_kind, tier, account_id, conditions, values, actor)
+    _check_actor(actor_kind, tier, account_id, conditions, values, actor)   # immediately before
     after = apply()
     return AgentAction.objects.create(
         actor=actor, tier=tier, action_type=action_type, scope=scope, target_model=target_model,
         target_pk=str(target_pk), before=before, after=after or {}, reason=reason,
-        evidence=evidence or {}, run=run)
+        evidence=evidence or {}, run=run, actor_kind=actor_kind,
+        human_confirmed=actor_kind == 'human')

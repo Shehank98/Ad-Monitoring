@@ -15,7 +15,8 @@ MONTH_MAX = 50      # core.Schedule.month
 class AgentConfig(models.Model):
     """Singleton (pk=1). The kill switch is `enabled`, checked at the start of every
     task and again immediately before every write (gate.py)."""
-    INTAKE_MODES = [('off', 'Off'), ('suggest', 'Suggest'), ('auto', 'Auto')]
+    # Phase 2 (owner decision B): SUGGEST is the highest mode; 'auto' is rejected.
+    INTAKE_MODES = [('off', 'Off'), ('suggest', 'Suggest')]
 
     enabled = models.BooleanField(default=False)
     autonomy_level = models.PositiveSmallIntegerField(default=0)   # 0..3 (brief §8)
@@ -24,6 +25,9 @@ class AgentConfig(models.Model):
     upload_debounce_minutes = models.PositiveSmallIntegerField(default=10)   # A5
     tc_intake_mode = models.CharField(max_length=10, choices=INTAKE_MODES, default='off')
     llm_daily_token_cap = models.PositiveIntegerField(default=200_000)
+    # Mail fetch is independent of the kill switch (owner Q6) and off until an admin enables it.
+    intake_fetch_enabled = models.BooleanField(default=False)
+    min_brand_overlap = models.FloatField(default=0.6)          # owner Q7
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                                    on_delete=models.SET_NULL, related_name='+')
@@ -34,7 +38,14 @@ class AgentConfig(models.Model):
     def __str__(self):
         return f'AgentConfig(enabled={self.enabled}, level={self.autonomy_level})'
 
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.tc_intake_mode not in dict(self.INTAKE_MODES):
+            raise ValidationError({'tc_intake_mode': 'Only off and suggest are available.'})
+
     def save(self, *args, **kwargs):
+        if self.tc_intake_mode not in dict(self.INTAKE_MODES):     # never store 'auto'
+            raise ValueError(f'tc_intake_mode {self.tc_intake_mode!r} is not allowed')
         self.pk = 1
         super().save(*args, **kwargs)
 
@@ -152,8 +163,12 @@ class _ActionFields(models.Model):
 
 
 class AgentAction(_ActionFields):
+    ACTOR_KINDS = [('agent', 'Agent'), ('intake_runner', 'Intake runner'),
+                   ('intake_fetch', 'Mail fetch'), ('human', 'Person (admin)')]
     run = models.ForeignKey(AgentRun, null=True, blank=True, on_delete=models.SET_NULL,
                             related_name='actions')
+    actor_kind = models.CharField(max_length=16, choices=ACTOR_KINDS, default='agent')
+    human_confirmed = models.BooleanField(default=False)      # an admin made this write
     reverted_at = models.DateTimeField(null=True, blank=True)
     reverted_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                                     on_delete=models.SET_NULL, related_name='+')
