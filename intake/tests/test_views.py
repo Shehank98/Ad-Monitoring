@@ -41,6 +41,19 @@ class InboxViewsTest(TestCase):
         self.assertEqual(self.client.get('/dashboard/agent/inbox/').status_code, 200)
         self.assertEqual(self.client.get('/dashboard/agent/config/').status_code, 403)
 
+    def test_list_shows_every_item_and_filters(self):
+        from .helpers import attachment
+        b = attachment(filename='b.xlsx')
+        b.status, b.reason = 'needs_review', 'low_brand_overlap'
+        b.save()
+        self.login(self.admin)
+        r = self.client.get('/dashboard/agent/inbox/')
+        self.assertContains(r, self.att.filename)
+        self.assertContains(r, 'b.xlsx')                       # regression: '' reason filter hid it
+        r = self.client.get('/dashboard/agent/inbox/?reason=low_brand_overlap')
+        self.assertNotContains(r, self.att.filename)
+        self.assertContains(r, 'b.xlsx')
+
     def test_users_see_only_their_clients(self):
         other = f.account('Dialog')
         planner = f.user(role='planner', email='p@t.com', accounts=[other])

@@ -5,7 +5,6 @@
 {% block nova %}
 <div class="nv-head"><div class="t"><h2>Agent settings</h2><p>Every change here is logged with before and after values. Core values are read from System Settings and are never changed by the agent.</p></div>
   <div class="nv-actions"><a class="nv-btn" href="/dashboard/settings/"><i class="fa-solid fa-sliders"></i>System Settings</a></div></div>
-{% if messages %}{% for m in messages %}<div class="nv-panel"><div class="bd"><span class="nv-chip {% if m.tags == 'error' %}bad{% else %}ok{% endif %}">{{ m }}</span></div></div>{% endfor %}{% endif %}
 
 <section class="nv-panel"><div class="hd"><h3>Agent</h3>{% if cfg.enabled %}<span class="nv-chip ok">Enabled</span>{% else %}<span class="nv-chip warn">Disabled</span>{% endif %}
   <span class="sub">Kill switch: when disabled the agent makes no writes. Mail fetch and your own actions still work.</span></div>

@@ -135,16 +135,17 @@ def confirm_upload(att, schedule: Schedule, admin, dates_ack: bool = False) -> d
             att.evidence = {**(att.evidence or {}), 'confirmed': {
                 'by': admin.email, 'schedule_id': schedule.id, 'dates_outside_window_ticked': out_of_window}}
             att.save()
-            sc, _ = ScopeState.objects.get_or_create(account=schedule.account, channel=schedule.channel,
-                                                     month=schedule.month)
             sc.needs_run = True                               # intake never reconciles
             sc.save(update_fields=['needs_run', 'updated_at'])
             return {'tc_report_id': rep.id, 'rows': count, 'schedule_id': schedule.id,
                     'channel': rep.channel, 'month': rep.month, 'file': rep.file.name}
 
+    # Agent table only: the scope this upload belongs to (strings copied from the Schedule)
+    sc, _ = ScopeState.objects.get_or_create(account=schedule.account, channel=schedule.channel,
+                                             month=schedule.month)
     try:
         act = gate.perform(
-            tier=gate.T1, action_type='intake_confirm_upload', actor_kind='human', actor=admin,
+            tier=gate.T1, action_type='intake_confirm_upload', actor_kind='human', actor=admin, scope=sc,
             account_id=schedule.account_id, target_model='core.TransmissionReport',
             target_pk=att.id, before={'attachment_id': att.id, 'status': att.status},
             conditions={'schedule_ok': True, 'dates_ok_or_ticked': (not out_of_window) or dates_ack},

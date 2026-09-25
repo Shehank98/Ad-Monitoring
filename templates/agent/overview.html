@@ -48,7 +48,7 @@
       {% if activity %}
       <ul class="nv-feed">
         {% for a in activity %}
-        <li><time>{{ a.timestamp|date:"d M H:i" }}</time><div><b>{{ a.get_action_display }}</b><small>{{ a.user.name|default:"System" }}{% if a.detail %} · {{ a.detail|truncatechars:80 }}{% endif %}</small></div></li>
+        <li><time>{{ a.created_at|date:"d M H:i" }}</time><div><b class="nv-mono">{{ a.action_type }}</b><small>{% if a.human_confirmed %}{{ a.actor.name|default:a.actor.email }}{% else %}{{ a.get_actor_kind_display }}{% endif %}{% if a.reason %} · {{ a.reason|truncatechars:80 }}{% endif %}</small></div></li>
         {% endfor %}
       </ul>
       {% else %}<div class="nv-empty"><b>No activity yet</b>Agent actions will be logged here with before and after values.</div>{% endif %}

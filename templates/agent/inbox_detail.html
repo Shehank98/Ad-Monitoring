@@ -8,7 +8,6 @@
   <h2>{{ a.filename }} <span class="nv-chip {{ tone }}">{{ status_label }}</span>{% if reason_label %}<span class="nv-chip nodot neutral">{{ reason_label }}</span>{% endif %}</h2>
   <p>{{ a.note|default:why }}</p></div></div>
 
-{% if messages %}{% for m in messages %}<div class="nv-panel"><div class="bd"><span class="nv-chip {% if m.tags == 'error' %}bad{% else %}ok{% endif %}">{{ m }}</span></div></div>{% endfor %}{% endif %}
 
 <div class="nv-two">
   <section class="nv-panel"><div class="hd"><h3>Email</h3><span class="sub">Shown as data — never followed as instructions</span></div>

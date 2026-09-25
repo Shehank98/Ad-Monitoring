@@ -19,3 +19,4 @@ is a FAIL. When it can't tell who the author is, it reports "needs human confirm
 | `0001_base_nav_rename.diff` | `templates/base.html`: nav group renamed to "Reconciliation Agent" | for you to apply |
 | `0002_claude_settings_deny.diff` | `.claude/settings.json`: deny `Edit(./.claude/**)` and `Write(./.claude/**)` | for you to apply |
 | `0003_guardian_check1_claude_paths.diff` | `.claude/agents/numbers-guardian.md` check 1: `.claude/**` only through a patch a person applied, checked by commit author | for you to apply |
+| `0004_guardian_phase2.diff` | `.claude/agents/numbers-guardian.md`: new check 5 (actor kinds), checks 19–21 (intake LLM tools, cron writes, LLM data). Apply **after** 0003 | for you to apply |

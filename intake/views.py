@@ -36,13 +36,14 @@ def _visible(user):
 def inbox(request):
     qs = _visible(request.user)
     status, reason = request.GET.get('status', ''), request.GET.get('reason', '')
-    if status in STATUS_LABEL:
+    if status and status in STATUS_LABEL:
         qs = qs.filter(status=status)
-    if reason in REASON_LABEL:
+    if reason and reason in REASON_LABEL:            # REASONS contains '' ("—"): never filter on it
         qs = qs.filter(reason=reason)
     page = Paginator(qs.order_by('-id'), 40).get_page(request.GET.get('page'))
     for a in page.object_list:
-        a.tone, a.status_label, a.reason_label = TONE.get(a.status, 'neutral'), STATUS_LABEL.get(a.status), REASON_LABEL.get(a.reason, '')
+        a.tone, a.status_label = TONE.get(a.status, 'neutral'), STATUS_LABEL.get(a.status)
+        a.reason_label = REASON_LABEL.get(a.reason, '') if a.reason else ''
     from django.db.models import Count
     counts = dict(_visible(request.user).order_by().values_list('status').annotate(n=Count('id')))
     return render(request, 'agent/inbox.html', {
@@ -82,7 +83,8 @@ def inbox_detail(request, pk):
         'a': att, 'is_admin': is_admin, 'detect': detect, 'cands': cands, 'rule': rule, 'llm': llm,
         'has_llm': bool(att.llm_verdict), 'why': (ev.get('final') or {}).get('why', ''),
         'rules_only_why': ev.get('rules_only_why', ''), 'choices': choices,
-        'status_label': STATUS_LABEL.get(att.status), 'reason_label': REASON_LABEL.get(att.reason, ''),
+        'status_label': STATUS_LABEL.get(att.status),
+        'reason_label': REASON_LABEL.get(att.reason, '') if att.reason else '',
         'tone': TONE.get(att.status, 'neutral'),
         'can_decide': is_admin and att.status in ('new', 'needs_review', 'suggested') and not att.tc_report_id,
     })
