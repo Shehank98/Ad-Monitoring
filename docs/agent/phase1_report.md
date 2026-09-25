@@ -142,3 +142,80 @@ You:
 - send back the audit and golden reports
 
 Then Phase 2 (simple workflow and email TC intake in off/suggest mode).
+
+---
+
+# Phase 1.1
+
+Range `a21c5bb..HEAD`, done in small commits. The owner's decisions 1–6 and items 7–9 are
+implemented. Phase 2 has not started.
+
+## Decisions
+
+| # | Decision | Done |
+|---|---|---|
+| 1 | CLAUDE.md §19 kept; guardian check 1 made append-only | Check 1 text updated; the §19 "Phase 1.1" block is additions only |
+| 2 | Makeup schedules, per schedule only | Test: each makeup schedule is reconciled in exactly one scope loop, and never with `schedule_id=None`. No makeup schedule is left unreconciled. Also added: the `MAKEUP_LINKED` finding (parent and makeups, each with its scope and report row count), `ScheduleStatus.makeup_linked`, and `makeup_linked` / `makeup_never_reconciled` audit sections. D25 records the pending finance billing rule |
+| 3 | V5 and edits made by people | See "External-change fingerprint" below |
+| 4 | Audit card preparation | `agent_core_audit` saves an `AgentRun(kind='audit')` holding counts and the report, in its own transaction after the read-only one has rolled back. Guardian check 17 updated |
+| 5 | Rename | "Reconciliation Agent" in `templates/agent/**` and in agent/ strings. The Nova chat widget and core are untouched |
+| 6 | Service user | `ensure_service_user` is run by a person: it logs no AgentAction and prints every change. `sync_service_user` runs in the system cycle: it only adds accounts and logs `service_user_account_sync` with before/after ids. `require_service_user` checks that the role is `operations`; if not, it logs an error, sets `Heartbeat.alert` and stops. Guardian check 18 added |
+| 7 | Guardian notes | `phase1_followups.md`. Notes 1, 2, 3, 5 and 6 fixed; note 4 goes to Phase 5; note 7 won't fix |
+| 8 | D24 `.distinct()` | All 36 core call sites are classified in `discrepancies.md`. **None affects a Summary number** |
+| 9 | CI | Workflow permission is `contents: read`, with no secrets. It runs on `pull_request` and on pushes to this branch |
+
+## External-change fingerprint
+
+Field names were checked in `core/models.py` and none are missing.
+
+`agent/fingerprint.py` records a snapshot per account of:
+- BrandMapping rows (all mapping fields) and TcLmrbThemeMap rows
+- ManualMatch ids and manual SponsorshipLmrbAssignment ids
+- PeriodSponsorship (dates, planned_count, theme)
+- TransmissionReport (schedule_id, uploaded_at, row_count)
+- Schedule (version, is_superseded, is_locked)
+- the latest MonitoringData upload, and the latest MatchResult run for the scope
+- the tolerance, every `tc_extra_*` / `lmrb_extra_*` alias, and the sponsorship keywords, all read through `get_setting`
+
+How it is used:
+- The JSON and its sha256 are stored with every `SummarySnapshot`.
+- V5 accepts a number change when an AgentAction was logged or the fingerprint changed. The row-level diff (added / removed / changed, by id and field) goes into `AgentRun.detail['external_changes']`.
+- A number change with no explanation → NEEDS_HUMAN.
+- **AUTHORISED scopes run no engine.** They are compared with the authorised snapshot, inside one read-only snapshot transaction. An explained change opens an `AgentProposal(kind='amendment', tier T4)` that holds both full summaries and the diff; duplicates are not created. An unexplained change → NEEDS_HUMAN.
+- The 4 required tests are in `agent/tests/test_fingerprint.py`, with 5 further tests:
+  - editing a mapping → explained, and the diff names the mapping id
+  - changing an alias setting → explained
+  - a number shift with nothing else changed → NEEDS_HUMAN
+  - an authorised schedule changes → amendment proposal
+
+## Results
+
+| Run | Result |
+|---|---|
+| SQLite, full suite | 283 run, 0 failures, 2 skipped |
+| PostgreSQL 16, full suite | 283 run, 0 failures, 7 skipped |
+| `makemigrations agent intake --check` | No changes (migration `agent/0002_phase1_1`) |
+| Golden `verify --mode idempotent` (PostgreSQL, synthetic) | **MATCH**: #101, #201, #202 |
+| Golden `verify --mode rebuild` (synthetic, `AGENT_DISPOSABLE_DB=1`) | 0 differences |
+
+## Numbers-guardian review (range `a21c5bb...b86371f`)
+
+**BLOCK on 2 of 18 checks.** The rest pass or are N/A. 282 tests passed.
+
+| Check | Finding | Resolution |
+|---|---|---|
+| 5 | `gate.perform` skipped the kill switch for T0, so the service-user account sync (a write to `accounts.User`) never read `AgentConfig.enabled` | **Fixed.** `perform` re-reads the kill switch before every write, for every tier. Test: `test_sync_respects_kill_switch` |
+| 1 | `.claude/agents/numbers-guardian.md` changed (checks 1, 17 and 18). It is not on the allowed list | **Needs your confirmation.** The change carries out your decisions 1, 4 and 6 word for word. The guardian itself started with the older 17-check file, so it asks you to confirm the checklist change or add `.claude/agents/` to the allowed list |
+
+Non-blocking notes:
+1. `_authorised_check` read summaries outside a lock. **Fixed:** all its reads now run in one always-rolled-back transaction, `REPEATABLE READ READ ONLY` on PostgreSQL.
+2. The fingerprint covers the whole account, so an edit on another channel also counts as an explanation. This is follow-up F2, assigned to Phase 3; the diff is always saved.
+3. Snapshots made before 1.1 have no fingerprint. The first 1.1 run treats any number change as unexplained, which puts the scope in NEEDS_HUMAN. That is the safe direction; expect it once.
+4. Deleting an older MonitoringData file does not move `monitoring_uploaded_max`. The resulting LMRB drop counts as unexplained, which is the safe direction.
+5. Standalone V2 counts the whole channel (follow-up note 5).
+
+## Open for you
+
+1. Guardian check 1: confirm the guardian checklist change (commit `4b19724`).
+2. First 1.1 run: expect NEEDS_HUMAN on scopes whose numbers moved since their last pre-1.1 snapshot (note 3).
+3. The Phase 5 items in `phase1_followups.md`: PROTECT, partial authorisation, and the amendment UI.
