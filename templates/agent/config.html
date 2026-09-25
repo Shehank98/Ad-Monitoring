@@ -1,0 +1,18 @@
+{% extends 'agent/_base.html' %}
+{% block title %}Agent Settings{% endblock %}
+{% block page_title %}Agent Settings{% endblock %}
+{% block page_subtitle %}Nova agent · administrators{% endblock %}
+{% block nova %}
+<div class="nv-head"><div class="t"><h2>Agent settings</h2><p>The agent is switched off. These are the planned defaults; they become editable when the agent's configuration is built (Phase 1). Core values are read from System Settings and are never changed by the agent.</p></div>
+  <div class="nv-actions"><a class="nv-btn" href="/dashboard/settings/"><i class="fa-solid fa-sliders"></i>System Settings</a></div></div>
+<section class="nv-panel"><div class="hd"><h3>Agent</h3><span class="nv-chip warn">Disabled</span></div>
+  {% for name, value, note in agent_settings %}
+  <div class="nv-setrow"><div><b>{{ name }}</b><small>{{ note }}</small></div><div class="nv-mono" style="font-weight:600">{{ value }}</div></div>
+  {% endfor %}
+</section>
+<section class="nv-panel"><div class="hd"><h3>Core settings the agent reads</h3><span class="sub">Read with get_setting(); the agent can only propose changes</span></div>
+  {% for name, value, key in core_settings %}
+  <div class="nv-setrow"><div><b>{{ name }}</b><small><span class="nv-q">{{ key }}</span></small></div><div class="nv-mono">{{ value }}</div></div>
+  {% endfor %}
+</section>
+{% endblock %}

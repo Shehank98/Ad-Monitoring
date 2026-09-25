@@ -1,0 +1,56 @@
+{% extends 'agent/_base.html' %}
+{% block title %}Scopes{% endblock %}
+{% block page_title %}Scopes{% endblock %}
+{% block page_subtitle %}Nova agent · {{ month }}{% endblock %}
+{% block nova %}
+<div class="nv-head">
+  <div class="t">
+    <h2>Scopes</h2>
+    <p>One row per client × channel × month. Reconciliation, locking, validation and sign-off happen per scope; each schedule number inside it is tracked on its own.</p>
+  </div>
+  <div class="nv-actions">{% include 'agent/_month.html' %}</div>
+</div>
+
+<section class="nv-panel">
+  <div class="nv-filters">
+    <div class="nv-seg" role="group" aria-label="Stage">
+      <a href="?month={{ month|urlencode }}&account={{ account }}&q={{ q|urlencode }}" class="{% if not state %}on{% endif %}">All</a>
+      {% for c in counts %}
+      <a href="?month={{ month|urlencode }}&state={{ c.key }}&account={{ account }}&q={{ q|urlencode }}" class="{% if state == c.key %}on{% endif %}">{{ c.label }}<b>{{ c.count }}</b></a>
+      {% endfor %}
+    </div>
+  </div>
+  <form class="nv-filters" method="get">
+    <input type="hidden" name="month" value="{{ month }}"><input type="hidden" name="state" value="{{ state }}">
+    <select name="account" class="nv-sel" onchange="this.form.submit()" aria-label="Client">
+      <option value="">All clients</option>
+      {% for a in accounts %}<option value="{{ a.id }}" {% if account == a.id|stringformat:"s" %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
+    </select>
+    <input class="nv-inp" name="q" value="{{ q }}" placeholder="Client, channel or schedule no." aria-label="Search">
+    <button class="nv-btn sm" type="submit">Search</button>
+    <span class="nv-muted" style="font-size:12px;margin-left:auto">{{ scopes|length }} scope{{ scopes|length|pluralize }}</span>
+  </form>
+  {% if scopes %}
+  <div class="nv-tscroll"><table class="nv-t">
+    <thead><tr><th>Client</th><th>Channel</th><th>Schedule no.</th><th>Period</th><th class="num">Planned</th><th>TC</th><th>Stage</th><th>Next step</th></tr></thead>
+    <tbody>
+    {% for s in scopes %}
+      <tr class="click" onclick="location.href='{{ s.url }}'">
+        <td><a href="{{ s.url }}"><b>{{ s.account_name }}</b></a></td>
+        <td>{{ s.channel }}</td>
+        <td class="id">{{ s.schedule_numbers|join:", "|truncatechars:30 }}</td>
+        <td class="nv-mono">{{ s.start|date:"d M" }} – {{ s.end|date:"d M" }}</td>
+        <td class="num">{{ s.planned }}</td>
+        <td>{% for st in s.schedules %}<span class="nv-chip nodot {% if st.has_tc %}ok{% else %}neutral{% endif %}" title="#{{ st.schedule.schedule_number }}">{% if st.has_tc %}T{% else %}–{% endif %}</span> {% endfor %}</td>
+        <td><span class="nv-chip {{ s.tone }}">{{ s.label }}</span></td>
+        <td class="nv-muted">{{ s.next_text }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <div class="nv-note"><span>TC: <span class="nv-chip nodot ok">T</span> linked to the schedule · <span class="nv-chip nodot neutral">–</span> not linked yet</span><span>Planned = commercial rows of the active version of each schedule number</span></div>
+  {% else %}
+  <div class="nv-empty"><b>No scopes match</b>Clear a filter or pick another month.</div>
+  {% endif %}
+</section>
+{% endblock %}

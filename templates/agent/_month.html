@@ -1,0 +1,6 @@
+<form method="get" class="nv-actions" aria-label="Month">
+  {% for k, v in request.GET.items %}{% if k != 'month' %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}{% endfor %}
+  <select name="month" class="nv-sel" onchange="this.form.submit()" aria-label="Month">
+    {% for m in months %}<option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>{% endfor %}
+  </select>
+</form>

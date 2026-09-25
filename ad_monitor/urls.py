@@ -22,6 +22,7 @@ urlpatterns = [
     path('privacy-policy/',  TemplateView.as_view(template_name='privacy_policy.html'), name='privacy_policy'),
     path('django-admin/',    admin.site.urls),
     path('auth/',            include('accounts.urls')),
+    path('dashboard/agent/', include('agent.urls')),   # Nova agent (AGENT_BUILD_BRIEF.md)
     path('dashboard/',       include('core.urls')),
     path('verify/',          include('verification.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

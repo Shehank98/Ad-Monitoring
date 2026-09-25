@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     'core',
     'verification',
     'competitor',
+    'agent',
 ]
 
 MIDDLEWARE = [

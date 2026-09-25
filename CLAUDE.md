@@ -853,3 +853,37 @@ Function: `summary_pdf()` in `core/views.py`
 | `templates/monitoring/upload.html` | LMRB/MapOnline upload form |
 | `ad_monitor/settings.py` | Django settings (reads from `.env`) |
 | `CLAUDE.md` | **This file** |
+
+---
+
+## 19. AI Agent
+
+Built on top of the existing system per `AGENT_BUILD_BRIEF.md` (repo root). Phase 0
+findings: `docs/agent/phase0_discovery.md`; code-vs-doc differences:
+`docs/agent/discrepancies.md`.
+
+### UI — Ogilvy Nova 2
+- `templates/base.html` carries the Nova 2 tokens (`--nova-*` CSS variables, Tailwind
+  `nova.*` colours, Schibsted Grotesk + IBM Plex Mono) and one "Nova Agent" nav group.
+  Existing `og.*` Tailwind colours and CSS class names are unchanged, so every page keeps
+  working and picks up the new look.
+- Red (`--nova-brand`, `--nova-brand-strong`) = a person decides. Teal (`--nova-agent`) =
+  anything the agent does.
+
+### `agent/` app (read-only preview, no models yet)
+| URL (`/dashboard/agent/…`) | View | Roles |
+|---|---|---|
+| `` | `overview` | all staff (not channel_officer) |
+| `scopes/` | `scope_list` | all staff |
+| `scope/?account_id=&channel=&month=` | `scope_detail` | all staff, account-scoped |
+| `queue/` | `queue` | super_admin, admin, team_head |
+| `activity/` | `activity` | all staff (non-admins see their own) |
+| `config/` | `config` | super_admin, admin |
+
+- `agent/scopes.py` derives each scope's state (STILL_AIRING, WAITING_INPUTS, MAPPING,
+  RECONCILING, READY_FOR_SIGNOFF, AUTHORISED) from core data. It **never writes**; active
+  schedules come from `verification.engine.active_schedule_ids` (Rule 12), summaries from
+  `build_summary_data(..., schedule_id=…)` per active schedule.
+- AUTHORISED = `SummaryReportMeta.authorised_by` is filled for the scope.
+- Tests: `agent/tests.py` (state rules, access, "no core rows written").
+- Next: Phase 1 adds agent models (`AgentConfig`, `ScopeState`, `AgentAction`, …).

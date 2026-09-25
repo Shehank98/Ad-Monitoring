@@ -1,0 +1,20 @@
+{% extends 'agent/_base.html' %}
+{% block title %}Activity{% endblock %}
+{% block page_title %}Activity{% endblock %}
+{% block page_subtitle %}Nova agent{% endblock %}
+{% block nova %}
+<div class="nv-head"><div class="t"><h2>Activity</h2><p>{% if request.user.role in 'super_admin,admin' %}Every logged action.{% else %}Your own logged actions.{% endif %} Agent actions will appear here with before and after values, reason and evidence, and a Revert button.</p></div></div>
+<section class="nv-panel">
+  {% if page.object_list %}
+  <div class="nv-tscroll"><table class="nv-t">
+    <thead><tr><th>When</th><th>Action</th><th>By</th><th>Detail</th></tr></thead>
+    <tbody>{% for a in page.object_list %}
+      <tr><td class="nv-mono">{{ a.timestamp|date:"d M Y H:i" }}</td><td><span class="nv-chip nodot neutral">{{ a.get_action_display }}</span></td><td>{{ a.user.name|default:"System" }}</td><td>{{ a.detail|truncatechars:140 }}</td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  <div class="nv-note"><span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+    {% if page.has_previous %}<a class="nv-btn sm" href="?page={{ page.previous_page_number }}">← Newer</a>{% endif %}
+    {% if page.has_next %}<a class="nv-btn sm" href="?page={{ page.next_page_number }}">Older →</a>{% endif %}</div>
+  {% else %}<div class="nv-empty"><b>No activity yet</b>Actions will be logged here.</div>{% endif %}
+</section>
+{% endblock %}

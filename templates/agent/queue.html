@@ -1,0 +1,28 @@
+{% extends 'agent/_base.html' %}
+{% block title %}Review Queue{% endblock %}
+{% block page_title %}Review Queue{% endblock %}
+{% block page_subtitle %}Nova agent · {{ month }}{% endblock %}
+{% block nova %}
+<div class="nv-head">
+  <div class="t">
+    <h2>Review queue</h2>
+    <p>Decisions the agent will not make alone. Today these are findings from the data; once the agent runs, each becomes a proposal with evidence, a dry-run difference and Approve / Reject.</p>
+  </div>
+  <div class="nv-actions">{% include 'agent/_month.html' %}{% for k, n in kinds.items %}<span class="nv-chip nodot neutral">{{ k }} {{ n }}</span>{% endfor %}</div>
+</div>
+<section class="nv-panel">
+  {% if items %}
+  <div class="nv-tscroll"><table class="nv-t">
+    <thead><tr><th>Kind</th><th>Scope</th><th>Finding</th><th></th></tr></thead>
+    <tbody>{% for it in items %}
+      <tr>
+        <td><span class="nv-chip {{ it.tone }}">{{ it.kind }}</span></td>
+        <td><a href="{{ it.scope.url }}"><b>{{ it.scope.account_name }}</b></a><br><span class="nv-muted" style="font-size:12px">{{ it.scope.channel }}</span></td>
+        <td>{{ it.title }}{% if it.detail %}<br><span class="nv-muted" style="font-size:12px">{{ it.detail }}</span>{% endif %}</td>
+        <td class="num">{% if it.link %}<a class="nv-btn sm" href="{{ it.link }}">{{ it.link_label }}</a>{% endif %}</td>
+      </tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="nv-empty"><b>Queue clear</b>No unmapped brands, unlinked TC files or data checks for {{ month }}.</div>{% endif %}
+</section>
+{% endblock %}

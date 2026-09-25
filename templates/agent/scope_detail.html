@@ -1,0 +1,103 @@
+{% extends 'agent/_base.html' %}
+{% block title %}{{ sc.account_name }} · {{ sc.channel }}{% endblock %}
+{% block page_title %}{{ sc.account_name }} · {{ sc.channel }}{% endblock %}
+{% block page_subtitle %}Scope · {{ sc.month }}{% endblock %}
+{% block nova %}
+<div class="nv-head">
+  <div class="t">
+    <div class="nv-crumbs"><a href="/dashboard/agent/scopes/?month={{ sc.month|urlencode }}">Scopes</a><span>/</span><a href="/dashboard/agent/scopes/?month={{ sc.month|urlencode }}&account={{ sc.account_id }}">{{ sc.account_name }}</a></div>
+    <h2>{{ sc.channel }} <span class="nv-chip {{ sc.tone }}">{{ sc.label }}</span></h2>
+    <p>{{ sc.account_name }} · {{ sc.month }} · {{ sc.schedules|length }} active schedule{{ sc.schedules|length|pluralize }}{% if sc.reason %} · {{ sc.reason_label }}{% endif %}</p>
+  </div>
+  <div class="nv-actions">
+    {% if sc.next_url %}<a class="nv-btn primary" href="{{ sc.next_url }}">{{ sc.next_text }} →</a>{% endif %}
+  </div>
+</div>
+
+{% if sc.state == 'AUTHORISED' %}
+<div class="nv-banner"><span class="dot" style="background:#2a9d5c"></span><div><b>Authorised by {{ sc.authorised_by }}.</b> Frozen for the agent only; the core pages can still re-run this scope.</div></div>
+{% endif %}
+
+<section class="nv-panel"><div class="bd" style="display:grid;gap:16px">
+  <div class="nv-steps">{% for s in steps %}<div class="nv-step {{ s.cls }}"><div class="b"></div><span><i>{{ s.n }}</i>{{ s.label }}</span></div>{% endfor %}</div>
+  <dl class="nv-facts">
+    <div><dt>Client</dt><dd>{{ sc.account_name }}</dd></div>
+    <div><dt>Channel (exact)</dt><dd><span class="nv-q">"{{ sc.channel }}"</span></dd></div>
+    <div><dt>Month (exact)</dt><dd><span class="nv-q">"{{ sc.month }}"</span></dd></div>
+    <div><dt>Period</dt><dd>{{ sc.start|date:"d M Y" }} – {{ sc.end|date:"d M Y" }}</dd></div>
+    <div><dt>LMRB data until</dt><dd>{% if sc.lmrb_until %}{{ sc.lmrb_until|date:"d M Y" }}{% else %}<span class="nv-muted">—</span>{% endif %}</dd></div>
+    <div><dt>TC ↔ LMRB tolerance</dt><dd class="nv-mono">±{{ tolerance }} s</dd></div>
+  </dl>
+</div></section>
+
+<section class="nv-panel">
+  <div class="hd"><h3>Schedule numbers</h3><span class="sub">Latest version of each number only (Rule 12), in schedule-number order (Rule 10)</span></div>
+  <div class="nv-tscroll"><table class="nv-t">
+    <thead><tr><th>Schedule no.</th><th>Ver</th><th>Period</th><th>TC linked</th><th class="num">Commercial rows</th><th class="num">Matched to LMRB</th><th class="num">Pending</th><th></th></tr></thead>
+    <tbody>
+    {% for x in summaries %}{% with st=x.status %}
+      <tr>
+        <td class="id">#{{ st.schedule.schedule_number }}</td>
+        <td class="nv-mono">v{{ st.schedule.version }}</td>
+        <td class="nv-mono">{{ st.schedule.start_date|date:"d M" }} – {{ st.schedule.end_date|date:"d M" }}</td>
+        <td>{% if st.has_tc %}<span class="nv-chip ok">Linked</span>{% else %}<span class="nv-chip warn">Not received</span>{% endif %}</td>
+        <td class="num">{{ st.rows }}</td>
+        <td class="num">{{ st.matched }}</td>
+        <td class="num">{{ st.pending }}</td>
+        <td class="num"><a class="nv-btn sm" href="{{ x.url }}">Summary Sheet</a></td>
+      </tr>
+    {% endwith %}{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+{% if sc.unmapped or sc.findings %}
+<section class="nv-panel">
+  <div class="hd"><h3>Diagnosis</h3><span class="sub">What stops this scope from closing cleanly</span></div>
+  <div>
+    {% for brand, dur in sc.unmapped %}
+    <div class="nv-finding"><span class="nv-chip bad">Unmapped</span><div class="txt"><b>{{ brand }}</b> ({{ dur }}s) has no TC theme mapping. Its spots count as Missed until a mapping exists; time overlap alone never credits a spot.</div><a class="nv-btn sm" href="/dashboard/brand-mappings/quick/">Quick Map</a></div>
+    {% endfor %}
+    {% for f in sc.findings %}
+    <div class="nv-finding"><span class="nv-chip {{ f.tone }}">Check</span><div class="txt">{{ f.text }}</div>{% if f.link %}<a class="nv-btn sm" href="{{ f.link }}">{{ f.link_label }}</a>{% endif %}</div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="nv-panel">
+  <div class="hd"><h3>Spot log</h3><span class="sub">Each tick is a planned commercial spot, coloured by the latest Schedule ↔ LMRB result</span></div>
+  <div class="bd" style="display:grid;gap:12px">
+    {% if strip.tracks %}
+    <div class="nv-klegend">{% for l in strip.legend %}<span><i class="tone-{{ l.tone }}"></i>{{ l.label }} <b class="nv-mono">{{ l.count }}</b></span>{% endfor %}</div>
+    <div class="nv-strip">
+      {% for t in strip.tracks %}
+      <div class="r"><div class="lbl" title="{{ t.brand }}">{{ t.brand }}<small>{{ t.dur }}s</small></div>
+        <div class="nv-track">{% for tk in t.ticks %}<span class="nv-tick tone-{{ tk.tone }}" style="left:{{ tk.left }}%" title="{{ tk.label }}"></span>{% endfor %}</div></div>
+      {% endfor %}
+      <div class="nv-axis"><span></span><div>{% for d in strip.axis %}<span>{{ d }}</span>{% endfor %}</div></div>
+    </div>
+    {% if strip.truncated %}<p class="nv-muted" style="margin:0;font-size:12px">Showing the first 1,500 spots.</p>{% endif %}
+    {% else %}<div class="nv-empty"><b>No commercial spots</b>This scope has only sponsorship rows.</div>{% endif %}
+  </div>
+</section>
+
+{% for x in summaries %}
+<section class="nv-panel">
+  <div class="hd"><h3>Summary Sheet · #{{ x.status.schedule.schedule_number }}</h3><span class="sub">Read-only; numbers from build_summary_data for this schedule</span><span class="sp"></span><a class="nv-btn sm" href="{{ x.url }}">Open Summary Sheet →</a></div>
+  {% if x.data.commercial %}
+  <div class="nv-tscroll"><table class="nv-t">
+    <thead><tr><th>Brand</th><th class="num">Dur</th><th class="num">Planned</th><th class="num">Aired</th><th class="num">3rd party</th><th class="num">Extra</th><th class="num">Missed</th></tr></thead>
+    <tbody>{% for r in x.data.commercial %}
+      <tr><td>{{ r.product }}</td><td class="num nv-mono">{{ r.dur }}</td><td class="num">{{ r.planned }}</td><td class="num">{{ r.aired }}</td><td class="num">{{ r.third_party }}</td><td class="num">{{ r.extra }}</td><td class="num {% if r.missed %}miss{% endif %}">{{ r.missed }}</td></tr>
+    {% endfor %}</tbody>
+    <tfoot><tr><td>Commercial total</td><td></td><td class="num">{{ x.data.commercial_total.planned }}</td><td class="num">{{ x.data.commercial_total.aired }}</td><td class="num">{{ x.data.commercial_total.third_party }}</td><td class="num">{{ x.data.commercial_total.extra }}</td><td class="num">{{ x.data.commercial_total.missed }}</td></tr></tfoot>
+  </table></div>
+  {% endif %}
+  {% if x.data.sponsorship %}
+  <div class="nv-note"><span><b>Sponsorship:</b> {{ x.data.sponsorship_total.planned }} planned · {{ x.data.sponsorship_total.aired }} aired · {{ x.data.sponsorship_total.missed }} missed</span></div>
+  {% endif %}
+  <div class="nv-note"><span><b>Aired</b> = TC spots confirmed by LMRB within ±{{ tolerance }}s whose TC theme maps to the brand, plus manual matches</span><span><b>Extra / Missed</b> = 3rd party vs Planned</span></div>
+</section>
+{% endfor %}
+{% endblock %}
