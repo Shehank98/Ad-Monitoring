@@ -1,5 +1,5 @@
 """
-Nova agent pages (/dashboard/agent/). Read-only for now.
+Reconciliation Agent preview pages (/dashboard/agent/). Read-only: GET only.
 
 These pages show the agent's view of every scope — state, missing inputs,
 mapping gaps, per-schedule status and the Summary Sheet numbers — using only
@@ -64,6 +64,8 @@ def _next_action(sc) -> tuple[str, str]:
         if sc.reason == 'tc_not_linked':
             return 'Link the uploaded TC to its schedule', '/dashboard/tc/'
         return 'Upload MediaWatch data for this period', '/dashboard/monitoring/upload/'
+    if s == 'NEEDS_HUMAN':
+        return 'Resolve the schedule set (duplicate number or locked schedule)', '/dashboard/schedules/'
     if s == 'MAPPING':
         return f'Map {len(sc.unmapped)} brand(s) to a TC theme', '/dashboard/brand-mappings/'
     if s == 'RECONCILING':
@@ -143,8 +145,8 @@ def scope_list(request):
 
 
 STEPS = ['Inputs', 'Mapping', 'Reconcile', 'Validate', 'Sign-off', 'Authorised']
-STEP_INDEX = {'STILL_AIRING': 0, 'WAITING_INPUTS': 0, 'MAPPING': 1, 'RECONCILING': 2,
-              'READY_FOR_SIGNOFF': 4, 'AUTHORISED': 6}
+STEP_INDEX = {'STILL_AIRING': 0, 'WAITING_INPUTS': 0, 'STANDALONE': 0, 'NEEDS_HUMAN': 0,
+              'MAPPING': 1, 'RECONCILING': 2, 'READY_FOR_SIGNOFF': 4, 'AUTHORISED': 6}
 
 
 @login_required

@@ -1,9 +1,10 @@
 """
-Read-only scope state for the Nova agent UI.
+Read-only scope view-model for the Reconciliation Agent preview pages.
 
 A scope is (account, channel, month): the unit the engines, the LMRB pool and
-SummaryReportMeta work on (AGENT_BUILD_BRIEF.md §5). This module derives a
-*preview* of the brief's state machine (§7) purely from existing core data.
+SummaryReportMeta work on (AGENT_BUILD_BRIEF.md §5). The STATE comes from
+agent/readiness.py (the single source of scope state); this module only shapes it
+for the templates and adds display findings.
 
 Rules this module follows:
 - It never writes. Every function only reads core models and calls read-only
@@ -17,19 +18,20 @@ import calendar
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-from django.db.models import Max, Min
 
-from core.models import (
-    LMRBRow, MatchResult, Schedule, ScheduleRow, SummaryReportMeta,
-    TCRow, TransmissionReport,
-)
-from verification.engine import _lmrb_channel_q, active_schedule_ids
-from verification.tc_engine import _build_tc_theme_map, _tc_themes_for_brand
+
+from core.models import MatchResult, Schedule, ScheduleRow, TransmissionReport
+from verification.tc_engine import _build_tc_theme_map
+
+from .models import ScopeState
+from .readiness import REASON_LABEL, assess
 
 # Ordered as the pipeline reads left to right.
 STATES = [
     ('STILL_AIRING',      'Still airing',       'neutral'),
     ('WAITING_INPUTS',    'Waiting for inputs', 'warn'),
+    ('STANDALONE',        'Standalone TC',      'neutral'),
+    ('NEEDS_HUMAN',       'Needs a person',     'bad'),
     ('MAPPING',           'Needs mapping',      'bad'),
     ('RECONCILING',       'Not reconciled',     'agent'),
     ('READY_FOR_SIGNOFF', 'Ready for sign-off', 'info'),
@@ -38,12 +40,6 @@ STATES = [
 STATE_LABEL = {k: label for k, label, _ in STATES}
 STATE_TONE = {k: tone for k, _, tone in STATES}
 
-REASON_LABEL = {
-    'no_lmrb':       'No LMRB data for this channel',
-    'lmrb_partial':  'LMRB data stops before the period ends',
-    'no_tc':         'TC not received',
-    'tc_not_linked': 'TC uploaded but not linked to a schedule',
-}
 
 COMMERCIAL = 'COMMERCIAL BENEFITS'
 
@@ -65,7 +61,7 @@ def available_months(account_ids) -> list[str]:
     """Distinct Schedule months for these accounts, newest first."""
     months = set(
         Schedule.objects.filter(account_id__in=account_ids)
-        .values_list('month', flat=True).distinct()
+        .order_by().values_list('month', flat=True).distinct()
     )
     return sorted(months, key=lambda m: parse_month(m) or date.min, reverse=True)
 
@@ -133,121 +129,43 @@ def _scope_keys(account_ids, month):
 
 def build_scope(account_id, account_name, channel, month, today=None,
                 tc_theme_map=None) -> Scope:
-    """Derive the state of one scope. Read-only."""
-    today = today or date.today()
+    """Shape readiness.assess() for the templates. Read-only: the ScopeState used here
+    is never saved."""
     sc = Scope(account_id, account_name, channel, month)
-    active_ids = active_schedule_ids(account_id, channel, month)
-    active = list(Schedule.objects.filter(id__in=active_ids))
-    active.sort(key=lambda s: active_ids.index(s.id))
+    r = assess(ScopeState(account_id=account_id, channel=channel, month=month),
+               today=today, tc_theme_map=tc_theme_map)
+    sc.state, sc.reason = r.state, r.reason
+    sc.start, sc.end, sc.lmrb_until = r.start, r.end, r.lmrb_until
+    sc.authorised_by = r.authorised_by
+    sc.unmapped = list(r.unmapped)
+    sc.schedules = [ScheduleStatus(schedule=x.schedule, has_tc=x.has_tc, rows=x.rows,
+                                   matched=x.matched, pending=x.pending) for x in r.schedules]
+    sc.planned = sum(x.rows for x in r.schedules)
 
-    # ── Findings about versions (Rule 12 reads version only; see D5/D6) ──
-    all_nums = Schedule.objects.filter(
-        account_id=account_id, channel=channel, month=month,
-    ).count()
-    if all_nums > len(active):
+    # ── Display findings ──
+    all_count = Schedule.objects.filter(account_id=account_id, channel=channel, month=month).count()
+    if all_count > len(sc.schedules):
         sc.findings.append(Finding(
             'superseded_present',
-            f'{all_nums - len(active)} older schedule version(s) exist in this scope. '
+            f'{all_count - len(sc.schedules)} older schedule version(s) exist in this scope. '
             'Summary figures are shown per active schedule so they are not double-counted.',
             'info'))
-
-    # ── Period ──
-    starts = [s.start_date for s in active if s.start_date]
-    ends = [s.end_date for s in active if s.end_date]
-    if not starts or not ends:
-        agg = ScheduleRow.objects.filter(schedule_id__in=active_ids).aggregate(a=Min('date'), b=Max('date'))
-        starts = starts or ([agg['a']] if agg['a'] else [])
-        ends = ends or ([agg['b']] if agg['b'] else [])
-    sc.start = min(starts) if starts else None
-    sc.end = max(ends) if ends else None
-
-    # ── Per schedule status ──
-    for s in active:
-        rows = ScheduleRow.objects.filter(schedule=s, ad_type=COMMERCIAL)
-        n = rows.count()
-        matched = rows.filter(is_matched=True).count() + rows.filter(is_manual_matched=True, is_matched=False).count()
-        sc.schedules.append(ScheduleStatus(
-            schedule=s,
-            has_tc=TransmissionReport.objects.filter(schedule=s).exists(),
-            rows=n, matched=matched, pending=n - matched,
-        ))
-        sc.planned += n
-
-    # ── Mapping (R1: mapping is required evidence) ──
-    tc_theme_map = tc_theme_map if tc_theme_map is not None else _build_tc_theme_map(account_id)
-    pairs = (ScheduleRow.objects.filter(schedule_id__in=active_ids, ad_type=COMMERCIAL)
-             .values_list('brand', 'duration').distinct().order_by('brand', 'duration'))
-    wildcard_only = []
-    for brand, dur in pairs:
-        themes = _tc_themes_for_brand(brand, dur, tc_theme_map)
-        if not themes:
-            sc.unmapped.append((brand, dur))
-        elif all(t.endswith('*') for t in themes):
-            wildcard_only.append((brand, dur))
-    for brand, dur in wildcard_only:
+    for brand, dur in r.wildcard_only:
         sc.findings.append(Finding(
             'wildcard_only',
             f'{brand} ({dur}s) is mapped only by a wildcard TC theme. The commercial summary '
             'does not expand wildcards, so Aired will read 0 (discrepancy D3).',
             'warn', '/dashboard/brand-mappings/', 'Brand mappings'))
-
-    # ── Authorised (frozen for the agent) ──
-    meta = SummaryReportMeta.objects.filter(account_id=account_id, channel=channel, month=month).first()
-    if meta and meta.authorised_by.strip():
-        sc.authorised_by = meta.authorised_by.strip()
-        sc.state = 'AUTHORISED'
-        return sc
-
-    # ── Still airing ──
-    if sc.end and sc.end >= today:
-        sc.state = 'STILL_AIRING'
-        return sc
-
-    # ── Inputs: L (monitoring) ──
-    sc.lmrb_until = LMRBRow.objects.filter(
-        _lmrb_channel_q(channel), account_id=account_id, source='mediawatch',
-    ).aggregate(d=Max('date'))['d']
-    if not sc.lmrb_until:
-        sc.state, sc.reason = 'WAITING_INPUTS', 'no_lmrb'
-        return sc
-    if sc.end and sc.lmrb_until < sc.end:
-        sc.state, sc.reason = 'WAITING_INPUTS', 'lmrb_partial'
-        return sc
-
-    # ── Inputs: T (transmission certificate) ──
-    if any(not st.has_tc for st in sc.schedules):
-        unlinked = TransmissionReport.objects.filter(
-            account_id=account_id, channel=channel, month=month, schedule__isnull=True,
-        ).exists()
-        sc.state, sc.reason = 'WAITING_INPUTS', ('tc_not_linked' if unlinked else 'no_tc')
-        case_only = (not unlinked and TransmissionReport.objects.filter(
-            account_id=account_id, channel__iexact=channel, month=month,
-        ).exclude(channel=channel).exists())
-        if case_only:
-            sc.findings.append(Finding(
-                'channel_case',
-                'A TC exists for this channel with different capitalisation. '
-                'The summary uses exact channel strings, so it would not be counted.',
-                'bad', '/dashboard/tc/', 'TC reports'))
-        return sc
-
-    # ── Mapping ──
-    if sc.unmapped:
-        sc.state = 'MAPPING'
-        return sc
-
-    # ── Reconciled? ──
-    tc_rows = TCRow.objects.filter(tc_report__schedule_id__in=active_ids)
-    if tc_rows.exists() and not (
-        tc_rows.filter(is_schedule_matched=True).exists()
-        or tc_rows.filter(is_extra=True).exists()
-        or tc_rows.filter(is_lmrb_confirmed=True).exists()
-    ):
-        sc.state = 'RECONCILING'
-        sc.reason = 'TC uploaded but reconciliation has not run'
-        return sc
-
-    sc.state = 'READY_FOR_SIGNOFF'
+    for code, text in r.warnings:
+        sc.findings.append(Finding(code.lower(), text, 'info'))
+    if r.reason == 'no_tc' and TransmissionReport.objects.filter(
+            account_id=account_id, channel__iexact=channel, month=month).exclude(channel=channel).exists():
+        # Detection only: the stored strings are shown, never used as values.
+        sc.findings.append(Finding(
+            'channel_case',
+            'A TC exists for this channel with different capitalisation. '
+            'The summary uses exact channel strings, so it would not be counted.',
+            'bad', '/dashboard/tc/', 'TC reports'))
     return sc
 
 

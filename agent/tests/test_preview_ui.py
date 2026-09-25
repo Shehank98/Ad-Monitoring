@@ -1,4 +1,4 @@
-"""Tests for the read-only Nova agent pages (/dashboard/agent/)."""
+"""Tests for the read-only Reconciliation Agent preview pages (/dashboard/agent/)."""
 import datetime
 
 from django.test import TestCase
@@ -9,7 +9,7 @@ from core.models import (
     TCRow, TransmissionReport,
 )
 
-from .scopes import build_scope, build_scopes
+from agent.scopes import build_scope, build_scopes
 
 CHANNEL = 'Sirasa TV'
 MONTH = 'January 2025'

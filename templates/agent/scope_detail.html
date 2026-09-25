@@ -18,6 +18,10 @@
 <div class="nv-banner"><span class="dot" style="background:#2a9d5c"></span><div><b>Authorised by {{ sc.authorised_by }}.</b> Frozen for the agent only; the core pages can still re-run this scope.</div></div>
 {% endif %}
 
+{% if sc.schedules|length > 1 %}
+<div class="nv-banner"><span class="dot" style="background:#3f6fd1"></span><div>Header fields are shared by all schedules in this scope.</div></div>
+{% endif %}
+
 <section class="nv-panel"><div class="bd" style="display:grid;gap:16px">
   <div class="nv-steps">{% for s in steps %}<div class="nv-step {{ s.cls }}"><div class="b"></div><span><i>{{ s.n }}</i>{{ s.label }}</span></div>{% endfor %}</div>
   <dl class="nv-facts">
@@ -87,7 +91,7 @@
   <div class="hd"><h3>Summary Sheet · #{{ x.status.schedule.schedule_number }}</h3><span class="sub">Read-only; numbers from build_summary_data for this schedule</span><span class="sp"></span><a class="nv-btn sm" href="{{ x.url }}">Open Summary Sheet →</a></div>
   {% if x.data.commercial %}
   <div class="nv-tscroll"><table class="nv-t">
-    <thead><tr><th>Brand</th><th class="num">Dur</th><th class="num">Planned</th><th class="num">Aired</th><th class="num">3rd party</th><th class="num">Extra</th><th class="num">Missed</th></tr></thead>
+    <thead><tr><th>Brand</th><th class="num">Dur</th><th class="num">Planned</th><th class="num">Aired</th><th class="num">3rd Party (TC confirmed by LMRB)</th><th class="num">Extra</th><th class="num">Missed</th></tr></thead>
     <tbody>{% for r in x.data.commercial %}
       <tr><td>{{ r.product }}</td><td class="num nv-mono">{{ r.dur }}</td><td class="num">{{ r.planned }}</td><td class="num">{{ r.aired }}</td><td class="num">{{ r.third_party }}</td><td class="num">{{ r.extra }}</td><td class="num {% if r.missed %}miss{% endif %}">{{ r.missed }}</td></tr>
     {% endfor %}</tbody>
@@ -97,7 +101,7 @@
   {% if x.data.sponsorship %}
   <div class="nv-note"><span><b>Sponsorship:</b> {{ x.data.sponsorship_total.planned }} planned · {{ x.data.sponsorship_total.aired }} aired · {{ x.data.sponsorship_total.missed }} missed</span></div>
   {% endif %}
-  <div class="nv-note"><span><b>Aired</b> = TC spots confirmed by LMRB within ±{{ tolerance }}s whose TC theme maps to the brand, plus manual matches</span><span><b>Extra / Missed</b> = 3rd party vs Planned</span></div>
+  <div class="nv-note"><span><b>Aired</b> = TC spots confirmed by LMRB within ±{{ tolerance }}s whose TC theme maps to the brand, plus manual matches</span><span><b>Extra / Missed</b> = 3rd Party (TC confirmed by LMRB) vs Planned</span></div>
 </section>
 {% endfor %}
 {% endblock %}

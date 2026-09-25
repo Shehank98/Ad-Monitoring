@@ -6,4 +6,4 @@ class AgentAppConfig(AppConfig):
     never collides with the brief's future AgentConfig model."""
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'agent'
-    verbose_name = 'Nova agent'
+    verbose_name = 'Reconciliation Agent'
