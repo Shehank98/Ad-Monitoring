@@ -3,7 +3,8 @@ from io import StringIO
 from django.core.management import call_command
 from django.test import RequestFactory, TestCase
 
-from agent.models import AgentAction, Heartbeat
+from agent.gate import AgentDisabled
+from agent.models import AgentAction, AgentConfig, Heartbeat
 from agent.service import ServiceUserError, ensure_service_user, sync_service_user
 from core.views import summary_excel
 
@@ -43,6 +44,22 @@ class ServiceUserTest(TestCase):
 
 class ServiceUserSyncTest(TestCase):
     """Owner decision 6 / guardian check 18."""
+
+    def setUp(self):
+        c = AgentConfig.get_solo()
+        c.enabled = True
+        c.save()
+
+    def test_sync_respects_kill_switch(self):
+        """Guardian check 5: the T0 account sync is a write, so the kill switch applies."""
+        a = f.account('A')
+        user, *_ = ensure_service_user()
+        f.account('B')
+        AgentConfig.objects.filter(pk=1).update(enabled=False)
+        with self.assertRaises(AgentDisabled):
+            sync_service_user()
+        self.assertEqual(list(user.accounts.values_list('id', flat=True)), [a.id])
+        self.assertFalse(AgentAction.objects.exists())
 
     def test_command_prints_every_change_and_logs_no_action(self):
         f.account('A')

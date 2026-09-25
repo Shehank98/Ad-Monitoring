@@ -86,13 +86,14 @@ def perform(*, tier: int, action_type: str, scope=None, target_model: str = '', 
             actor=None, run=None, conditions: dict | None = None, account_id=None,
             values=None) -> AgentAction:
     """Run `apply()` (which returns the `after` dict) only if the gate allows it.
-    The kill switch is read again immediately before the write."""
+    The kill switch is read again immediately before the write, for EVERY tier: perform()
+    is only ever used for writes, so even a T0 system write (e.g. the service-user account
+    sync) stops when the agent is disabled (guardian check 5)."""
     account_id = account_id if account_id is not None else getattr(scope, 'account_id', None)
-    if tier != T0:
-        ensure_enabled(account_id)
-        if not allowed(tier, account_id, conditions, values):
-            raise TierNotAllowed(f'tier T{tier} is not allowed at level {effective_level(account_id)}')
-        ensure_enabled(account_id)        # immediately before the write
+    ensure_enabled(account_id)
+    if tier != T0 and not allowed(tier, account_id, conditions, values):
+        raise TierNotAllowed(f'tier T{tier} is not allowed at level {effective_level(account_id)}')
+    ensure_enabled(account_id)            # immediately before the write
     after = apply()
     return AgentAction.objects.create(
         actor=actor, tier=tier, action_type=action_type, scope=scope, target_model=target_model,

@@ -269,17 +269,11 @@ def _authorised_check(scope, dry: bool, actor) -> dict:
     """AUTHORISED scope: never re-run. Compare each authorised schedule with its
     authorised snapshot; explained changes become amendment proposals, unexplained
     changes put the scope in NEEDS_HUMAN. Read-only apart from agent tables."""
-    fp_now = fingerprint(scope)
+    fp_now, current = _authorised_reads(scope)
     fp_sha = fingerprint_sha(fp_now)
     result = {'scope_id': scope.id, 'dry': dry, 'status': 'skipped', 'reason': 'authorised', 'amendments': [],
               'external_changes': {}, 'checks': []}
-    for s in active_schedules(scope):
-        auth = (AgentAuthorisation.objects.filter(schedule=s).select_related('snapshot')
-                .order_by('-authorised_at', '-id').first())
-        if auth is None:
-            continue
-        data = to_jsonable(build_summary_data(scope.account_id, scope.channel, scope.month,
-                                              schedule_id=s.id))
+    for s, auth, data in current:
         sha = sha256_of(data)
         if sha == auth.snapshot_sha256:
             continue
@@ -311,6 +305,35 @@ def _authorised_check(scope, dry: bool, actor) -> dict:
             scope.state, scope.reason = 'NEEDS_HUMAN', 'unexplained_change_after_authorisation'
             scope.save(update_fields=['state', 'reason', 'updated_at'])
     return result
+
+
+def _authorised_reads(scope):
+    """All reads of the authorised check in ONE transaction that is always rolled back
+    (REPEATABLE READ + READ ONLY on PostgreSQL), so a core run happening at the same time
+    cannot give a half-updated view and a false 'unexplained change'."""
+    class _Done(Exception):
+        pass
+    box = {}
+    outermost = not connection.in_atomic_block
+    try:
+        with transaction.atomic():
+            if connection.vendor == 'postgresql' and outermost:
+                with connection.cursor() as cur:   # must be the transaction's first statement
+                    cur.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+            box['fp'] = fingerprint(scope)
+            rows = []
+            for s in active_schedules(scope):
+                auth = (AgentAuthorisation.objects.filter(schedule=s).select_related('snapshot')
+                        .order_by('-authorised_at', '-id').first())
+                if auth is None:
+                    continue
+                rows.append((s, auth, to_jsonable(build_summary_data(
+                    scope.account_id, scope.channel, scope.month, schedule_id=s.id))))
+            box['rows'] = rows
+            raise _Done
+    except _Done:
+        pass
+    return box['fp'], box['rows']
 
 
 def _create_amendments(scope, specs, actor, run) -> list:
