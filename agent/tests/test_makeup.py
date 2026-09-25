@@ -8,6 +8,7 @@ from agent.core_audit import collect
 from agent.diagnose import diagnose
 from agent.models import AgentConfig, ScheduleStatus, ScopeState
 from agent.scope import sync_scopes
+from agent.service import ensure_service_user
 from agent.tools import reconcile as R
 from agent.tools.reconcile import reconcile_scope
 
@@ -37,6 +38,7 @@ class MakeupLoopTest(TransactionTestCase):
         c = AgentConfig.get_solo()
         c.enabled, c.autonomy_level, c.upload_debounce_minutes = True, 1, 0
         c.save()
+        ensure_service_user()
         seen = []
         real = R.reconcile_tc
 

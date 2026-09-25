@@ -7,13 +7,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from core.models import (
-    ManualMatch, MonitoringData, PeriodSponsorshipMatch, Schedule, SponsorshipLmrbAssignment,
-    SystemSetting, TcLmrbMatch, TransmissionReport,
-)
+from core.models import TransmissionReport
 from verification.tc_engine import _build_tc_theme_map, _tc_themes_for_brand
 
-from .models import AgentAction, SummarySnapshot
+from .fingerprint import diff as fingerprint_diff
+from .fingerprint import fingerprint_sha
+from .models import AgentAction, AgentAuthorisation, SummarySnapshot
 
 
 @dataclass
@@ -60,34 +59,25 @@ def v3(schedules) -> Check:
     return Check('V3', not bad, {'mismatches': bad})
 
 
-def v5(scope, schedule, new_sha: str) -> Check:
-    """Any change since the last snapshot must be explained by an AgentAction or a new
-    upload / match record / settings change for the account. BrandMapping has no
-    timestamp, so a mapping edit alone cannot explain a change (reported, not assumed)."""
+def v5(scope, schedule, new_sha: str, fp_now: dict) -> Check:
+    """V5 (Phase 1.1): a change in this schedule's numbers since our last snapshot is
+    explained when AgentActions were logged for the scope since then, or when the
+    external-change fingerprint changed (people edited mappings, uploaded, changed a
+    setting, ran a core engine…). The fingerprint diff is returned for AgentRun.detail.
+    A snapshot without a stored fingerprint cannot explain anything."""
     last = (SummarySnapshot.objects.filter(scope=scope, schedule=schedule)
-            .exclude(kind='golden').order_by('-created_at').first())
+            .exclude(kind='golden').order_by('-created_at', '-id').first())
     if last is None or last.sha256 == new_sha:
         return Check('V5', True, {'changed': False})
-    since = last.created_at
-    acc = scope.account_id
-    reasons = []
-    if AgentAction.objects.filter(scope=scope, created_at__gt=since).exists():
+    reasons, fp_diff = [], {}
+    if AgentAction.objects.filter(scope=scope, created_at__gt=last.created_at).exists():
         reasons.append('agent_action')
-    for label, model, f in (('schedule_upload', Schedule, 'uploaded_at'),
-                            ('monitoring_upload', MonitoringData, 'uploaded_at'),
-                            ('tc_upload', TransmissionReport, 'uploaded_at'),
-                            ('manual_match', ManualMatch, 'matched_at'),
-                            ('sponsorship_assignment', SponsorshipLmrbAssignment, 'matched_at'),
-                            ('period_sponsorship_match', PeriodSponsorshipMatch, 'matched_at'),
-                            ('tc_lmrb_match', TcLmrbMatch, 'matched_at')):
-        qs = model.objects.filter(**{f'{f}__gt': since})
-        if model is not PeriodSponsorshipMatch:
-            qs = qs.filter(account_id=acc)
-        else:
-            qs = qs.filter(period_sponsorship__account_id=acc)
-        if qs.exists():
-            reasons.append(label)
-    if SystemSetting.objects.filter(updated_at__gt=since).exists():
-        reasons.append('settings_change')
-    return Check('V5', bool(reasons), {'changed': True, 'explained_by': reasons,
-                                       'previous_sha': last.sha256, 'new_sha': new_sha})
+    if last.fingerprint_sha256:
+        if fingerprint_sha(fp_now) != last.fingerprint_sha256:
+            fp_diff = fingerprint_diff(last.fingerprint, fp_now)
+            reasons.append('external_change')
+    authorised = AgentAuthorisation.objects.filter(schedule=schedule).exists()
+    return Check('V5', bool(reasons), {
+        'changed': True, 'explained_by': reasons, 'fingerprint_diff': fp_diff,
+        'authorised': authorised, 'schedule_id': schedule.id,
+        'previous_sha': last.sha256, 'new_sha': new_sha, 'previous_snapshot_id': last.id})

@@ -67,7 +67,7 @@ class CoreContractTest(SimpleTestCase):
         allowed_models = {'Account', 'BrandMapping', 'LMRBRow', 'ManualMatch', 'MatchResult',
                           'MonitoringData', 'PeriodSponsorship', 'PeriodSponsorshipMatch', 'Schedule',
                           'ScheduleRow', 'SponsorshipLmrbAssignment', 'SummaryReportMeta', 'SystemSetting',
-                          'TCRow', 'TcLmrbMatch', 'TransmissionReport', 'AuditLog'}
+                          'TCRow', 'TcLmrbMatch', 'TcLmrbThemeMap', 'TransmissionReport', 'AuditLog'}
         missing = []
         for path in list(root.glob('agent/**/*.py')) + list(root.glob('intake/**/*.py')):
             if '/tests/' in str(path) or '/migrations/' in str(path):

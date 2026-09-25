@@ -5,6 +5,7 @@ from core.models import Schedule
 from verification.tc_engine import build_summary_data
 
 from ..canonical import sha256_of, to_jsonable
+from ..fingerprint import fingerprint, fingerprint_sha
 from ..models import ScopeState, SummarySnapshot
 from ..readiness import assess
 from ..scope import active_schedules, makeup_schedules, period, standalone_keys, sync_scopes
@@ -77,11 +78,13 @@ def summary(scope_id: int, persist: bool = False, run=None) -> dict:
     persist=True stores one SummarySnapshot per schedule (agent table, T0)."""
     sc = ScopeState.objects.get(pk=scope_id)
     out = {}
+    fp = fingerprint(sc) if persist else None
     for s in active_schedules(sc):
         data = to_jsonable(build_summary_data(sc.account_id, sc.channel, sc.month, schedule_id=s.id))
         sha = sha256_of(data)
         if persist:
             SummarySnapshot.objects.create(scope=sc, schedule=s, schedule_number=s.schedule_number,
-                                           kind='draft', data=data, sha256=sha, run=run)
+                                           kind='draft', data=data, sha256=sha, run=run,
+                                           fingerprint=fp, fingerprint_sha256=fingerprint_sha(fp))
         out[str(s.id)] = {'schedule_number': s.schedule_number, 'sha256': sha, 'data': data}
     return out

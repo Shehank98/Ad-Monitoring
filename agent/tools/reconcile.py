@@ -35,9 +35,14 @@ from verification.tc_lmrb_engine import reconcile_tc_lmrb
 from .. import gate, validate
 from ..canonical import sha256_of, to_jsonable
 from ..checks import makeup_linked_ids, multi_flag_count
+from ..fingerprint import diff as fingerprint_diff, fingerprint, fingerprint_sha
 from ..locks import scope_lock
-from ..models import AgentConfig, AgentRun, ScheduleStatus, ScopeState, SummarySnapshot
+from ..models import (
+    AgentAction, AgentAuthorisation, AgentConfig, AgentProposal, AgentRun, ScheduleStatus,
+    ScopeState, SummarySnapshot,
+)
 from ..readiness import assess
+from ..service import get_service_user
 from ..scope import active_schedules, has_commercial_rows, lock_key, period
 
 
@@ -111,10 +116,19 @@ def reconcile_scope(scope_id: int, *, actor=None, dry: bool = False, change=None
         gate.ensure_enabled(acc)
         if not gate.allowed(gate.T1, acc):
             raise gate.TierNotAllowed('reconcile_scope needs autonomy level >= 1')
+        if actor is None:          # A9: the service user is the actor on every AgentAction
+            actor = get_service_user()
+            if actor is None:
+                raise RuntimeError('No agent service user: run manage.py agent_ensure_service_user')
+            if actor.role != 'operations':
+                raise RuntimeError(f'Agent service user role is {actor.role!r}, expected operations')
 
     r = assess(scope)
-    if r.state in ('AUTHORISED', 'NEEDS_HUMAN'):
-        return {'status': 'skipped', 'reason': r.reason or r.state.lower(), 'scope_id': scope.id}
+    if r.state == 'NEEDS_HUMAN':
+        return {'status': 'skipped', 'reason': r.reason or 'needs_human', 'scope_id': scope.id}
+    if r.state == 'AUTHORISED':
+        # Frozen for the agent: no engine runs. Only detect changes after authorisation.
+        return _authorised_check(scope, dry, actor)
     if respect_debounce and debounce_hit(scope):
         return {'status': 'skipped', 'reason': 'debounce', 'scope_id': scope.id}
 
@@ -124,16 +138,27 @@ def reconcile_scope(scope_id: int, *, actor=None, dry: bool = False, change=None
     try:
         with scope_lock(lock_key(acc, ch, mo)):
             if not active:     # standalone: TC without schedule
+                # V2 over the whole channel: a standalone scope has no schedule period
+                locks_before = multi_flag_count(acc, ch, None, None)
+
                 def apply_standalone():
                     return {'reconcile_tc_lmrb': reconcile_tc_lmrb(acc, ch, mo, mode='smart')}
                 if dry:
                     result['standalone'] = apply_standalone()
-                    transaction.set_rollback(True)
                 else:
                     gate.perform(tier=gate.T1, action_type='reconcile_standalone', scope=scope,
-                                 target_model='Scope', target_pk=scope.id, before={},
+                                 target_model='Scope', target_pk=scope.id,
+                                 before={'multi_flag_lmrb': locks_before},
                                  apply=apply_standalone, reason='smart TC↔LMRB (no schedule)',
                                  actor=actor, run=run)
+                locks_after = multi_flag_count(acc, ch, None, None)
+                v2 = validate.v2(locks_before, locks_after)
+                result['checks'] = [{'code': v2.code, 'ok': v2.ok, 'detail': v2.detail}]
+                result['multi_flag_lmrb'] = {'before': locks_before, 'after': locks_after}
+                if not v2.ok:
+                    result['status'] = 'validation_failed'
+                if dry or not v2.ok:
+                    transaction.set_rollback(True)
             else:
                 _schedule_path(scope, active, result, dry, change, actor, run)
     except Exception as exc:
@@ -143,6 +168,8 @@ def reconcile_scope(scope_id: int, *, actor=None, dry: bool = False, change=None
 
     # Outside the (possibly rolled-back) transaction: agent bookkeeping only.
     failed = result['status'] == 'validation_failed'
+    if not dry and not failed:
+        _create_amendments(scope, result.get('amendments', []), actor, run)
     run.status = 'rolled_back' if (dry or failed) else 'ok'
     run.detail = {k: v for k, v in result.items() if k not in ('schedules',)}
     run.finished_at = timezone.now()
@@ -163,7 +190,12 @@ def _schedule_path(scope, active, result, dry, change, actor, run):
     before_sha = {sid: sha256_of(d) for sid, d in before.items()}
 
     # V5 on the state we found (changes since our last snapshot must be explained)
-    v5 = [validate.v5(scope, s, before_sha[s.id]) for s in active]
+    fp_now = fingerprint(scope)
+    v5 = [validate.v5(scope, s, before_sha[s.id], fp_now) for s in active]
+    result['external_changes'] = {str(c.detail['schedule_id']): c.detail['fingerprint_diff']
+                                  for c in v5 if c.detail.get('fingerprint_diff')}
+    result['amendments'] = [spec for s, c in zip(active, v5)
+                            if (spec := _amendment_spec(scope, s, before[s.id], c))]
 
     if change is not None:     # dry-run hypothesis (tests / golden check only, P6)
         change()
@@ -173,7 +205,8 @@ def _schedule_path(scope, active, result, dry, change, actor, run):
     def apply():
         box['steps'] = engine_steps(scope, active)
         box['after'] = schedule_summaries(scope, active)
-        return {'summary_sha256': {str(k): sha256_of(v) for k, v in box['after'].items()}}
+        return {'summary_sha256': {str(k): sha256_of(v) for k, v in box['after'].items()},
+                'summaries': {str(k): v for k, v in box['after'].items()}}
 
     if dry:
         apply()
@@ -181,6 +214,7 @@ def _schedule_path(scope, active, result, dry, change, actor, run):
         action = gate.perform(
             tier=gate.T1, action_type='reconcile_scope', scope=scope, target_model='Scope',
             target_pk=scope.id, before={'summary_sha256': {str(k): v for k, v in before_sha.items()},
+                                        'summaries': {str(k): v for k, v in before.items()},
                                         'multi_flag_lmrb': locks_before},
             apply=apply, reason='smart reconcile (A4 order)', actor=actor, run=run)
         result['action_id'] = action.id
@@ -205,15 +239,101 @@ def _schedule_path(scope, active, result, dry, change, actor, run):
     if dry or failed:
         transaction.set_rollback(True)
     else:
+        fp_after = fingerprint(scope)
+        fp_sha = fingerprint_sha(fp_after)
         for s in active:
             SummarySnapshot.objects.create(
                 scope=scope, schedule=s, schedule_number=s.schedule_number, kind='draft',
-                data=after[s.id], sha256=sha256_of(after[s.id]), run=run)
+                data=after[s.id], sha256=sha256_of(after[s.id]), run=run,
+                fingerprint=fp_after, fingerprint_sha256=fp_sha)
     result['multi_flag_lmrb'] = {'before': locks_before, 'after': locks_after}
     if failed:
         result['status'] = 'validation_failed'
     elif unexplained:
         result['status'] = 'unexplained_change'
+
+
+def _amendment_spec(scope, schedule, current_data: dict, v5check) -> dict | None:
+    """Numbers of an AUTHORISED schedule changed and the change is explained (external
+    change or logged action): propose an amendment showing before and after numbers."""
+    d = v5check.detail
+    if not (d.get('changed') and d.get('authorised') and v5check.ok):
+        return None
+    auth = (AgentAuthorisation.objects.filter(schedule=schedule)
+            .select_related('snapshot').order_by('-authorised_at', '-id').first())
+    if auth is None or auth.snapshot_sha256 == d['new_sha']:
+        return None
+    return {'schedule_id': schedule.id, 'schedule_number': schedule.schedule_number,
+            'authorised_sha': auth.snapshot_sha256, 'authorised_data': auth.snapshot.data,
+            'current_sha': d['new_sha'], 'current_data': current_data,
+            'explained_by': d['explained_by'], 'fingerprint_diff': d['fingerprint_diff']}
+
+
+def _authorised_check(scope, dry: bool, actor) -> dict:
+    """AUTHORISED scope: never re-run. Compare each authorised schedule with its
+    authorised snapshot; explained changes become amendment proposals, unexplained
+    changes put the scope in NEEDS_HUMAN. Read-only apart from agent tables."""
+    fp_now = fingerprint(scope)
+    fp_sha = fingerprint_sha(fp_now)
+    result = {'scope_id': scope.id, 'dry': dry, 'status': 'skipped', 'reason': 'authorised', 'amendments': [],
+              'external_changes': {}, 'checks': []}
+    for s in active_schedules(scope):
+        auth = (AgentAuthorisation.objects.filter(schedule=s).select_related('snapshot')
+                .order_by('-authorised_at', '-id').first())
+        if auth is None:
+            continue
+        data = to_jsonable(build_summary_data(scope.account_id, scope.channel, scope.month,
+                                              schedule_id=s.id))
+        sha = sha256_of(data)
+        if sha == auth.snapshot_sha256:
+            continue
+        snap = auth.snapshot
+        reasons, fp_diff = [], {}
+        if AgentAction.objects.filter(scope=scope, created_at__gt=snap.created_at).exists():
+            reasons.append('agent_action')
+        if snap.fingerprint_sha256 and snap.fingerprint_sha256 != fp_sha:
+            fp_diff = fingerprint_diff(snap.fingerprint, fp_now)
+            reasons.append('external_change')
+        result['checks'].append({'code': 'V5', 'ok': bool(reasons),
+                                 'detail': {'schedule_id': s.id, 'explained_by': reasons,
+                                            'fingerprint_diff': fp_diff}})
+        if fp_diff:
+            result['external_changes'][str(s.id)] = fp_diff
+        if reasons:
+            result['amendments'].append({
+                'schedule_id': s.id, 'schedule_number': s.schedule_number,
+                'authorised_sha': auth.snapshot_sha256, 'authorised_data': snap.data,
+                'current_sha': sha, 'current_data': data,
+                'explained_by': reasons, 'fingerprint_diff': fp_diff})
+        else:
+            result['status'] = 'unexplained_change'
+    if not dry and result['checks']:
+        run = AgentRun.objects.create(kind='scope', scope=scope, status='ok',
+                                      detail={k: v for k, v in result.items()}, finished_at=timezone.now())
+        _create_amendments(scope, result['amendments'], actor, run)
+        if result['status'] == 'unexplained_change':
+            scope.state, scope.reason = 'NEEDS_HUMAN', 'unexplained_change_after_authorisation'
+            scope.save(update_fields=['state', 'reason', 'updated_at'])
+    return result
+
+
+def _create_amendments(scope, specs, actor, run) -> list:
+    """Open one amendment AgentProposal per (schedule, current numbers). No UI yet."""
+    made = []
+    for sp in specs:
+        if AgentProposal.objects.filter(kind='amendment', status='open', schedule_id=sp['schedule_id'],
+                                        after__sha256=sp['current_sha']).exists():
+            continue
+        made.append(AgentProposal.objects.create(
+            kind='amendment', tier=gate.T4, action_type='amendment', scope=scope,
+            schedule_id=sp['schedule_id'], target_model='Schedule', target_pk=str(sp['schedule_id']),
+            before={'sha256': sp['authorised_sha'], 'summary': sp['authorised_data']},
+            after={'sha256': sp['current_sha'], 'summary': sp['current_data']},
+            reason=f"Numbers of authorised schedule #{sp['schedule_number']} changed after authorisation.",
+            evidence={'explained_by': sp['explained_by'], 'fingerprint_diff': sp['fingerprint_diff'],
+                      'run_id': run.id if run else None},
+            actor=actor))
+    return made
 
 
 def _update_scope_state(scope: ScopeState, lock_count: int, needs_human: bool) -> None:

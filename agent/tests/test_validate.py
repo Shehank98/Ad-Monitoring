@@ -5,6 +5,7 @@ from django.test import TestCase
 
 from agent import validate
 from agent.canonical import sha256_of
+from agent.fingerprint import fingerprint, fingerprint_sha
 from agent.models import AgentAction, ScopeState, SummarySnapshot
 
 from . import factories as f
@@ -70,9 +71,14 @@ class V2V3V5Test(TestCase):
         acc = f.account()
         s = f.schedule(acc)
         sc = ScopeState.objects.create(account=acc, channel=f.CHANNEL, month=f.MONTH)
-        self.assertTrue(validate.v5(sc, s, 'x').ok)                     # no snapshot yet
-        SummarySnapshot.objects.create(scope=sc, schedule=s, schedule_number='101', data={}, sha256=sha256_of({}))
-        self.assertTrue(validate.v5(sc, s, sha256_of({})).ok)           # unchanged
-        self.assertFalse(validate.v5(sc, s, 'changed').ok)              # unexplained
+        fp = fingerprint(sc)
+        self.assertTrue(validate.v5(sc, s, 'x', fp).ok)                 # no snapshot yet
+        SummarySnapshot.objects.create(scope=sc, schedule=s, schedule_number='101', data={},
+                                       sha256=sha256_of({}), fingerprint=fp,
+                                       fingerprint_sha256=fingerprint_sha(fp))
+        self.assertTrue(validate.v5(sc, s, sha256_of({}), fp).ok)       # unchanged
+        self.assertFalse(validate.v5(sc, s, 'changed', fp).ok)          # unexplained
         AgentAction.objects.create(action_type='x', scope=sc)
-        self.assertTrue(validate.v5(sc, s, 'changed').ok)               # explained
+        c = validate.v5(sc, s, 'changed', fp)
+        self.assertTrue(c.ok)                                            # explained
+        self.assertEqual(c.detail['explained_by'], ['agent_action'])

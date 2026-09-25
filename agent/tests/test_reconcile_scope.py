@@ -8,6 +8,7 @@ from unittest import mock
 from django.test import TransactionTestCase, override_settings
 
 from agent import gate
+from agent.service import ensure_service_user
 from agent.models import AgentAction, AgentConfig, AgentRun, ScheduleStatus, ScopeState, SummarySnapshot
 from agent.tools import reconcile as R
 from agent.tools.reconcile import DryRunNotAllowed, dry_run, reconcile_scope
@@ -22,6 +23,7 @@ def enable(level=1):
     c = AgentConfig.get_solo()
     c.enabled, c.autonomy_level, c.upload_debounce_minutes = True, level, 0
     c.save()
+    ensure_service_user()      # A9: the service user is the default actor
 
 
 def scope(acc):
