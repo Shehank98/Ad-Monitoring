@@ -219,3 +219,10 @@ Non-blocking notes:
 1. Guardian check 1: confirm the guardian checklist change (commit `4b19724`).
 2. First 1.1 run: expect NEEDS_HUMAN on scopes whose numbers moved since their last pre-1.1 snapshot (note 3).
 3. The Phase 5 items in `phase1_followups.md`: PROTECT, partial authorisation, and the amendment UI.
+
+### Guardian checklist replaced (owner decision, after the Phase 1.1 review)
+
+The owner replaced `.claude/agents/numbers-guardian.md` with the original 8-check version
+from the brief. This resolves the check 1 BLOCK above. Checks 9–18 are no longer part of the
+guardian. The rules they covered (always pass `schedule_id`, ScopeLock, the read-only
+commands, the core contract, the service user) are still enforced by the agent tests.

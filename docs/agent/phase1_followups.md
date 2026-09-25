@@ -35,7 +35,7 @@ AgentAction and need no actor. Tests: `test_standalone_path_runs_v2_and_logs_ser
   - records a `service_user_account_sync` AgentAction with before/after account ids;
   - never changes role, password or is_active, and never touches another user;
   - stops with a Heartbeat alert if the role is wrong.
-- Guardian check 18 covers these rules. Tests: `ServiceUserSyncTest` (5 tests).
+- Tests: `ServiceUserSyncTest` (6 tests). (Guardian check 18 was removed when the owner replaced the guardian with the 8-check version; these rules stay enforced by the tests.)
 
 **4. `on_delete=PROTECT` on AgentAuthorisation (Phase 5).** Nothing creates an
 AgentAuthorisation before Phase 5, so today no core delete can hit `ProtectedError`. Before
