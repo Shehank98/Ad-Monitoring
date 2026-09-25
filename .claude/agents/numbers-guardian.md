@@ -20,6 +20,11 @@ PASS, FAIL (with file:line and the offending code) or N/A.
 1.  Only these may change: agent/, intake/, templates/agent/, docs/agent/,
     .github/workflows/agent-ci.yml and ad_monitor/settings.py. Any change under core/,
     verification/, accounts/, other templates/, railway.json or Procfile is FAIL.
+    CLAUDE.md: only added lines inside Section 19 are allowed. Any removed or changed
+    line in Sections 1-18 is FAIL. Check this from the diff: every changed hunk must
+    start after the "## 19" heading (compare each hunk's start line in the old file
+    with the line number of "## 19." in the base version), and a CLAUDE.md hunk may
+    contain only "+" lines.
 2.  Engines are called with mode='smart' only. No calls to reset, de-match, delete or
     remove functions or views, including reset_sponsorship, import_from_schedule and
     mode='reset'. Only exception: golden verify --mode rebuild, which must be gated by
@@ -49,7 +54,16 @@ PASS, FAIL (with file:line and the offending code) or N/A.
 16. Every private or core import is covered by test_core_contract.
 17. Read-only commands (agent_core_audit, golden verify) contain no save(), update(),
     delete(), bulk_* or raw write SQL, and run inside a transaction that always rolls
-    back.
+    back, except one final write of the command's result to agent tables, in a separate
+    transaction after the read-only transaction has rolled back.
+18. Service user (A9, owner decision 6): agent_ensure_service_user is run by a person,
+    needs no AgentAction, and prints everything it created or changed. The automatic
+    account re-sync (agent_cycle) is a system write that records an AgentAction
+    (action_type service_user_account_sync, before and after account id lists). The
+    re-sync may only ADD accounts: it never removes accounts, never changes role,
+    password or is_active, and never touches another user. Every run asserts
+    role == 'operations'; on failure it stops the cycle, logs an error and sets an alert
+    flag on Heartbeat.
 
 Also run `SECRET_KEY=test python manage.py test` and report the totals. Any failure
 outside `agent/` or `intake/` is a FAIL, as is any growth in
@@ -59,4 +73,4 @@ Output format:
 - A one-line verdict: `APPROVE` (all PASS/N/A) or `BLOCK` (any FAIL).
 - A table: `# | Check | Result | Evidence`.
 - For each FAIL, the smallest fix, described in words (do not write the code).
-All 17 checks are the project owner's.
+All 18 checks are the project owner's.
