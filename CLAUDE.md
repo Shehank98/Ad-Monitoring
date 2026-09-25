@@ -888,3 +888,25 @@ findings: `docs/agent/phase0_discovery.md`; code-vs-doc differences:
 - AUTHORISED = `SummaryReportMeta.authorised_by` is filled for the scope.
 - Tests: `agent/tests.py` (state rules, access, "no core rows written").
 - Next: Phase 1 adds agent models (`AgentConfig`, `ScopeState`, `AgentAction`, …).
+
+### Phase 1 — foundation (agent disabled by default)
+Rules: `docs/agent/BRIEF_AMENDMENT_01.md` wins over the brief. Report: `docs/agent/phase1_report.md`.
+- **Kill switch:** `AgentConfig.enabled=False`, `autonomy_level=0` by default. `agent/gate.py` re-reads
+  it immediately before every write; every write records an `AgentAction` (before/after).
+- **One scope run = `agent/tools/reconcile.py::reconcile_scope`**, inside one `transaction.atomic()`
+  under `ScopeLock` (`agent/locks.py`: `pg_try_advisory_xact_lock` on PostgreSQL, `ScopeLockRow`
+  fallback elsewhere): `run_scope` once (skipped when the scope has no COMMERCIAL rows) → per
+  active schedule `reconcile_tc` + `reconcile_sponsorship` **with `schedule_id`** →
+  `reconcile_period_sponsorship` → `build_summary_data(schedule_id=…)` per schedule.
+  Never call those three without `schedule_id` (superseded rows would be counted).
+- **Scope state:** `agent/readiness.py` is the single source (also used by the preview pages).
+- **Checks:** `agent/validate.py` V1–V5 follow the code, not §9 (there is no "3rd Party ≥ Aired").
+  `agent/diagnose.py` findings are information only (incl. `LOCK_ORPHANED` sub-codes).
+- **Commands:** `agent_ensure_service_user`, `agent_core_audit` (read-only, rolled back),
+  `agent_golden_check snapshot | verify --mode idempotent | verify --mode rebuild`
+  (rebuild needs `AGENT_DISPOSABLE_DB=1`). Real-data steps: `docs/agent/runbook_real_data.md`.
+- **Core contract:** every private/core function the agent imports is pinned in
+  `agent/tests/test_core_contract.py`; add new imports there first.
+- **Tests:** `python manage.py test agent intake` (preview tests now in
+  `agent/tests/test_preview_ui.py`). CI: `.github/workflows/agent-ci.yml` (PostgreSQL).
+- `templates/base.html` is protected: nav changes ship as patches in `docs/agent/patches/`.
