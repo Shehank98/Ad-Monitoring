@@ -36,6 +36,7 @@ from .. import gate, validate
 from ..canonical import sha256_of, to_jsonable
 from ..checks import makeup_linked_ids, multi_flag_count
 from ..fingerprint import diff as fingerprint_diff, fingerprint, fingerprint_sha
+from ..fingerprint import is_current as fingerprint_is_current, relevant_diff, scope_context
 from ..locks import scope_lock
 from ..models import (
     AgentAction, AgentAuthorisation, AgentConfig, AgentProposal, AgentRun, ScheduleStatus,
@@ -173,7 +174,8 @@ def reconcile_scope(scope_id: int, *, actor=None, dry: bool = False, change=None
     if not dry:
         locks = result.get('multi_flag_lmrb', {})
         _update_scope_state(scope, locks.get('before') if failed else locks.get('after'),
-                            failed or result['status'] == 'unexplained_change')
+                            failed or result['status'] == 'unexplained_change',
+                            result.get('baselines'))
     return result
 
 
@@ -187,9 +189,15 @@ def _schedule_path(scope, active, result, dry, change, actor, run):
 
     # V5 on the state we found (changes since our last snapshot must be explained)
     fp_now = fingerprint(scope)
-    v5 = [validate.v5(scope, s, before_sha[s.id], fp_now) for s in active]
-    result['external_changes'] = {str(c.detail['schedule_id']): c.detail['fingerprint_diff']
-                                  for c in v5 if c.detail.get('fingerprint_diff')}
+    ctx = scope_context(scope)
+    v5 = [validate.v5(scope, s, before_sha[s.id], fp_now, ctx) for s in active]
+    # Account-wide diff kept for information; only the scope-relevant part explains.
+    result['external_changes'] = {
+        str(c.detail['schedule_id']): {'account_wide': c.detail['fingerprint_diff'],
+                                       'relevant': c.detail.get('relevant_diff', {})}
+        for c in v5 if c.detail.get('fingerprint_diff')}
+    result['baselines'] = {str(c.detail['schedule_id']): c.detail['baseline']
+                           for c in v5 if c.detail.get('baseline')}
     result['amendments'] = [spec for s, c in zip(active, v5)
                             if (spec := _amendment_spec(scope, s, before[s.id], c))]
 
@@ -262,14 +270,15 @@ def _amendment_spec(scope, schedule, current_data: dict, v5check) -> dict | None
     return {'schedule_id': schedule.id, 'schedule_number': schedule.schedule_number,
             'authorised_sha': auth.snapshot_sha256, 'authorised_data': auth.snapshot.data,
             'current_sha': d['new_sha'], 'current_data': current_data,
-            'explained_by': d['explained_by'], 'fingerprint_diff': d['fingerprint_diff']}
+            'explained_by': d['explained_by'], 'fingerprint_diff': d.get('relevant_diff', {}),
+            'account_wide_diff': d['fingerprint_diff']}
 
 
 def _authorised_check(scope, dry: bool, actor) -> dict:
     """AUTHORISED scope: never re-run. Compare each authorised schedule with its
     authorised snapshot; explained changes become amendment proposals, unexplained
     changes put the scope in NEEDS_HUMAN. Read-only apart from agent tables."""
-    fp_now, current = _authorised_reads(scope)
+    fp_now, ctx, current = _authorised_reads(scope)
     fp_sha = fingerprint_sha(fp_now)
     result = {'scope_id': scope.id, 'dry': dry, 'status': 'skipped', 'reason': 'authorised', 'amendments': [],
               'external_changes': {}, 'checks': []}
@@ -278,23 +287,27 @@ def _authorised_check(scope, dry: bool, actor) -> dict:
         if sha == auth.snapshot_sha256:
             continue
         snap = auth.snapshot
-        reasons, fp_diff = [], {}
+        reasons, full, fp_diff = [], {}, {}
         if AgentAction.objects.filter(scope=scope, created_at__gt=snap.created_at).exists():
             reasons.append('agent_action')
-        if snap.fingerprint_sha256 and snap.fingerprint_sha256 != fp_sha:
-            fp_diff = fingerprint_diff(snap.fingerprint, fp_now)
-            reasons.append('external_change')
+        # Authorised numbers are never accepted on a baseline: a snapshot without a current
+        # fingerprint cannot explain anything here (the change stays unexplained).
+        if fingerprint_is_current(snap.fingerprint) and snap.fingerprint_sha256 != fp_sha:
+            full = fingerprint_diff(snap.fingerprint, fp_now)
+            fp_diff = relevant_diff(full, snap.fingerprint, fp_now, ctx)
+            if fp_diff:
+                reasons.append('external_change')
         result['checks'].append({'code': 'V5', 'ok': bool(reasons),
                                  'detail': {'schedule_id': s.id, 'explained_by': reasons,
-                                            'fingerprint_diff': fp_diff}})
-        if fp_diff:
-            result['external_changes'][str(s.id)] = fp_diff
+                                            'fingerprint_diff': full, 'relevant_diff': fp_diff}})
+        if full:
+            result['external_changes'][str(s.id)] = {'account_wide': full, 'relevant': fp_diff}
         if reasons:
             result['amendments'].append({
                 'schedule_id': s.id, 'schedule_number': s.schedule_number,
                 'authorised_sha': auth.snapshot_sha256, 'authorised_data': snap.data,
                 'current_sha': sha, 'current_data': data,
-                'explained_by': reasons, 'fingerprint_diff': fp_diff})
+                'explained_by': reasons, 'fingerprint_diff': fp_diff, 'account_wide_diff': full})
         else:
             result['status'] = 'unexplained_change'
     if not dry and result['checks']:
@@ -321,6 +334,7 @@ def _authorised_reads(scope):
                 with connection.cursor() as cur:   # must be the transaction's first statement
                     cur.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
             box['fp'] = fingerprint(scope)
+            box['ctx'] = scope_context(scope)
             rows = []
             for s in active_schedules(scope):
                 auth = (AgentAuthorisation.objects.filter(schedule=s).select_related('snapshot')
@@ -333,7 +347,7 @@ def _authorised_reads(scope):
             raise _Done
     except _Done:
         pass
-    return box['fp'], box['rows']
+    return box['fp'], box['ctx'], box['rows']
 
 
 def _create_amendments(scope, specs, actor, run) -> list:
@@ -350,12 +364,14 @@ def _create_amendments(scope, specs, actor, run) -> list:
             after={'sha256': sp['current_sha'], 'summary': sp['current_data']},
             reason=f"Numbers of authorised schedule #{sp['schedule_number']} changed after authorisation.",
             evidence={'explained_by': sp['explained_by'], 'fingerprint_diff': sp['fingerprint_diff'],
+                      'account_wide_diff': sp.get('account_wide_diff', {}),
                       'run_id': run.id if run else None},
             actor=actor))
     return made
 
 
-def _update_scope_state(scope: ScopeState, lock_count: int, needs_human: bool) -> None:
+def _update_scope_state(scope: ScopeState, lock_count: int, needs_human: bool,
+                        baselines: dict | None = None) -> None:
     r = assess(scope)
     scope.state = 'NEEDS_HUMAN' if needs_human else r.state
     scope.reason = 'validation' if needs_human else r.reason
@@ -369,6 +385,8 @@ def _update_scope_state(scope: ScopeState, lock_count: int, needs_human: bool) -
             schedule=s.schedule,
             defaults={'scope': scope, 'sub_status': s.sub_status, 'has_tc': s.has_tc,
                       'makeup_linked': s.schedule.id in linked,
+                      # Phase 1.2: first run / pre-1.1 snapshot -> info, never NEEDS_HUMAN
+                      'baseline_reason': (baselines or {}).get(str(s.schedule.id), ''),
                       'matched_count': s.matched, 'pending_count': s.pending})
 
 

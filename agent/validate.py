@@ -11,7 +11,8 @@ from core.models import TransmissionReport
 from verification.tc_engine import _build_tc_theme_map, _tc_themes_for_brand
 
 from .fingerprint import diff as fingerprint_diff
-from .fingerprint import fingerprint_sha
+from .fingerprint import fingerprint_sha, relevant_diff, scope_context
+from .fingerprint import is_current as fingerprint_is_current
 from .models import AgentAction, AgentAuthorisation, SummarySnapshot
 
 
@@ -59,25 +60,38 @@ def v3(schedules) -> Check:
     return Check('V3', not bad, {'mismatches': bad})
 
 
-def v5(scope, schedule, new_sha: str, fp_now: dict) -> Check:
-    """V5 (Phase 1.1): a change in this schedule's numbers since our last snapshot is
-    explained when AgentActions were logged for the scope since then, or when the
-    external-change fingerprint changed (people edited mappings, uploaded, changed a
-    setting, ran a core engine…). The fingerprint diff is returned for AgentRun.detail.
-    A snapshot without a stored fingerprint cannot explain anything."""
+def v5(scope, schedule, new_sha: str, fp_now: dict, ctx: dict | None = None) -> Check:
+    """V5: a change in this schedule's numbers since our last snapshot must be explained.
+
+    Explained = AgentActions were logged for the scope since then, OR the part of the
+    external-change fingerprint that is RELEVANT TO THIS SCOPE changed (Phase 1.2 item 3).
+    The account-wide diff is returned too, for AgentRun.detail (information only).
+
+    First-run baseline (Phase 1.2 item 2), never NEEDS_HUMAN:
+      no previous snapshot                      -> baseline 'no_prior_snapshot'
+      previous snapshot has no (current) fingerprint -> baseline 'baseline_no_fingerprint'
+    """
     last = (SummarySnapshot.objects.filter(scope=scope, schedule=schedule)
             .exclude(kind='golden').order_by('-created_at', '-id').first())
-    if last is None or last.sha256 == new_sha:
-        return Check('V5', True, {'changed': False})
-    reasons, fp_diff = [], {}
+    base = {'schedule_id': schedule.id, 'new_sha': new_sha}
+    if last is None:
+        return Check('V5', True, {**base, 'changed': False, 'baseline': 'no_prior_snapshot'})
+    base.update(previous_sha=last.sha256, previous_snapshot_id=last.id)
+    if not fingerprint_is_current(last.fingerprint):
+        return Check('V5', True, {**base, 'changed': last.sha256 != new_sha,
+                                  'baseline': 'baseline_no_fingerprint'})
+    if last.sha256 == new_sha:
+        return Check('V5', True, {**base, 'changed': False})
+    reasons, full, relevant = [], {}, {}
     if AgentAction.objects.filter(scope=scope, created_at__gt=last.created_at).exists():
         reasons.append('agent_action')
-    if last.fingerprint_sha256:
-        if fingerprint_sha(fp_now) != last.fingerprint_sha256:
-            fp_diff = fingerprint_diff(last.fingerprint, fp_now)
+    if fingerprint_sha(fp_now) != last.fingerprint_sha256:
+        full = fingerprint_diff(last.fingerprint, fp_now)
+        relevant = relevant_diff(full, last.fingerprint, fp_now,
+                                 ctx if ctx is not None else scope_context(scope))
+        if relevant:
             reasons.append('external_change')
     authorised = AgentAuthorisation.objects.filter(schedule=schedule).exists()
     return Check('V5', bool(reasons), {
-        'changed': True, 'explained_by': reasons, 'fingerprint_diff': fp_diff,
-        'authorised': authorised, 'schedule_id': schedule.id,
-        'previous_sha': last.sha256, 'new_sha': new_sha, 'previous_snapshot_id': last.id})
+        **base, 'changed': True, 'explained_by': reasons, 'fingerprint_diff': full,
+        'relevant_diff': relevant, 'authorised': authorised})

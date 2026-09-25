@@ -103,6 +103,9 @@ class ScheduleStatus(models.Model):
     # Parent of, or makeup for, another schedule (D25). Drafts (Phase 5) will show:
     # "Makeup spots for this schedule are reported under schedule <number>."
     makeup_linked = models.BooleanField(default=False)
+    # Phase 1.2 first-run baseline (info only, grouped on the overview; never NEEDS_HUMAN):
+    # 'no_prior_snapshot' | 'baseline_no_fingerprint' | ''
+    baseline_reason = models.CharField(max_length=32, blank=True, default='')
     matched_count = models.PositiveIntegerField(default=0)
     pending_count = models.PositiveIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)

@@ -125,6 +125,16 @@ def diagnose(scope: ScopeState, readiness=None) -> list[Finding]:
                            'Each is reconciled and reported in its own scope; the billing rule '
                            'is pending with finance (D25).', tier=0, severity='info', evidence=link))
 
+    # ── BASELINE (Phase 1.2, information only; grouped on the overview) ──
+    from .models import ScheduleStatus
+    for st in (ScheduleStatus.objects.filter(schedule_id__in=ids).exclude(baseline_reason='')
+               .select_related('schedule').order_by('schedule__schedule_number')):
+        out.append(Finding('BASELINE', f'Schedule #{st.schedule.schedule_number}: '
+                           f'{checks.BASELINE_LABELS.get(st.baseline_reason, st.baseline_reason)}. '
+                           'This run becomes the baseline; later changes are checked against it.',
+                           tier=0, severity='info', sub_code=st.baseline_reason,
+                           evidence={'schedule_id': st.schedule_id, 'reason': st.baseline_reason}))
+
     # ── LOCK_ORPHANED, per flag (information only) ──
     for sub, sets in checks.lock_orphaned_querysets(acc).items():
         for label, qs in sets:

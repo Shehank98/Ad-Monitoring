@@ -22,6 +22,7 @@ from core.models import AuditLog, get_setting, get_setting_int, get_setting_list
 from core.views import _account_access, _account_qs
 from verification.tc_engine import build_summary_data
 
+from .checks import baseline_groups
 from .scopes import (
     STATE_LABEL, STATES, available_months, build_scope, build_scopes,
     spot_strip, state_counts,
@@ -116,6 +117,7 @@ def overview(request):
         'attention': attention[:10], 'attention_total': len(attention),
         'clients': client_rows, 'activity': _activity_qs(request.user)[:6],
         'agent_enabled': False,
+        'baselines': baseline_groups(account_ids),
     })
 
 

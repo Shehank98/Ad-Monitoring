@@ -231,3 +231,30 @@ def lock_orphaned_querysets(account_id=None):
             ('ScheduleRow', ScheduleRow.objects.filter(is_matched=True, matched_lmrb__isnull=True, **f)),
         ],
     }
+
+
+# ── First-run baseline (Phase 1.2 item 2) ─────────────────────────────────────
+
+BASELINE_LABELS = {
+    'no_prior_snapshot': 'First agent run: no earlier snapshot to compare with',
+    'baseline_no_fingerprint': 'Earlier snapshot predates the change fingerprint (saved before 1.1)',
+}
+
+
+def baseline_groups(account_ids=None) -> list[dict]:
+    """Schedules whose last V5 was a baseline, grouped by reason (one info card on the
+    overview, never one alert per scope)."""
+    from .models import ScheduleStatus
+    qs = ScheduleStatus.objects.exclude(baseline_reason='')
+    if account_ids is not None:
+        qs = qs.filter(scope__account_id__in=account_ids)
+    groups = {}
+    for reason, acc_name, scope_id in (qs.order_by('baseline_reason', 'scope__account__name')
+                                       .values_list('baseline_reason', 'scope__account__name', 'scope_id')):
+        g = groups.setdefault(reason, {'reason': reason, 'label': BASELINE_LABELS.get(reason, reason),
+                                       'schedules': 0, 'scopes': set(), 'accounts': []})
+        g['schedules'] += 1
+        g['scopes'].add(scope_id)
+        if acc_name not in g['accounts']:
+            g['accounts'].append(acc_name)
+    return [{**g, 'scopes': len(g['scopes'])} for g in groups.values()]

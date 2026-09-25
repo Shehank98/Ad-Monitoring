@@ -77,6 +77,21 @@
   {% else %}<div class="nv-empty"><b>Nothing blocked</b>Every scope in {{ month }} has its inputs and mappings.</div>{% endif %}
 </section>
 
+{% if baselines %}
+<section class="nv-panel">
+  <div class="hd"><h3>Baseline runs</h3><span class="sub">Information only: these schedules had nothing earlier to compare with, so this run sets their baseline</span></div>
+  <div class="nv-tscroll"><table class="nv-t">
+    <thead><tr><th>Reason</th><th>Schedules</th><th>Scopes</th><th>Clients</th></tr></thead>
+    <tbody>
+    {% for b in baselines %}
+      <tr><td><span class="nv-chip">{{ b.label }}</span></td><td>{{ b.schedules }}</td><td>{{ b.scopes }}</td>
+          <td class="nv-muted">{{ b.accounts|join:", "|truncatechars:80 }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endif %}
+
 <section class="nv-panel">
   <div class="hd"><h3>Progress by client</h3><span class="sub">Authorised scopes / total scopes in {{ month }}</span></div>
   <div class="bd">
