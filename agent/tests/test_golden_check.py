@@ -87,6 +87,16 @@ class GoldenCheckTest(TransactionTestCase):
         self.assertEqual(rep['differences'], 0, golden.render(rep))
         self.assertEqual(before, state())
 
+    def test_clear_engine_state_guards_itself(self):
+        sc = golden.resolve(self.entries[:1])[0]
+        with self.assertRaises(golden.GoldenRefused):
+            golden._clear_engine_state(sc, [self.v2])
+        before = state()
+        with mock.patch.dict(os.environ, {'AGENT_DISPOSABLE_DB': '1'}):
+            with self.assertRaises(golden.GoldenRefused):       # not inside a transaction
+                golden._clear_engine_state(sc, [self.v2])
+        self.assertEqual(before, state())
+
     def test_scope_strings_must_match_stored_exactly(self):
         with self.assertRaises(golden.GoldenRefused):
             golden.resolve([{'account': 'Keells', 'channel': 'sirasa tv', 'month': f.MONTH}])

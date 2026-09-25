@@ -156,6 +156,10 @@ def _clear_engine_state(sc: ScopeState, active) -> None:
     run_scope 'reset' keeps ManualMatch rows; reconcile_tc 'reset' skips TC rows pinned by
     ManualMatch; only match_type='auto' sponsorship assignments are removed;
     period-sponsorship matches are engine-made."""
+    if os.environ.get('AGENT_DISPOSABLE_DB') != '1':      # defence in depth: never trust the caller
+        raise GoldenRefused('engine state may only be cleared on a disposable database')
+    if not connection.in_atomic_block:
+        raise GoldenRefused('engine state may only be cleared inside a rolled-back transaction')
     acc, ch, mo = sc.account_id, sc.channel, sc.month
     run_scope(acc, ch, mo, mode='reset')
     for s in active:

@@ -99,6 +99,10 @@ def reconcile_scope(scope_id: int, *, actor=None, dry: bool = False, change=None
     engine counts, and the V1–V3/V5 checks. Validation failure rolls the run back and
     puts the scope in NEEDS_HUMAN.
     """
+    if change is not None and not dry:
+        # Guardian check 5: a hypothesis may only ever run inside a rolled-back dry run,
+        # never as a committed write outside gate.perform().
+        raise ValueError('change= is only allowed with dry=True')
     scope = ScopeState.objects.get(pk=scope_id)
     acc, ch, mo = scope.account_id, scope.channel, scope.month
     if dry and not _dry_run_allowed():

@@ -49,6 +49,15 @@ class ReconcileScopeTest(TransactionTestCase):
     def setUp(self):
         enable(level=1)
 
+    def test_change_hook_refused_outside_dry_run(self):
+        acc, _ = f.full_scope()
+        called = []
+        with self.assertRaises(ValueError):
+            reconcile_scope(scope(acc).id, change=lambda: called.append(1))
+        self.assertEqual(called, [])
+        self.assertFalse(ScheduleRow.objects.filter(is_matched=True).exists())
+        self.assertFalse(AgentRun.objects.exists())
+
     def test_engine_order_and_schedule_id_always_passed(self):
         acc, s1 = f.full_scope(number='101')
         s2 = f.schedule(acc, number='102')

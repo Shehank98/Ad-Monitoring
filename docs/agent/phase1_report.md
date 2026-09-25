@@ -7,12 +7,12 @@ Branch `claude/design-system-extraction-vnav5h`. Phase 1 base `a4df7a3`. Brief +
 
 | # | Rule | Status |
 |---|---|---|
-| 1 | Test baseline (A2) | **Met.** Full suite 259/259 on SQLite and on PostgreSQL 16 (168 core + 91 agent/intake). |
+| 1 | Test baseline (A2) | **Met.** Full suite: 261 run, 0 failures on SQLite (2 skipped) and on PostgreSQL 16 (7 skipped); 168 core + 93 agent/intake. All 168 core tests pass. |
 | 2 | `test_core_contract` passes | **Met.** 29 pinned signatures plus a source scan that fails on any unpinned core import. |
 | 3 | Golden check matches exactly on the listed scopes, on PostgreSQL | **Met on synthetic scopes only** (a revised schedule and a two-schedule scope). **Open on real data**: you run it per `runbook_real_data.md`. |
 | 4 | `agent_core_audit` ran and its report is committed | **Met on synthetic data** (`core_audit_20260925_SYNTHETIC.md`). **Open on real data** (same runbook). |
 | 5 | `nova_tools_review.md` written | **Met.** |
-| 6 | No protected path, nothing under `core/` | **Met.** See the guardian verdict below. |
+| 6 | No protected path, nothing under `core/` | **Met for code.** The one non-listed file is `CLAUDE.md` (the §19 append that brief §17 requires); guardian check 1 needs your exemption, see below. |
 
 ## What was built
 
@@ -84,8 +84,8 @@ Branch `claude/design-system-extraction-vnav5h`. Phase 1 base `a4df7a3`. Brief +
 
 | Run | Result |
 |---|---|
-| SQLite, full suite | 259 tests, OK (2 skipped: PostgreSQL-only lock tests) |
-| PostgreSQL 16, full suite | 259 tests, OK (7 skipped: SQLite-only fallback/refusal tests); advisory-lock contention and release-on-rollback pass |
+| SQLite, full suite | 261 run, 0 failures, 2 skipped (PostgreSQL-only lock tests) |
+| PostgreSQL 16, full suite | 261 run, 0 failures, 7 skipped (SQLite-only fallback/refusal tests); advisory-lock contention and release-on-rollback pass |
 | `makemigrations agent intake --check` | No changes |
 | Golden `verify --mode idempotent` (PostgreSQL, synthetic) | MATCH: #101 (revised v2), #201 and #202 (two schedules, one scope) |
 | Golden `verify --mode rebuild` (PostgreSQL, synthetic, `AGENT_DISPOSABLE_DB=1`) | 0 differences |
@@ -110,7 +110,21 @@ audit detects them. They say nothing about production:
 
 ## Numbers-guardian review
 
-_To be filled from the guardian's report._
+First review (range `a4df7a3...527ae8d`): **BLOCK** on 2 of 17 checks; 15 PASS or N/A. Both suites passed.
+
+| Check | Finding | Resolution |
+|---|---|---|
+| 5 (core writes through the gate) | `reconcile_scope(change=…)` ran the hook even when `dry=False`: a committed write outside `gate.perform`. It was latent, since only tests passed `change`. | **Fixed.** `reconcile_scope` now raises before anything runs if `change` is given without `dry=True`, with a test. Also hardened: `golden._clear_engine_state` now checks `AGENT_DISPOSABLE_DB=1` and an active transaction itself, instead of trusting its caller (with a test). |
+| 1 (allowed paths) | `CLAUDE.md` changed (the §19 append). It is not on the check-1 list. | **Needs your decision.** Brief §17 step 4 requires the append, but check 1 has no exemption for it. Either add "CLAUDE.md §19 (append only)" to check 1, or I move the text elsewhere. I have not reverted it. |
+
+Non-blocking notes from the guardian, for later phases:
+1. **AgentAction stores summary hashes, not values.** The full before/after summaries are in the rolled-back result, not on the action. Store the per-schedule summaries before Phase 4 so reverts and audits can show *what* changed.
+2. **No actor yet.** `reconcile_scope` has no actor by default. A9 wants the service user on every action; this gets wired in with `agent_cycle` (Phase 2/3).
+3. **The service user command writes `accounts.User` without an AgentAction.** A9 asks for this and a person runs the command, but please confirm that exemption.
+4. **`AgentAuthorisation` uses `on_delete=PROTECT`** on Schedule and User. Once authorisations exist (Phase 5), core's delete views would raise `ProtectedError`. Revisit before Phase 5.
+5. **The standalone TC↔LMRB path has no V2/V3 check** after a real run.
+6. **T3 trusts the caller's `exact_value` flag.** The gate should inspect the value for `*` itself before Phase 4.
+7. **The CI push filter** doesn't include `docs/agent/**`, which is intentional since docs don't affect tests.
 
 ## Open questions
 
