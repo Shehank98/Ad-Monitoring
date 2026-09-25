@@ -1,0 +1,13 @@
+--- a/templates/base.html
++++ b/templates/base.html
+@@ -508,8 +508,8 @@
+         <i class="nav-icon fa-solid fa-house-chimney"></i><span class="nav-text">Dashboard</span>
+       </a>
+ 
+-      {# ── Nova agent (agent app, /dashboard/agent/) ── #}
+-      <p class="nav-label"><span class="nav-text"><span class="agent-dot"></span>Nova Agent</span></p>
++      {# ── Reconciliation Agent (agent app, /dashboard/agent/) ── #}
++      <p class="nav-label"><span class="nav-text"><span class="agent-dot"></span>Reconciliation Agent</span></p>
+       <a href="/dashboard/agent/" class="nav-item agent-link {% if path == '/dashboard/agent/' %}active{% endif %}">
+         <i class="nav-icon fa-solid fa-wand-magic-sparkles"></i><span class="nav-text">Agent Overview</span>
+       </a>

@@ -1,0 +1,39 @@
+# Reconciliation Agent CI (Amendment A1): full Django suite on PostgreSQL, including the
+# advisory-lock tests that only run on PostgreSQL. Live-LLM evals are excluded.
+name: agent-ci
+
+on:
+  push:
+    paths: ['agent/**', 'intake/**', 'templates/agent/**', 'ad_monitor/settings.py',
+            'requirements.txt', '.github/workflows/agent-ci.yml', 'core/**', 'verification/**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: admon
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      SECRET_KEY: ci-only-secret
+      DEBUG: 'False'
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/admon
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: No missing migrations for agent / intake
+        run: python manage.py makemigrations agent intake --check --dry-run
+      - name: Full suite on PostgreSQL (evals excluded)
+        run: python manage.py test --noinput --exclude-tag=eval
