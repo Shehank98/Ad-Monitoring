@@ -41,14 +41,18 @@ class GateTest(TestCase):
         cfg(level=1)
         self.assertTrue(gate.allowed(gate.T1))
         self.assertFalse(gate.allowed(gate.T2))            # A8: aliases never auto
-        self.assertFalse(gate.allowed(gate.T3, conditions=ALL_T3))
+        self.assertFalse(gate.allowed(gate.T3, conditions=ALL_T3, values=['NEXUS 30']))
         cfg(level=3)
-        self.assertTrue(gate.allowed(gate.T3, conditions=ALL_T3))
-        self.assertFalse(gate.allowed(gate.T4, conditions=ALL_T3))
+        self.assertTrue(gate.allowed(gate.T3, conditions=ALL_T3, values=['NEXUS 30']))
+        self.assertFalse(gate.allowed(gate.T3, conditions=ALL_T3))       # values are required
+        self.assertFalse(gate.allowed(gate.T4, conditions=ALL_T3, values=['NEXUS 30']))
 
     def test_wildcard_is_never_auto_applied(self):
         cfg(level=3)
-        self.assertFalse(gate.allowed(gate.T3, conditions={**ALL_T3, 'exact_value': False}))
+        self.assertFalse(gate.allowed(gate.T3, conditions={**ALL_T3, 'exact_value': False}, values=['X']))
+        # the gate inspects the value itself, even when the caller claims exact_value
+        for v in (['NEXUS*'], ['A|B*'], ['ok', 'Theme*']):
+            self.assertFalse(gate.allowed(gate.T3, conditions=ALL_T3, values=v), v)
 
     def test_authorised_change_is_a_proposal(self):
         cfg(level=3)

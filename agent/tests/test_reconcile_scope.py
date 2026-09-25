@@ -51,6 +51,30 @@ class ReconcileScopeTest(TransactionTestCase):
     def setUp(self):
         enable(level=1)
 
+    def test_standalone_path_runs_v2_and_logs_service_user(self):
+        """Guardian notes 2 and 5: V2 around reconcile_tc_lmrb; the service user is the actor."""
+        acc = f.account()
+        ensure_service_user()
+        rep = f.tc_report(acc, None)
+        f.tc_row(acc, rep, day=10)
+        f.lmrb(acc, day=10, time='20:05:00', theme='NEXUS 30')
+        res = reconcile_scope(scope(acc).id)
+        self.assertEqual(res['status'], 'ok')
+        self.assertEqual([c['code'] for c in res['checks']], ['V2'])
+        self.assertEqual(res['multi_flag_lmrb'], {'before': 0, 'after': 0})
+        act = AgentAction.objects.get(action_type='reconcile_standalone')
+        self.assertEqual(act.actor.email, 'reconciliation-agent@agent.invalid')
+
+    def test_action_stores_full_before_and_after_summaries(self):
+        """Guardian note 1: values, not only hashes, so reverts and audits show what changed."""
+        acc, s = f.full_scope()
+        reconcile_scope(scope(acc).id)
+        act = AgentAction.objects.get(action_type='reconcile_scope')
+        snap = SummarySnapshot.objects.get(schedule=s)
+        self.assertEqual(act.after['summaries'][str(s.id)], snap.data)
+        self.assertIn(str(s.id), act.before['summaries'])
+        self.assertEqual(act.actor.email, 'reconciliation-agent@agent.invalid')
+
     def test_change_hook_refused_outside_dry_run(self):
         acc, _ = f.full_scope()
         called = []

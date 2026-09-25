@@ -52,7 +52,18 @@ def ensure_enabled(account_id=None) -> None:
         raise AgentDisabled('Reconciliation Agent is disabled (AgentConfig.enabled=False)')
 
 
-def allowed(tier: int, account_id=None, conditions: dict | None = None) -> bool:
+def has_wildcard(values) -> bool:
+    """True if any value (or any pipe-separated part of one) contains '*'. The gate checks
+    this itself; it never trusts a caller's exact_value flag alone (guardian note 6)."""
+    for v in values or ():
+        if v is not None and '*' in str(v):
+            return True
+    return False
+
+
+def allowed(tier: int, account_id=None, conditions: dict | None = None, values=None) -> bool:
+    """`values`: for T3, every value the write would store (e.g. theme, tc_theme). T3 is
+    refused when it is missing or any value carries a wildcard."""
     if tier == T0:
         return True
     if not is_enabled(account_id):
@@ -64,19 +75,22 @@ def allowed(tier: int, account_id=None, conditions: dict | None = None) -> bool:
         return False                      # A8: aliases are proposal-only
     if tier == T3:
         c = conditions or {}
+        if not values or has_wildcard(values):
+            return False
         return level >= 3 and all(c.get(k) is True for k in T3_CONDITIONS)
     return False                          # T4 and anything else: human only
 
 
 def perform(*, tier: int, action_type: str, scope=None, target_model: str = '', target_pk='',
             before: dict, apply, reason: str = '', evidence: dict | None = None,
-            actor=None, run=None, conditions: dict | None = None, account_id=None) -> AgentAction:
+            actor=None, run=None, conditions: dict | None = None, account_id=None,
+            values=None) -> AgentAction:
     """Run `apply()` (which returns the `after` dict) only if the gate allows it.
     The kill switch is read again immediately before the write."""
     account_id = account_id if account_id is not None else getattr(scope, 'account_id', None)
     if tier != T0:
         ensure_enabled(account_id)
-        if not allowed(tier, account_id, conditions):
+        if not allowed(tier, account_id, conditions, values):
             raise TierNotAllowed(f'tier T{tier} is not allowed at level {effective_level(account_id)}')
         ensure_enabled(account_id)        # immediately before the write
     after = apply()
