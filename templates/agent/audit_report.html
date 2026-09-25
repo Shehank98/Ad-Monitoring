@@ -1,0 +1,10 @@
+{% extends 'agent/_base.html' %}
+{% block title %}Core audit{% endblock %}
+{% block page_title %}Core audit{% endblock %}
+{% block page_subtitle %}Reconciliation Agent · administrators{% endblock %}
+{% block nova %}
+<div class="nv-head"><div class="t"><div class="nv-crumbs"><a href="/dashboard/agent/">Overview</a><span>/</span><span>Audit #{{ run.id }}</span></div>
+  <h2>Core audit {% if run.detail.synthetic %}<span class="nv-chip warn">Synthetic data</span>{% endif %}</h2>
+  <p>Read-only audit of the existing system, run {{ run.finished_at|date:"d M Y H:i" }}. Nothing here was changed.</p></div></div>
+<section class="nv-panel"><pre class="nv-pre">{{ run.detail.report }}</pre></section>
+{% endblock %}

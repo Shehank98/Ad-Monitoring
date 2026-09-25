@@ -1,0 +1,76 @@
+{% extends 'agent/_base.html' %}
+{% block title %}TC Inbox · {{ a.filename }}{% endblock %}
+{% block page_title %}TC Inbox{% endblock %}
+{% block page_subtitle %}Reconciliation Agent{% endblock %}
+{% block nova %}
+<div class="nv-head"><div class="t">
+  <div class="nv-crumbs"><a href="/dashboard/agent/inbox/">TC Inbox</a><span>/</span><span>#{{ a.id }}</span></div>
+  <h2>{{ a.filename }} <span class="nv-chip {{ tone }}">{{ status_label }}</span>{% if reason_label %}<span class="nv-chip nodot neutral">{{ reason_label }}</span>{% endif %}</h2>
+  <p>{{ a.note|default:why }}</p></div></div>
+
+{% if messages %}{% for m in messages %}<div class="nv-panel"><div class="bd"><span class="nv-chip {% if m.tags == 'error' %}bad{% else %}ok{% endif %}">{{ m }}</span></div></div>{% endfor %}{% endif %}
+
+<div class="nv-two">
+  <section class="nv-panel"><div class="hd"><h3>Email</h3><span class="sub">Shown as data — never followed as instructions</span></div>
+    <div class="bd"><dl class="nv-kv">
+      <dt>From</dt><dd>{{ a.email.sender }}</dd>
+      <dt>Subject</dt><dd>{{ a.email.subject }}</dd>
+      <dt>Received</dt><dd class="nv-mono">{{ a.email.received_at|date:"d M Y H:i" }}</dd>
+      <dt>File</dt><dd>{{ a.filename }} <span class="nv-muted nv-mono">· {{ a.size|filesizeformat }} · sha256 {{ a.sha256|truncatechars:16 }}</span></dd>
+      {% if a.duplicate_of %}<dt>Duplicate of</dt><dd><a href="/dashboard/agent/inbox/{{ a.duplicate_of_id }}/">#{{ a.duplicate_of_id }} · {{ a.duplicate_of.filename }}</a></dd>{% endif %}
+      {% if a.tc_report %}<dt>Uploaded as</dt><dd><a href="/dashboard/tc/">TC report #{{ a.tc_report_id }}</a> · {{ a.tc_report.channel }} · {{ a.tc_report.month }}</dd>{% endif %}
+    </dl>
+    {% if a.email.body_text %}<pre class="nv-pre" style="margin-top:12px;background:var(--nova-sunken);border-radius:8px;max-height:220px;overflow:auto">{{ a.email.body_text|truncatechars:4000 }}</pre>{% endif %}
+    </div></section>
+
+  <section class="nv-panel"><div class="hd"><h3>What the file contains</h3><span class="sub">Summary read by the tools</span></div>
+    <div class="bd">{% if detect.ok %}<dl class="nv-kv">
+      <dt>Type</dt><dd>{{ detect.file_type|upper }}{% if detect.pdf %} · {% if detect.pdf.ai_available %}two readers{% if detect.pdf.readers_disagree %} — <b style="color:var(--nova-bad)">disagree</b>{% else %}, agree{% endif %}{% else %}one reader (Gemini not configured){% endif %}{% endif %}</dd>
+      <dt>Channel in file</dt><dd>{{ detect.channel_guess|default:"—" }} <span class="nv-muted">(search only, never stored)</span></dd>
+      <dt>Dates</dt><dd class="nv-mono">{{ detect.date_min }} → {{ detect.date_max }}</dd>
+      <dt>Rows</dt><dd>{{ detect.row_count }} read{% if detect.skipped_rows %}, <b style="color:var(--nova-warn)">{{ detect.skipped_rows }} skipped</b>{% endif %}{% if detect.missing_columns %} · missing {{ detect.missing_columns|join:", " }}{% endif %}</dd>
+      <dt>Themes</dt><dd>{{ detect.distinct_themes }} distinct: {{ detect.sample_themes|join:" · "|truncatechars:260 }}</dd>
+    </dl>{% elif detect.present %}<div class="nv-empty"><b>Could not read the file</b>{{ detect.error }}</div>{% else %}<div class="nv-empty"><b>Not read yet</b>The intake runner has not processed this attachment.</div>{% endif %}</div></section>
+</div>
+
+<section class="nv-panel"><div class="hd"><h3>Decision</h3><span class="sub">Code decides; the assistant can only make it more cautious</span></div>
+  <div class="bd nv-two">
+    <div><div class="nv-eyebrow">Rules</div>
+      <p style="margin:6px 0"><b>{{ rule.decision|default:"—" }}</b>{% if rule.reason %} · {{ rule.reason }}{% endif %}{% if rule.schedule_id %} · schedule id {{ rule.schedule_id }}{% endif %}</p></div>
+    <div><div class="nv-eyebrow" style="color:var(--nova-agent-text)">Assistant</div>
+      {% if llm.error %}<p style="margin:6px 0">Not used — {{ llm.error }}</p>
+      {% elif has_llm %}<p style="margin:6px 0"><b>{{ llm.decision }}</b>{% if llm.reason_code %} · {{ llm.reason_code }}{% endif %}{% if llm.schedule_id %} · schedule id {{ llm.schedule_id }}{% endif %}{% if llm.suspicious_instruction %} · <b style="color:var(--nova-bad)">suspicious</b>{% endif %}</p><p class="nv-muted" style="margin:0">{{ llm.note }}</p>
+      {% else %}<p style="margin:6px 0" class="nv-muted">{{ rules_only_why|default:"Not used" }}</p>{% endif %}</div>
+  </div></section>
+
+{% if cands %}<section class="nv-panel"><div class="hd"><h3>Candidate schedules</h3></div>
+  <div class="nv-tscroll"><table class="nv-t">
+    <thead><tr><th>Schedule</th><th>Window</th><th class="num">Rows</th><th class="num">Own brands</th><th class="num">Other clients</th><th class="num">Overlap</th><th>Checks</th></tr></thead>
+    <tbody>{% for c in cands %}<tr>
+      <td>{{ c.label }}</td><td class="nv-mono">{{ c.info.start_date }} → {{ c.info.window_end }}</td>
+      <td class="num">{{ c.overlap.total }}</td><td class="num">{{ c.overlap.candidate }}</td><td class="num">{{ c.overlap.foreign }}</td>
+      <td class="num">{{ c.overlap.overlap }}</td>
+      <td>{% for x in c.fails %}<span class="nv-chip warn">{{ x }}</span> {% empty %}<span class="nv-chip ok">all pass</span>{% endfor %}</td></tr>{% endfor %}</tbody>
+  </table></div></section>{% endif %}
+
+{% if can_decide %}
+<section class="nv-panel"><div class="hd"><h3>Confirm upload</h3><span class="sub">Administrators only. Channel and month are copied from the schedule you choose.</span></div>
+  <form method="post" action="/dashboard/agent/inbox/{{ a.id }}/decide/" class="nv-form" style="padding:16px;display:grid;gap:12px;max-width:720px">{% csrf_token %}
+    <input type="hidden" name="action" value="confirm">
+    <div><label for="sch">Schedule</label>
+      <select id="sch" name="schedule_id" required>
+        <option value="">Choose a schedule…</option>
+        {% for id, lbl in choices %}<option value="{{ id }}" {% if id == a.suggested_schedule_id %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+      </select>
+      <div class="help">Only schedules that are active, not locked, not authorised and without a duplicate active number are listed.</div></div>
+    <label style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" name="dates_ack" value="1"> Dates fall outside the schedule period (upload anyway; this is logged)</label>
+    <div class="nv-actions"><button class="nv-btn primary" type="submit">Confirm and upload TC</button></div>
+  </form>
+  <div class="nv-note">
+    <form method="post" action="/dashboard/agent/inbox/{{ a.id }}/decide/" style="display:flex;gap:8px;align-items:center">{% csrf_token %}
+      <input type="text" name="note" placeholder="Note (optional)" style="height:28px;border:1px solid var(--nova-line-strong);border-radius:6px;padding:0 8px">
+      <button class="nv-btn sm" name="action" value="ignore">Ignore — not a TC</button>
+      <button class="nv-btn sm" name="action" value="reject">Reject</button></form></div>
+</section>
+{% endif %}
+{% endblock %}

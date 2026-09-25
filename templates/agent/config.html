@@ -3,13 +3,52 @@
 {% block page_title %}Agent Settings{% endblock %}
 {% block page_subtitle %}Reconciliation Agent · administrators{% endblock %}
 {% block nova %}
-<div class="nv-head"><div class="t"><h2>Agent settings</h2><p>The agent is switched off. These are the planned defaults; they become editable when the agent's configuration is built (Phase 1). Core values are read from System Settings and are never changed by the agent.</p></div>
+<div class="nv-head"><div class="t"><h2>Agent settings</h2><p>Every change here is logged with before and after values. Core values are read from System Settings and are never changed by the agent.</p></div>
   <div class="nv-actions"><a class="nv-btn" href="/dashboard/settings/"><i class="fa-solid fa-sliders"></i>System Settings</a></div></div>
-<section class="nv-panel"><div class="hd"><h3>Agent</h3><span class="nv-chip warn">Disabled</span></div>
-  {% for name, value, note in agent_settings %}
-  <div class="nv-setrow"><div><b>{{ name }}</b><small>{{ note }}</small></div><div class="nv-mono" style="font-weight:600">{{ value }}</div></div>
-  {% endfor %}
+{% if messages %}{% for m in messages %}<div class="nv-panel"><div class="bd"><span class="nv-chip {% if m.tags == 'error' %}bad{% else %}ok{% endif %}">{{ m }}</span></div></div>{% endfor %}{% endif %}
+
+<section class="nv-panel"><div class="hd"><h3>Agent</h3>{% if cfg.enabled %}<span class="nv-chip ok">Enabled</span>{% else %}<span class="nv-chip warn">Disabled</span>{% endif %}
+  <span class="sub">Kill switch: when disabled the agent makes no writes. Mail fetch and your own actions still work.</span></div>
+  <form method="post" class="nv-form">{% csrf_token %}<input type="hidden" name="what" value="config">
+    <div class="nv-fgrid">
+      {% for field in form %}
+      <div>{% if field.field.widget.input_type == 'checkbox' %}<label style="display:flex;gap:8px;align-items:center">{{ field }} {{ field.label }}</label>
+           {% else %}<label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% endif %}
+        {% if field.name == 'tc_intake_mode' %}<div class="help">Off: fetch and list only. Suggest: the assistant proposes, an admin confirms. There is no automatic mode.</div>{% endif %}
+        {% if field.name == 'intake_fetch_enabled' %}<div class="help">Reads the TC mailbox (read-only). Needs at least one active sender below.</div>{% endif %}
+        {% if field.name == 'min_brand_overlap' %}<div class="help">Share of TC rows that must map to the schedule's brands (0.6 = 60%).</div>{% endif %}
+        {% for e in field.errors %}<div class="err">{{ e }}</div>{% endfor %}</div>
+      {% endfor %}
+    </div>
+    <div class="nv-note"><button class="nv-btn primary" type="submit">Save settings</button><span>Last changed {{ cfg.updated_at|date:"d M Y H:i" }}</span></div>
+  </form>
 </section>
+
+<section class="nv-panel" id="senders"><div class="hd"><h3>Allowed TC senders</h3><span class="sub">Channel traffic desks. An exact address, or a domain for the whole desk.</span></div>
+  {% if senders %}<div class="nv-tscroll"><table class="nv-t">
+    <thead><tr><th>Address or domain</th><th>Channel hint</th><th>Clients</th><th>Status</th><th></th></tr></thead>
+    <tbody>{% for s in senders %}<tr>
+      <td class="id">{{ s.email_or_domain }}</td><td>{{ s.channel_hint|default:"—" }}</td>
+      <td>{% for a in s.accounts.all %}{{ a.name }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="nv-muted">All clients</span>{% endfor %}</td>
+      <td>{% if s.active %}<span class="nv-chip ok">Active</span>{% else %}<span class="nv-chip neutral">Paused</span>{% endif %}</td>
+      <td style="white-space:nowrap"><form method="post" style="display:inline">{% csrf_token %}<input type="hidden" name="id" value="{{ s.id }}">
+        <button class="nv-btn sm" name="what" value="sender_toggle">{% if s.active %}Pause{% else %}Resume{% endif %}</button>
+        <button class="nv-btn sm ghost" name="what" value="sender_delete" onclick="return confirm('Remove {{ s.email_or_domain }}?')">Remove</button></form></td></tr>{% endfor %}</tbody>
+  </table></div>{% else %}<div class="nv-empty"><b>No senders yet</b>Mail fetch stays off until at least one sender is added.</div>{% endif %}
+  <form method="post" class="nv-form">{% csrf_token %}<input type="hidden" name="what" value="sender_add">
+    <div class="nv-fgrid">{% for field in sender_form %}<div><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
+      {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}{% for e in field.errors %}<div class="err">{{ e }}</div>{% endfor %}</div>{% endfor %}</div>
+    <div class="nv-note"><button class="nv-btn" type="submit">Add sender</button></div></form>
+</section>
+
+<section class="nv-panel" id="overrides"><div class="hd"><h3>Per-client overrides</h3><span class="sub">Switch the agent off, or lower its level, for one client</span></div>
+  {% if overrides %}<div class="nv-tscroll"><table class="nv-t"><thead><tr><th>Client</th><th>Agent</th><th>Level</th></tr></thead>
+    <tbody>{% for o in overrides %}<tr><td>{{ o.account.name }}</td><td>{% if o.enabled is None %}Global{% elif o.enabled %}On{% else %}Off{% endif %}</td><td>{{ o.autonomy_level|default_if_none:"Global" }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+  <form method="post" class="nv-form">{% csrf_token %}<input type="hidden" name="what" value="override">
+    <div class="nv-fgrid">{% for field in override_form %}<div><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% for e in field.errors %}<div class="err">{{ e }}</div>{% endfor %}</div>{% endfor %}</div>
+    <div class="nv-note"><button class="nv-btn" type="submit">Save override</button></div></form>
+</section>
+
 <section class="nv-panel"><div class="hd"><h3>Core settings the agent reads</h3><span class="sub">Read with get_setting(); the agent can only propose changes</span></div>
   {% for name, value, key in core_settings %}
   <div class="nv-setrow"><div><b>{{ name }}</b><small><span class="nv-q">{{ key }}</span></small></div><div class="nv-mono">{{ value }}</div></div>

@@ -77,6 +77,15 @@
   {% else %}<div class="nv-empty"><b>Nothing blocked</b>Every scope in {{ month }} has its inputs and mappings.</div>{% endif %}
 </section>
 
+<div class="nv-two">
+<section class="nv-panel"><div class="hd"><h3>Existing-system audit</h3>{% if audit %}{% if audit.detail.synthetic %}<span class="nv-chip warn">Synthetic data</span>{% endif %}<span class="sub">Read-only · {{ audit.finished_at|date:"d M Y H:i" }}</span><span class="sp"></span>{% if request.user.role in 'super_admin,admin' %}<a class="nv-btn sm ghost" href="/dashboard/agent/audit/{{ audit.id }}/">Full report →</a>{% endif %}{% endif %}</div>
+  {% if audit %}<div class="bd"><dl class="nv-kv">{% for k, v in audit_counts %}<dt>{{ k }}</dt><dd class="nv-mono">{{ v }}</dd>{% empty %}<dt>Findings</dt><dd>None</dd>{% endfor %}</dl></div>
+  {% else %}<div class="nv-empty"><b>No audit yet</b>Runs nightly (agent_core_audit) once deployed.</div>{% endif %}</section>
+<section class="nv-panel"><div class="hd"><h3>TC Inbox</h3><span class="sp"></span><a class="nv-btn sm ghost" href="/dashboard/agent/inbox/">Open →</a></div>
+  <div class="bd">{% if intake_counts %}<dl class="nv-kv">{% for k, lbl, v in intake_counts %}<dt>{{ lbl }}</dt><dd class="nv-mono"><a href="/dashboard/agent/inbox/?status={{ k }}">{{ v }}</a></dd>{% endfor %}</dl>
+  {% else %}<div class="nv-empty" style="padding:16px"><b>Empty</b>No TC emails yet.</div>{% endif %}</div></section>
+</div>
+
 {% if baselines %}
 <section class="nv-panel">
   <div class="hd"><h3>Baseline runs</h3><span class="sub">Information only: these schedules had nothing earlier to compare with, so this run sets their baseline</span></div>

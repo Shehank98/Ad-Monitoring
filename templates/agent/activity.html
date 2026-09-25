@@ -3,18 +3,26 @@
 {% block page_title %}Activity{% endblock %}
 {% block page_subtitle %}Reconciliation Agent{% endblock %}
 {% block nova %}
-<div class="nv-head"><div class="t"><h2>Activity</h2><p>{% if request.user.role in 'super_admin,admin' %}Every logged action.{% else %}Your own logged actions.{% endif %} Agent actions will appear here with before and after values, reason and evidence, and a Revert button.</p></div></div>
+<div class="nv-head"><div class="t"><h2>Activity</h2><p>{% if request.user.role in 'super_admin,admin' %}Every write the agent, the intake jobs and administrators made through the Action Gate, with before and after values.{% else %}Writes on your clients' scopes, and your own.{% endif %}</p></div></div>
 <section class="nv-panel">
+  <div class="nv-filters"><div class="nv-seg">
+    <a href="?" class="{% if not kind %}on{% endif %}">All</a>
+    {% for k, lbl in kinds %}<a href="?kind={{ k }}" class="{% if kind == k %}on{% endif %}">{{ lbl }}</a>{% endfor %}
+  </div></div>
   {% if page.object_list %}
   <div class="nv-tscroll"><table class="nv-t">
-    <thead><tr><th>When</th><th>Action</th><th>By</th><th>Detail</th></tr></thead>
+    <thead><tr><th>When</th><th>Action</th><th>By</th><th>Scope</th><th>Reason</th></tr></thead>
     <tbody>{% for a in page.object_list %}
-      <tr><td class="nv-mono">{{ a.timestamp|date:"d M Y H:i" }}</td><td><span class="nv-chip nodot neutral">{{ a.get_action_display }}</span></td><td>{{ a.user.name|default:"System" }}</td><td>{{ a.detail|truncatechars:140 }}</td></tr>
+      <tr><td class="nv-mono">{{ a.created_at|date:"d M Y H:i" }}</td>
+        <td><span class="nv-chip nodot neutral nv-mono">{{ a.action_type }}</span> <span class="nv-muted nv-mono" style="font-size:11px">T{{ a.tier }}</span></td>
+        <td>{% if a.human_confirmed %}<span class="nv-chip bad">Person</span> {{ a.actor.name|default:a.actor.email }}{% else %}<span class="nv-chip agent">{{ a.get_actor_kind_display }}</span>{% endif %}</td>
+        <td>{% if a.scope %}{{ a.scope.account.name }} · {{ a.scope.channel }} · {{ a.scope.month }}{% else %}<span class="nv-muted">—</span>{% endif %}</td>
+        <td>{{ a.reason|truncatechars:120 }}</td></tr>
     {% endfor %}</tbody>
   </table></div>
   <div class="nv-note"><span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
-    {% if page.has_previous %}<a class="nv-btn sm" href="?page={{ page.previous_page_number }}">← Newer</a>{% endif %}
-    {% if page.has_next %}<a class="nv-btn sm" href="?page={{ page.next_page_number }}">Older →</a>{% endif %}</div>
-  {% else %}<div class="nv-empty"><b>No activity yet</b>Actions will be logged here.</div>{% endif %}
+    {% if page.has_previous %}<a class="nv-btn sm" href="?kind={{ kind }}&page={{ page.previous_page_number }}">← Newer</a>{% endif %}
+    {% if page.has_next %}<a class="nv-btn sm" href="?kind={{ kind }}&page={{ page.next_page_number }}">Older →</a>{% endif %}</div>
+  {% else %}<div class="nv-empty"><b>No activity yet</b>Every write through the Action Gate is logged here.</div>{% endif %}
 </section>
 {% endblock %}

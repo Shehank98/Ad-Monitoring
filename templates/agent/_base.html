@@ -139,11 +139,37 @@
   .nv-setrow b { display:block; font-size:13.5px; }
   .nv-setrow small { color:var(--nova-muted); font-size:12.5px; display:block; margin-top:2px; }
   @media (max-width:760px){ .nv-setrow { grid-template-columns:minmax(0,1fr); } .nv-head h2 { font-size:22px; } }
+  .nv-tabs { display:flex; flex-wrap:wrap; gap:2px; border-bottom:1px solid var(--nova-line); margin-bottom:2px; }
+  .nv-tabs a { padding:9px 12px; font-size:13px; font-weight:600; color:var(--nova-muted); text-decoration:none; border-bottom:2px solid transparent; margin-bottom:-1px; }
+  .nv-tabs a:hover { color:var(--nova-ink); }
+  .nv-tabs a.on { color:var(--nova-ink); border-bottom-color:var(--nova-agent); }
+  .nv-form label { display:block; font-size:12px; font-weight:600; color:var(--nova-ink-2); margin-bottom:4px; }
+  .nv-form input[type=text], .nv-form input[type=number], .nv-form input[type=email], .nv-form select, .nv-form textarea { width:100%; height:34px; padding:0 10px; border:1px solid var(--nova-line-strong); border-radius:8px; background:var(--nova-surface); font-size:13px; color:var(--nova-ink); }
+  .nv-form select[multiple] { height:auto; min-height:90px; padding:6px; }
+  .nv-form textarea { height:70px; padding:8px 10px; }
+  .nv-form .err { color:var(--nova-bad); font-size:12px; margin-top:4px; }
+  .nv-form .help { color:var(--nova-muted); font-size:12px; margin-top:4px; }
+  .nv-fgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px 16px; padding:16px; }
+  .nv-kv { display:grid; grid-template-columns:minmax(120px,max-content) 1fr; gap:6px 16px; font-size:13px; }
+  .nv-kv dt { color:var(--nova-muted); } .nv-kv dd { margin:0; color:var(--nova-ink); overflow-wrap:anywhere; }
+  .nv-two { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; }
+  @media (max-width:900px){ .nv-two { grid-template-columns:minmax(0,1fr); } }
+  pre.nv-pre { white-space:pre-wrap; font:12.5px/1.5 var(--nova-mono); margin:0; padding:16px; overflow-x:auto; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="nv">
+  {% with p=request.path %}
+  <nav class="nv-tabs" aria-label="Reconciliation Agent">
+    <a href="/dashboard/agent/" class="{% if p == '/dashboard/agent/' %}on{% endif %}">Overview</a>
+    <a href="/dashboard/agent/scopes/" class="{% if '/agent/scope' in p %}on{% endif %}">Scopes</a>
+    <a href="/dashboard/agent/inbox/" class="{% if '/agent/inbox' in p %}on{% endif %}">TC Inbox</a>
+    {% if request.user.role in 'super_admin,admin,team_head' %}<a href="/dashboard/agent/queue/" class="{% if '/agent/queue' in p %}on{% endif %}">Review queue</a>{% endif %}
+    <a href="/dashboard/agent/activity/" class="{% if '/agent/activity' in p %}on{% endif %}">Activity</a>
+    {% if request.user.role in 'super_admin,admin' %}<a href="/dashboard/agent/config/" class="{% if '/agent/config' in p %}on{% endif %}">Settings</a>{% endif %}
+  </nav>
+  {% endwith %}
   {% block nova %}{% endblock %}
 </div>
 {% endblock %}

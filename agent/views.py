@@ -15,14 +15,20 @@ from urllib.parse import urlencode
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.http import Http404
-from django.shortcuts import redirect, render
+from django.contrib import messages
+from django.shortcuts import get_object_or_404, redirect, render
 
 from accounts.decorators import role_required
-from core.models import AuditLog, get_setting, get_setting_int, get_setting_list
+from core.models import get_setting, get_setting_int, get_setting_list
 from core.views import _account_access, _account_qs
 from verification.tc_engine import build_summary_data
 
+from intake.models import AllowedSender, InboundAttachment
+
+from . import gate
 from .checks import baseline_groups
+from .forms import AgentConfigForm, AllowedSenderForm, OverrideForm
+from .models import AgentAccountOverride, AgentAction, AgentConfig, AgentRun
 from .scopes import (
     STATE_LABEL, STATES, available_months, build_scope, build_scopes,
     spot_strip, state_counts,
@@ -116,9 +122,23 @@ def overview(request):
         'months': months, 'month': month, 'kpis': kpis, 'counts': counts,
         'attention': attention[:10], 'attention_total': len(attention),
         'clients': client_rows, 'activity': _activity_qs(request.user)[:6],
-        'agent_enabled': False,
+        'agent_enabled': AgentConfig.objects.filter(pk=1, enabled=True).exists(),
         'baselines': baseline_groups(account_ids),
+        'audit': (audit := AgentRun.objects.filter(kind='audit').order_by('-finished_at', '-id').first()),
+        'audit_counts': [(k.replace('_', ' ').capitalize(), v)
+                         for k, v in ((audit.detail or {}).get('counts') or {}).items() if v] if audit else [],
+        'intake_counts': _intake_counts(request.user),
     })
+
+
+def _intake_counts(user):
+    from django.db.models import Count
+    qs = InboundAttachment.objects.all()
+    if user.role not in ADMIN_ROLES:
+        qs = qs.filter(suggested_schedule__account_id__in=_account_qs(user).values('id'))
+    from intake.models import STATUS
+    got = dict(qs.order_by().values_list('status').annotate(n=Count('id')))
+    return [(k, lbl, got[k]) for k, lbl in STATUS if k in got]
 
 
 @login_required
@@ -217,37 +237,122 @@ def queue(request):
 
 
 def _activity_qs(user):
-    qs = AuditLog.objects.select_related('user').order_by('-timestamp')
+    """AgentAction log. Admins: everything. Users: actions on their clients' scopes, or their own."""
+    from django.db.models import Q
+    qs = AgentAction.objects.select_related('actor', 'scope', 'scope__account').order_by('-created_at', '-id')
     if user.role not in ADMIN_ROLES:
-        qs = qs.filter(user=user)
+        ids = list(_account_qs(user).values_list('id', flat=True))
+        qs = qs.filter(Q(scope__account_id__in=ids) | Q(actor=user))
     return qs
 
 
 @login_required
 @role_required(AGENT_ROLES)
 def activity(request):
-    page = Paginator(_activity_qs(request.user), 40).get_page(request.GET.get('page'))
-    return render(request, 'agent/activity.html', {'page': page})
+    qs = _activity_qs(request.user)
+    kind = request.GET.get('kind', '')
+    if kind in dict(AgentAction.ACTOR_KINDS):
+        qs = qs.filter(actor_kind=kind)
+    page = Paginator(qs, 40).get_page(request.GET.get('page'))
+    return render(request, 'agent/activity.html', {'page': page, 'kind': kind,
+                                                    'kinds': AgentAction.ACTOR_KINDS})
+
+
+def _snap_config(c):
+    return {f: getattr(c, f) for f in AgentConfigForm.Meta.fields}
+
+
+def _snap_sender(a):
+    return {'email_or_domain': a.email_or_domain, 'channel_hint': a.channel_hint, 'active': a.active,
+            'note': a.note, 'account_ids': sorted(a.accounts.values_list('id', flat=True))}
 
 
 @login_required
 @role_required(ADMIN_ROLES)
 def config(request):
-    """Agent settings. Read-only until Phase 1 adds AgentConfig."""
+    """Agent Settings (admin). Every change is a human write through gate.perform:
+    logged as an AgentAction with before/after, never blocked by the kill switch (Q6)."""
+    cfg = AgentConfig.get_solo()
+    form = AgentConfigForm(instance=AgentConfig.get_solo())
+    sender_form, override_form = AllowedSenderForm(), OverrideForm()
+    if request.method == 'POST':
+        what = request.POST.get('what')
+        try:
+            if what == 'config':
+                form = AgentConfigForm(request.POST, instance=AgentConfig.get_solo())
+                if form.is_valid():
+                    before = _snap_config(cfg)
+                    gate.perform(tier=gate.T0, action_type='agent_config_update', actor_kind='human',
+                                 actor=request.user, target_model='agent.AgentConfig', target_pk=1,
+                                 before=before, apply=lambda: _snap_config(form.save()),
+                                 reason='Agent Settings')
+                    messages.success(request, 'Agent settings saved.')
+                    return redirect('/dashboard/agent/config/')
+            elif what == 'sender_add':
+                sender_form = AllowedSenderForm(request.POST)
+                if sender_form.is_valid():
+                    def add():
+                        obj = sender_form.save()
+                        return _snap_sender(obj)
+                    gate.perform(tier=gate.T0, action_type='allowed_sender_add', actor_kind='human',
+                                 actor=request.user, target_model='intake.AllowedSender',
+                                 target_pk=sender_form.cleaned_data['email_or_domain'], before={}, apply=add,
+                                 reason='Agent Settings')
+                    messages.success(request, 'Sender added.')
+                    return redirect('/dashboard/agent/config/#senders')
+            elif what in ('sender_toggle', 'sender_delete'):
+                obj = get_object_or_404(AllowedSender, pk=request.POST.get('id'))
+                before = _snap_sender(obj)
+
+                def change():
+                    if what == 'sender_delete':
+                        obj.delete()
+                        return {}
+                    obj.active = not obj.active
+                    obj.save(update_fields=['active'])
+                    return _snap_sender(obj)
+                gate.perform(tier=gate.T0, action_type=f'allowed_{what}', actor_kind='human', actor=request.user,
+                             target_model='intake.AllowedSender', target_pk=before['email_or_domain'],
+                             before=before, apply=change, reason='Agent Settings')
+                messages.success(request, 'Sender updated.')
+                return redirect('/dashboard/agent/config/#senders')
+            elif what == 'override':
+                override_form = OverrideForm(request.POST)
+                if override_form.is_valid():
+                    d = override_form.cleaned_data
+                    ov = AgentAccountOverride.objects.filter(account=d['account']).first()
+                    before = ({'enabled': ov.enabled, 'autonomy_level': ov.autonomy_level} if ov else {})
+
+                    def save_ov():
+                        o, _ = AgentAccountOverride.objects.get_or_create(account=d['account'])
+                        o.enabled, o.autonomy_level = d['enabled'], d['autonomy_level']
+                        o.save()
+                        return {'enabled': o.enabled, 'autonomy_level': o.autonomy_level}
+                    gate.perform(tier=gate.T0, action_type='agent_override_update', actor_kind='human',
+                                 actor=request.user, account_id=d['account'].id,
+                                 target_model='agent.AgentAccountOverride', target_pk=d['account'].id,
+                                 before=before, apply=save_ov, reason='Agent Settings')
+                    messages.success(request, f"Override saved for {d['account'].name}.")
+                    return redirect('/dashboard/agent/config/#overrides')
+        except gate.HumanNotAllowed as exc:
+            messages.error(request, str(exc))
     core_settings = [
         ('TC ↔ LMRB time tolerance', f"±{get_setting_int('tc_lmrb_time_tolerance', 5)} s", 'tc_lmrb_time_tolerance'),
         ('Sponsorship keywords', ', '.join(get_setting_list('lmrb_sponsorship_keywords')) or '—', 'lmrb_sponsorship_keywords'),
         ('Extra TC theme columns', ', '.join(get_setting_list('tc_extra_theme_aliases')) or 'None', 'tc_extra_theme_aliases'),
         ('Extra TC time columns', ', '.join(get_setting_list('tc_extra_time_aliases')) or 'None', 'tc_extra_time_aliases'),
     ]
-    agent_settings = [
-        ('Agent', 'Disabled', 'The agent does not run yet. Pages show a read-only preview.'),
-        ('Autonomy level', '0 · read only', 'Levels 1–3 arrive in Phase 4 and stay off until you raise them.'),
-        ('Mapping auto-apply threshold', '0.92', 'Proposals below this confidence go to the review queue.'),
-        ('Email TC intake', 'Off', 'Off → suggest → auto (Phase 2).'),
-        ('Grace days after period end', '3', 'Days to wait for late TC and LMRB before flagging.'),
-    ]
     return render(request, 'agent/config.html', {
-        'core_settings': core_settings, 'agent_settings': agent_settings,
-        'today': date.today(), 'nova_chat': get_setting('nova_enabled', '1') != '0',
+        'cfg': cfg, 'form': form, 'sender_form': sender_form, 'override_form': override_form,
+        'senders': AllowedSender.objects.prefetch_related('accounts'),
+        'overrides': AgentAccountOverride.objects.select_related('account').order_by('account__name'),
+        'core_settings': core_settings, 'today': date.today(),
+        'nova_chat': get_setting('nova_enabled', '1') != '0',
     })
+
+
+@login_required
+@role_required(ADMIN_ROLES)
+def audit_report(request, pk):
+    run = get_object_or_404(AgentRun, pk=pk, kind='audit')
+    return render(request, 'agent/audit_report.html', {'run': run})

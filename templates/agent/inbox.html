@@ -1,0 +1,39 @@
+{% extends 'agent/_base.html' %}
+{% block title %}TC Inbox{% endblock %}
+{% block page_title %}TC Inbox{% endblock %}
+{% block page_subtitle %}Reconciliation Agent{% endblock %}
+{% block nova %}
+<div class="nv-head"><div class="t"><h2>TC Inbox</h2>
+  <p>TC files that arrived by email. The agent only suggests a schedule; {% if is_admin %}you{% else %}an administrator{% endif %} confirm every upload. Nothing is reconciled from here — a confirmed TC queues its scope for the next run.</p></div></div>
+
+<section class="nv-panel">
+  <div class="nv-filters">
+    <div class="nv-seg">
+      <a href="?" class="{% if not status %}on{% endif %}">All</a>
+      {% for key, lbl, n in statuses %}<a href="?status={{ key }}" class="{% if status == key %}on{% endif %}">{{ lbl }} · {{ n }}</a>{% endfor %}
+    </div>
+    <form method="get" style="margin-left:auto"><input type="hidden" name="status" value="{{ status }}">
+      <select name="reason" onchange="this.form.submit()" style="height:32px;border:1px solid var(--nova-line-strong);border-radius:8px;padding:0 8px;background:var(--nova-surface)">
+        <option value="">Any reason</option>
+        {% for key, lbl in reasons %}<option value="{{ key }}" {% if reason == key %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+      </select></form>
+  </div>
+  {% if page.object_list %}
+  <div class="nv-tscroll"><table class="nv-t">
+    <thead><tr><th>Received</th><th>From</th><th>File</th><th>Status</th><th>Reason</th><th>Proposed schedule</th></tr></thead>
+    <tbody>{% for a in page.object_list %}
+      <tr class="click" onclick="location.href='/dashboard/agent/inbox/{{ a.id }}/'">
+        <td class="nv-mono">{{ a.email.received_at|default:a.email.fetched_at|date:"d M H:i" }}</td>
+        <td>{{ a.email.sender }}<div class="nv-muted" style="font-size:12px">{{ a.email.subject|truncatechars:60 }}</div></td>
+        <td><a href="/dashboard/agent/inbox/{{ a.id }}/"><b>{{ a.filename|truncatechars:40 }}</b></a><div class="nv-muted nv-mono" style="font-size:11px">{{ a.size|filesizeformat }}</div></td>
+        <td><span class="nv-chip {{ a.tone }}">{{ a.status_label }}</span></td>
+        <td>{{ a.reason_label|default:"—" }}</td>
+        <td>{% if a.suggested_schedule %}{{ a.suggested_schedule.account.name }} · #{{ a.suggested_schedule.schedule_number }}{% else %}<span class="nv-muted">—</span>{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="nv-note"><span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+    {% if page.has_previous %}<a class="nv-btn sm" href="?status={{ status }}&reason={{ reason }}&page={{ page.previous_page_number }}">← Newer</a>{% endif %}
+    {% if page.has_next %}<a class="nv-btn sm" href="?status={{ status }}&reason={{ reason }}&page={{ page.next_page_number }}">Older →</a>{% endif %}</div>
+  {% else %}<div class="nv-empty"><b>Nothing here</b>{% if is_admin %}TC emails from allowed senders appear here once mail fetch is switched on in Settings.{% else %}Items show here once a schedule for one of your clients is proposed.{% endif %}</div>{% endif %}
+</section>
+{% endblock %}

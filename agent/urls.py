@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import include, path
 
 from . import views
 
@@ -11,4 +11,6 @@ urlpatterns = [
     path('queue/',    views.queue,        name='queue'),
     path('activity/', views.activity,     name='activity'),
     path('config/',   views.config,       name='config'),
+    path('audit/<int:pk>/', views.audit_report, name='audit_report'),
+    path('inbox/',    include('intake.urls')),              # TC Inbox (owner Q5)
 ]
