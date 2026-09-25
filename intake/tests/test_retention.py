@@ -77,3 +77,9 @@ class ImportSendersTest(TestCase):
         with self.assertRaises(CommandError):
             call_command('intake_import_senders', bad, '--actor', admin.email, stdout=StringIO())
         self.assertFalse(AllowedSender.objects.exists())
+
+
+class PurgeBoundsTest(TestCase):
+    def test_days_lower_bound(self):
+        with self.assertRaises(ValueError):
+            purge(0)

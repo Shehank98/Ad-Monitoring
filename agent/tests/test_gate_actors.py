@@ -20,6 +20,7 @@ def cfg(**kw):
 def write(kind, actor=None, conditions=None, tier=gate.T0):
     box = []
     act = gate.perform(tier=tier, action_type='test', before={}, actor=actor, actor_kind=kind,
+                       target_model='intake.InboundEmail',
                        conditions=conditions, apply=lambda: box.append(1) or {'ok': True})
     return act, box
 
@@ -106,3 +107,12 @@ class AllowedSenderTest(TestCase):
         self.assertFalse(d.matches('traffic@sub.radio.lk'))           # exact domain only
         self.assertFalse(d.matches('radio.lk@evil.com'))
         self.assertEqual(AllowedSender.for_sender('desk@tv.lk'), [e])
+
+
+class IntakeKindTargetTest(TestCase):
+    def test_intake_kinds_cannot_write_core_tables(self):
+        for kind in ('intake_runner', 'intake_fetch', 'intake_retention'):
+            with self.assertRaises(ValueError):
+                gate.perform(tier=gate.T0, action_type='x', actor_kind=kind, target_model='core.TransmissionReport',
+                             before={}, apply=lambda: {})
+        self.assertFalse(AgentAction.objects.exists())

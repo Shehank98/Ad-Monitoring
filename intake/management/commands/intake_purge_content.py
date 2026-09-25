@@ -16,7 +16,12 @@ from intake.models import InboundAttachment, InboundEmail
 FINISHED = ('uploaded', 'ignored', 'rejected', 'duplicate')
 
 
+MIN_DAYS = 7
+
+
 def purge(days: int, now=None) -> dict:
+    if days < MIN_DAYS:
+        raise ValueError(f'--days must be at least {MIN_DAYS}')
     now = now or timezone.now()
     cutoff = now - timedelta(days=days)
     atts = (InboundAttachment.objects.filter(status__in=FINISHED, email__fetched_at__lt=cutoff,

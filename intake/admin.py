@@ -1,10 +1,12 @@
 from django.contrib import admin
 
+from agent.admin import ReadOnlyAdmin
+
 from .models import AllowedSender, InboundAttachment, InboundEmail
 
 
 @admin.register(AllowedSender)
-class AllowedSenderAdmin(admin.ModelAdmin):
+class AllowedSenderAdmin(ReadOnlyAdmin):   # edit in Agent Settings (logged)
     list_display = ('email_or_domain', 'channel_hint', 'active')
     filter_horizontal = ('accounts',)
 

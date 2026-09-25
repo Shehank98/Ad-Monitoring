@@ -77,6 +77,14 @@ class ConfirmTest(TestCase):
             confirm_upload(att, dup, self.admin)
         self.assertFalse(TransmissionReport.objects.exists())
 
+    def test_legacy_authorised_scope_is_frozen(self):
+        from core.models import SummaryReportMeta
+        acc, s, att = scenario()
+        SummaryReportMeta.objects.create(account=acc, channel=s.channel, month=s.month, authorised_by='K. Perera')
+        with self.assertRaisesMessage(ConfirmRefused, 'schedule_frozen'):
+            confirm_upload(att, s, self.admin)
+        self.assertNotIn(s.id, [x.id for x in eligible_schedules(att)])
+
     def test_dates_outside_window_need_the_second_tick(self):
         acc, s, att = scenario(rows=tc_rows(2, month=2, day0=20))       # Feb dates, Jan schedule
         with self.assertRaisesMessage(ConfirmRefused, 'date_out_of_range'):

@@ -97,6 +97,16 @@ class HumanNotAllowed(Exception):
     """A human write needs an admin actor and every per-action condition True."""
 
 
+# Non-agent, non-human actors may only write intake tables (guardian Phase 2 note):
+# they bypass the kill switch, so they must never reach a core table.
+INTAKE_ONLY_KINDS = ('intake_runner', 'intake_fetch', 'intake_retention')
+
+
+def _check_target(actor_kind, target_model):
+    if actor_kind in INTAKE_ONLY_KINDS and not str(target_model or '').startswith('intake.'):
+        raise ValueError(f'{actor_kind} may only write intake tables, not {target_model!r}')
+
+
 def _check_actor(actor_kind, tier, account_id, conditions, values, actor):
     """The per-actor rules (owner Q6). One write path; the rules differ by who writes.
 
@@ -147,6 +157,7 @@ def perform(*, tier: int, action_type: str, scope=None, target_model: str = '', 
     the agent is disabled (guardian check 5). Human (admin) writes are not blocked by the
     kill switch; they are logged with human_confirmed=True (owner Q6)."""
     account_id = account_id if account_id is not None else getattr(scope, 'account_id', None)
+    _check_target(actor_kind, target_model)
     _check_actor(actor_kind, tier, account_id, conditions, values, actor)
     _check_actor(actor_kind, tier, account_id, conditions, values, actor)   # immediately before
     after = apply()

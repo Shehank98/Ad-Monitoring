@@ -22,7 +22,7 @@ from datetime import timedelta
 
 import pandas as pd
 
-from core.models import Schedule, ScheduleRow, TransmissionReport, get_setting_list
+from core.models import Schedule, ScheduleRow, SummaryReportMeta, TransmissionReport, get_setting_list
 from core.views import _find_col, _safe_date, _safe_int, _safe_str, _tc_channel_prompt
 from verification.engine import _lmrb_channel_q, active_schedule_ids
 from verification.tc_converters.gemini_ai import GeminiError, is_configured as gemini_configured
@@ -259,7 +259,9 @@ def get_schedule(ctx: ToolContext, schedule_id) -> dict:
         'window_end': end.isoformat() if end else None,
         'active': s.id in set(active_schedule_ids(s.account_id, s.channel, s.month)),
         'locked': bool(s.is_locked),
-        'authorised': AgentAuthorisation.objects.filter(schedule=s).exists(),
+        'authorised': (AgentAuthorisation.objects.filter(schedule=s).exists()
+                       or SummaryReportMeta.objects.filter(account_id=s.account_id, channel=s.channel,
+                                                           month=s.month).exclude(authorised_by='').exists()),
         'duplicate_active_number': dups.count(s.schedule_number) > 1,
         'has_tc': TransmissionReport.objects.filter(schedule=s).exists(),
     }

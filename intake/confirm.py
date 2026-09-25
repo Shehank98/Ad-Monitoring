@@ -27,7 +27,7 @@ from django.utils import timezone
 
 from agent import gate
 from agent.models import AgentAuthorisation, AgentConfig, AgentProposal, ScopeState
-from core.models import Schedule, TCRow, TransmissionReport
+from core.models import Schedule, SummaryReportMeta, TCRow, TransmissionReport
 from core.views import _detect_tc_meta, _parse_tc_rows
 from verification.engine import active_schedule_ids
 
@@ -49,9 +49,15 @@ class Collision(Exception):
         self.reason, self.gone_ids = reason, gone_ids
 
 
+def _legacy_authorised(s: Schedule) -> bool:
+    """Scope signed off the existing way (SummaryReportMeta.authorised_by), as readiness.py does."""
+    return SummaryReportMeta.objects.filter(account_id=s.account_id, channel=s.channel, month=s.month) \
+        .exclude(authorised_by='').exists()
+
+
 def schedule_problems(s: Schedule) -> list[str]:
     out = []
-    if AgentAuthorisation.objects.filter(schedule=s).exists():
+    if AgentAuthorisation.objects.filter(schedule=s).exists() or _legacy_authorised(s):
         out.append('schedule_frozen')
     if s.is_locked:
         out.append('schedule_locked')

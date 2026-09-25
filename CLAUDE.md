@@ -931,3 +931,22 @@ Rules: `docs/agent/BRIEF_AMENDMENT_01.md` wins over the brief. Report: `docs/age
 - `agent_core_audit` saves `AgentRun(kind='audit')` after its read-only transaction rolled back.
 - UI strings say "Reconciliation Agent"; the Nova chat widget is unchanged.
 - Follow-ups: `docs/agent/phase1_followups.md`.
+
+### Phase 2 — agent UI + email TC intake (off / suggest; not deployed)
+- **Gate by actor kind** (`agent/gate.py`, one write path): `agent` and `intake_runner` obey the
+  kill switch (the runner also needs `tc_intake_mode='suggest'`); `intake_fetch` needs
+  `intake_fetch_enabled` and an active `AllowedSender`; `intake_retention` only purges intake
+  content; `human` (super_admin/admin) is not blocked by the kill switch and is logged with
+  `human_confirmed=True`. `intake_*` kinds may only write `intake.*` tables.
+- **Intake** (`intake/`): read-only IMAP/Graph mailboxes → `InboundEmail`/`InboundAttachment`
+  (bytes kept in the DB) → rules verdict (`intake/cron/rules.py`) + LLM (tools: detect_tc,
+  find_schedules, get_schedule, check_brand_overlap, submit_decision) → **code decides, the LLM
+  can only downgrade**. There is no automatic upload: an admin Confirms in the TC Inbox
+  (`intake/confirm.py`, the only intake code that writes a TransmissionReport; channel and
+  month are copied from the Schedule; A6 collision guard; never reconciles, only sets
+  `ScopeState.needs_run`).
+- Cron-side code (`intake/cron/`, commands) never imports `default_storage` and never writes
+  core tables. The prompt is `intake/prompts/tc_intake_system.md` (owner text, versioned).
+- UI: `/dashboard/agent/` Overview, Scopes, TC Inbox (`inbox/`), Review queue, Activity
+  (AgentAction), Settings. Railway cron configs are in `railway/` (not deployed).
+  Report: `docs/agent/phase2_report.md`.

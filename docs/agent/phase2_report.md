@@ -109,10 +109,10 @@ Screens: `p2_overview`, `p2_inbox`, `p2_inbox_proposed`, `p2_inbox_confirmed`,
 ## Results
 | Run | Run | Passed | Skipped | Failed |
 |---|---:|---:|---:|---:|
-| SQLite, full suite (`--exclude-tag=eval`) | 376 | 374 | 2 | 0 |
-| PostgreSQL 16, full suite (`--exclude-tag=eval`) | 376 | 369 | 7 | 0 |
+| SQLite, full suite (`--exclude-tag=eval`) | 379 | 377 | 2 | 0 |
+| PostgreSQL 16, full suite (`--exclude-tag=eval`) | 379 | 372 | 7 | 0 |
 
-- Phase 1.2 ended at 291 tests, so Phase 2 adds 85: the intake app plus the new agent gate and UI tests.
+- Phase 1.2 ended at 291 tests, so Phase 2 adds 88: the intake app, the new agent gate and UI tests, and 3 tests added after the guardian review.
 - The skips are the same database-specific lock and dry-run tests as before: 2 on SQLite, 7 on PostgreSQL.
 - The 4 `eval` tests are excluded by the tag, so they are not counted.
 - `makemigrations agent intake --check`: no changes. New migrations are `agent/0004_phase2` (with a data step that turns any stored `auto` mode into `off`) and `intake/0002_phase2`.
@@ -120,7 +120,26 @@ Screens: `p2_overview`, `p2_inbox`, `p2_inbox_proposed`, `p2_inbox_confirmed`,
 - The UI walk-through used a copy of that database, so the golden data was not touched.
 
 ## Guardian review
-GUARDIAN_PLACEHOLDER
+Range `598d681..8dfae08`; the reviewer used the current 8-check file, plus your checks 19–21 by hand.
+
+**PASS on all 8 checks. Checks 19, 20 and 21 also pass, and the proposed check 5 passes with one gap (fixed below).**
+At review time the SQLite suite gave 376 run, 374 passed, 2 skipped, 0 failed, and golden idempotent gave MATCH.
+No `.claude/**` file changed in the range.
+
+| Guardian item | Action |
+|---|---|
+| Proposed check 5 gap: the Django admin allowed unlogged edits to AgentConfig, AccountOverride and AllowedSender | **Fixed.** Those admin screens are now read-only; changes go through Agent Settings, which logs them. |
+| `intake_retention` / `intake_fetch` could pass the kill switch for any target | **Fixed.** The gate refuses any `intake_*` actor kind whose target is not an `intake.*` table (`test_intake_kinds_cannot_write_core_tables`). |
+| `intake_purge_content --days` had no lower bound | **Fixed.** The minimum is 7 (`test_days_lower_bound`). |
+| Note 1: a scope authorised the legacy way (`SummaryReportMeta.authorised_by`) was not treated as frozen | **Fixed.** Confirm refuses it with `schedule_frozen`, and `get_schedule` reports it as authorised (`test_legacy_authorised_scope_is_frozen`). |
+| Note 2: race between the schedule checks and the write | Open, for Phase 5 (together with authorisation). The window is milliseconds, and the admin sees the result. |
+| Note 3: the collision path's attachment status update is not logged | Accepted. The `tc_link` AgentProposal records the collision with its evidence. |
+| Note 4: **Gemini receives the full PDF** on the cron side, as it already does in core `tc_pdf_convert` | **For you to know.** C5 limits apply to the intake LLM (Anthropic), not to the existing Gemini PDF reader. Unset `GEMINI_API_KEY` on cron-intake if PDFs must not go to Gemini; PDFs then stay needs_review. |
+| Note 5: a file saying "Sirasa TV" does not find a schedule stored as "TV - Sirasa TV" | Accepted as safe: the item goes to `no_schedule` for review. Use `AllowedSender.channel_hint` with the stored form to narrow the search. |
+| Note 6: items left in needs_review (unknown sender, too large) are never purged | Open, for you to decide. Option: purge needs_review items older than N days too. |
+| Note 7: the `intake/0002` migration assumes empty intake tables | True everywhere today; the Phase 1 tables were never filled. Staging has the Phase 1 tables, which are empty. |
+| Note 8: the cron commands are chained with `&&` | Intentional for intake (no runner after a failed fetch). For the audit, a failed audit skips that night's purge; I can change it to `;` if you prefer. |
+| Note 9: Settings allows autonomy level 1–3 before Phase 4 | Every change is logged. There is no level-3 writer yet, and the gate already refuses T2/T4. I can cap the form at 1 until Phase 4 if you prefer. |
 
 ## Open items for you
 1. **Media storage.** Confirm that `FIREBASE_STORAGE_BUCKET` is set, or that `MEDIA_ROOT` is on a volume, before Confirm is used in production.
