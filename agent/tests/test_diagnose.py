@@ -95,3 +95,35 @@ class CoreAuditTest(TestCase):
         md = render_markdown(data, synthetic=True)
         self.assertTrue(md.startswith('SYNTHETIC DATA'))
         self.assertIn('# SYNTHETIC DATA', md)
+
+
+class CoreAuditSaveTest(TestCase):
+    """Guardian check 17 / owner decision 4: one final write to agent tables, after the
+    read-only transaction has rolled back."""
+
+    def test_command_saves_one_audit_run_after_collect(self):
+        import tempfile
+        from io import StringIO
+        from unittest import mock
+
+        from django.core.management import call_command
+
+        from agent.management.commands import agent_core_audit as cmd
+        from agent.models import AgentRun
+        acc, s = f.full_scope()
+        f.schedule(acc, number='101', version=2)
+        collect()
+        self.assertFalse(AgentRun.objects.exists())           # collect() alone never writes
+        order = []
+        real_collect, real_save = cmd.collect, cmd.save_result
+        with mock.patch.object(cmd, 'collect', side_effect=lambda: order.append('collect') or real_collect()), \
+                mock.patch.object(cmd, 'save_result',
+                                  side_effect=lambda *a: order.append('save') or real_save(*a)), \
+                tempfile.TemporaryDirectory() as d:
+            call_command('agent_core_audit', '--synthetic', '--output', f'{d}/a.md', stdout=StringIO())
+        self.assertEqual(order, ['collect', 'save'])
+        run = AgentRun.objects.get()
+        self.assertEqual((run.kind, run.status), ('audit', 'ok'))
+        self.assertEqual(run.detail['counts']['duplicate_active_numbers'], 1)
+        self.assertTrue(run.detail['report'].startswith('SYNTHETIC DATA'))
+        self.assertTrue(run.detail['synthetic'])

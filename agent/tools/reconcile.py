@@ -42,7 +42,7 @@ from ..models import (
     ScopeState, SummarySnapshot,
 )
 from ..readiness import assess
-from ..service import get_service_user
+from ..service import require_service_user
 from ..scope import active_schedules, has_commercial_rows, lock_key, period
 
 
@@ -117,11 +117,7 @@ def reconcile_scope(scope_id: int, *, actor=None, dry: bool = False, change=None
         if not gate.allowed(gate.T1, acc):
             raise gate.TierNotAllowed('reconcile_scope needs autonomy level >= 1')
         if actor is None:          # A9: the service user is the actor on every AgentAction
-            actor = get_service_user()
-            if actor is None:
-                raise RuntimeError('No agent service user: run manage.py agent_ensure_service_user')
-            if actor.role != 'operations':
-                raise RuntimeError(f'Agent service user role is {actor.role!r}, expected operations')
+            actor = require_service_user()     # role == operations, else alert + stop
 
     r = assess(scope)
     if r.state == 'NEEDS_HUMAN':
