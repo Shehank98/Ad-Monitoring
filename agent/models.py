@@ -100,6 +100,9 @@ class ScheduleStatus(models.Model):
                                     related_name='agent_status')
     sub_status = models.CharField(max_length=16, choices=SUB, default='waiting')
     has_tc = models.BooleanField(default=False)
+    # Parent of, or makeup for, another schedule (D25). Drafts (Phase 5) will show:
+    # "Makeup spots for this schedule are reported under schedule <number>."
+    makeup_linked = models.BooleanField(default=False)
     matched_count = models.PositiveIntegerField(default=0)
     pending_count = models.PositiveIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
@@ -187,6 +190,9 @@ class SummarySnapshot(models.Model):
     kind = models.CharField(max_length=10, choices=KINDS, default='draft')
     data = models.JSONField()
     sha256 = models.CharField(max_length=64, db_index=True)
+    # External-change fingerprint of the account at snapshot time (V5, Phase 1.1)
+    fingerprint = models.JSONField(default=dict, blank=True)
+    fingerprint_sha256 = models.CharField(max_length=64, blank=True, default='')
     run = models.ForeignKey(AgentRun, null=True, blank=True, on_delete=models.SET_NULL,
                             related_name='snapshots')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -261,6 +267,8 @@ class Heartbeat(models.Model):
     name = models.CharField(max_length=60, unique=True)
     last_beat = models.DateTimeField()
     detail = models.JSONField(default=dict, blank=True)
+    alert = models.BooleanField(default=False)          # e.g. service user role check failed
+    alert_message = models.TextField(blank=True, default='')
 
     def __str__(self):
         return f'{self.name} @ {self.last_beat}'

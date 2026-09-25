@@ -125,7 +125,23 @@ def _collect() -> dict:
         {'account': names[tr.account_id], 'month': tr.month, 'channel': tr.channel, 'example_ids': [tr.id]}
         for tr in checks.unlinked_tc_in_scheduled_scopes()]
 
-    # 10. LOCK_ORPHANED per sub-code
+    # 10. Makeup-linked schedules (D25) and makeups no loop would reconcile
+    ml = []
+    for link in checks.makeup_links():
+        ml.append({'account': names[link['account_id']], 'month': link['parent_scope']['month'],
+                   'channel': link['parent_scope']['channel'], 'parent_number': link['parent_number'],
+                   'count': len(link['makeups']),
+                   'makeups': '; '.join(f"#{m['makeup_number']} ({m['scope']['channel']} / {m['scope']['month']}, "
+                                        f"{m['report_rows']} rows)" for m in link['makeups']),
+                   'example_ids': [link['parent_id']] + [m['makeup_id'] for m in link['makeups']][:4]})
+    sections['makeup_linked'] = ml
+    never = checks.makeups_never_reconciled()
+    sections['makeup_never_reconciled'] = [
+        {'account': names[s.account_id], 'month': s.month, 'channel': s.channel,
+         'schedule_number': s.schedule_number, 'example_ids': [s.id]}
+        for s in Schedule.objects.filter(id__in=never)]
+
+    # 11. LOCK_ORPHANED per sub-code
     orphan = []
     for sub, sets in checks.lock_orphaned_querysets().items():
         for label, qs in sets:
@@ -156,6 +172,8 @@ TITLES = [
     ('channel_variants', 'Channel strings differing only by case or whitespace'),
     ('lmrb_multi_flag', 'LMRB rows with more than one lock flag'),
     ('tc_unlinked_in_scheduled_scopes', 'TransmissionReports with schedule=None in scopes that have schedules'),
+    ('makeup_linked', 'Schedules with makeup schedules (each reported in its own scope; D25)'),
+    ('makeup_never_reconciled', 'Makeup schedules no per-schedule loop would reconcile'),
     ('lock_orphaned', 'LOCK_ORPHANED: lock flag set with no record behind it'),
 ]
 

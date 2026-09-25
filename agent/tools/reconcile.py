@@ -34,7 +34,7 @@ from verification.tc_lmrb_engine import reconcile_tc_lmrb
 
 from .. import gate, validate
 from ..canonical import sha256_of, to_jsonable
-from ..checks import multi_flag_count
+from ..checks import makeup_linked_ids, multi_flag_count
 from ..locks import scope_lock
 from ..models import AgentConfig, AgentRun, ScheduleStatus, ScopeState, SummarySnapshot
 from ..readiness import assess
@@ -224,10 +224,12 @@ def _update_scope_state(scope: ScopeState, lock_count: int, needs_human: bool) -
     scope.needs_run = False
     scope.last_run_at = timezone.now()
     scope.save()
+    linked = makeup_linked_ids([s.schedule.id for s in r.schedules])
     for s in r.schedules:
         ScheduleStatus.objects.update_or_create(
             schedule=s.schedule,
             defaults={'scope': scope, 'sub_status': s.sub_status, 'has_tc': s.has_tc,
+                      'makeup_linked': s.schedule.id in linked,
                       'matched_count': s.matched, 'pending_count': s.pending})
 
 

@@ -117,6 +117,14 @@ def diagnose(scope: ScopeState, readiness=None) -> list[Finding]:
             out.append(Finding('LMRB_MULTI_FLAG', f'{n} LMRB rows carry more than one lock flag.',
                                tier=0, severity='warn', evidence={'count': n}))
 
+    # ── MAKEUP_LINKED (D25, information only) ──
+    for link in checks.makeup_links(schedule_ids=ids):
+        numbers = ', '.join(m['makeup_number'] for m in link['makeups'])
+        out.append(Finding('MAKEUP_LINKED',
+                           f"Schedule #{link['parent_number']} has makeup schedule(s) #{numbers}. "
+                           'Each is reconciled and reported in its own scope; the billing rule '
+                           'is pending with finance (D25).', tier=0, severity='info', evidence=link))
+
     # ── LOCK_ORPHANED, per flag (information only) ──
     for sub, sets in checks.lock_orphaned_querysets(acc).items():
         for label, qs in sets:

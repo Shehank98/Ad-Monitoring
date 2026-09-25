@@ -148,6 +148,57 @@ def unlinked_tc_in_scheduled_scopes(account_id=None):
         account_id=tr.account_id, channel=tr.channel, month=tr.month).exists()]
 
 
+# ── Makeup schedules (D25) ────────────────────────────────────────────────────
+
+def _report_rows(schedule) -> int:
+    """Commercial rows that schedule's own per-schedule report includes."""
+    return ScheduleRow.objects.filter(schedule=schedule, ad_type=COMMERCIAL).count()
+
+
+def makeup_links(schedule_ids=None, account_id=None) -> list[dict]:
+    """One entry per parent schedule that has makeup schedules (Schedule.parent_schedule,
+    related_name 'makeup_schedules'). Each schedule is reported in its own scope."""
+    qs = Schedule.objects.filter(parent_schedule__isnull=False)
+    if account_id is not None:
+        qs = qs.filter(account_id=account_id)
+    if schedule_ids is not None:
+        # every parent touched by these schedules (as parent or as makeup), then the full link
+        parent_ids = set(Schedule.objects.filter(id__in=schedule_ids, parent_schedule__isnull=False)
+                         .values_list('parent_schedule_id', flat=True))
+        parent_ids |= set(qs.filter(parent_schedule_id__in=schedule_ids)
+                          .values_list('parent_schedule_id', flat=True))
+        qs = qs.filter(parent_schedule_id__in=parent_ids)
+    parents = {}
+    for mk in qs.select_related('parent_schedule').order_by('parent_schedule_id', 'schedule_number'):
+        p = mk.parent_schedule
+        e = parents.setdefault(p.id, {
+            'parent_id': p.id, 'parent_number': p.schedule_number, 'account_id': p.account_id,
+            'parent_scope': {'channel': p.channel, 'month': p.month},
+            'parent_report_rows': _report_rows(p), 'makeups': []})
+        e['makeups'].append({'makeup_id': mk.id, 'makeup_number': mk.schedule_number,
+                             'scope': {'channel': mk.channel, 'month': mk.month},
+                             'report_rows': _report_rows(mk)})
+    return list(parents.values())
+
+
+def makeup_linked_ids(schedule_ids) -> set:
+    """Schedules among schedule_ids that are a parent of, or a makeup for, another schedule."""
+    ids = set(Schedule.objects.filter(id__in=schedule_ids, parent_schedule__isnull=False)
+              .values_list('id', flat=True))
+    ids |= set(Schedule.objects.filter(parent_schedule_id__in=schedule_ids)
+               .values_list('parent_schedule_id', flat=True))
+    return ids
+
+
+def makeups_never_reconciled(account_id=None) -> list[int]:
+    """Makeup schedules that are not active in their own scope (e.g. an older version),
+    so no per-schedule loop would ever reconcile them."""
+    qs = Schedule.objects.filter(parent_schedule__isnull=False)
+    if account_id is not None:
+        qs = qs.filter(account_id=account_id)
+    return [s.id for s in qs if s.id not in active_schedule_ids(s.account_id, s.channel, s.month)]
+
+
 # ── LOCK_ORPHANED (information only, never auto-fixed) ───────────────────────
 # Relation names verified in core/models.py:
 #   LMRBRow  <- TcLmrbMatch.lmrb_row         related_name='tc_lmrb_match'            (:704)
