@@ -858,7 +858,8 @@ Function: `summary_pdf()` in `core/views.py`
 
 ## 19. AI Agent
 
-Built on top of the existing system per `AGENT_BUILD_BRIEF.md` (repo root). Phase 0
+Built on top of the existing system per `docs/agent/AGENT_BUILD_BRIEF.md` and
+`docs/agent/BRIEF_AMENDMENT_01.md` (the amendment wins where they conflict). Phase 0
 findings: `docs/agent/phase0_discovery.md`; code-vs-doc differences:
 `docs/agent/discrepancies.md`.
 

@@ -3,8 +3,8 @@
 Read-only investigation for `AGENT_BUILD_BRIEF.md`. No code was written or changed.
 All references are `file:line` at commit `445fb8a` (branch `claude/design-system-extraction-vnav5h`).
 
-> Note: the brief lives at the repo root (`AGENT_BUILD_BRIEF.md`), not at
-> `docs/agent/AGENT_BUILD_BRIEF.md`. It was not moved (Phase 0 is read-only).
+> Note: at the time of Phase 0 the brief lived at the repo root. It has since been moved
+> to `docs/agent/AGENT_BUILD_BRIEF.md` (Amendment 01, A1).
 
 ## Summary of what needs your decision
 
