@@ -24,6 +24,7 @@ class Migration(migrations.Migration):
                     ("agent", "Agent"),
                     ("intake_runner", "Intake runner"),
                     ("intake_fetch", "Mail fetch"),
+                    ("intake_retention", "Intake retention"),
                     ("human", "Person (admin)"),
                 ],
                 default="agent",

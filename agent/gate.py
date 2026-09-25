@@ -81,7 +81,7 @@ def allowed(tier: int, account_id=None, conditions: dict | None = None, values=N
     return False                          # T4 and anything else: human only
 
 
-ACTOR_KINDS = ('agent', 'intake_runner', 'intake_fetch', 'human')
+ACTOR_KINDS = ('agent', 'intake_runner', 'intake_fetch', 'intake_retention', 'human')
 HUMAN_ROLES = ('super_admin', 'admin')
 
 
@@ -103,6 +103,9 @@ def _check_actor(actor_kind, tier, account_id, conditions, values, actor):
     agent          kill switch (re-read) + tier rules
     intake_runner  kill switch (re-read) + tc_intake_mode == 'suggest'
     intake_fetch   NO kill switch; intake_fetch_enabled + >=1 active AllowedSender
+    intake_retention NO kill switch, no conditions: only clears stored bytes/bodies of
+                   finished intake items (C6), so retention keeps running even after
+                   fetch is switched off
     human          NO kill switch; actor role super_admin/admin + every condition True
     """
     if actor_kind == 'agent':
@@ -119,6 +122,8 @@ def _check_actor(actor_kind, tier, account_id, conditions, values, actor):
             raise FetchDisabled('mail fetch is off (AgentConfig.intake_fetch_enabled=False)')
         if not AllowedSender.objects.filter(active=True).exists():
             raise FetchDisabled('no active AllowedSender')
+    elif actor_kind == 'intake_retention':
+        pass
     elif actor_kind == 'human':
         if actor is None or getattr(actor, 'role', None) not in HUMAN_ROLES:
             raise HumanNotAllowed('only super_admin or admin may make this change')

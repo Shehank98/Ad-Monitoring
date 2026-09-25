@@ -164,7 +164,8 @@ class _ActionFields(models.Model):
 
 class AgentAction(_ActionFields):
     ACTOR_KINDS = [('agent', 'Agent'), ('intake_runner', 'Intake runner'),
-                   ('intake_fetch', 'Mail fetch'), ('human', 'Person (admin)')]
+                   ('intake_fetch', 'Mail fetch'), ('intake_retention', 'Intake retention'),
+                   ('human', 'Person (admin)')]
     run = models.ForeignKey(AgentRun, null=True, blank=True, on_delete=models.SET_NULL,
                             related_name='actions')
     actor_kind = models.CharField(max_length=16, choices=ACTOR_KINDS, default='agent')
