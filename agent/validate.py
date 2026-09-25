@@ -77,7 +77,13 @@ def v5(scope, schedule, new_sha: str, fp_now: dict, ctx: dict | None = None) -> 
     if last is None:
         return Check('V5', True, {**base, 'changed': False, 'baseline': 'no_prior_snapshot'})
     base.update(previous_sha=last.sha256, previous_snapshot_id=last.id)
+    authorised = AgentAuthorisation.objects.filter(schedule=schedule).exists()
     if not fingerprint_is_current(last.fingerprint):
+        if authorised and last.sha256 != new_sha:
+            # Authorised numbers are never accepted on a baseline: nothing can explain it.
+            return Check('V5', False, {**base, 'changed': True, 'explained_by': [],
+                                       'fingerprint_diff': {}, 'relevant_diff': {},
+                                       'authorised': True, 'baseline_refused': 'authorised'})
         return Check('V5', True, {**base, 'changed': last.sha256 != new_sha,
                                   'baseline': 'baseline_no_fingerprint'})
     if last.sha256 == new_sha:
@@ -91,7 +97,6 @@ def v5(scope, schedule, new_sha: str, fp_now: dict, ctx: dict | None = None) -> 
                                  ctx if ctx is not None else scope_context(scope))
         if relevant:
             reasons.append('external_change')
-    authorised = AgentAuthorisation.objects.filter(schedule=schedule).exists()
     return Check('V5', bool(reasons), {
         **base, 'changed': True, 'explained_by': reasons, 'fingerprint_diff': full,
         'relevant_diff': relevant, 'authorised': authorised})

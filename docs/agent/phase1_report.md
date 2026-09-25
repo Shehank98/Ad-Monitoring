@@ -226,3 +226,117 @@ The owner replaced `.claude/agents/numbers-guardian.md` with the original 8-chec
 from the brief. This resolves the check 1 BLOCK above. Checks 9–18 are no longer part of the
 guardian. The rules they covered (always pass `schedule_id`, ScopeLock, the read-only
 commands, the core contract, the service user) are still enforced by the agent tests.
+
+---
+
+# Phase 1.2
+
+Items 1–5 from the owner's Phase 1.2 message. Phase 2 exists as a plan only.
+
+## 1. Guardian governance
+- I made no change to commit `4b19724` or to any file under `.claude/`. Every `.claude/`
+  change is now delivered as a patch file (`docs/agent/patches/README.md`):
+  - `0002_claude_settings_deny.diff` adds `Edit(./.claude/**)` and `Write(./.claude/**)` to the deny list.
+  - `0003_guardian_check1_claude_paths.diff` changes guardian check 1: `.claude/**` may change
+    only through a patch a person applied. The guardian checks the commit author. The author
+    `Claude <noreply@anthropic.com>` means FAIL; an author it can't identify reliably means
+    "needs human confirmation".
+- `git apply --check` passes for both patches.
+- Every commit from this session is authored `Claude <noreply@anthropic.com>`. A commit made
+  under your own git identity is therefore easy to tell apart.
+
+## 2. First-run baseline
+| Case | V5 result | Stored | Shown |
+|---|---|---|---|
+| No earlier SummarySnapshot | ok, `baseline: no_prior_snapshot` | `ScheduleStatus.baseline_reason` | `BASELINE` info finding; one grouped "Baseline runs" card on the overview |
+| Earlier snapshot saved before 1.1 (no fingerprint, or the 1.1 layout) | ok, `baseline: baseline_no_fingerprint` | same | same |
+
+- A baseline never produces NEEDS_HUMAN. The scope keeps the state `readiness.py` gives it,
+  and the baseline appears as a reason on the schedule. I used the reason form rather than a
+  new BASELINE state so a real state such as MAPPING is never hidden.
+- The next run compares against the new baseline and clears the reason.
+- Exception: an **authorised** schedule never accepts a baseline. If its authorised snapshot
+  has no current fingerprint, a number change stays unexplained and goes to NEEDS_HUMAN.
+  Authorised numbers are never accepted silently. (AgentAuthorisation rows cannot predate 1.1,
+  so this cannot happen in production.)
+- Tests: `test_baseline_no_prior_snapshot`, `test_baseline_pre_1_1_snapshot_without_fingerprint`,
+  `test_first_run_is_baseline_not_needs_human`, `test_pre_1_1_snapshot_with_changed_numbers_is_baseline_and_grouped`.
+
+## 3. Scope-relevant fingerprint (F2, moved here from Phase 3)
+The whole-account diff is still saved in `AgentRun.detail['external_changes'][schedule]['account_wide']`,
+for information. Only `['relevant']` can explain a change:
+
+| Section | Relevant to the scope when |
+|---|---|
+| BrandMapping | the old or new row's `brand` (lower-case, trimmed) is a brand of the scope's active ScheduleRows, **or** its `theme` matches a scope LMRB theme, **or** its `tc_theme` matches a scope TC theme. Themes are lower-case and trimmed as the engines do; pipe parts are split; a `*` suffix is a prefix match |
+| TcLmrbThemeMap | `tc_theme` matches a scope TC theme (same matching) |
+| ManualMatch, manual SponsorshipLmrbAssignment, PeriodSponsorship, TransmissionReport, Schedule | channel **and** month equal the scope's, byte for byte |
+| settings (tolerance, aliases, sponsorship keywords) | always |
+| MonitoringData ids, LMRB count, MatchResult last run | always (they are already scope-level) |
+| latest MonitoringData upload time (whole account) | never; information only |
+
+- A row counts when either its old or its new version is relevant, so moving a brand out of
+  the scope still counts.
+- The fingerprint format is now version 2. Snapshots in the 1.1 layout are treated as
+  `baseline_no_fingerprint`.
+- Tests: a mapping edit for a brand on another channel does NOT explain a change; a mapping
+  edit in this scope does; a wildcard theme mapping that matches this scope's LMRB does.
+
+## 4. Monitoring deletions
+- The fingerprint now includes the sorted MonitoringData ids for the account and channel, and
+  the scope's LMRB row count. The channel filter is the engines' own `_lmrb_channel_q`, because
+  MonitoringData stores the clean channel name, as LMRB rows do.
+- Test: deleting a MonitoringData file counts as explained, and the diff names the removed id.
+
+## 5. Exact test counts
+| Point | Database | Run | Passed | Skipped | Failed |
+|---|---|---:|---:|---:|---:|
+| Phase 1.1 guardian review (`b86371f`) | SQLite | 282 | 280 | 2 | 0 |
+| Phase 1.1 final (`e833ca5`, +1 kill-switch test) | SQLite | 283 | 281 | 2 | 0 |
+| Phase 1.1 final (`e833ca5`) | PostgreSQL 16 | 283 | 276 | 7 | 0 |
+| Phase 1.2 (`a9b9317`, +7 fingerprint/baseline tests) | SQLite | 290 | 288 | 2 | 0 |
+| Phase 1.2 (`a9b9317`) | PostgreSQL 16 | 290 | 283 | 7 | 0 |
+| **Phase 1.2 final (+1 guardian-note test)** | **SQLite** | **291** | **289** | **2** | **0** |
+| **Phase 1.2 final** | **PostgreSQL 16** | **291** | **284** | **7** | **0** |
+
+Why "283 run, 282 passed" didn't add up: the 282 came from the guardian's run at `b86371f`,
+before the kill-switch test was added. After that commit, SQLite ran 283 tests with 281 passed;
+nothing failed. Skipped tests are expected on every run, because some tests only apply to one
+database:
+- SQLite skips 2 tests that need PostgreSQL advisory locks
+  (`AdvisoryLockTest.test_contention_between_connections_and_release_on_rollback`,
+  `test_scope_lock_requires_atomic_and_nests`).
+- PostgreSQL skips 7:
+  - 4 `FallbackLockTest` tests (the table lock is for other databases);
+  - `DryRunTest.test_refused_on_sqlite_without_setting`;
+  - `ReconcileScopeTest.test_lock_contention_skips_nothing_silently` (fallback lock only);
+  - `GoldenCheckTest.test_refuses_sqlite_outside_tests` (it tests the SQLite refusal).
+- The `eval` tag is excluded by default, and no eval tests exist yet.
+
+Also: `makemigrations agent intake --check` shows no changes (new migration `agent/0003_phase1_2`).
+The golden check `verify --mode idempotent` on the synthetic PostgreSQL data gives **MATCH**.
+
+## Numbers-guardian review (range `ef8ccee...a9b9317`, the owner's 8-check list)
+
+**PASS on all 8 checks.** SQLite suite: 290 run, 288 passed, 2 skipped, 0 failed. Golden
+idempotent: MATCH (#101, #201, #202). No `.claude/**` file changed in the range.
+
+It raised two points for you to confirm:
+- **Checklist provenance.** The 8-check file on disk was committed by this session
+  (`ef8ccee`), at your request. Git alone can't prove the text is yours, so please confirm it.
+- **Existing tests were edited.** `agent/tests/test_fingerprint.py` (added in Phase 1.1) was
+  changed, not only added to. The edits repoint assertions to the scope-relevant diff and
+  add fields; no test was removed or weakened. I read "never modify existing tests" as
+  covering the pre-existing core tests (A2 names `core/tests.py`). Please confirm.
+
+Non-blocking notes:
+1. **An authorised schedule outside a fully AUTHORISED scope could baseline.** **Fixed:** V5
+   never baselines a schedule that has an AgentAuthorisation. If its numbers changed and the
+   snapshot has no current fingerprint, the change stays unexplained. Test:
+   `test_authorised_schedule_is_never_baselined`.
+2. **Every Phase 1.1 (version 1) snapshot baselines once.** This is by design. Production has
+   none, because the agent has never run there.
+3. **The "always relevant" sections are broad.** Any LMRB upload on the channel, or any
+   settings edit, explains a change. I kept this as you specified in item 3.
+4. **No comments on the fingerprint's LMRB reads.** **Fixed:** both flag-agnostic reads in
+   `fingerprint.py` now carry a comment saying they are not candidate queries.

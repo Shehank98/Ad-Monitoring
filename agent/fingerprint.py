@@ -99,6 +99,7 @@ def fingerprint(scope) -> dict:
         # MonitoringData stores the clean channel name like LMRBRow: use the engine's filter
         'monitoring_data': sorted(MonitoringData.objects.filter(_lmrb_channel_q(ch), account_id=acc)
                                   .order_by().values_list('id', flat=True)),
+        # Deliberately flag-agnostic: a count of the scope's LMRB rows, not a candidate query.
         'lmrb_count': lmrb_scope_qs(acc, ch, start, end).count() if start else 0,
         'match_results_run_max': MatchResult.objects.filter(account_id=acc, channel=ch, month=mo)
         .aggregate(m=Max('run_at'))['m'],
@@ -159,6 +160,7 @@ def scope_context(scope) -> dict:
               .order_by().values_list('brand', flat=True).distinct()}
     lmrb = set()
     if start:
+        # Deliberately flag-agnostic: every theme present in the scope, not a candidate query.
         lmrb = {_norm(t) for t in lmrb_scope_qs(acc, ch, start, end)
                 .order_by().values_list('advt_theme', flat=True).distinct()}
     tc = {_norm(t) for t in TCRow.objects.filter(account_id=acc, channel=ch, tc_report__month=mo)

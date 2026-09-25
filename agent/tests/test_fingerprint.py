@@ -144,6 +144,20 @@ class FingerprintTest(TestCase):
                          'baseline_no_fingerprint')
 
 
+    def test_authorised_schedule_is_never_baselined(self):
+        """Guardian note (1.2): outside a fully AUTHORISED scope too, an authorised
+        schedule with an old-layout snapshot and changed numbers stays unexplained."""
+        acc, s = scoped()
+        sc = scope(acc)
+        snap = snapshot(sc, s, {})
+        AgentAuthorisation.objects.create(schedule=s, snapshot=snap, snapshot_sha256='old',
+                                          authorised_by=f.user())
+        c = validate.v5(sc, s, 'new', fingerprint(sc))
+        self.assertFalse(c.ok)
+        self.assertNotIn('baseline', c.detail)
+        self.assertTrue(validate.v5(sc, s, 'old', fingerprint(sc)).ok)     # unchanged numbers: fine
+
+
 def enable():
     c = AgentConfig.get_solo()
     c.enabled, c.autonomy_level, c.upload_debounce_minutes = True, 1, 0
