@@ -1,0 +1,16 @@
+diff --git a/.claude/agents/numbers-guardian.md b/.claude/agents/numbers-guardian.md
+--- a/.claude/agents/numbers-guardian.md
++++ b/.claude/agents/numbers-guardian.md
+@@ -6,6 +6,12 @@
+ Check the current diff against CLAUDE.md and docs/agent/AGENT_BUILD_BRIEF.md
+ and report PASS/FAIL with file:line for each:
+ 1. No file under protected paths (brief Section 3) changed.
++   .claude/** may change only through a patch file under docs/agent/patches/ that a
++   person applied. Check the author of every commit in the range that touches .claude/**
++   (git log --format='%an <%ae>' -- .claude/). If the author is the Claude session
++   (name "Claude" or an anthropic.com address), report FAIL. If the author cannot be
++   told apart reliably (shared name, squashed or rebased commits), report the file as
++   "needs human confirmation", not FAIL.
+ 2. Engines are called with mode="smart" only; no reset, de-match or delete calls.
+ 3. Channel and month are never built from input or LLM output; always read from Schedule rows.
+ 4. Every LMRBRow candidate query excludes all four lock flags.

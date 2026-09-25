@@ -1,0 +1,15 @@
+diff --git a/.claude/settings.json b/.claude/settings.json
+--- a/.claude/settings.json
++++ b/.claude/settings.json
+@@ -47,7 +47,9 @@
+       "Read(./.env.*)",
+       "Bash(railway:*)",
+       "Bash(python manage.py makemigrations core:*)",
+-      "Bash(python manage.py makemigrations accounts:*)"
++      "Bash(python manage.py makemigrations accounts:*)",
++      "Edit(./.claude/**)",
++      "Write(./.claude/**)"
+     ]
+   }
+ }
+\ No newline at end of file
