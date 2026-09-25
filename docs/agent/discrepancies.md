@@ -29,4 +29,72 @@ Found during Phase 0 at commit `445fb8a`. Severity reflects the risk to correct 
 | D21 | Info | Tests | Regression guards protect Rules 10/12 | 10 of 168 tests fail today: the fixture creates `source="maponline"` rows (`core/tests.py:115-139`), which `run_scope` now ignores (`engine.py:619`). Rule 10 and Rule 12 guards are among them. | Blocks the Phase 1 exit rule "all existing tests pass". Needs your decision (see phase0_discovery.md Q11). **Resolved** by decision D1, commit `bbb2963` (fixture default now `mediawatch`; 168/168 pass). |
 | D22 | Info | CLAUDE.md §18 counts | "12 classes" / "88 routes" | `core/models.py` has more model classes (e.g. PeriodSponsorship, TcLmrbMatch, TcLmrbThemeMap, Client, SpotNote…) | Documentation only |
 | D23 | Medium | TC re-upload vs TcLmrbMatch (found in Phase 1, A6.3) | Removing a TcLmrbMatch clears both `is_tc_lmrb_matched` flags (§6) | `TcLmrbMatch.tc_row` is `on_delete=CASCADE` (`core/models.py:700-702`). A TC re-upload deletes TCRows by dedup key (`core/views.py:4395`), which silently deletes the TcLmrbMatch **without** clearing `LMRBRow.is_tc_lmrb_matched`. The LMRB row stays locked with no record behind it, and no engine will ever use it again. | The collision guard (A6) must treat a TCRow with a `tc_lmrb_match` as protected. Measured by the audit and diagnoser as `LOCK_ORPHANED` / `TC_LMRB`. |
-| D24 | Low | Django `Meta.ordering` + `.distinct()` (found in Phase 1) | — | Schedule, TransmissionReport, MonitoringData order by `-uploaded_at`; ScheduleRow by `date, start_time`. `values_list(...).distinct()` without `.order_by()` silently adds the ordering column to `SELECT DISTINCT`, returning one row per upload / per date instead of one per key. Agent code always calls `.order_by()` first. Core code that relies on `.distinct()` (e.g. `auto_run_all_for_account`, `core/views.py` channel/month pickers) may return duplicates; most callers wrap the result in `set()` or `sorted(set(...))`. | Information only. |
+| D24 | Low | Django `Meta.ordering` + `.distinct()` (found in Phase 1) | — | Schedule, TransmissionReport, MonitoringData order by `-uploaded_at`; ScheduleRow by `date, start_time`. `values_list(...).distinct()` without `.order_by()` silently adds the ordering column to `SELECT DISTINCT`, returning one row per upload / per date instead of one per key. Agent code always calls `.order_by()` first. Core code that relies on `.distinct()` (e.g. `auto_run_all_for_account`, `core/views.py` channel/month pickers) may return duplicates; most callers wrap the result in `set()` or `sorted(set(...))`. | Information only. Full call-site analysis below. |
+
+## D24 — `.distinct()` call-site analysis (Phase 1.1, read-only)
+
+**Cause.** On a queryset whose model has `Meta.ordering`, `values()/values_list(...).distinct()`
+without an explicit `.order_by()` adds the ordering columns to `SELECT DISTINCT`. The result then
+has one row per ordering value instead of one per key. Verified from the generated SQL, e.g.
+`ScheduleRow…values_list('month').distinct()` →
+`SELECT DISTINCT month, date, start_time … ORDER BY date, start_time`.
+Call sites that end with `.order_by(<selected fields>)`, wrap the result in `set()`/a dict, or use
+`.count()` (which clears ordering) are unaffected.
+
+**Summary numbers: not affected.** The only `.distinct()` inside `build_summary_data` is
+`verification/tc_engine.py:1019` (`spon_programmes`). It ends with `.order_by('programme')`, and
+the SQL is `SELECT DISTINCT programme … ORDER BY 1`.
+
+All 36 call sites in `core/` and `verification/` (excluding tests):
+
+| # | Call site | Model (ordering) | Safe because / effect | Class |
+|---|---|---|---|---|
+| 1 | `core/agent_tools.py:221` | LMRBRow (date, advt_time) | Duplicates removed by the `seen` set | List only, no effect |
+| 2 | `core/views.py:2114` | BrandMapping | `.count()` clears ordering; "n brands deleted" message | Count, **unaffected** |
+| 3 | `core/views.py:2164` | ScheduleRow | Explicit `.order_by('brand')` | Dropdown, unaffected |
+| 4 | `core/views.py:2383` | LMRBRow | Collected into sets | List only, no effect |
+| 5 | `core/views.py:2432` | TCRow | Collected into sets | List only, no effect |
+| 6 | `core/views.py:2442` | TCRow | Collected into sets | List only, no effect |
+| 7 | `core/views.py:2470` | ScheduleRow (date, start_time) | `.append()` into a list: a brand's products can be listed repeatedly in the Quick Map picker data | **List only, visible duplicates** |
+| 8 | `core/views.py:2956` | ScheduleRow | Explicit `.order_by('brand')`; per-brand counts are separate `filter().count()` calls | Count, unaffected |
+| 9 | `core/views.py:2978` | ScheduleRow | Explicit `.order_by('brand')` | Count, unaffected |
+| 10 | `core/views.py:3060` | LMRBRow | `if t not in map` dedups | List only, no effect |
+| 11 | `core/views.py:3826` | ScheduleRow | Explicit `.order_by('channel')` | Dropdown, unaffected |
+| 12 | `core/views.py:3832` | ScheduleRow | Explicit `.order_by('month')` | Dropdown, unaffected |
+| 13 | `core/views.py:5045` | ChannelOfficer | Used in `channel__in=` | List only, no effect |
+| 14 | `core/views.py:5194` | TCRow | Explicit `.order_by('tc_theme')` | List, unaffected |
+| 15 | `core/views.py:5199` | BrandMapping | Only tested for emptiness | No effect |
+| 16 | `core/views.py:6458` | TCRow | Wrapped in `set()` | No effect |
+| 17 | `core/views.py:6465` | TCRow | Wrapped in `set()` | No effect |
+| 18 | `core/views.py:9009` | ScheduleRow | Explicit `.order_by('channel')` | Dropdown, unaffected |
+| 19 | `core/views.py:9015` | ScheduleRow | Explicit `.order_by('month')` | Dropdown, unaffected |
+| 20 | `core/views.py:9150` | ScheduleRow | Explicit `.order_by('channel')` | Dropdown, unaffected |
+| 21 | `core/views.py:9157` | ScheduleRow | Explicit `.order_by('month')` | Dropdown, unaffected |
+| 22 | `core/views.py:9856` | LMRBRow (date, advt_time) | `lmrb_themes` repeats a theme per (date, time); `total`, `covered` and `pct` on **Admin Analytics → mapping coverage** are inflated and the % skewed | **Count (Admin Analytics only)** |
+| 23 | `core/views.py:9958` | Schedule (-uploaded_at) | DB Tools "delete duplicate schedules": combos repeat, but `keeper_ids` is a set | No effect |
+| 24 | `core/views.py:10291` | MatchResult (-run_at, brand, scheduled_date) | `_notify_missed_spots_email` loops over scopes that repeat per (run_at, brand, date): **the not-aired email for one scope can be sent many times** per upload | **Count/behaviour (emails)** |
+| 25 | `core/views.py:10565` | TCRow | Wrapped in `set()` | No effect |
+| 26 | `core/views.py:10905` | User (full rows, not `values`) | Full-row DISTINCT is correct | Not affected |
+| 27 | `core/views.py:11645` | TCRow | Wrapped in `set()` | No effect |
+| 28 | `verification/engine.py:855` | ScheduleRow | Later `sorted(set(overlap))` | No effect |
+| 29 | `verification/engine.py:860` | LMRBRow | Dict comprehension | No effect |
+| 30 | `verification/engine.py:870` | ScheduleRow (date, start_time) | `auto_run_all_for_account` runs `run_scope(..., 'smart')` **once per distinct (month, date, start_time)** instead of once per month. It runs in the upload background thread. Smart mode makes repeats mostly no-ops, but each repeat deletes and re-creates MatchResult rows for still-unmatched rows | **Unclear** (numbers expected unchanged; heavy repeated work; races widen) |
+| 31 | `verification/tc_engine.py:358` | ScheduleRow | Set comprehension | No effect |
+| 32 | `verification/tc_engine.py:1019` | ScheduleRow | Explicit `.order_by('programme')` — **inside build_summary_data** | Summary, **unaffected** |
+| 33 | `verification/tc_lmrb_engine.py:426` | TcLmrbMatch | Added to a set | No effect |
+| 34 | `verification/tc_lmrb_engine.py:430` | TransmissionReport | Added to a set | No effect |
+| 35 | `verification/views.py:749` | Schedule | Explicit `.order_by('month')` | Dropdown, unaffected |
+| 36 | `verification/views.py:1036` | MatchResult | Explicit `.order_by('channel', 'month')` | List, unaffected |
+
+**For engineering (not the agent project):** #24 (repeated not-aired emails), #30 (repeated
+`run_scope` in the upload thread), #22 (Admin Analytics coverage %), #7 (duplicate picker entries).
+The fix in each case is to put `.order_by()` before `.values…distinct()`. Core was not changed.
+
+## D25 — Makeup schedules and billing (pending finance)
+
+| Severity | Topic | Code does | Agent behaviour |
+|---|---|---|---|
+| Medium (billing rule pending) | Where makeup spots are reported | `run_scope` includes makeup schedules (linked by `parent_schedule`) in the **parent** scope's commercial run (`verification/engine.py:276-295`, `:648-650`). `reconcile_tc(schedule_id=…)` and `build_summary_data(schedule_id=…)` include only the rows of that schedule. Makeup rows are added to TC reconciliation only when `schedule_id` is None (`tc_engine.py:292-300`), which the agent never uses (A4). | Mirrors core: per-schedule calls only. Each makeup schedule is reconciled and reported in **its own** scope's per-schedule loop (test: `agent/tests/test_makeup.py`). Finding `MAKEUP_LINKED` (info) on the parent and each makeup schedule; `ScheduleStatus.makeup_linked`. Drafts (Phase 5) will say "Makeup spots for this schedule are reported under schedule <number>." |
+
+**Open with finance:** should makeup spots be billed under the parent schedule's report or under
+the makeup schedule's own report? Until they decide, the agent follows core.
