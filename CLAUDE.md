@@ -1028,4 +1028,9 @@ Report: `docs/agent/phase3_report.md`. Observe and rehearse only; nothing is app
   into `templates/base.html` only through patch `docs/agent/patches/0007_base_agent_card.diff`.
 - AgentConfig booleans (`enabled`, `intake_fetch_enabled`, `intake_gemini_enabled`) are safe when False;
   `BooleanFailSafeTest` pins the list.
-- Staging week: `docs/agent/runbook_staging.md` (outbound messages off before any service starts).
+- Console views show only the latest observed snapshot of each **active** schedule (Rule 12) in the user's
+  accounts; sign-off comes from ScopeState (readiness). Run is refused while paused, and a second click while
+  a request is pending changes nothing. The card (`agent/console.py::card`) never breaks a page: errors are
+  logged and the card is hidden; 4 queries for staff, 0 for channel officers and anonymous users.
+- Staging week: `docs/agent/runbook_staging.md` (step 1 = own storage, variables, access; then outbound
+  messages off, all before any service starts).

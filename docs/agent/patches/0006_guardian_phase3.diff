@@ -1,6 +1,6 @@
---- a/.claude/agents/numbers-guardian.md	2026-09-26 04:25:23.487191220 +0000
-+++ b/.claude/agents/numbers-guardian.md	2026-09-26 04:59:19.412329611 +0000
-@@ -5,12 +5,26 @@
+--- a/.claude/agents/numbers-guardian.md
++++ b/.claude/agents/numbers-guardian.md
+@@ -5,12 +5,30 @@
  ---
  Check the current diff against CLAUDE.md and docs/agent/AGENT_BUILD_BRIEF.md
  and report PASS/FAIL with file:line for each:
@@ -15,8 +15,8 @@
 +5. Every write to a core, accounts or mapping table, and every human write to any table, goes
 +   through gate.py and creates an AgentAction whose before and after values cover every row that
 +   apply() changes. The agent's own bookkeeping tables (runs, snapshots, findings, pending
-+   effects, heartbeat, notification log, and proposals with kind='finding' and an empty
-+   apply_payload) are exempt.
++   effects, heartbeat, notification log, proposals with kind='finding' and an empty
++   apply_payload, and the cycle clearing AgentConfig.run_requested_at) are exempt.
  6. Wildcard and pipe mapping values are never auto-applied.
  7. LLM output is validated, and IDs are restricted to the candidates supplied.
  8. Email and file content is wrapped as data and never executed as instructions.
@@ -28,4 +28,8 @@
 +    without re-taking it), and every redirect target from request data is validated.
 +12. The kill switch fails safe: no form, fill-in or default keeps AgentConfig.enabled (or any
 +    other switch) True when the person submitting did not send it.
++13. Agent code that runs on core pages (template tags, context processors) is read-only, never
++    uses get_solo / get_or_create, and cannot break a core page (errors are caught and logged).
++14. Console views that show stored snapshots are limited to the user's accounts and to the
++    currently active schedules (Rule 12).
  Then run the existing test suite and agent_golden_check, and report the results.

@@ -397,7 +397,7 @@ form, not a checkbox: its "Use global" choice is None, never True.)
 agent-ci passed on GitHub for the latest pushed commit before this phase (4dbd937):
 https://github.com/Shehank98/Ad-Monitoring/actions/runs/36220049982 (run #16, success). The
 workflow runs `makemigrations agent intake --check` and the full suite on PostgreSQL 16; no change
-was needed. __CI32__
+was needed. After the first Phase 3.2 pushes it also passed on 43ea79f (https://github.com/Shehank98/Ad-Monitoring/actions/runs/36221097244) and 38016a1 (https://github.com/Shehank98/Ad-Monitoring/actions/runs/36221118230). The result for the final Phase 3.2 commit is given in the reply that hands this phase over, because a report cannot quote the CI run of the commit that contains it.
 
 ## 4. Staging runbook
 
@@ -418,14 +418,139 @@ was needed. __CI32__
 - the Agent Settings values;
 - a 13-row daily checklist with where to read each number.
 
+## Phase 3.2 follow-ups (owner review before acceptance)
+
+### Item 1: the Phase 2.1 "400" error
+
+**It was never captured.** No live API call was made from this environment (no API key), so there is no
+observed error and **no model id it happened with**. The only text I have is what the Claude API
+reference bundled with my tooling documents, quoted in the Phase 2.1 section of
+`docs/agent/phase2_report.md`:
+
+> `tool_choice: type "tool" and "any" are not supported for this model.`
+
+That reference names models (Claude Fable 5.1, Claude Mythos 5.1, Claude Opus 5.5), not a model id
+that produced the error. I have not reconstructed anything beyond that quote.
+
+### Item 5: sidebar card safety
+
+- `agent/console.py::card()` wraps everything: **any** exception (including `ProgrammingError` when the
+  agent tables do not exist yet) is logged (`agent.console`, "agent card failed; not shown") and the card
+  is not rendered. The page itself is never affected.
+- **A fixed number of queries: 4** for staff (AgentConfig, last cycle run, and `health()`'s AgentConfig +
+  Heartbeat list), the same with 1 or many scopes (`assertNumQueries(4)`). **0 queries** for
+  channel officers and anonymous users, who get nothing.
+- **Patch 0007 applies after 0001 and 0005:** tested in the suite (`Patch0007Test` copies `base.html`
+  to a temp folder, applies 0001 and 0005, then `git apply --check` 0007 and applies it; the card tag
+  appears once).
+- Tests: `CardSafetyTest` (5) and `Patch0007Test`.
+
+### Item 6: exactly what `run_requested_at` changes in the next cycle
+
+| Part | Behaviour | Test |
+|---|---|---|
+| Every scope counts as due | `select(run_now=True)` sets the "due" cut-off to now, so every scope not observed since the request is picked as `due`. Nothing else in the selection changes. | `test_every_scope_counts_as_due` |
+| Same caps | `max_scopes_per_cycle` applies as usual; the rest wait for the next cycle | `test_same_cap` |
+| Same debounce | a scope inside the upload debounce is still skipped (`debounced`) | `test_same_debounce` |
+| Observe-only outside the shadow window | outside 01:00–05:00 the cycle only observes; no dry run, no shadow window, no shadow snapshot. Inside the window the scopes get their normal nightly rehearsal (still within the night budget). Nothing is ever applied (level 0). | `test_observe_only_outside_the_shadow_window` |
+| Cleared after the cycle | cleared only if nobody clicked again during that cycle | `test_newer_request_during_a_cycle_survives`, `test_cycle_treats_request_as_run_now_and_clears_it` |
+| Second click while pending | changes nothing (no write, no AgentAction) and says "A cycle is already requested (at HH:MM)…" | `test_second_click_while_pending_changes_nothing` |
+| While paused | refused, nothing recorded, message "The Reconciliation Agent is paused. Resume it first." (guardian finding 5) | `test_refused_while_paused` |
+
+### Item 4: file storage on staging (runbook step 1)
+
+`docs/agent/runbook_staging.md` now **starts** with step 1, done before any service starts:
+- **1a:** what I found about `FIREBASE_STORAGE_BUCKET` and `MEDIA_ROOT`:
+  - with a bucket set, every file read, write and delete goes to Firebase; without one, files go to
+    `MEDIA_ROOT`, which Railway loses on redeploy unless a volume is mounted;
+  - saves never overwrite, but deletes do reach the bucket;
+  - restored rows point to production file paths, so downloads on staging may fail, which is expected;
+  - with the production bucket, deleting on staging deletes the production file. Every core place that
+    deletes stored files is listed with file:line: `schedule_delete`, `monitoring_delete`,
+    `monitoring_delete_group`, `tc_delete`, `schedule_template_upload`, **the automatic MapOnline 30-day
+    purge after any MapOnline upload**, `purge_maponline`, and `branding_upload` (local only).
+- **1b:** staging uses its own empty bucket or no bucket (local storage on a staging volume). Never the
+  production bucket.
+- **1c:** every environment variable not to copy from production, with its staging value. This includes
+  `GEMINI_API_KEY` (unset; it is the real lock for Nova chat and PDF conversion, not `nova_enabled`, as the
+  guardian pointed out), `ANTHROPIC_API_KEY`, all `FIREBASE_*`, all `INTAKE_*`, `SUPER_ADMIN_EMAILS`
+  (unset), `SUPER_ADMIN_EMAIL/PASSWORD/NAME` (one named tester; `ensure_superadmin` runs on every
+  deploy), `SECRET_KEY` (new), `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` (staging domain only).
+  Email and WhatsApp credentials are database settings, switched off in step 3.
+- **1d:** a separate domain, and a person's one-off SQL that deactivates every restored user except the
+  named testers (and the agent's service user) and clears restored sessions.
+
 ## Phase 3.2 results
 
 | Run | Run | Passed | Skipped | Failed |
 |---|---|---|---|---|
-| Full suite, SQLite (`manage.py test --exclude-tag=eval`) | 530 | 521 | 9 | 0 |
-| Full suite, PostgreSQL 16 | 530 | 522 | 8 | 0 |
+| Full suite, SQLite (`manage.py test --exclude-tag=eval`), first Phase 3.2 run | 530 | 521 | 9 | 0 |
+| Full suite, PostgreSQL 16, first Phase 3.2 run | 530 | 522 | 8 | 0 |
+| **Full suite, SQLite, final** | **546** | **537** | **9** | **0** |
+| **Full suite, PostgreSQL 16, final** | **546** | **538** | **8** | **0** |
 
-- `makemigrations --check --dry-run`: **No changes detected** (new migration `agent/0009_phase3_2`).
-- Golden idempotent on `synthetic` after migrating to 0009: **MATCH** (3 of 3 schedules).
+**Why the numbers differ between the databases.** Both run the same 546 tests. Some tests exercise a
+feature that exists on only one database, and skip themselves on the other:
 
-__GUARDIAN32__
+- **Skipped on SQLite (9), PostgreSQL-only features:**
+  - `OverlapTest.test_second_cycle_exits_with_overlap_skipped_pg` (session advisory lock)
+  - `CycleLockKeptTest.test_lock_still_held_after_a_scope_db_error` (session advisory lock)
+  - `RealTimeoutTest.test_lock_held_elsewhere_gives_busy_yielded` (lock_timeout)
+  - `AdvisoryLockTest.test_contention_between_connections_and_release_on_rollback`
+  - `AdvisoryLockTest.test_scope_lock_requires_atomic_and_nests`
+  - `ParityWithSummaryPageTest.test_write_inside_read_only_guard_is_stop_and_ask` (READ ONLY enforcement)
+  - `GuardTimeoutsTest.test_lock_timeout_yields_busy`
+  - `GuardTimeoutsTest.test_set_local_values_applied`
+  - `GuardTimeoutsTest.test_statement_timeout_yields`
+- **Skipped on PostgreSQL (8), SQLite / fallback-only features:**
+  - `OverlapTest.test_second_cycle_exits_with_overlap_skipped` (ScopeLockRow cycle lock)
+  - `FallbackLockTest.test_contention_and_release`
+  - `FallbackLockTest.test_expired_row_is_free`
+  - `FallbackLockTest.test_refuses_inside_atomic`
+  - `FallbackLockTest.test_released_in_finally_on_error`
+  - `DryRunTest.test_refused_on_sqlite_without_setting`
+  - `ReconcileScopeTest.test_lock_contention_skips_nothing_silently` (fallback lock)
+  - `GoldenCheckTest.test_refuses_sqlite_outside_tests`
+
+So PostgreSQL passes one more test than SQLite (538 vs 537), because nine tests are PostgreSQL-only and
+eight are SQLite-only.
+
+- `makemigrations --check --dry-run`: **No changes detected** (migration `agent/0009_phase3_2`).
+- Golden idempotent on `synthetic` after 0009: **MATCH** (3 of 3 schedules), before and after the fixes.
+
+### Guardian review of Phase 3.2
+
+**Verdict: PASS on all 8 checks.**
+- Protected paths are unchanged; `templates/base.html` is byte-identical.
+- The console calls no engine. It imports only the four pinned resolvers (plus `active_schedule_ids`,
+  also pinned).
+- Pause/Resume and Run are human gate writes with before/after; both forms carry CSRF tokens (a POST
+  without a token → 403, tested by the guardian).
+- The READ ONLY view tests pass on PostgreSQL.
+- Golden idempotent: MATCH.
+- The guardian also applied patch 0007 to a copy and confirmed:
+  - an admin page renders under READ ONLY;
+  - channel officers and anonymous users see no card;
+  - a page still returns 200 with the AgentConfig row deleted (the row is not re-created).
+- Borderline under the current check 5: the cycle clears `run_requested_at` with a direct `update()`. It
+  is allowed as bookkeeping under patch 0006's check 5, whose text now names it.
+
+Findings, all fixed:
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| 1 | **Schedules/Reports showed superseded and deleted schedules**, so Reports double-counted Planned/Aired/Missed after a re-upload (Rule 12) | only the latest observed snapshot of each **active** schedule (`active_schedule_ids`) per scope of the user's accounts | `test_superseded_version_is_not_counted_twice` |
+| 2 | Reports sign-off label counted AgentAuthorisation rows itself | uses the scope state from `agent/readiness.py` (AUTHORISED / READY_FOR_SIGNOFF), naming the core `authorised_by` | `test_signoff_comes_from_scope_state` |
+| 3 | Theme tester returned 500 on a non-numeric `account_id` | input validated; messages instead of errors | `test_theme_tester_bad_input_never_500` |
+| 4 | A blank duration gave a misleading "No brand" (the resolvers then match only duration-less mappings) | duration is now required | same test |
+| 5 | Pause showed "paused" even when the gate refused; Run could be requested while paused | message only on success; Run refused while paused | `test_pause_message_only_on_success`, `test_refused_while_paused` |
+| — | Card not fail-safe (a missing table would break every staff page) | `card()` catches, logs and hides (item 5) | `CardSafetyTest` |
+| — | Runbook said `nova_enabled=0` keeps chat data from Gemini; `chat_with_nova` does not check it | runbook says `GEMINI_API_KEY` unset is the real lock | — |
+| — | SQL used category `display` for `nova_enabled` (default `assistant`) | changed to `assistant` | — |
+
+Checklist text: the guardian recommended three more changes. They are in **patch 0006** (still for you to
+apply; `git apply --check` passes):
+- check 5 names the cycle clearing `run_requested_at` as allowed bookkeeping;
+- new check 13: agent code on core pages is read-only, never uses `get_solo` / `get_or_create`, and
+  cannot break a page;
+- new check 14: console snapshot views are limited to the user's accounts and active schedules.
