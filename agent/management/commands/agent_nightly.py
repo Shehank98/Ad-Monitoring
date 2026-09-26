@@ -27,12 +27,12 @@ class Command(BaseCommand):
             'Each step runs; non-zero exit if any failed.')
 
     def handle(self, *args, **opts):
-        failed, done = [], []
+        failed, done, window = [], [], {}
         try:                                     # T3: under the cycle lock, waits up to 10 minutes
             from agent.cycle import nightly_close
-            res = nightly_close()
-            self.stdout.write(f"shadow window: closed {res['closed']}, pending {res['pending']} (lock {res['lock']})")
-            done.append('close_shadow_window')
+            window = nightly_close()
+            self.stdout.write(f"shadow window: closed {window['closed']}, pending {window['pending']} "
+                              f"(lock {window['lock']})")
         except BaseException as exc:             # noqa: BLE001 — the audit and purge still run
             failed.append(f'close_shadow_window: {type(exc).__name__}: {exc}')
             self.stderr.write(f'close_shadow_window failed: {exc}')
@@ -46,4 +46,4 @@ class Command(BaseCommand):
         if failed:
             beat_error('agent_nightly', '; '.join(failed))
             sys.exit(1)
-        beat_ok('agent_nightly', {'steps': done})
+        beat_ok('agent_nightly', {'steps': done, 'shadow_window': window})

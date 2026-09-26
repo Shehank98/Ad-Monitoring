@@ -285,3 +285,86 @@ class NightlyCloseTest(TransactionTestCase):
         cycle.run_cycle()                                           # the next cycle closes it
         run.refresh_from_db()
         self.assertEqual(run.status, 'ok')
+
+
+class NowFlagTest(TestCase):
+    """T7."""
+
+    def test_refused_outside_debug_disposable_or_tests(self):
+        import os
+        import sys
+        from unittest import mock
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        with mock.patch.object(sys, 'argv', ['manage.py', 'agent_cycle']), \
+                mock.patch.dict(os.environ, {'AGENT_DISPOSABLE_DB': ''}), self.settings(DEBUG=False):
+            with self.assertRaises(CommandError):
+                call_command('agent_cycle', '--now', '2026-01-01T02:00:00+05:30')
+            with mock.patch.dict(os.environ, {'AGENT_DISPOSABLE_DB': '1'}):
+                from agent.management.commands.agent_cycle import now_allowed
+                self.assertTrue(now_allowed())
+            with self.settings(DEBUG=True):
+                from agent.management.commands.agent_cycle import now_allowed
+                self.assertTrue(now_allowed())
+        from agent.management.commands.agent_cycle import now_allowed
+        self.assertTrue(now_allowed())                   # a test run (sys.argv[1] == 'test')
+
+
+class ServiceUserCoverageTest(TestCase):
+    """T8."""
+
+    def test_missing_accounts_reported_never_written(self):
+        from agent.heartbeat import health
+        from agent import digest
+        from agent.service import get_service_user
+        ensure_service_user()
+        enable()
+        f.account('Late Client')                                   # created after the service user
+        before = set(get_service_user().accounts.values_list('id', flat=True))
+        res = cycle.run_cycle(now=DAY)
+        self.assertEqual(res['service_user_missing_accounts'], ['Late Client'])
+        self.assertEqual(set(get_service_user().accounts.values_list('id', flat=True)), before)   # not synced
+        self.assertFalse(AgentAction.objects.exists())
+        row = next(h for h in health() if h['name'] == 'agent_cycle')
+        self.assertIn('run agent_ensure_service_user', row['note'])
+        self.assertEqual(digest.build(timezone.now())['service_user_missing'], ['Late Client'])
+        self.assertIn('Late Client', digest.render_to_string('agent/_digest_email.txt', digest.build(timezone.now())))
+
+
+class SettingsFormKeepsStoredValuesTest(TestCase):
+    """T10."""
+
+    def setUp(self):
+        from agent.models import AgentConfig
+        self.admin = f.user(role='admin', email='boss@x.lk')
+        self.client.force_login(self.admin)
+        cfg = AgentConfig.get_solo()
+        cfg.shadow_budget_seconds, cfg.shadow_window_start, cfg.enabled = 900, datetime.time(0, 30), True
+        cfg.save()
+        cfg.digest_recipients.set([self.admin])
+
+    def post(self, **extra):
+        data = {'what': 'config', 'autonomy_level': 0, 'mapping_threshold': 0.92, 'grace_days': 3,
+                'upload_debounce_minutes': 10, 'tc_intake_mode': 'off', 'min_brand_overlap': 0.6,
+                'llm_daily_token_cap': 200000, **extra}
+        return self.client.post('/dashboard/agent/config/', data)
+
+    def test_fields_missing_from_the_post_keep_their_stored_value(self):
+        from agent.models import AgentConfig
+        r = self.post(grace_days=5)
+        self.assertEqual(r.status_code, 302)
+        cfg = AgentConfig.get_solo()
+        self.assertEqual((cfg.grace_days, cfg.shadow_budget_seconds, cfg.shadow_window_start, cfg.enabled),
+                         (5, 900, datetime.time(0, 30), True))
+        self.assertEqual(list(cfg.digest_recipients.all()), [self.admin])
+
+    def test_rendered_checkbox_left_unticked_turns_off(self):
+        from agent.models import AgentConfig
+        from agent.forms import AgentConfigForm
+        r = self.post(_fields=','.join(AgentConfigForm.Meta.fields),
+                      shadow_window_start='00:30', shadow_window_end='05:00', shadow_budget_seconds=900,
+                      max_scopes_per_cycle=25, observe_every_minutes=360, db_lock_timeout_ms=2000,
+                      db_statement_timeout_ms=120000, db_idle_timeout_ms=60000,
+                      core_fingerprint_timeout_ms=600000, digest_time='07:30')
+        self.assertEqual(r.status_code, 302)
+        self.assertFalse(AgentConfig.get_solo().enabled)

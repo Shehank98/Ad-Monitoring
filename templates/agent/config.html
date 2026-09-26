@@ -8,7 +8,7 @@
 
 <section class="nv-panel"><div class="hd"><h3>Agent</h3>{% if cfg.enabled %}<span class="nv-chip ok">Enabled</span>{% else %}<span class="nv-chip warn">Disabled</span>{% endif %}
   <span class="sub">Kill switch: when disabled the agent makes no writes. Mail fetch and your own actions still work.</span></div>
-  <form method="post" class="nv-form">{% csrf_token %}<input type="hidden" name="what" value="config">
+  <form method="post" class="nv-form">{% csrf_token %}<input type="hidden" name="what" value="config"><input type="hidden" name="_fields" value="{{ form_fields }}">
     <div class="nv-fgrid">
       {% for field in form %}
       <div>{% if field.field.widget.input_type == 'checkbox' %}<label style="display:flex;gap:8px;align-items:center">{{ field }} {{ field.label }}</label>

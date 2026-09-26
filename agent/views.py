@@ -464,6 +464,7 @@ def config(request):
         'senders': AllowedSender.objects.prefetch_related('accounts'),
         'overrides': AgentAccountOverride.objects.select_related('account').order_by('account__name'),
         'core_settings': core_settings, 'today': date.today(),
+        'form_fields': ','.join(AgentConfigForm.Meta.fields),
         'nova_chat': get_setting('nova_enabled', '1') != '0',
     })
 

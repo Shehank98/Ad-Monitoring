@@ -106,6 +106,34 @@ Nothing is applied. There is no apply path, no mapping candidate and no scoring;
 7. **Settings form.** The Phase 3 fields are on Agent Settings. Two intake tests that posted only
    the Phase 2 fields now also send the Phase 3 defaults (`factories.PHASE3_CONFIG_POST`).
 
+## S1: does the Summary GET write?
+
+**No.** Nothing reachable from a GET of `/dashboard/summary/` (`summary_report`, `core/views.py:6184`)
+writes to the database. The only write in the view is on the POST branch.
+
+| Code reachable from the view | file:line | Runs when | Writes? | Covered under READ ONLY by |
+|---|---|---|---|---|
+| `SummaryReportMeta.objects.get_or_create` + `meta.save()` | `core/views.py:6205` (inside `if request.method == 'POST'`, :6197) | POST only (Save metadata) | yes, **POST only** | not reachable from a GET |
+| schedule auto-select | `core/views.py:6333` | scope given, no `schedule_id`, exactly one schedule | no | `SummaryGetReadOnlyTest.test_first_visit_without_meta_and_without_schedule_id` |
+| `build_summary_data(..., schedule_id=sid)` | `core/views.py:6337` → `verification/tc_engine.py:767` (helpers `_lmrb_row_count` :814, `_sch_qs` :839, `_leftover_lmrb_count` :994; querysets and aggregates only) | scope given; `sid=None` when several schedules and none chosen | no | `ParityWithSummaryPageTest` (sid given), `test_several_schedules_without_schedule_id` (sid None) |
+| `SummaryReportMeta.objects.filter(...).first()` | `core/views.py:6339` | scope given; first visit = no row, and **no row is created** | no | `test_first_visit_without_meta_and_without_schedule_id` (asserts no row afterwards) |
+| card grid: `build_summary_data(schedule_id=sched.id)` per schedule | `core/views.py:6500` | account only, no channel/month | no | `test_card_grid` |
+| `SpecialNotesService(...).calculate()` | `core/views.py:6559` (`verification/special_notes.py`) | `Account.enable_special_notes` and meta has costs | no | `test_meta_with_costs_and_special_notes` |
+| `build_recon_context(...)` | `core/views.py:6569` (`verification/media_recon.py`) | whenever `summary_data` exists | no | `ParityWithSummaryPageTest` and every scope test above |
+| context processors `branding` (`get_setting`), `site_notifications` | `core/context_processors.py:14`, `:29` | every page | no (`get_setting` is `objects.get`, `core/models.py:1469`) | every test above |
+| `_ensure_defaults()` (`get_or_create` of SystemSetting rows) | `core/models.py:1443`, called only from `system_settings` (`core/views.py:8393`) | the System Settings page only | yes, **not reachable** from the Summary GET | not reachable |
+| `tc_three_way` live coverage resolution | `core/views.py:5224`–`5510` (`live_cover_sr` :5249, resolution :5315–5385) | a separate view (`/dashboard/tc/detail/`); the Summary template never calls it | no (in-memory dicts only) | `test_tc_three_way_live_resolution` |
+| messages framework | `core/views.py:6323` (`Access denied`), `:6356` (build failure warning) | only on an error branch | cookie / session storage only; not reached in a normal view | — |
+
+**What the parity test compares:** the page's context variable **`summary_data`**
+(`core/views.py:6585`), after canonical JSON (`to_jsonable` + `canonical_json`), byte-equal with the
+stored observed snapshot's `data` (`agent/tests/test_snapshots_phase3.py:42`).
+
+All tests in `SummaryGetReadOnlyTest` wrap the GET in `agent/db.py::guard(read_only=True)`. On PostgreSQL
+the transaction is `READ ONLY`, so any write would raise `CoreWriteAttempt`. **Result: all pass on
+PostgreSQL 16 and on SQLite; no write was hit.** (On SQLite the guard only rolls back, so enforcement
+is proven by the PostgreSQL run.)
+
 ## Core tables covered by the fingerprint and the no-core-writes test (S6)
 
 These are the 31 tables of every `core` and `accounts` model, including the many-to-many tables:

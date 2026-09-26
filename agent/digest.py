@@ -100,6 +100,7 @@ def build(now) -> dict:
                      .select_related('scope__account')],
         'stale_inputs': _stale_inputs(today),
         'health': [h for h in health(now) if h['state'] != 'ok'],
+        'service_user_missing': service_user_missing(),
         'effects': effects, 'effects_more': more,
         'v5_unexplained': v5_open(now),
         'window': ({'night': window.detail.get('night'), 'used_seconds': window.detail.get('used_seconds'),
@@ -107,6 +108,13 @@ def build(now) -> dict:
                     'changed_tables': sorted((window.detail.get('diff') or {}).keys()),
                     'agent_actions': window.detail.get('agent_actions_in_window')} if window else None),
     }
+
+
+def service_user_missing() -> list:
+    """T8: accounts the agent service user cannot see, as the last cycle recorded them."""
+    from .models import Heartbeat
+    hb = Heartbeat.objects.filter(name='agent_cycle').first()
+    return list(((hb.counts if hb else None) or {}).get('service_user_missing_accounts') or [])
 
 
 def v5_open(now) -> list:

@@ -483,16 +483,25 @@ def run_cycle(now=None) -> dict:
         lock.__exit__(None, None, None)
 
 
+def service_user_missing_accounts(user) -> list:
+    """Phase 3.1 T8: accounts the service user cannot see ('run agent_ensure_service_user').
+    Read only: the cycle never calls sync_service_user (it writes accounts.*, S8)."""
+    from core.models import Account
+    have = set(user.accounts.values_list('id', flat=True))
+    return [name for _id, name in Account.objects.exclude(id__in=have).order_by('name').values_list('id', 'name')]
+
+
 def _run(now, t_start) -> dict:
     try:
         actor = require_service_user()      # alert + stop on failure
     except ServiceUserError as exc:
         beat_error(HEARTBEAT, exc)
         return {'outcome': 'service_user_error', 'error': str(exc)}
+    missing = service_user_missing_accounts(actor)       # T8: report only, never written here
     cfg = AgentConfig.objects.filter(pk=1).first() or AgentConfig()
     if not cfg.enabled:
         dur = time.monotonic() - t_start
-        _beat({'disabled': True}, dur)
+        _beat({'disabled': True, 'service_user_missing_accounts': missing}, dur)
         return {'outcome': 'disabled'}
 
     cycle = AgentRun.objects.create(kind='cycle', status='running')
@@ -547,7 +556,9 @@ def _run(now, t_start) -> dict:
     cycle.status, cycle.finished_at = 'ok', timezone.now()
     cycle.detail = to_jsonable({k: v for k, v in result.items()})
     cycle.save(update_fields=['status', 'finished_at', 'detail'])
-    _beat({**result['counts'], 'scopes': len(result['scopes']), 'in_window': in_window}, dur)
+    result['service_user_missing_accounts'] = missing
+    _beat({**result['counts'], 'scopes': len(result['scopes']), 'in_window': in_window,
+           'service_user_missing_accounts': missing}, dur)
     return result
 
 

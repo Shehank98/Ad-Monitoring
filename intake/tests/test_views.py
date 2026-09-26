@@ -116,7 +116,7 @@ class SettingsViewTest(TestCase):
     def post_config(self, **over):
         data = {'what': 'config', 'autonomy_level': 0, 'mapping_threshold': 0.92, 'grace_days': 3,
                 'upload_debounce_minutes': 10, 'tc_intake_mode': 'off', 'min_brand_overlap': 0.6,
-                'llm_daily_token_cap': 200000, **f.PHASE3_CONFIG_POST}
+                'llm_daily_token_cap': 200000}
         data.update(over)
         return self.client.post('/dashboard/agent/config/', data, follow=True)
 

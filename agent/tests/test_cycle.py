@@ -166,7 +166,7 @@ class DaytimeTest(CycleBase):
         self.assertEqual(res['outcome'], 'disabled')
         self.assertFalse(AgentRun.objects.exists())
         self.assertFalse(ScopeState.objects.exists())
-        self.assertEqual(Heartbeat.objects.get(name='agent_cycle').counts, {'disabled': True})
+        self.assertTrue(Heartbeat.objects.get(name='agent_cycle').counts['disabled'])
 
     def test_service_user_missing_stops_with_alert(self):
         from accounts.models import User

@@ -56,6 +56,12 @@ def health(now=None) -> list[dict]:
             if hb is None or hb.last_ok_at is None or now - hb.last_ok_at > timedelta(minutes=CYCLE_STALE_MINUTES):
                 state = 'stale' if state != 'error' else state
                 note = note or f'No successful cycle for {CYCLE_STALE_MINUTES}+ minutes while the agent is on'
+        if name == 'agent_cycle' and hb and (hb.counts or {}).get('service_user_missing_accounts'):
+            miss = hb.counts['service_user_missing_accounts']
+            state = 'stale' if state == 'ok' else state
+            note = (note + ' · ' if note else '') + (
+                f'Service user cannot see {len(miss)} account(s): {", ".join(miss[:5])}'
+                f'{"…" if len(miss) > 5 else ""} — run agent_ensure_service_user')
         if hb and hb.alert:
             state, note = 'alert', hb.alert_message
         out.append({'name': name, 'label': label, 'state': state, 'note': note,

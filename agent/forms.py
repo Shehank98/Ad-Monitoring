@@ -35,6 +35,35 @@ class AgentConfigForm(forms.ModelForm):
                   'core_fingerprint_timeout_ms': 'Core fingerprint timeout per table (ms)',
                   'digest_time': 'Daily digest time (Colombo)'}
 
+    def __init__(self, data=None, *args, **kwargs):
+        """Phase 3.1 T10: a field missing from the POST keeps its stored value, so a form posted by an
+        older page or test (without the fields added later) never resets or fails them. The page
+        sends `_fields` (every field it rendered); for those, a missing checkbox still means False."""
+        super().__init__(data, *args, **kwargs)
+        if data is None or not self.instance.pk:
+            return
+        rendered = {x for x in (data.get('_fields') or '').split(',') if x}
+        filled = data.copy()
+        multi = hasattr(filled, 'setlist')
+        for name, field in self.fields.items():
+            if name in data or name in rendered:
+                continue
+            value = getattr(self.instance, name)
+            if name == 'digest_recipients':
+                pks = [str(pk) for pk in value.values_list('pk', flat=True)]
+                if multi:
+                    filled.setlist(name, pks)
+                else:
+                    filled[name] = pks
+            elif isinstance(field, forms.BooleanField):
+                if value:
+                    filled[name] = 'on'
+            elif hasattr(value, 'strftime'):
+                filled[name] = value.strftime('%H:%M')
+            elif value is not None:
+                filled[name] = str(value)
+        self.data = filled
+
     def clean(self):
         d = super().clean()
         if d.get('shadow_window_start') and d.get('shadow_window_start') == d.get('shadow_window_end'):

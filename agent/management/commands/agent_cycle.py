@@ -6,9 +6,11 @@ agent tables. See agent/cycle.py. Exit code 1 when the cycle stopped on a write 
 read-only transaction (stop and ask) or on a service-user error.
 """
 import json
+import os
 import sys
 
-from django.core.management.base import BaseCommand
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError
 from django.utils.dateparse import parse_datetime
 
 from agent.cycle import run_cycle
@@ -22,6 +24,8 @@ class Command(BaseCommand):
         parser.add_argument('--now', help='ISO datetime to use as "now" (synthetic walk-throughs only)')
 
     def handle(self, *args, **opts):
+        if opts.get('now') and not now_allowed():
+            raise CommandError('--now is refused here: it needs DEBUG=True, AGENT_DISPOSABLE_DB=1, or a test run.')
         now = parse_datetime(opts['now']) if opts.get('now') else None
         try:
             res = run_cycle(now=now)
@@ -31,3 +35,9 @@ class Command(BaseCommand):
         self.stdout.write(json.dumps(res, default=str, indent=1, sort_keys=True))
         if res.get('outcome') == 'service_user_error':
             sys.exit(1)
+
+
+def now_allowed() -> bool:
+    """Phase 3.1 T7: a fake clock only on a developer box, a disposable database or in tests."""
+    return (bool(settings.DEBUG) or os.environ.get('AGENT_DISPOSABLE_DB') == '1'
+            or sys.argv[1:2] == ['test'])

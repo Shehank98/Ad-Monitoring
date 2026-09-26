@@ -27,6 +27,10 @@ STALE INPUTS (waiting > 7 days after the period ended)
 {% for s in stale_inputs %}  {{ s.account }} | {{ s.channel }} | {{ s.month }} — {{ s.reason }} ({{ s.days }} days)
 {% empty %}  none
 {% endfor %}
+{% if service_user_missing %}
+SERVICE USER COVERAGE
+  The agent service user cannot see {{ service_user_missing|length }} account(s): {{ service_user_missing|join:", " }}. Run agent_ensure_service_user.
+{% endif %}
 JOB HEALTH
 {% for h in health %}  {{ h.label }}: {{ h.state }} — {{ h.note }}
 {% empty %}  all jobs ok

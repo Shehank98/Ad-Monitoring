@@ -146,3 +146,51 @@ class GuardTimeoutsTest(TransactionTestCase):
                 with connection.cursor() as cur:
                     cur.execute('SELECT pg_sleep(2)')
         self.assertEqual(cm.exception.reason, 'timeout_yielded')
+
+
+class SummaryGetReadOnlyTest(TestCase):
+    """Phase 3.1 T6: every Summary page GET path the parity test does not reach, run inside a
+    READ ONLY transaction (enforced on PostgreSQL: any write raises CoreWriteAttempt)."""
+
+    def setUp(self):
+        self.acc, self.s = f.full_scope()
+        self.admin = f.user(role='admin')
+        self.client.force_login(self.admin)
+        self.base = f'/dashboard/summary/?account_id={self.acc.id}'
+
+    def get(self, url):
+        with guard(read_only=True):
+            resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        return resp
+
+    def test_first_visit_without_meta_and_without_schedule_id(self):
+        from core.models import SummaryReportMeta
+        self.assertFalse(SummaryReportMeta.objects.exists())
+        r = self.get(f'{self.base}&channel={self.s.channel}&month={self.s.month}')    # auto-selects the schedule
+        self.assertEqual(r.context['schedule_id'], str(self.s.id))
+        self.assertFalse(SummaryReportMeta.objects.exists())
+
+    def test_several_schedules_without_schedule_id(self):
+        s2 = f.schedule(self.acc, number='102')
+        f.row(self.acc, s2, brand='Nexus', day=20)
+        self.get(f'{self.base}&channel={self.s.channel}&month={self.s.month}')        # schedule_id=None path
+
+    def test_card_grid(self):
+        r = self.get(self.base)
+        self.assertTrue(r.context['cards_by_month'])
+
+    def test_meta_with_costs_and_special_notes(self):
+        from decimal import Decimal
+        from core.models import SummaryReportMeta
+        type(self.acc).objects.filter(pk=self.acc.pk).update(enable_special_notes=True)
+        SummaryReportMeta.objects.create(account=self.acc, channel=self.s.channel, month=self.s.month,
+                                         schedule_cost=Decimal('1000'), deviated_cost=Decimal('100'))
+        r = self.get(f'{self.base}&channel={self.s.channel}&month={self.s.month}&schedule_id={self.s.id}')
+        self.assertIsNotNone(r.context['special_notes_data'])
+
+    def test_tc_three_way_live_resolution(self):
+        with guard(read_only=True):
+            resp = self.client.get(f'/dashboard/tc/detail/?account_id={self.acc.id}&channel={self.s.channel}'
+                                   f'&month={self.s.month}&schedule_id={self.s.id}')
+        self.assertEqual(resp.status_code, 200)
