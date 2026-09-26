@@ -32,6 +32,8 @@ UNCOVERED = ('TC_NO_ROWS', 'LMRB_THEME_NO_ROWS', 'SPONSORSHIP_NOT_RUN', 'LMRB_MU
 UNMAPPED_BRAND = ('NO_TC_MAPPING',)
 CLOSE_AFTER_ABSENT = 2
 RESOLUTIONS = ('mapping_changed', 'manual_match', 'alias_changed', 'tc_reuploaded', 'self_cleared')
+HUMAN_RESOLUTIONS = RESOLUTIONS[:4]
+OWNER_ONLY = 'owner_only'     # an owner label the agent has not (yet) found: a miss (agent_label_scopes)
 
 
 def ledger_key(scope_id, schedule_id, code, brand, duration) -> str:
@@ -81,6 +83,22 @@ def resolution_for(full: dict, relevant: dict) -> tuple[str, dict]:
     return 'self_cleared', {}
 
 
+def human_changes(full: dict, relevant: dict) -> list[str]:
+    """Every kind of human change in this observation's scope-relevant diff (for the inferred
+    'action coverage' measure, S2a)."""
+    out = []
+    if 'brand_mappings' in relevant or 'tc_lmrb_theme_maps' in relevant:
+        out.append('mapping_changed')
+    if (relevant.get('manual_matches') or {}).get('added'):
+        out.append('manual_match')
+    changed = ((full or {}).get('settings') or {}).get('changed') or {}
+    if any(k in ALIAS_KEYS for k in changed):
+        out.append('alias_changed')
+    if 'transmission_reports' in relevant:
+        out.append('tc_reuploaded')
+    return out
+
+
 def _proposal(scope, row, actor):
     return AgentProposal.objects.create(
         kind='finding', tier=4, status='open', action_type=f'finding_{row.code.lower()}'[:40], scope=scope,
@@ -97,6 +115,9 @@ def observe(scope, findings, fp_old: dict | None, fp_new: dict, ctx: dict, actor
     stats = {'opened': 0, 'reopened': 0, 'seen': 0, 'absent': 0, 'closed': 0, 'proposals': 0}
     full = fp_diff(fp_old, fp_new) if fp_old else {}
     relevant = relevant_diff(full, fp_old, fp_new, ctx) if full else {}
+    # S2a inputs: human changes seen now, and whether an agent finding was open before them
+    stats['human_changes'] = human_changes(full, relevant)
+    stats['open_before'] = [r.code for r in rows.values() if r.open and r.resolution != OWNER_ONLY]
 
     for key, g in current.items():
         row = rows.get(key)
@@ -108,7 +129,8 @@ def observe(scope, findings, fp_old: dict | None, fp_new: dict, ctx: dict, actor
                 open=True, first_seen=now, last_seen=now)
             stats['opened'] += 1
         else:
-            reopened = not row.open
+            owner_only = row.resolution == OWNER_ONLY
+            reopened = not row.open and not owner_only
             row.text, row.evidence, row.last_seen, row.absent_count = g['text'], g['evidence'], now, 0
             row.actionable = actionable
             fields = ['text', 'evidence', 'last_seen', 'absent_count', 'actionable']
@@ -117,6 +139,11 @@ def observe(scope, findings, fp_old: dict | None, fp_new: dict, ctx: dict, actor
                 row.reopen_count += 1
                 fields += ['open', 'resolved_at', 'resolution', 'resolution_evidence', 'reopen_count']
                 stats['reopened'] += 1
+            elif owner_only:       # the agent now finds what the owner labelled: no longer a miss
+                row.open, row.resolution, row.first_seen = True, '', now
+                row.label = 'correct' if row.label == 'owner' else row.label
+                fields += ['open', 'resolution', 'first_seen', 'label']
+                stats['opened'] += 1
             else:
                 stats['seen'] += 1
             row.save(update_fields=fields)

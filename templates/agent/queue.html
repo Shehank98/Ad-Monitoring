@@ -25,4 +25,26 @@
   </table></div>
   {% else %}<div class="nv-empty"><b>Queue clear</b>No unmapped brands, unlinked TC files or data checks for {{ month }}.</div>{% endif %}
 </section>
+<section class="nv-panel" style="margin-top:16px" id="findings">
+  <div class="hd"><h3>Agent findings</h3><span class="sub">Recorded by the shadow agent (level 0). Information only: nothing is applied. Your feedback measures how often it is right.</span></div>
+  {% if ledger %}
+  <div class="nv-tscroll"><table class="nv-t">
+    <thead><tr><th>Finding</th><th>Scope</th><th>Seen</th><th>Feedback</th></tr></thead>
+    <tbody>{% for f in ledger %}
+      <tr>
+        <td><span class="nv-chip {% if f.actionable %}agent{% else %}neutral{% endif %}">{{ f.code }}</span>{% if not f.open %} <span class="nv-chip nodot neutral">closed · {{ f.resolution }}</span>{% endif %}{% if f.reopen_count >= 2 %} <span class="nv-chip warn">reopened {{ f.reopen_count }}×</span>{% endif %}<br>{{ f.text }}{% if f.brand %}<br><span class="nv-muted" style="font-size:12px">{{ f.brand }}{% if f.duration is not None %} · {{ f.duration }}s{% endif %}</span>{% endif %}</td>
+        <td><b>{{ f.scope.account.name }}</b><br><span class="nv-muted" style="font-size:12px">{{ f.scope.channel }}</span></td>
+        <td class="nv-muted" style="font-size:12px">{{ f.first_seen|date:"d M H:i" }}<br>to {{ f.last_seen|date:"d M H:i" }}</td>
+        <td>{% if f.label %}<span class="nv-chip nodot {% if f.label == 'correct' %}ok{% elif f.label == 'incorrect' %}bad{% else %}neutral{% endif %}">{{ f.get_label_display }}</span> <span class="nv-muted" style="font-size:12px">{{ f.label_source }}</span>{% endif %}
+          {% if can_label and f.label_source != 'owner' %}
+          <form method="post" action="/dashboard/agent/finding/{{ f.id }}/feedback/" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">{% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}#findings">
+            <input type="text" name="note" placeholder="Note (optional)" maxlength="500" aria-label="Feedback note" style="font-size:12px;padding:3px 6px;min-width:120px">
+            {% for k, lbl in labels %}<button class="nv-btn sm" name="label" value="{{ k }}">{{ lbl }}</button>{% endfor %}
+          </form>{% endif %}</td>
+      </tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="nv-empty"><b>No agent findings</b>The shadow agent has not recorded findings for {{ month }} yet.</div>{% endif %}
+</section>
 {% endblock %}

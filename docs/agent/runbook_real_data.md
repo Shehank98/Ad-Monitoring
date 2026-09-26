@@ -99,10 +99,44 @@ psql "$COPY_URL" -c "select count(*), sum(is_lmrb_confirmed::int) from core_tcro
 
 Run these before step 2 and after step 3c; the numbers must be identical.
 
+## 4b. Labelled diagnosis eval (Phase 3, S2c)
+
+Use a backup restored from **before** the problems in your labels were fixed, so diagnose
+can still see them.
+
+1. Write the label CSV (one row per real cause you know of; UTF-8):
+
+   ```
+   account,channel,month,schedule_number,cause_code,brand,duration,as_of,note
+   Keells,Sirasa TV,January 2025,101,NO_TC_MAPPING,Nexus,30,2025-02-03,tc_theme was blank
+   Keells,Derana TV,January 2025,201,no_issue,,,2025-02-03,checked; all fine
+   ```
+
+   - `channel` and `month` must match the Schedule **exactly** (copy them from the Summary Sheet).
+   - `cause_code`: a diagnose code (NO_TC_MAPPING, CHANNEL_VARIANT, TC_NOT_LINKED,
+     WILDCARD_TC_THEME_COMMERCIAL, MANUAL_LOCK_LOST, DUPLICATE_ACTIVE_NUMBER, SCHEDULE_LOCKED,
+     TC_NO_ROWS, LMRB_THEME_NO_ROWS, SPONSORSHIP_NOT_RUN, …), `no_issue` or `other`.
+   - Any bad row refuses the whole file, with the line number.
+
+2. Run the eval on the copy (never on production; it refuses without the flag):
+
+   ```bash
+   AGENT_DISPOSABLE_DB=1 DATABASE_URL="$COPY_URL" python manage.py agent_diagnose_labelled labels.csv
+   ```
+
+   It runs readiness + diagnose only (no engine, no dry run) inside read-only transactions
+   and writes `docs/agent/labelled_eval_<date>.md` (per code TP / FP / misses, precision,
+   recall). Exit criterion 3 is the Overall recall.
+
+3. To store the same labels on **production** findings (criterion 2, precision), an admin runs
+   `python manage.py agent_label_scopes labels.csv --actor you@company.lk`. It writes only the
+   agent findings ledger, one logged action per row.
+
 ## 5. Send back
 
 - `docs/agent/core_audit_<date>.md`
 - `docs/agent/golden_idempotent_<date>.md` and `golden_rebuild_<date>.md`
 - the golden list you used
+- `docs/agent/labelled_eval_<date>.md` (if you ran 4b)
 
 Then drop the copy: `dropdb --maintenance-db="${COPY_URL%/*}/postgres" admon_restore`.

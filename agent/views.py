@@ -16,6 +16,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.http import Http404
 from django.contrib import messages
+from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 
 from accounts.decorators import role_required
@@ -29,7 +30,7 @@ from . import gate
 from .checks import baseline_groups
 from .heartbeat import health
 from .forms import AgentConfigForm, AllowedSenderForm, OverrideForm
-from .models import AgentAccountOverride, AgentAction, AgentConfig, AgentRun
+from .models import AgentAccountOverride, AgentAction, AgentConfig, AgentRun, FindingLedger
 from .scopes import (
     STATE_LABEL, STATES, available_months, build_scope, build_scopes,
     spot_strip, state_counts,
@@ -233,9 +234,53 @@ def queue(request):
     kinds = {}
     for it in items:
         kinds[it['kind']] = kinds.get(it['kind'], 0) + 1
+    # Phase 3: findings the shadow agent recorded (actionable ones carry an info proposal)
+    ledger = (FindingLedger.objects.filter(scope__account_id__in=account_ids, scope__month=month)
+              .filter(Q(open=True) | ~Q(label='')).exclude(resolution='owner_only')
+              .select_related('scope__account', 'proposal').order_by('-actionable', 'code', 'scope__channel')
+              if month else FindingLedger.objects.none())
     return render(request, 'agent/queue.html', {
         'months': months, 'month': month, 'items': items, 'kinds': kinds,
+        'ledger': ledger[:200], 'can_label': request.user.role in ADMIN_ROLES,
+        'labels': FEEDBACK_LABELS,
     })
+
+
+FEEDBACK_LABELS = (('correct', 'Correct'), ('incorrect', 'Incorrect'), ('unsure', 'Unsure'))
+
+
+@login_required
+@role_required(ADMIN_ROLES)
+def finding_feedback(request, pk):
+    """Correct / Incorrect / Unsure on a finding (S2b). A human gate write to an agent
+    table only (FindingLedger); never touches core data."""
+    if request.method != 'POST':
+        return redirect('/dashboard/agent/queue/')
+    row = get_object_or_404(FindingLedger.objects.select_related('scope'), pk=pk)
+    if not _account_access(request.user, row.scope.account_id):
+        return render(request, '403.html', status=403)
+    label = request.POST.get('label', '')
+    note = request.POST.get('note', '').strip()[:500]
+    if label not in dict(FEEDBACK_LABELS):
+        messages.error(request, 'Choose Correct, Incorrect or Unsure.')
+        return redirect(request.POST.get('next') or '/dashboard/agent/queue/')
+    before = {'label': row.label, 'label_source': row.label_source, 'label_note': row.label_note}
+    if row.label_source == 'owner':
+        messages.error(request, 'This finding carries an owner label; feedback does not replace it.')
+        return redirect(request.POST.get('next') or '/dashboard/agent/queue/')
+
+    def apply():
+        row.label, row.label_source, row.label_note = label, 'feedback', note
+        row.save(update_fields=['label', 'label_source', 'label_note'])
+        return {'label': label, 'label_source': 'feedback', 'label_note': note}
+    try:
+        gate.perform(tier=gate.T0, action_type='finding_feedback', actor_kind='human', actor=request.user,
+                     scope=row.scope, target_model='agent.FindingLedger', target_pk=row.id, before=before,
+                     apply=apply, reason=f'feedback on {row.code}: {label}', evidence={'code': row.code})
+        messages.success(request, f'Feedback saved: {dict(FEEDBACK_LABELS)[label]}.')
+    except gate.HumanNotAllowed as exc:
+        messages.error(request, str(exc))
+    return redirect(request.POST.get('next') or '/dashboard/agent/queue/')
 
 
 def _activity_qs(user):
