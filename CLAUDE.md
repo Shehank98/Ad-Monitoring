@@ -1016,3 +1016,16 @@ Report: `docs/agent/phase3_report.md`. Observe and rehearse only; nothing is app
 - Agent Settings form: a field missing from the POST keeps its stored value, except checkboxes: an unsent
   checkbox is always False (the kill switch fails safe).
 - V5 explanations ignore AgentActions on `agent.*` / `intake.*` tables (`validate.explaining_actions`).
+
+### Phase 3.2 — Reconciliation Agent console (level 0, not deployed)
+- Console pages under `/dashboard/agent/console/`: `schedules/` and `reports/` (read-only, from observed
+  SummarySnapshot rows, links to the core Summary page) and `theme-tester/` (read-only; pinned engine
+  resolvers; no save). No approve/apply controls.
+- `pause/` (toggles `AgentConfig.enabled`) and `run/` (sets `AgentConfig.run_requested_at`): admin-only,
+  POST-only, human `gate.perform` on agent.AgentConfig. The web request never runs a cycle; `agent_cycle`
+  treats a pending request as run-now (every scope due, still capped, still level 0) and clears it.
+- Sidebar card: `{% load agent_console %}{% agent_card %}` (`agent/templatetags/agent_console.py`); it goes
+  into `templates/base.html` only through patch `docs/agent/patches/0007_base_agent_card.diff`.
+- AgentConfig booleans (`enabled`, `intake_fetch_enabled`, `intake_gemini_enabled`) are safe when False;
+  `BooleanFailSafeTest` pins the list.
+- Staging week: `docs/agent/runbook_staging.md` (outbound messages off before any service starts).

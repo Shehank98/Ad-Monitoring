@@ -345,3 +345,87 @@ is still for you to apply (`git apply --check` passes):
 - The Nova Agent Console mockup you linked is not built. Its approve/apply actions (mapping proposals,
   tolerance changes, manual-match proposals, TC split) need autonomy above 0, which is Phase 4.
   See the question in my final message.
+
+---
+
+# Phase 3.2 (owner items 1–5)
+
+Synthetic data only. Not deployed. Autonomy stays 0.
+
+## 1. Reconciliation Agent console (option (a), level 0 only)
+
+| Part | What it does | Where |
+|---|---|---|
+| Sidebar agent card | Status (Running · level N / Paused), last cycle, next expected cycle (the next `*/15` tick), heartbeat health (OK / Check / Alert, with the first problem as a tooltip), "Run requested" when pending. Admins also see **Pause/Resume** and **Run cycle**. Channel officers and anonymous users see nothing. | `agent/templatetags/agent_console.py` (`{% agent_card %}`), `templates/agent/_agent_card.html`; into `templates/base.html` by **patch `0007_base_agent_card.diff`** (for you to apply; applies alone or after 0001 and 0005) |
+| Pause / Resume | Toggles `AgentConfig.enabled` (the kill switch). Admin only, POST only (GET → 405), a human `gate.perform` on `agent.AgentConfig` with before/after (`agent_pause` / `agent_resume`). | `agent/views.py::console_pause` |
+| Run cycle | Sets the new `AgentConfig.run_requested_at` (admin only, POST only, logged as `agent_run_requested`). **The request never runs a cycle.** The next `agent_cycle` (cron) treats it as run-now: every scope counts as due (still capped at `max_scopes_per_cycle`, still level 0). It clears the flag afterwards, but only if nobody clicked again during the cycle. | `agent/views.py::console_run`, `agent/cycle.py` (`select(run_now=…)`), migration `agent/0009_phase3_2` |
+| Schedules | Latest **observed** SummarySnapshot per schedule: state, Planned / Aired / 3rd Party / Missed, when observed, link to the core Summary Sheet. No Summary calculation. | `/dashboard/agent/console/schedules/` |
+| Reports | Per scope: sign-off state (core `authorised_by`, AgentAuthorisation, Ready for sign-off, Not ready), totals from observed snapshots, prepared/checked by, links to the Summary Sheet, PDF and Excel. | `/dashboard/agent/console/reports/` |
+| Theme tester | Client + TC or LMRB theme + optional duration → brand(s). TC uses `_build_reverse_tc_theme_map` + `_brands_for_tc_theme`. LMRB uses `_build_lmrb_theme_map` + `_lmrb_themes_for_brand` per brand with the engines' exact / `*`-prefix rule. All are pinned in `test_core_contract`. GET only, no save action; accounts outside the user's access → 403. | `/dashboard/agent/console/theme-tester/` |
+
+There are **no approve / apply controls** anywhere in the console, not even disabled ones (tested).
+The three views are also tabs in the agent pages (`templates/agent/_base.html`).
+
+Tests: `agent/tests/test_console.py`.
+- **No core writes:** every console view, plus the Overview, runs inside a READ ONLY guard (enforced on PostgreSQL).
+- **Run cycle:** the request only sets the flag (no cycle, no scope run); the next cycle runs everything and clears the flag; a newer click during a cycle survives.
+- **Switches:** Pause/Resume and Run are admin-only (team_head, planner, operations and channel_officer → 403), POST-only (405) and logged.
+- **Access:** channel_officer gets 403 on every console view.
+- **Card:** admin, other staff, channel officer, paused and requested states; the card is rendered under READ ONLY.
+
+Screenshots: `docs/agent/screens/p32_schedules.png`, `p32_reports.png`, `p32_theme_tester.png`. The
+sidebar card needs patch 0007, which I did not apply. It is covered by the tag tests instead.
+
+## 2. Fail-safe check of AgentConfig booleans
+
+A checkbox missing from the POST is always False (Phase 3.1 guardian fix). AgentConfig has exactly
+three boolean fields, and False is the safe value for each:
+
+| Field | When False | Safe? |
+|---|---|---|
+| `enabled` | Kill switch: the cycle writes its heartbeat and does nothing else; no observation, no rehearsal, no digest | yes |
+| `intake_fetch_enabled` | No mailbox is read | yes |
+| `intake_gemini_enabled` | Intake PDFs are not sent to Gemini; they are read once by the heuristic reader and always go to review | yes |
+
+No boolean is unsafe when False. `BooleanFailSafeTest` pins this list, so a new boolean field fails
+the test until its safe value is reviewed. It also posts the settings form without any boolean and
+checks that all three turn off. (`AgentAccountOverride.enabled` is a nullable choice on a separate
+form, not a checkbox: its "Use global" choice is None, never True.)
+
+## 3. CI
+
+agent-ci passed on GitHub for the latest pushed commit before this phase (4dbd937):
+https://github.com/Shehank98/Ad-Monitoring/actions/runs/36220049982 (run #16, success). The
+workflow runs `makemigrations agent intake --check` and the full suite on PostgreSQL 16; no change
+was needed. __CI32__
+
+## 4. Staging runbook
+
+`docs/agent/runbook_staging.md`. It covers:
+- restoring the backup;
+- **switching off every outbound message before any service starts**, with a table of each
+  SystemSetting key (`whatsapp_enabled`, `whatsapp_access_token`, `whatsapp_phone_number_id`,
+  `whatsapp_test_number`, `email_enabled`, `email_host`, `email_host_password`, `nova_enabled`),
+  what reads it and the value to set;
+- a one-off upsert SQL, tested on a copy. It inserts missing rows because a missing `nova_enabled`
+  row reads as on;
+- the environment variables to leave unset (`GEMINI_API_KEY`, `FIREBASE_STORAGE_BUCKET` if it is
+  production, `ANTHROPIC_*`, `INTAKE_*`);
+- digest recipients limited to named testers;
+- migrations, `agent_ensure_service_user` and the runbook_real_data steps;
+- `AGENT_DISPOSABLE_DB=1` only on the one-off rebuild or eval command;
+- the two cron services with their variables;
+- the Agent Settings values;
+- a 13-row daily checklist with where to read each number.
+
+## Phase 3.2 results
+
+| Run | Run | Passed | Skipped | Failed |
+|---|---|---|---|---|
+| Full suite, SQLite (`manage.py test --exclude-tag=eval`) | 530 | 521 | 9 | 0 |
+| Full suite, PostgreSQL 16 | 530 | 522 | 8 | 0 |
+
+- `makemigrations --check --dry-run`: **No changes detected** (new migration `agent/0009_phase3_2`).
+- Golden idempotent on `synthetic` after migrating to 0009: **MATCH** (3 of 3 schedules).
+
+__GUARDIAN32__
