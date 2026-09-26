@@ -1,0 +1,37 @@
+{% autoescape off %}Reconciliation Agent — daily digest {{ date }}
+Level 0 (shadow): the agent observes and rehearses only. Nothing below was changed by it.
+
+SCOPES BY STATE
+{% for s, n in states %}  {{ s }}: {{ n }}
+{% empty %}  (no scopes)
+{% endfor %}
+NEW FINDINGS ({{ new_findings_total }})
+{% for f in new_findings %}  [{{ f.code }}{% if f.actionable %}, actionable{% endif %}] {{ f.account }} | {{ f.channel }} | {{ f.month }}{% if f.brand %} | {{ f.brand }}{% endif %}{% if f.duration is not None %} ({{ f.duration }}s){% endif %}
+    {{ f.text }}
+{% empty %}  none
+{% endfor %}
+FLAPPING FINDINGS (reopened 2+ times)
+{% for f in flapping %}  [{{ f.code }}] {{ f.account }} | {{ f.channel }} | {{ f.month }} {{ f.brand }} — reopened {{ f.reopen_count }}x
+{% empty %}  none
+{% endfor %}
+PENDING EFFECTS (what a run would change; |Δ| >= 1 on Aired or Missed; top 20)
+{% for e in effects %}  {{ e.account }} | {{ e.channel }} | {{ e.month }} | #{{ e.schedule_number }} | {{ e.section }} {{ e.product }} ({{ e.dur }}s): Aired {{ e.aired|stringformat:"+d" }}, Missed {{ e.missed|stringformat:"+d" }}
+{% empty %}  none
+{% endfor %}{% if effects_more %}  … and {{ effects_more }} more
+{% endif %}
+UNEXPLAINED NUMBER CHANGES (V5)
+{% for v in v5_unexplained %}  {{ v.account }} | {{ v.channel }} | {{ v.month }} — schedules {{ v.schedules|join:", " }}
+{% empty %}  none
+{% endfor %}
+STALE INPUTS (waiting > 7 days after the period ended)
+{% for s in stale_inputs %}  {{ s.account }} | {{ s.channel }} | {{ s.month }} — {{ s.reason }} ({{ s.days }} days)
+{% empty %}  none
+{% endfor %}
+JOB HEALTH
+{% for h in health %}  {{ h.label }}: {{ h.state }} — {{ h.note }}
+{% empty %}  all jobs ok
+{% endfor %}
+LAST SHADOW WINDOW
+{% if window %}  night {{ window.night }}: {{ window.dry_runs }} dry run(s), {{ window.used_seconds }} s used; agent actions in window: {{ window.agent_actions }}; core tables changed during the window (detection, not proof): {{ window.changed_tables|join:", "|default:"none" }}
+{% else %}  no completed window yet
+{% endif %}{% endautoescape %}

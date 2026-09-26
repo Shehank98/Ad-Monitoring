@@ -12,8 +12,10 @@ from django.utils import timezone
 
 from .models import AgentConfig, Heartbeat
 
-JOBS = (('intake_fetch', 'Mail fetch'), ('intake_runner', 'Intake runner'), ('agent_nightly', 'Nightly audit + purge'))
+JOBS = (('intake_fetch', 'Mail fetch'), ('intake_runner', 'Intake runner'), ('agent_nightly', 'Nightly audit + purge'),
+        ('agent_cycle', 'Agent cycle'))
 FETCH_STALE_MINUTES = 20
+CYCLE_STALE_MINUTES = 60          # Phase 3 exit criterion 7
 
 
 def beat_ok(name: str, counts: dict | None = None) -> None:
@@ -50,11 +52,19 @@ def health(now=None) -> list[dict]:
             if hb is None or hb.last_ok_at is None or now - hb.last_ok_at > timedelta(minutes=FETCH_STALE_MINUTES):
                 state = 'stale' if state != 'error' else state
                 note = note or f'No successful fetch for {FETCH_STALE_MINUTES}+ minutes while fetch is on'
+        if name == 'agent_cycle' and cfg and cfg.enabled:
+            if hb is None or hb.last_ok_at is None or now - hb.last_ok_at > timedelta(minutes=CYCLE_STALE_MINUTES):
+                state = 'stale' if state != 'error' else state
+                note = note or f'No successful cycle for {CYCLE_STALE_MINUTES}+ minutes while the agent is on'
+        if hb and hb.alert:
+            state, note = 'alert', hb.alert_message
         out.append({'name': name, 'label': label, 'state': state, 'note': note,
                     'last_ok_at': hb.last_ok_at if hb else None, 'last_error_at': hb.last_error_at if hb else None,
-                    'counts': hb.counts if hb else {}})
-    for h in rows.values():                                      # e.g. agent_cycle alerts
-        if h.alert:
+                    'counts': hb.counts if hb else {}, 'detail': hb.detail if hb else {}})
+    names = {n for n, _ in JOBS}
+    for h in rows.values():                                      # alerts on other heartbeats
+        if h.alert and h.name not in names:
             out.append({'name': h.name, 'label': h.name, 'state': 'alert', 'note': h.alert_message,
-                        'last_ok_at': h.last_ok_at, 'last_error_at': h.last_error_at, 'counts': h.counts})
+                        'last_ok_at': h.last_ok_at, 'last_error_at': h.last_error_at, 'counts': h.counts,
+                        'detail': h.detail})
     return out

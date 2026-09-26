@@ -1,0 +1,23 @@
+<div style="font-family:Arial,sans-serif;font-size:14px;color:#1b1b1b">
+<h2 style="margin:0 0 4px">Reconciliation Agent — daily digest {{ date }}</h2>
+<p style="margin:0 0 12px;color:#555">Level 0 (shadow): the agent observes and rehearses only. Nothing below was changed by it.</p>
+<h3>Scopes by state</h3>
+<ul>{% for s, n in states %}<li>{{ s }}: {{ n }}</li>{% empty %}<li>no scopes</li>{% endfor %}</ul>
+<h3>New findings ({{ new_findings_total }})</h3>
+<ul>{% for f in new_findings %}<li><b>{{ f.code }}</b>{% if f.actionable %} (actionable){% endif %} — {{ f.account }} | {{ f.channel }} | {{ f.month }}{% if f.brand %} | {{ f.brand }}{% endif %}{% if f.duration is not None %} ({{ f.duration }}s){% endif %}<br>{{ f.text }}</li>{% empty %}<li>none</li>{% endfor %}</ul>
+<h3>Flapping findings</h3>
+<ul>{% for f in flapping %}<li>{{ f.code }} — {{ f.account }} | {{ f.channel }} | {{ f.month }} {{ f.brand }}: reopened {{ f.reopen_count }}x</li>{% empty %}<li>none</li>{% endfor %}</ul>
+<h3>Pending effects (top 20)</h3>
+<table cellpadding="4" style="border-collapse:collapse">
+<tr><th align="left">Scope</th><th align="left">Schedule</th><th align="left">Brand</th><th>Aired Δ</th><th>Missed Δ</th></tr>
+{% for e in effects %}<tr><td>{{ e.account }} | {{ e.channel }} | {{ e.month }}</td><td>#{{ e.schedule_number }}</td><td>{{ e.section }} {{ e.product }} ({{ e.dur }}s)</td><td align="right">{{ e.aired|stringformat:"+d" }}</td><td align="right">{{ e.missed|stringformat:"+d" }}</td></tr>{% empty %}<tr><td colspan="5">none</td></tr>{% endfor %}
+</table>{% if effects_more %}<p>… and {{ effects_more }} more</p>{% endif %}
+<h3>Unexplained number changes (V5)</h3>
+<ul>{% for v in v5_unexplained %}<li>{{ v.account }} | {{ v.channel }} | {{ v.month }} — schedules {{ v.schedules|join:", " }}</li>{% empty %}<li>none</li>{% endfor %}</ul>
+<h3>Stale inputs</h3>
+<ul>{% for s in stale_inputs %}<li>{{ s.account }} | {{ s.channel }} | {{ s.month }} — {{ s.reason }} ({{ s.days }} days)</li>{% empty %}<li>none</li>{% endfor %}</ul>
+<h3>Job health</h3>
+<ul>{% for h in health %}<li>{{ h.label }}: {{ h.state }} — {{ h.note }}</li>{% empty %}<li>all jobs ok</li>{% endfor %}</ul>
+<h3>Last shadow window</h3>
+{% if window %}<p>Night {{ window.night }}: {{ window.dry_runs }} dry run(s), {{ window.used_seconds }} s used. Agent actions in window: {{ window.agent_actions }}. Core tables changed during the window (detection, not proof): {{ window.changed_tables|join:", "|default:"none" }}.</p>{% else %}<p>No completed window yet.</p>{% endif %}
+</div>

@@ -4,8 +4,8 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "python manage.py agent_nightly",
-    "cronSchedule": "45 23 * * *",
+    "startCommand": "python manage.py agent_cycle",
+    "cronSchedule": "*/15 * * * *",
     "restartPolicyType": "NEVER"
   }
 }

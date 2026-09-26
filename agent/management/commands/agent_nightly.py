@@ -1,4 +1,5 @@
-"""agent_nightly (railway/cron-audit.json, 02:00 Colombo). Phase 2.1 item 5.
+"""agent_nightly (railway/cron-audit.json, 23:45 UTC = 05:15 Colombo, after the shadow window;
+Phase 3 Q1). Phase 2.1 item 5.
 
 Runs agent_core_audit, then intake_purge_content. Each step runs even if the other
 fails; the command exits non-zero if any step failed. Heartbeat 'agent_nightly' records

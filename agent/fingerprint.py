@@ -70,13 +70,10 @@ def _norm(s) -> str:
     return str(s).lower().strip() if s else ''
 
 
-def fingerprint(scope) -> dict:
-    # Local import: .scope imports core engines; keep this module import-light.
-    from .checks import lmrb_scope_qs
-    from .scope import period
-    acc, ch, mo = scope.account_id, scope.channel, scope.month
-    start, end = period(scope)
-    data = {
+def account_parts(account_id) -> dict:
+    """The account-wide sections. agent_cycle computes these once per account per cycle (S10)."""
+    acc = account_id
+    return to_jsonable({
         'version': VERSION,
         'brand_mappings': _rows(BrandMapping.objects.filter(account_id=acc),
                                 ['product', 'brand', 'theme', 'tc_theme', 'maponline_theme', 'duration']),
@@ -95,7 +92,16 @@ def fingerprint(scope) -> dict:
         'monitoring_uploaded_max': MonitoringData.objects.filter(account_id=acc)
         .aggregate(m=Max('uploaded_at'))['m'],
         'settings': {k: get_setting(k, '') for k in SETTING_KEYS},
-        # scope parts
+    })
+
+
+def scope_parts(scope) -> dict:
+    # Local import: .scope imports core engines; keep this module import-light.
+    from .checks import lmrb_scope_qs
+    from .scope import period
+    acc, ch, mo = scope.account_id, scope.channel, scope.month
+    start, end = period(scope)
+    return to_jsonable({
         # MonitoringData stores the clean channel name like LMRBRow: use the engine's filter
         'monitoring_data': sorted(MonitoringData.objects.filter(_lmrb_channel_q(ch), account_id=acc)
                                   .order_by().values_list('id', flat=True)),
@@ -103,8 +109,12 @@ def fingerprint(scope) -> dict:
         'lmrb_count': lmrb_scope_qs(acc, ch, start, end).count() if start else 0,
         'match_results_run_max': MatchResult.objects.filter(account_id=acc, channel=ch, month=mo)
         .aggregate(m=Max('run_at'))['m'],
-    }
-    return to_jsonable(data)
+    })
+
+
+def fingerprint(scope, account=None) -> dict:
+    """Account parts (or the cached `account` dict from account_parts) plus the scope parts."""
+    return {**(account if account is not None else account_parts(scope.account_id)), **scope_parts(scope)}
 
 
 def fingerprint_sha(fp: dict) -> str:
