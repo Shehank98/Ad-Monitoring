@@ -226,11 +226,24 @@ def agent_effect(nights: int = 14) -> list[dict]:
     """The last `nights` closed shadow windows: core tables whose count / max(id) / content hash
     changed between the start and end of the window, next to the AgentActions made inside it.
     Reads agent tables only. Detection, not proof: people and core jobs may also write at night."""
+    from datetime import datetime
+
+    from django.utils import timezone
+
     from .models import AgentRun
     out = []
+    now = timezone.now()
+    for run in (AgentRun.objects.filter(kind='shadow_window', status='running').order_by('started_at')):
+        d = run.detail or {}
+        if datetime.fromisoformat(d['window_end']) <= now:      # T3: never closed yet -> pending
+            out.append({'night': d.get('night'), 'status': 'pending', 'dry_runs': d.get('dry_runs', 0),
+                        'used_seconds': d.get('used_seconds', 0), 'agent_actions': '—', 'human_actions': '—',
+                        'changed_tables': [], 'scan_errors': []})
     for run in AgentRun.objects.filter(kind='shadow_window', status='ok').order_by('-started_at')[:nights]:
         d = run.detail or {}
-        out.append({'night': d.get('night'), 'dry_runs': d.get('dry_runs', 0),
+        out.append({'night': d.get('night'), 'status': 'closed', 'dry_runs': d.get('dry_runs', 0),
+                    'fingerprint_ms': {'start': (d.get('start') or {}).get('total_ms'),
+                                       'end': (d.get('end') or {}).get('total_ms')},
                     'used_seconds': d.get('used_seconds', 0),
                     'agent_actions': d.get('agent_actions_in_window', 0),
                     'human_actions': d.get('human_actions_in_window', 0),
@@ -241,18 +254,27 @@ def agent_effect(nights: int = 14) -> list[dict]:
 
 
 def render_agent_effect(rows: list[dict]) -> str:
+    from .core_fingerprint import RECONCILIATION_PATTERNS, group_tables
     out = ['', '## Agent effect (shadow windows)', '',
            'Detection, not proof: per core table, row count, max(id) and sum(hashtext(row)) at the start '
-           'and end of each night\'s shadow window. A change is listed with its table names; it is not '
-           'blamed on the agent, because people and core jobs can write at night too. At autonomy level 0 '
-           'the agent must make no AgentAction inside the window.', '']
+           'and end of each night\'s shadow window (accounts_user.last_login is left out of the hash). A change '
+           'is listed with its table names; it is not blamed on the agent, because people and core jobs can '
+           'write at night too. At autonomy level 0 the agent must make no AgentAction inside the window.', '',
+           f'Reconciliation data = {", ".join(RECONCILIATION_PATTERNS)}. Activity tables = every other table.', '']
     if not rows:
         out.append('No completed shadow window yet.')
         return '\n'.join(out) + '\n'
-    out.append('| Night | Dry runs | Seconds | Agent actions | Human actions | Core tables changed | Scan errors |')
-    out.append('|---|---:|---:|---:|---:|---|---|')
+    out.append('| Night | Status | Dry runs | Seconds | Agent actions | Human actions | Changed: reconciliation data '
+               '| Changed: activity tables | Scan errors | Fingerprint ms (start / end) |')
+    out.append('|---|---|---:|---:|---:|---:|---|---|---|---|')
     for r in rows:
-        out.append(f"| {r['night']} | {r['dry_runs']} | {r['used_seconds']} | {r['agent_actions']} | "
-                   f"{r['human_actions']} | {', '.join(r['changed_tables']) or 'none'} | "
-                   f"{', '.join(r['scan_errors']) or 'none'} |")
+        g = group_tables(r['changed_tables'])
+        ms = r.get('fingerprint_ms') or {}
+        out.append(f"| {r['night']} | {r.get('status', 'closed')} | {r['dry_runs']} | {r['used_seconds']} | "
+                   f"{r['agent_actions']} | {r['human_actions']} | {', '.join(g['reconciliation']) or 'none'} | "
+                   f"{', '.join(g['activity']) or 'none'} | {', '.join(r['scan_errors']) or 'none'} | "
+                   f"{ms.get('start', '—')} / {ms.get('end', '—')} |")
+    if any(r.get('status') == 'pending' for r in rows):
+        out += ['', 'A **pending** window was not closed yet (the nightly job could not get the cycle lock in 10 '
+                'minutes). The next cycle closes it and the next audit shows its row.']
     return '\n'.join(out) + '\n'

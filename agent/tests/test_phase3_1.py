@@ -219,3 +219,69 @@ class ReconcilePendingCycleTest(TransactionTestCase):
         row = FindingLedger.objects.get(code='RECONCILE_PENDING')
         self.assertTrue(row.open and row.actionable)
         self.assertGreaterEqual(row.evidence['max_abs'], 1)
+
+
+class NightlyCloseTest(TransactionTestCase):
+    """T3."""
+
+    def setUp(self):
+        ensure_service_user()
+        enable()
+        self.acc, self.s = f.full_scope()
+        age_uploads()
+
+    def open_window(self):
+        from agent.models import AgentRun
+        now = timezone.now()
+        return AgentRun.objects.create(kind='shadow_window', status='running', detail={
+            'night': '2025-02-10', 'window_start': (now - timedelta(hours=5)).isoformat(),
+            'window_end': (now - timedelta(minutes=30)).isoformat(), 'used_seconds': 0, 'dry_runs': 0,
+            'start': __import__('agent.core_fingerprint', fromlist=['take']).take()})
+
+    def test_nightly_closes_a_still_open_window(self):
+        from django.core.management import call_command
+        run = self.open_window()
+        call_command('agent_nightly', stdout=__import__('io').StringIO(), stderr=__import__('io').StringIO())
+        run.refresh_from_db()
+        self.assertEqual(run.status, 'ok')
+        self.assertIn('end', run.detail)
+        self.assertEqual(run.detail['agent_actions_in_window'], 0)
+
+    def test_nightly_and_cycle_racing_close_it_once(self):
+        run = self.open_window()
+        now = timezone.now()
+        self.assertTrue(cycle.close_window(run.id, now))            # the nightly job wins
+        end_fp = __import__('agent.models', fromlist=['AgentRun']).AgentRun.objects.get(pk=run.id).detail['end']
+        self.assertFalse(cycle.close_window(run.id, now))           # the cycle's attempt is a no-op
+        self.assertEqual(cycle.close_windows(now), [])
+        run.refresh_from_db()
+        self.assertEqual(run.detail['end'], end_fp)                 # end fingerprint not overwritten
+
+    def test_lock_timeout_reports_pending_and_leaves_it_open(self):
+        from agent.models import AgentRun, ScopeLockRow
+        from django.db import connection, connections
+        run = self.open_window()
+        other = None
+        if connection.vendor == 'postgresql':
+            other = connections.create_connection('default')
+            with other.cursor() as cur:
+                cur.execute('SELECT pg_advisory_lock(%s)', [cycle.CYCLE_LOCK_KEY])
+        else:
+            ScopeLockRow.objects.create(key=cycle.CYCLE_LOCK_KEY, owner='cycle:1', acquired_at=timezone.now(),
+                                        expires_at=timezone.now() + timedelta(minutes=10))
+        try:
+            res = cycle.nightly_close(wait_seconds=0.2)
+        finally:
+            if other is not None:
+                with other.cursor() as cur:
+                    cur.execute('SELECT pg_advisory_unlock(%s)', [cycle.CYCLE_LOCK_KEY])
+                other.close()
+            ScopeLockRow.objects.filter(key=cycle.CYCLE_LOCK_KEY).delete()
+        self.assertEqual((res['lock'], res['pending']), ('timeout', [run.id]))
+        run.refresh_from_db()
+        self.assertEqual(run.status, 'running')
+        from agent.core_audit import agent_effect
+        self.assertEqual(agent_effect()[0]['status'], 'pending')
+        cycle.run_cycle()                                           # the next cycle closes it
+        run.refresh_from_db()
+        self.assertEqual(run.status, 'ok')

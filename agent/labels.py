@@ -7,6 +7,7 @@ CSV columns: account, channel, month, schedule_number, cause_code, brand, durati
   cause_code       a diagnose code, TC_NOT_LINKED, no_issue or other
   brand, duration  optional; narrow the match
   as_of            YYYY-MM-DD, the day the label describes
+  complete         optional, yes / no (default no): yes = these rows list every real cause for the scope
 
 apply_labels(rows, actor): one human gate write (agent.FindingLedger) per row
   - a code: every ledger row of that scope with the code (and brand/duration when given) seen
@@ -30,6 +31,9 @@ from .ledger import ACTIONABLE, CYCLE_CODES, INFO_ONLY, OWNER_ONLY, ledger_key
 from .models import FindingLedger, ScopeState
 
 COLUMNS = ('account', 'channel', 'month', 'schedule_number', 'cause_code', 'brand', 'duration', 'as_of', 'note')
+# Phase 3.1 T4: optional column. complete=yes on any row of a scope means the owner listed EVERY real
+# cause for that scope, so an agent finding there that no label explains is a false positive.
+OPTIONAL_COLUMNS = ('complete',)
 # diagnose codes only (BASELINE is a state; V5_UNEXPLAINED / RECONCILE_PENDING are not diagnoses)
 CAUSE_CODES = tuple(sorted(set(ACTIONABLE) - set(CYCLE_CODES) | set(INFO_ONLY))) + ('no_issue', 'other')
 
@@ -48,6 +52,7 @@ class Label:
     duration: int | None
     as_of: datetime.date
     note: str
+    complete: bool = False
 
 
 def parse(path: str) -> tuple[list[Label], list[str]]:
@@ -88,8 +93,11 @@ def _row(n, r) -> Label:
         raise LabelError(f'as_of must be YYYY-MM-DD: {exc}') from None
     if dur and not dur.isdigit():
         raise LabelError(f'duration must be whole seconds, not {dur!r}')
+    comp = (r.get('complete') or 'no').strip().lower()
+    if comp not in ('yes', 'no'):
+        raise LabelError(f'complete must be yes or no, not {comp!r}')
     return Label(n, acc, s, code, (r['brand'] or '').strip(), int(dur) if dur else None, as_of,
-                 (r['note'] or '').strip()[:500])
+                 (r['note'] or '').strip()[:500], comp == 'yes')
 
 
 def _end_of(day):
@@ -145,3 +153,41 @@ def apply_label(lab: Label, actor) -> dict:
                        evidence={'schedule_id': s.id, 'schedule_number': s.schedule_number,
                                  'brand': lab.brand, 'duration': lab.duration, 'as_of': lab.as_of.isoformat()})
     return act.after
+
+
+def scope_key(lab: Label) -> tuple:
+    s = lab.schedule
+    return (s.account_id, s.channel, s.month)
+
+
+def complete_scopes(labels) -> set:
+    return {scope_key(l) for l in labels if l.complete}
+
+
+def mark_unexplained_incorrect(labels, actor) -> int:
+    """T4 for the ledger: in a complete=yes scope, every agent finding (diagnoses only) seen on or
+    before as_of that no owner label explains is labelled incorrect. One human gate write per scope."""
+    n = 0
+    for key in complete_scopes(labels):
+        labs = [l for l in labels if scope_key(l) == key]
+        as_of = max(l.as_of for l in labs)
+        scope = ScopeState.objects.filter(account_id=key[0], channel=key[1], month=key[2]).first()
+        if scope is None:
+            continue
+        rows = list(FindingLedger.objects.filter(scope=scope, first_seen__lt=_end_of(as_of), label='')
+                    .exclude(resolution=OWNER_ONLY).exclude(code__in=CYCLE_CODES))
+        if not rows:
+            continue
+
+        def apply(rows=rows, labs=labs):
+            ids = [r.id for r in rows]
+            FindingLedger.objects.filter(pk__in=ids).update(
+                label='incorrect', label_source='owner', cause_code='complete_unexplained',
+                label_note='not in a complete owner label set', label_as_of=max(l.as_of for l in labs))
+            return {'labelled_incorrect': ids}
+        gate.perform(tier=gate.T0, action_type='owner_label_complete', actor_kind='human', actor=actor,
+                     scope=scope, target_model='agent.FindingLedger', target_pk=f'{scope.id}:complete',
+                     before={'rows': [{'id': r.id, 'label': r.label} for r in rows]}, apply=apply,
+                     reason='complete=yes: unexplained agent findings are false positives')
+        n += len(rows)
+    return n

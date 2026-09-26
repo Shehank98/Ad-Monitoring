@@ -100,7 +100,47 @@ class CoreFingerprintTest(TestCase):
             'human_actions_in_window': 1, 'diff': {'core_tcrow': {}}, 'start': {'errors': {}}, 'end': {'errors': {}}})
         md = render_agent_effect(agent_effect())
         self.assertIn('Detection, not proof', md)
-        self.assertIn('| 2025-02-10 | 3 | 12.5 | 0 | 1 | core_tcrow | none |', md)
+        self.assertIn('| 2025-02-10 | closed | 3 | 12.5 | 0 | 1 | core_tcrow | none | none |', md)
+
+
+class FingerprintNoiseTest(TestCase):
+    """Phase 3.1 T9."""
+
+    def test_groups_and_timings(self):
+        g = core_fingerprint.group_tables(['core_tcrow', 'core_schedulerow', 'core_periodsponsorshipmatch',
+                                           'core_tclmrbmatch', 'accounts_user', 'core_auditlog'])
+        self.assertEqual(g['reconciliation'], ['core_periodsponsorshipmatch', 'core_schedulerow',
+                                               'core_tclmrbmatch', 'core_tcrow'])
+        self.assertEqual(g['activity'], ['accounts_user', 'core_auditlog'])
+        self.assertEqual(core_fingerprint.group_tables([]), {'reconciliation': [], 'activity': []})
+        fp = core_fingerprint.take()
+        self.assertEqual(set(fp['timing_ms']), set(core_fingerprint.tables()))
+        self.assertIn('total_ms', fp)
+
+    def test_last_login_does_not_change_the_hash(self):
+        u = f.user(role='admin', email='login@x.lk')
+        a = core_fingerprint.take()
+        from accounts.models import User
+        User.objects.filter(pk=u.pk).update(last_login=timezone.now())
+        b = core_fingerprint.take()
+        self.assertNotIn('accounts_user', core_fingerprint.diff(a, b))
+        User.objects.filter(pk=u.pk).update(role='planner')
+        c = core_fingerprint.take()
+        if core_fingerprint.connection.vendor == 'postgresql':           # hashes exist only on PostgreSQL
+            self.assertIn('accounts_user', core_fingerprint.diff(b, c))
+
+    def test_audit_shows_both_groups_and_pending(self):
+        now = timezone.now()
+        AgentRun.objects.create(kind='shadow_window', status='running', detail={
+            'night': '2025-02-11', 'window_start': (now - datetime.timedelta(hours=6)).isoformat(),
+            'window_end': (now - datetime.timedelta(hours=2)).isoformat(), 'dry_runs': 1, 'used_seconds': 1})
+        AgentRun.objects.create(kind='shadow_window', status='ok', detail={
+            'night': '2025-02-10', 'dry_runs': 3, 'used_seconds': 12.5, 'agent_actions_in_window': 0,
+            'human_actions_in_window': 0, 'diff': {'core_tcrow': {}, 'core_auditlog': {}},
+            'start': {'errors': {}, 'total_ms': 5}, 'end': {'errors': {}, 'total_ms': 6}})
+        md = render_agent_effect(agent_effect())
+        self.assertIn('| 2025-02-11 | pending |', md)
+        self.assertIn('| core_tcrow | core_auditlog | none | 5 / 6 |', md)
 
 
 class UiTest(TestCase):

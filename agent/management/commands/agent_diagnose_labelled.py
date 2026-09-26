@@ -12,8 +12,11 @@ and recall.
                    unless a label names them.
   TP    a label whose code (and brand / duration, when given) diagnose also reports
   miss  a label diagnose does not report
-  FP    a finding of an evaluated code in a labelled scope that no label explains
-        (in a no_issue scope every evaluated finding is an FP)
+  FP    a finding of an evaluated code that no label explains, in a scope whose labels are
+        complete=yes or labelled no_issue (Phase 3.1 T4)
+  unverified  the same, in any other labelled scope: listed in the report, left out of precision
+Precision is reported twice: over complete-labelled scopes only, and overall.
+BASELINE (a state) and the cycle codes V5_UNEXPLAINED / RECONCILE_PENDING are never scored.
 """
 import datetime
 import os
@@ -26,7 +29,8 @@ from django.core.management.base import BaseCommand, CommandError
 from agent.db import guard
 from agent.diagnose import Finding, diagnose
 from agent.labels import parse
-from agent.ledger import ACTIONABLE
+from agent.labels import complete_scopes
+from agent.ledger import ACTIONABLE, CYCLE_CODES, STATES
 from agent.models import AgentRun, ScopeState
 from agent.readiness import assess
 
@@ -39,41 +43,60 @@ def _match(f, lab) -> bool:
             and (lab.duration is None or f['duration'] == lab.duration))
 
 
+def _prf(d):
+    p = round(d['tp'] / (d['tp'] + d['fp']), 3) if d['tp'] + d['fp'] else None
+    r = round(d['tp'] / (d['tp'] + d['miss']), 3) if d['tp'] + d['miss'] else None
+    return p, r
+
+
 def evaluate(labels, findings_by_scope: dict) -> dict:
     """Pure. `findings_by_scope`: {(account_id, channel, month): [{'code','brand','duration'}]}."""
-    codes = ({l.cause_code for l in labels} - set(NOT_SCORED)) | set(ACTIONABLE)
-    per = defaultdict(lambda: {'tp': 0, 'fp': 0, 'miss': 0})
+    codes = (({l.cause_code for l in labels} - set(NOT_SCORED)) | set(ACTIONABLE)) - set(CYCLE_CODES) - set(STATES)
+    complete = complete_scopes(labels)
+    per = defaultdict(lambda: {'tp': 0, 'fp': 0, 'miss': 0, 'unverified': 0})
+    per_c = defaultdict(lambda: {'tp': 0, 'fp': 0, 'miss': 0})       # complete-labelled scopes only
+    unverified = []
     by_scope = defaultdict(list)
     for lab in labels:
         s = lab.schedule
         by_scope[(s.account_id, s.channel, s.month)].append(lab)
     for key, labs in by_scope.items():
         found = [f for f in findings_by_scope.get(key, []) if f['code'] in codes]
+        closed_world = key in complete or any(l.cause_code == 'no_issue' for l in labs)
         explained = set()
         for lab in labs:
             if lab.cause_code in NOT_SCORED:
                 continue
             hit = [i for i, f in enumerate(found) if _match(f, lab)]
-            if hit:
-                per[lab.cause_code]['tp'] += 1
-                explained.update(hit)
-            else:
-                per[lab.cause_code]['miss'] += 1
+            k = 'tp' if hit else 'miss'
+            per[lab.cause_code][k] += 1
+            if key in complete:
+                per_c[lab.cause_code][k] += 1
+            explained.update(hit)
         for i, f in enumerate(found):
-            if i not in explained:
+            if i in explained:
+                continue
+            if closed_world:
                 per[f['code']]['fp'] += 1
-    rows, tot = [], {'tp': 0, 'fp': 0, 'miss': 0}
+                if key in complete:
+                    per_c[f['code']]['fp'] += 1
+            else:
+                per[f['code']]['unverified'] += 1
+                unverified.append({'scope': list(key), **f})
+    rows, tot, tot_c = [], {'tp': 0, 'fp': 0, 'miss': 0, 'unverified': 0}, {'tp': 0, 'fp': 0, 'miss': 0}
     for code in sorted(per):
-        d = per[code]
-        rows.append({'code': code, **d,
-                     'precision': round(d['tp'] / (d['tp'] + d['fp']), 3) if d['tp'] + d['fp'] else None,
-                     'recall': round(d['tp'] / (d['tp'] + d['miss']), 3) if d['tp'] + d['miss'] else None})
+        d, dc = per[code], per_c.get(code, {'tp': 0, 'fp': 0, 'miss': 0})
+        p, r = _prf(d)
+        rows.append({'code': code, **d, 'precision': p, 'recall': r, 'precision_complete': _prf(dc)[0]})
         for k in tot:
             tot[k] += d[k]
-    overall = {**tot,
-               'precision': round(tot['tp'] / (tot['tp'] + tot['fp']), 3) if tot['tp'] + tot['fp'] else None,
-               'recall': round(tot['tp'] / (tot['tp'] + tot['miss']), 3) if tot['tp'] + tot['miss'] else None}
-    return {'codes': rows, 'overall': overall, 'scopes': len(by_scope), 'labels': len(labels),
+        for k in tot_c:
+            tot_c[k] += dc[k]
+    p, r = _prf(tot)
+    return {'codes': rows, 'overall': {**tot, 'precision': p, 'recall': r},
+            'complete_only': {**tot_c, 'precision': _prf(tot_c)[0], 'recall': _prf(tot_c)[1],
+                              'scopes': len(complete)},
+            'unverified': unverified, 'scopes': len(by_scope), 'labels': len(labels),
             'evaluated_codes': sorted(codes)}
 
 
@@ -81,25 +104,40 @@ def scope_findings(account_id, channel, month) -> list[dict]:
     sc = ScopeState(account_id=account_id, channel=channel, month=month)     # never saved
     with guard(read_only=True):
         r = assess(sc)
-        fs = diagnose(sc, r)
+        fs = [x for x in diagnose(sc, r) if x.code not in STATES]
         if r.reason == 'tc_not_linked':
             fs.append(Finding('TC_NOT_LINKED', 'TC not linked'))
     return [{'code': f.code, 'brand': f.brand or '', 'duration': (f.evidence or {}).get('duration')} for f in fs]
 
 
 def render(res, csv_path, today) -> str:
-    lines = [f'# Labelled diagnosis eval — {today}', '',
-             f'Labels: `{csv_path}` · {res["labels"]} label row(s) · {res["scopes"]} scope(s). '
-             'Readiness + diagnose only (no engine, no dry run), on a restored pre-fix copy.', '',
-             '| Code | TP | FP | Misses | Precision | Recall |', '|---|---|---|---|---|---|']
     fmt = lambda v: '—' if v is None else f'{v:.3f}'      # noqa: E731
+    lines = [f'# Labelled diagnosis eval — {today}', '',
+             f'Labels: `{csv_path}` · {res["labels"]} label row(s) · {res["scopes"]} scope(s), '
+             f'{res["complete_only"]["scopes"]} of them complete=yes. Readiness + diagnose only '
+             '(no engine, no dry run), on a restored pre-fix copy.', '',
+             'An unexplained finding is a false positive only in a complete=yes or no_issue scope; elsewhere it '
+             'is **unverified** and left out of precision.', '',
+             '| Code | TP | FP | Misses | Unverified | Precision | Precision (complete scopes) | Recall |',
+             '|---|---|---|---|---|---|---|---|']
     for r in res['codes']:
-        lines.append(f'| {r["code"]} | {r["tp"]} | {r["fp"]} | {r["miss"]} | {fmt(r["precision"])} | {fmt(r["recall"])} |')
-    o = res['overall']
-    lines += [f'| **Overall** | {o["tp"]} | {o["fp"]} | {o["miss"]} | {fmt(o["precision"])} | {fmt(o["recall"])} |', '',
+        lines.append(f'| {r["code"]} | {r["tp"]} | {r["fp"]} | {r["miss"]} | {r["unverified"]} | '
+                     f'{fmt(r["precision"])} | {fmt(r["precision_complete"])} | {fmt(r["recall"])} |')
+    o, c = res['overall'], res['complete_only']
+    lines += [f'| **Overall** | {o["tp"]} | {o["fp"]} | {o["miss"]} | {o["unverified"]} | {fmt(o["precision"])} | '
+              f'{fmt(c["precision"])} | {fmt(o["recall"])} |', '',
+              f'Complete-labelled scopes only: TP {c["tp"]}, FP {c["fp"]}, misses {c["miss"]}, '
+              f'precision {fmt(c["precision"])}, recall {fmt(c["recall"])}.', '',
               f'Evaluated codes: {", ".join(res["evaluated_codes"])}.', '',
-              'Exit criterion 3 (recall ≥ 0.70) is read from the Overall row.', '']
-    return '\n'.join(lines)
+              'Exit criterion 3 (recall ≥ 0.70) is read from the Overall row.', '', '## Unverified findings', '']
+    if res['unverified']:
+        lines += ['| Account id | Channel | Month | Code | Brand | Duration |', '|---|---|---|---|---|---|']
+        for u in res['unverified']:
+            a, ch, mo = u['scope']
+            lines.append(f'| {a} | {ch} | {mo} | {u["code"]} | {u["brand"]} | {u["duration"] if u["duration"] is not None else ""} |')
+    else:
+        lines.append('None.')
+    return '\n'.join(lines) + '\n'
 
 
 class Command(BaseCommand):

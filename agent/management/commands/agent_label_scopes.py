@@ -11,7 +11,7 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 
 from agent import gate
-from agent.labels import CAUSE_CODES, apply_label, parse
+from agent.labels import CAUSE_CODES, apply_label, mark_unexplained_incorrect, parse
 
 
 class Command(BaseCommand):
@@ -37,5 +37,7 @@ class Command(BaseCommand):
             res = apply_label(lab, actor)
             n_lab += len(res['labelled'])
             n_miss += res['owner_only_row'] is not None
+        n_fp = mark_unexplained_incorrect(labels, actor)          # T4: complete=yes scopes
         self.stdout.write(f'{len(labels)} label row(s): {n_lab} finding(s) labelled, '
-                          f'{n_miss} owner-only row(s) (not found by the agent).')
+                          f'{n_miss} owner-only row(s) (not found by the agent), '
+                          f'{n_fp} unexplained finding(s) in complete scopes labelled incorrect.')

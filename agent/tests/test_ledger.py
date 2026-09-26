@@ -219,6 +219,28 @@ class FeedbackAndLabelsTest(TestCase):
         self.assertEqual(measure.precision('feedback')['overall']['precision'], 1.0)
         self.assertEqual(measure.inferred()['label'], 'inferred')
 
+    def test_complete_scope_marks_unexplained_findings_incorrect(self):
+        today = timezone.localdate().isoformat()
+        path = self.csv(['Keells', self.s.channel, self.s.month, '101', 'NO_TC_MAPPING', 'Nexus', '30', today, ''])
+        with open(path) as fh:
+            body = fh.read().replace('as_of,note\n', 'as_of,note,complete\n').replace(f'{today},\n', f'{today},,yes\n')
+        with open(path, 'w') as fh:
+            fh.write(body)
+        call_command('agent_label_scopes', path, '--actor', self.admin.email)
+        self.assertEqual(FindingLedger.objects.get(brand='Nexus').label, 'correct')
+        other = FindingLedger.objects.get(brand='Other')
+        self.assertEqual((other.label, other.label_source, other.cause_code), ('incorrect', 'owner', 'complete_unexplained'))
+
+    def test_complete_column_is_validated(self):
+        today = timezone.localdate().isoformat()
+        path = self.csv(['Keells', self.s.channel, self.s.month, '101', 'NO_TC_MAPPING', 'Nexus', '30', today, ''])
+        with open(path) as fh:
+            body = fh.read().replace('as_of,note\n', 'as_of,note,complete\n').replace(f'{today},\n', f'{today},,maybe\n')
+        with open(path, 'w') as fh:
+            fh.write(body)
+        _, errors = parse(path)
+        self.assertIn('complete must be yes or no', errors[0])
+
     def test_label_command_refuses_whole_file_on_one_bad_row(self):
         today = timezone.localdate().isoformat()
         path = self.csv(['Keells', self.s.channel, self.s.month, '101', 'NO_TC_MAPPING', 'Nexus', '30', today, ''],
@@ -248,10 +270,20 @@ class LabelledEvalTest(TestCase):
                        {'code': 'SUPERSEDED_ROWS_PRESENT', 'brand': '', 'duration': None}]}
         res = evaluate(labs, found)
         rows = {r['code']: r for r in res['codes']}
-        self.assertEqual((rows['NO_TC_MAPPING']['tp'], rows['NO_TC_MAPPING']['fp']), (1, 1))
+        # T4: labels not complete -> the unexplained 'Other' finding is unverified, not an FP
+        self.assertEqual((rows['NO_TC_MAPPING']['tp'], rows['NO_TC_MAPPING']['fp'],
+                          rows['NO_TC_MAPPING']['unverified']), (1, 0, 1))
         self.assertEqual(rows['TC_NO_ROWS']['miss'], 1)
         self.assertNotIn('SUPERSEDED_ROWS_PRESENT', rows)                 # info only: not scored
-        self.assertEqual((res['overall']['precision'], res['overall']['recall']), (0.5, 0.5))
+        self.assertEqual((res['overall']['precision'], res['overall']['recall']), (1.0, 0.5))
+        self.assertEqual(res['complete_only']['precision'], None)
+        self.assertEqual(len(res['unverified']), 1)
+        # complete=yes -> it is a false positive, in both precisions
+        labs[0].complete = True
+        res = evaluate(labs, found)
+        self.assertEqual((res['overall']['fp'], res['overall']['precision'], res['complete_only']['precision']),
+                         (1, 0.5, 0.5))
+        self.assertEqual(res['unverified'], [])
 
     def test_runs_read_only_and_writes_report(self):
         fd, path = tempfile.mkstemp(suffix='.csv')

@@ -93,19 +93,30 @@ def dry_runs_allowed() -> bool:
 # ── cycle lock (S7) ───────────────────────────────────────────────────────────
 
 class _CycleLock:
-    def __enter__(self):
+    """The cycle-wide lock. `wait_seconds` > 0 retries until then (agent_nightly, T3)."""
+
+    def __init__(self, wait_seconds: float = 0, poll_seconds: float = 5):
+        self.wait_seconds, self.poll_seconds = wait_seconds, poll_seconds
+
+    def _try(self) -> bool:
         if is_postgres():
             with connection.cursor() as cur:
                 cur.execute('SELECT pg_try_advisory_lock(%s)', [CYCLE_LOCK_KEY])
                 (ok,) = cur.fetchone()
-            if not ok:
-                raise CycleBusy('another agent_cycle holds the cycle lock')
             self.owner = None
-        else:
-            try:
-                self.owner = _acquire_row(CYCLE_LOCK_KEY, CYCLE_LOCK_TTL_MINUTES)
-            except ScopeBusy as exc:
-                raise CycleBusy(str(exc)) from exc
+            return bool(ok)
+        try:
+            self.owner = _acquire_row(CYCLE_LOCK_KEY, CYCLE_LOCK_TTL_MINUTES)
+            return True
+        except ScopeBusy:
+            return False
+
+    def __enter__(self):
+        deadline = time.monotonic() + self.wait_seconds
+        while not self._try():
+            if time.monotonic() >= deadline:
+                raise CycleBusy('another agent_cycle holds the cycle lock')
+            time.sleep(min(self.poll_seconds, max(0.0, deadline - time.monotonic())))
         return self
 
     def __exit__(self, *exc):
@@ -375,13 +386,25 @@ def open_window(night, start, end) -> AgentRun:
 
 def close_windows(now) -> list:
     """Close every shadow-window run whose window has ended: end fingerprint + diff + the
-    AgentActions created inside the window (level 0: there must be none)."""
+    AgentActions created inside the window (level 0: there must be none). Idempotent: each run is
+    re-read under select_for_update and closed only while still 'running', so the cycle and
+    agent_nightly can never both close it (both also hold the cycle lock)."""
     closed = []
-    for run in AgentRun.objects.filter(kind='shadow_window', status='running'):
+    for run_id in AgentRun.objects.filter(kind='shadow_window', status='running').values_list('id', flat=True):
+        if close_window(run_id, now):
+            closed.append(run_id)
+    return closed
+
+
+def close_window(run_id, now) -> bool:
+    with transaction.atomic():
+        run = AgentRun.objects.select_for_update().filter(pk=run_id, kind='shadow_window').first()
+        if run is None or run.status != 'running':
+            return False                            # already closed by the other job
         d = dict(run.detail)
         end = datetime.fromisoformat(d['window_end'])
         if now < end:
-            continue
+            return False
         start = datetime.fromisoformat(d['window_start'])
         d['end'] = core_fingerprint.take()
         d['diff'] = core_fingerprint.diff(d.get('start'), d['end'])
@@ -390,8 +413,30 @@ def close_windows(now) -> list:
         d['human_actions_in_window'] = acts.filter(human_confirmed=True).count()
         run.detail, run.status, run.finished_at = d, 'ok', timezone.now()
         run.save(update_fields=['detail', 'status', 'finished_at'])
-        closed.append(run.id)
-    return closed
+        return True
+
+
+NIGHTLY_LOCK_WAIT_SECONDS = 600        # T3: agent_nightly waits up to 10 minutes for the cycle lock
+
+
+def pending_windows(now) -> list:
+    return [r for r in AgentRun.objects.filter(kind='shadow_window', status='running')
+            if datetime.fromisoformat(r.detail['window_end']) <= now]
+
+
+def nightly_close(now=None, wait_seconds=None) -> dict:
+    """agent_nightly (T3): take the cycle lock (waiting), then close any ended window. On a lock
+    timeout the windows are reported 'pending'; they stay open, so the next cycle or the next
+    night's audit closes and includes them."""
+    now = now or timezone.now()
+    try:
+        lock = _CycleLock(NIGHTLY_LOCK_WAIT_SECONDS if wait_seconds is None else wait_seconds).__enter__()
+    except CycleBusy:
+        return {'closed': [], 'pending': [r.id for r in pending_windows(now)], 'lock': 'timeout'}
+    try:
+        return {'closed': close_windows(now), 'pending': [], 'lock': 'ok'}
+    finally:
+        lock.__exit__(None, None, None)
 
 
 def _add_window_use(run, seconds):
