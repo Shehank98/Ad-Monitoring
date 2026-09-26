@@ -12,7 +12,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from agent.core_audit import collect, render_markdown
+from agent.core_audit import agent_effect, collect, render_agent_effect, render_markdown
 from agent.models import AgentRun
 
 
@@ -26,8 +26,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opts):
         data = collect()                  # read-only; its transaction has already rolled back
-        md = render_markdown(data, synthetic=opts['synthetic'])
-        run = save_result(data, md, opts['synthetic'])
+        effect = agent_effect()          # Phase 3: agent tables only
+        md = render_markdown(data, synthetic=opts['synthetic']) + render_agent_effect(effect)
+        run = save_result(data, md, opts['synthetic'], effect)
         out = Path(opts['output'] or Path(settings.BASE_DIR) / 'docs' / 'agent'
                    / f"core_audit_{date.today():%Y%m%d}.md")
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -44,9 +45,10 @@ def counts(data: dict) -> dict:
     return {k: (len(v) if isinstance(v, (list, dict)) else v) for k, v in data['sections'].items()}
 
 
-def save_result(data: dict, md: str, synthetic: bool) -> AgentRun:
+def save_result(data: dict, md: str, synthetic: bool, effect=None) -> AgentRun:
     """The single write: agent tables only, in its own transaction (guardian check 17)."""
     with transaction.atomic():
         return AgentRun.objects.create(
             kind='audit', status='ok', finished_at=timezone.now(),
-            detail={'synthetic': synthetic, 'counts': counts(data), 'report': md})
+            detail={'synthetic': synthetic, 'counts': counts(data), 'report': md,
+                    'agent_effect': effect or []})

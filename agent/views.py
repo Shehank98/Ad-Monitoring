@@ -26,11 +26,14 @@ from verification.tc_engine import build_summary_data
 
 from intake.models import AllowedSender, InboundAttachment
 
-from . import gate
+from . import gate, measure
 from .checks import baseline_groups
 from .heartbeat import health
 from .forms import AgentConfigForm, AllowedSenderForm, OverrideForm
-from .models import AgentAccountOverride, AgentAction, AgentConfig, AgentRun, FindingLedger
+from .models import (
+    AgentAccountOverride, AgentAction, AgentConfig, AgentRun, FindingLedger, PendingEffect, ScopeState,
+    SummarySnapshot,
+)
 from .scopes import (
     STATE_LABEL, STATES, available_months, build_scope, build_scopes,
     spot_strip, state_counts,
@@ -131,6 +134,8 @@ def overview(request):
                          for k, v in ((audit.detail or {}).get('counts') or {}).items() if v] if audit else [],
         'intake_counts': _intake_counts(request.user),
         'health': health(),
+        'quality': measure.quality(),
+        'cycle': measure.cycle_health(),
     })
 
 
@@ -198,13 +203,21 @@ def scope_detail(request):
     summaries = []
     for st in sc.schedules:
         data = build_summary_data(sc.account_id, sc.channel, sc.month, schedule_id=st.schedule.id)
-        summaries.append({'status': st, 'data': data, 'url': _summary_url(sc, st.schedule.id)})
+        effect = (PendingEffect.objects.filter(schedule=st.schedule).select_related('shadow')
+                  .order_by('-created_at', '-id').first())
+        observed = (SummarySnapshot.objects.filter(schedule=st.schedule, kind='observed')
+                    .order_by('-created_at', '-id').first())
+        summaries.append({'status': st, 'data': data, 'url': _summary_url(sc, st.schedule.id),
+                          'effect': effect, 'observed': observed})
 
     idx = STEP_INDEX[sc.state]
     steps = [{'n': i + 1, 'label': s, 'cls': 'done' if i < idx else ('now' if i == idx else '')}
              for i, s in enumerate(STEPS)]
+    state = ScopeState.objects.filter(account_id=sc.account_id, channel=sc.channel, month=sc.month).first()
     return render(request, 'agent/scope_detail.html', {
         'sc': sc, 'steps': steps, 'summaries': summaries, 'strip': spot_strip(sc),
+        'agent_findings': (FindingLedger.objects.filter(scope=state, open=True).exclude(resolution='owner_only')
+                           if state else FindingLedger.objects.none()),
         'tolerance': get_setting_int('tc_lmrb_time_tolerance', 5),
     })
 
@@ -306,7 +319,15 @@ def activity(request):
 
 
 def _snap_config(c):
-    return {f: getattr(c, f) for f in AgentConfigForm.Meta.fields}
+    out = {}
+    for f in AgentConfigForm.Meta.fields:
+        v = getattr(c, f)
+        if f == 'digest_recipients':
+            v = sorted(v.values_list('id', flat=True)) if c.pk else []
+        elif hasattr(v, 'isoformat'):
+            v = v.isoformat()
+        out[f] = v
+    return out
 
 
 def _snap_sender(a):

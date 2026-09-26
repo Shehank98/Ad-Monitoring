@@ -218,3 +218,41 @@ def render_markdown(data: dict, synthetic: bool = False) -> str:
         if len(rows) > 200:
             out.append(f'\n… {len(rows) - 200} more rows not shown.')
     return '\n'.join(out) + '\n'
+
+
+# ── Phase 3 d: agent effect (shadow windows) ──────────────────────────────────
+
+def agent_effect(nights: int = 14) -> list[dict]:
+    """The last `nights` closed shadow windows: core tables whose count / max(id) / content hash
+    changed between the start and end of the window, next to the AgentActions made inside it.
+    Reads agent tables only. Detection, not proof: people and core jobs may also write at night."""
+    from .models import AgentRun
+    out = []
+    for run in AgentRun.objects.filter(kind='shadow_window', status='ok').order_by('-started_at')[:nights]:
+        d = run.detail or {}
+        out.append({'night': d.get('night'), 'dry_runs': d.get('dry_runs', 0),
+                    'used_seconds': d.get('used_seconds', 0),
+                    'agent_actions': d.get('agent_actions_in_window', 0),
+                    'human_actions': d.get('human_actions_in_window', 0),
+                    'changed_tables': sorted((d.get('diff') or {}).keys()),
+                    'scan_errors': sorted(set((d.get('start') or {}).get('errors', {}))
+                                          | set((d.get('end') or {}).get('errors', {})))})
+    return out
+
+
+def render_agent_effect(rows: list[dict]) -> str:
+    out = ['', '## Agent effect (shadow windows)', '',
+           'Detection, not proof: per core table, row count, max(id) and sum(hashtext(row)) at the start '
+           'and end of each night\'s shadow window. A change is listed with its table names; it is not '
+           'blamed on the agent, because people and core jobs can write at night too. At autonomy level 0 '
+           'the agent must make no AgentAction inside the window.', '']
+    if not rows:
+        out.append('No completed shadow window yet.')
+        return '\n'.join(out) + '\n'
+    out.append('| Night | Dry runs | Seconds | Agent actions | Human actions | Core tables changed | Scan errors |')
+    out.append('|---|---:|---:|---:|---:|---|---|')
+    for r in rows:
+        out.append(f"| {r['night']} | {r['dry_runs']} | {r['used_seconds']} | {r['agent_actions']} | "
+                   f"{r['human_actions']} | {', '.join(r['changed_tables']) or 'none'} | "
+                   f"{', '.join(r['scan_errors']) or 'none'} |")
+    return '\n'.join(out) + '\n'

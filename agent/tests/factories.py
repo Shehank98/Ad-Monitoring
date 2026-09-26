@@ -79,3 +79,12 @@ def full_scope(acc=None, number='101', brand='Nexus', days=(10, 12), channel=CHA
     for d in days:
         tc_row(acc, rep, day=d, theme=f'{brand.upper()} 30')
     return acc, s
+
+
+# Phase 3 AgentConfig form fields at their defaults (for tests that post the settings form)
+PHASE3_CONFIG_POST = {
+    'shadow_window_start': '01:00', 'shadow_window_end': '05:00', 'shadow_budget_seconds': 1800,
+    'max_scopes_per_cycle': 25, 'observe_every_minutes': 360, 'db_lock_timeout_ms': 2000,
+    'db_statement_timeout_ms': 120000, 'db_idle_timeout_ms': 60000, 'core_fingerprint_timeout_ms': 600000,
+    'digest_time': '07:30',
+}

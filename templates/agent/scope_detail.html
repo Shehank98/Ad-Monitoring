@@ -86,6 +86,13 @@
   </div>
 </section>
 
+{% if agent_findings %}
+<section class="nv-panel">
+  <div class="hd"><h3>Agent findings</h3><span class="sub">Open findings from the shadow agent (information only)</span><span class="sp"></span><a class="nv-btn sm ghost" href="/dashboard/agent/queue/?month={{ sc.month|urlencode }}#findings">Review →</a></div>
+  <div class="nv-tscroll"><table class="nv-t"><tbody>{% for f in agent_findings %}<tr><td><span class="nv-chip {% if f.actionable %}agent{% else %}neutral{% endif %}">{{ f.code }}</span></td><td>{{ f.text }}</td><td class="nv-muted nv-mono" style="font-size:12px">since {{ f.first_seen|date:"d M H:i" }}</td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endif %}
+
 {% for x in summaries %}
 <section class="nv-panel">
   <div class="hd"><h3>Summary Sheet · #{{ x.status.schedule.schedule_number }}</h3><span class="sub">Read-only; numbers from build_summary_data for this schedule</span><span class="sp"></span><a class="nv-btn sm" href="{{ x.url }}">Open Summary Sheet →</a></div>
@@ -100,6 +107,18 @@
   {% endif %}
   {% if x.data.sponsorship %}
   <div class="nv-note"><span><b>Sponsorship:</b> {{ x.data.sponsorship_total.planned }} planned · {{ x.data.sponsorship_total.aired }} aired · {{ x.data.sponsorship_total.missed }} missed</span></div>
+  {% endif %}
+  {% if x.effect %}
+  <div class="nv-note"><span><b>Pending effect</b> (shadow run {{ x.effect.created_at|date:"d M H:i" }}, rolled back — nothing changed): {% if x.effect.by_brand %}an agent run would change these numbers{% else %}an agent run would change nothing{% endif %}.</span></div>
+  {% if x.effect.by_brand %}<div class="nv-tscroll"><table class="nv-t">
+    <thead><tr><th>Section</th><th>Brand</th><th class="num">Dur</th><th class="num">Planned</th><th class="num">Aired</th><th class="num">3rd Party</th><th class="num">Extra</th><th class="num">Missed</th></tr></thead>
+    <tbody>{% for b in x.effect.by_brand %}<tr><td>{{ b.section }}</td><td>{{ b.product }}</td><td class="num nv-mono">{{ b.dur }}</td>
+      <td class="num">{{ b.observed.planned }} → {{ b.shadow.planned }}</td><td class="num">{{ b.observed.aired }} → <b>{{ b.shadow.aired }}</b></td>
+      <td class="num">{{ b.observed.third_party }} → {{ b.shadow.third_party }}</td><td class="num">{{ b.observed.extra }} → {{ b.shadow.extra }}</td>
+      <td class="num">{{ b.observed.missed }} → <b>{{ b.shadow.missed }}</b></td></tr>{% endfor %}</tbody>
+  </table></div>{% endif %}
+  {% elif x.observed %}
+  <div class="nv-note"><span><b>Observed</b> by the agent {{ x.observed.created_at|date:"d M H:i" }}. No shadow run yet (they run 01:00–05:00, PostgreSQL only).</span></div>
   {% endif %}
   <div class="nv-note"><span><b>Aired</b> = TC spots confirmed by LMRB within ±{{ tolerance }}s whose TC theme maps to the brand, plus manual matches</span><span><b>Extra / Missed</b> = 3rd Party (TC confirmed by LMRB) vs Planned</span></div>
 </section>

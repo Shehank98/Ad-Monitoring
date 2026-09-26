@@ -90,6 +90,36 @@
 </section>
 
 <div class="nv-two">
+<section class="nv-panel" id="quality"><div class="hd"><h3>Diagnosis quality</h3><span class="sub">From labels: precision = correct ÷ (correct + incorrect)</span></div>
+  <div class="bd">
+    <dl class="nv-kv">
+      <dt>Open findings</dt><dd class="nv-mono">{{ quality.open }} <span class="nv-muted">({{ quality.open_actionable }} actionable)</span></dd>
+      <dt>Labelled precision</dt><dd class="nv-mono">{{ quality.labelled.overall.precision|default_if_none:"—" }} <span class="nv-muted">n={{ quality.labelled.overall.n }} · {{ quality.labelled.overall.codes_labelled }} code{{ quality.labelled.overall.codes_labelled|pluralize }}</span></dd>
+      <dt>Unmapped-brand precision</dt><dd class="nv-mono">{{ quality.labelled.unmapped_brand.precision|default_if_none:"—" }} <span class="nv-muted">n={{ quality.labelled.unmapped_brand.n }}</span></dd>
+      <dt>Owner / feedback</dt><dd class="nv-mono">{{ quality.owner.overall.precision|default_if_none:"—" }} / {{ quality.feedback.overall.precision|default_if_none:"—" }}</dd>
+      <dt>Missed (owner labels)</dt><dd class="nv-mono">{% for c, n in quality.misses.items %}{{ c }} {{ n }}{% if not forloop.last %}, {% endif %}{% empty %}none{% endfor %}</dd>
+      <dt>Flapping</dt><dd class="nv-mono">{{ quality.flapping }}</dd>
+      <dt>Action alignment <span class="nv-chip nodot neutral">inferred</span></dt><dd class="nv-mono">{{ quality.inferred.alignment|default_if_none:"—" }} <span class="nv-muted">{{ quality.inferred.closed }} closed · {{ quality.inferred.days }} days</span></dd>
+      <dt>Action coverage <span class="nv-chip nodot neutral">inferred</span></dt><dd class="nv-mono">{{ quality.inferred.coverage|default_if_none:"—" }} <span class="nv-muted">{{ quality.inferred.observations_with_human_change }} change{{ quality.inferred.observations_with_human_change|pluralize }}</span></dd>
+    </dl>
+    {% if quality.labelled.codes %}<div class="nv-tscroll" style="margin-top:10px"><table class="nv-t">
+      <thead><tr><th>Code</th><th class="num">Correct</th><th class="num">Incorrect</th><th class="num">Unsure</th><th class="num">Precision</th></tr></thead>
+      <tbody>{% for r in quality.labelled.codes %}<tr><td class="nv-mono">{{ r.code }}</td><td class="num">{{ r.correct }}</td><td class="num">{{ r.incorrect }}</td><td class="num">{{ r.unsure }}</td><td class="num">{{ r.precision|default_if_none:"—" }}</td></tr>{% endfor %}</tbody>
+    </table></div>{% endif %}
+    <p class="nv-muted" style="font-size:12px;margin:8px 0 0">Inferred measures are display only and never decide an exit criterion. <a href="/dashboard/agent/queue/#findings">Label findings →</a></p>
+  </div></section>
+<section class="nv-panel" id="cycle"><div class="hd"><h3>Agent cycle</h3><span class="sub">Level 0 · last {{ cycle.days }} days</span></div>
+  <div class="bd"><dl class="nv-kv">
+    <dt>Last cycle</dt><dd class="nv-mono">{% if cycle.last_cycle %}{{ cycle.last_cycle.started_at|date:"d M H:i" }} · {{ cycle.last_cycle.detail.outcome|default:cycle.last_cycle.status }}{% else %}not run yet{% endif %}</dd>
+    <dt>Cycles</dt><dd class="nv-mono">{{ cycle.cycles }}</dd>
+    <dt>Duration p95 / max</dt><dd class="nv-mono">{{ cycle.p95_seconds|default_if_none:"—" }} s / {{ cycle.max_seconds|default_if_none:"—" }} s <span class="nv-muted">(target &lt; 600 s)</span></dd>
+    <dt>Yielded visits</dt><dd class="nv-mono">{{ cycle.yields }} of {{ cycle.visits }} <span class="nv-muted">({{ cycle.yield_share|default_if_none:"—" }}; target ≤ 0.02)</span></dd>
+    <dt>Shadow nights in budget</dt><dd class="nv-mono">{{ cycle.nights_ok }} of {{ cycle.nights }} <span class="nv-muted">(target ≥ 95%)</span></dd>
+    <dt>Agent actions in windows</dt><dd class="nv-mono">{{ cycle.agent_actions_in_windows }} <span class="nv-muted">(must be 0)</span></dd>
+  </dl></div></section>
+</div>
+
+<div class="nv-two">
 <section class="nv-panel"><div class="hd"><h3>Existing-system audit</h3>{% if audit %}{% if audit.detail.synthetic %}<span class="nv-chip warn">Synthetic data</span>{% endif %}<span class="sub">Read-only · {{ audit.finished_at|date:"d M Y H:i" }}</span><span class="sp"></span>{% if request.user.role in 'super_admin,admin' %}<a class="nv-btn sm ghost" href="/dashboard/agent/audit/{{ audit.id }}/">Full report →</a>{% endif %}{% endif %}</div>
   {% if audit %}<div class="bd"><dl class="nv-kv">{% for k, v in audit_counts %}<dt>{{ k }}</dt><dd class="nv-mono">{{ v }}</dd>{% empty %}<dt>Findings</dt><dd>None</dd>{% endfor %}</dl></div>
   {% else %}<div class="nv-empty"><b>No audit yet</b>Runs nightly (agent_core_audit) once deployed.</div>{% endif %}</section>

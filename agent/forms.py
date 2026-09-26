@@ -1,5 +1,6 @@
 """Admin forms for Agent Settings (Phase 2). Saved through gate.perform(actor_kind='human')."""
 from django import forms
+from django.contrib.auth import get_user_model
 
 from core.models import Account
 from intake.models import AllowedSender
@@ -9,12 +10,39 @@ from .models import AUTONOMY_NOTE, MAX_AUTONOMY_LEVEL, AgentConfig
 
 class AgentConfigForm(forms.ModelForm):
     tc_intake_mode = forms.ChoiceField(choices=AgentConfig.INTAKE_MODES)   # 'auto' is not a choice
+    digest_recipients = forms.ModelMultipleChoiceField(
+        queryset=get_user_model().objects.filter(is_active=True, role__in=('super_admin', 'admin')).order_by('email'),
+        required=False, help_text='Empty = every active super admin and admin.')
 
     class Meta:
         model = AgentConfig
         fields = ['enabled', 'autonomy_level', 'mapping_threshold', 'grace_days', 'upload_debounce_minutes',
                   'tc_intake_mode', 'intake_fetch_enabled', 'intake_gemini_enabled', 'min_brand_overlap',
-                  'llm_daily_token_cap']
+                  'llm_daily_token_cap',
+                  # Phase 3
+                  'shadow_window_start', 'shadow_window_end', 'shadow_budget_seconds', 'max_scopes_per_cycle',
+                  'observe_every_minutes', 'db_lock_timeout_ms', 'db_statement_timeout_ms', 'db_idle_timeout_ms',
+                  'core_fingerprint_timeout_ms', 'digest_time', 'digest_recipients']
+        widgets = {'shadow_window_start': forms.TimeInput(attrs={'type': 'time'}, format='%H:%M'),
+                   'shadow_window_end': forms.TimeInput(attrs={'type': 'time'}, format='%H:%M'),
+                   'digest_time': forms.TimeInput(attrs={'type': 'time'}, format='%H:%M')}
+        labels = {'shadow_window_start': 'Shadow window start (Colombo)',
+                  'shadow_window_end': 'Shadow window end (Colombo)',
+                  'shadow_budget_seconds': 'Shadow budget per night (s)',
+                  'observe_every_minutes': 'Observe each scope every (minutes)',
+                  'db_lock_timeout_ms': 'DB lock timeout (ms)', 'db_statement_timeout_ms': 'DB statement timeout (ms)',
+                  'db_idle_timeout_ms': 'DB idle-in-transaction timeout (ms)',
+                  'core_fingerprint_timeout_ms': 'Core fingerprint timeout per table (ms)',
+                  'digest_time': 'Daily digest time (Colombo)'}
+
+    def clean(self):
+        d = super().clean()
+        if d.get('shadow_window_start') and d.get('shadow_window_start') == d.get('shadow_window_end'):
+            raise forms.ValidationError('The shadow window start and end must differ.')
+        for k in ('db_lock_timeout_ms', 'db_statement_timeout_ms', 'db_idle_timeout_ms', 'core_fingerprint_timeout_ms'):
+            if d.get(k) is not None and d[k] < 100:
+                self.add_error(k, 'Use at least 100 ms.')
+        return d
 
     def clean_autonomy_level(self):
         v = self.cleaned_data['autonomy_level']

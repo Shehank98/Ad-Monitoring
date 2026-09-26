@@ -92,3 +92,51 @@ def quality() -> dict:
             'open': FindingLedger.objects.filter(open=True).count(),
             'open_actionable': FindingLedger.objects.filter(open=True, actionable=True).count(),
             'flapping': FindingLedger.objects.filter(open=True, reopen_count__gte=2).count()}
+
+
+def cycle_health(days: int = 14, now=None) -> dict:
+    """Exit criteria 4, 6 and 7, over the last `days` days (agent tables only).
+    yield_share   (busy_yielded + timeout_yielded) / scope visits, observe and shadow steps
+    p95_seconds   95th percentile of cycle duration
+    nights_ok     closed shadow windows in which no scope was skipped for budget_exhausted
+    """
+    now = now or timezone.now()
+    since = now - timedelta(days=days)
+    durations = sorted(float((d or {}).get('duration_seconds', 0)) for d in
+                       AgentRun.objects.filter(kind='cycle', status='ok', started_at__gte=since)
+                       .values_list('detail', flat=True))
+    visits = yields = 0
+    budget_nights = set()
+    for started, d in (AgentRun.objects.filter(kind='scope', started_at__gte=since, detail__mode='observe')
+                       .values_list('started_at', 'detail')):
+        d = d or {}
+        if d.get('outcome') == 'debounced':
+            continue
+        visits += 1
+        yields += d.get('outcome') in ('busy_yielded', 'timeout_yielded')
+        sh = d.get('shadow') or {}
+        if sh:
+            visits += 1
+            yields += sh.get('outcome') in ('busy_yielded', 'timeout_yielded')
+            if sh.get('reason') == 'budget_exhausted':
+                budget_nights.add(timezone.localtime(started).date())
+    windows = list(AgentRun.objects.filter(kind='shadow_window', status='ok', started_at__gte=since)
+                   .values_list('detail', flat=True))
+    nights = len(windows)
+    nights_ok = sum(1 for d in windows if (d or {}).get('night') and
+                    not any(n.isoformat() in (d['night'], _next(d['night'])) for n in budget_nights))
+    last = AgentRun.objects.filter(kind='cycle').order_by('-started_at').first()
+    return {'days': days, 'cycles': len(durations),
+            'p95_seconds': durations[max(0, int(round(0.95 * len(durations))) - 1)] if durations else None,
+            'max_seconds': durations[-1] if durations else None,
+            'visits': visits, 'yields': yields,
+            'yield_share': round(yields / visits, 4) if visits else None,
+            'nights': nights, 'nights_ok': nights_ok,
+            'nights_ok_share': round(nights_ok / nights, 3) if nights else None,
+            'agent_actions_in_windows': sum(int((d or {}).get('agent_actions_in_window') or 0) for d in windows),
+            'last_cycle': last}
+
+
+def _next(iso):
+    import datetime
+    return (datetime.date.fromisoformat(iso) + timedelta(days=1)).isoformat()

@@ -207,7 +207,7 @@ class GeminiFlagTest(TestCase):
         self.client.post('/dashboard/agent/config/', {
             'what': 'config', 'autonomy_level': 0, 'mapping_threshold': 0.92, 'grace_days': 3,
             'upload_debounce_minutes': 10, 'tc_intake_mode': 'off', 'min_brand_overlap': 0.6,
-            'llm_daily_token_cap': 200000, 'intake_gemini_enabled': 'on'})
+            'llm_daily_token_cap': 200000, 'intake_gemini_enabled': 'on', **f.PHASE3_CONFIG_POST})
         act = AgentAction.objects.get(action_type='agent_config_update')
         self.assertEqual((act.before['intake_gemini_enabled'], act.after['intake_gemini_enabled']), (False, True))
 
