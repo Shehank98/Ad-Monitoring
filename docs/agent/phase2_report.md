@@ -151,3 +151,57 @@ No `.claude/**` file changed in the range.
 7. **Apply patches 0002, 0003 and 0004**, in that order, when you are ready.
 
 Stopped before deployment.
+
+---
+
+# Phase 2.1
+
+Owner items 1–9. Phase 3 exists as a plan only.
+
+| # | Item | Built | Tests |
+|---|---|---|---|
+| 1 | LLM with no final decision | `tool_choice` stays `auto`, and extended thinking is not enabled. If a turn ends without `submit_decision`, the runner sends one follow-up. If there is still none, the result is rules only, NEEDS_REVIEW, reason **`llm_no_decision`**. The same applies to `submit_decision` called twice, text after it, or an invalid schema. Text *before* the call is allowed. With `llm_no_decision`, the reason is always `llm_no_decision`; the rules' own verdict and reason are kept in the note and the evidence. | `NoDecisionTest` (6): text-only ending, rescue after the follow-up, duplicate submit, text after submit, invalid schema, text before submit |
+| 2 | Confirm concurrency | `_scope_guard`: ScopeLock for the schedule's scope inside `transaction.atomic()` (PostgreSQL advisory xact lock, or the ScopeLockRow elsewhere, always released). Inside it the Schedule is re-read with `select_for_update` and every refusal is re-checked: frozen, legacy authorised, locked, duplicate active number, date window. A busy lock gives **`scope_busy`**: "The agent is working on this scope. Try again in a minute." | `ConfirmConcurrencyTest`: lock contention (SQLite row lock and a second PostgreSQL connection), authorised between page load and POST, locked between page load and POST |
+| 3 | Debounce | `debounce_hit` also counts `TransmissionReport.uploaded_at`, which includes a Confirm upload. | `DebounceTest` |
+| 4 | Gemini flag | `AgentConfig.intake_gemini_enabled` (default off). Gemini runs only when the flag is on and `GEMINI_API_KEY` is set (`tools.gemini_allowed()`). Confirm uses the same rule, so an admin confirms the reading that was reviewed. The flag is on the Settings page, and changes are logged. | `GeminiFlagTest` (3) |
+| 5 | Retention | `intake_retention` was approved as built. The purge also moves needs_review items older than `--review-days` (default 180, minimum 30) to **`expired` / `retention_expired`** and clears their content. New command `agent_nightly` runs audit, then purge; each step always runs, and the command exits non-zero if either failed. `railway/cron-audit.json` now runs `python manage.py agent_nightly`. | `RetentionNightlyTest` (3) |
+| 6 | Logging and heartbeat | Fetch logs an AgentAction only when it stored something (`intake_fetch`) or failed (`intake_fetch_failed`). Fetch, runner and nightly each update Heartbeat: `last_ok_at`, `last_error_at`, `last_error`, `counts`. A new `gate.check()` lets fetch stop before reading mail. Agent Overview has a **Health** card; fetch shows as *stale* after 20 minutes without a good run while fetch is on. | `HeartbeatTest` (3), plus the updated fetch idempotency test |
+| 7 | Autonomy cap | `AgentConfig.clean()` and the Settings form reject levels above 0: "Levels above 0 unlock in Phase 4." | `AutonomyCapTest` |
+| 8 | Nav patch | `docs/agent/patches/0005_base_nav_inbox.diff` adds a "TC Inbox" link to the Reconciliation Agent group. The whole group is already hidden from channel_officer. Applying 0001 and then 0005 to the current `base.html` passes `git apply --check`. `base.html` itself is not edited. | — |
+| 9 | Eval set | 27 cases in `intake/tests/eval_cases.py`, criteria in `docs/agent/eval_criteria.md`. The live test (tag `eval`) prints a table per case and asserts the four criteria. `EvalCasesTest` runs offline in every suite and checks each case's rules verdict. | 1 offline test; the live run is pending an API key |
+
+Rules change found while building the eval set: when **no candidate is eligible**, only
+candidates whose brands appear in the file now decide the reason. Before, a Keells file on
+Sirasa TV whose schedule was locked came back as `multiple_schedules`, because an
+unrelated Cargills schedule on the same channel also counted. It now says
+`schedule_locked`. This can only change *which* needs_review reason is given; it can never
+produce a proposal.
+
+## About the "400 on forced tool_choice" (item 1)
+
+**I did not see this error myself.** No real API call has been made from this environment
+(there is no API key here). I chose `tool_choice: auto` because of the Claude API reference
+bundled with my tooling. It lists this error for the newest models: Claude Fable 5.1,
+Claude Mythos 5.1 and Claude Opus 5.5. It gives the error text as:
+
+> `tool_choice: type "tool" and "any" are not supported for this model.`
+
+Because I haven't observed it, please treat the text and the model list as documented, not
+observed. The first live eval run will show whether your `ANTHROPIC_MODEL` accepts forced
+tool use. The runner doesn't depend on it either way.
+
+## Results (Phase 2.1)
+| Run | Run | Passed | Skipped | Failed |
+|---|---:|---:|---:|---:|
+| SQLite, full suite (`--exclude-tag=eval`) | 400 | 398 | 2 | 0 |
+| PostgreSQL 16, full suite (`--exclude-tag=eval`) | 400 | 393 | 7 | 0 |
+
+Phase 2 ended at 379 tests, so Phase 2.1 adds 21: 20 in `test_phase2_1.py` and the
+offline eval-case test. The skips are the same database-specific lock tests as before.
+The live eval tests are excluded by the tag.
+
+- `makemigrations agent intake --check`: no changes (new migrations `agent/0005_phase2_1` and `intake/0003_phase2_1`).
+- Golden `verify --mode idempotent` on the synthetic PostgreSQL data, after migrating it: **MATCH** (#101, #201, #202).
+
+## Guardian review (Phase 2.1)
+GUARDIAN21_PLACEHOLDER
