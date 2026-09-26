@@ -136,8 +136,10 @@ count / hash, not id continuity. `max(id)` does not move on a rollback.
 
 | Run | Run | Passed | Skipped | Failed |
 |---|---|---|---|---|
-| Full suite, SQLite (`manage.py test --exclude-tag=eval`) | 470 | 462 | 8 | 0 |
-| Full suite, PostgreSQL 16 (same command, `DATABASE_URL` → local PostgreSQL) | 470 | 462 | 8 | 0 |
+| Full suite, SQLite (`manage.py test --exclude-tag=eval`), before guardian fixes | 470 | 462 | 8 | 0 |
+| Full suite, PostgreSQL 16 (same command), before guardian fixes | 470 | 462 | 8 | 0 |
+| Full suite, SQLite, after guardian fixes | 475 | 466 | 9 | 0 |
+| Full suite, PostgreSQL 16, after guardian fixes | 475 | 467 | 8 | 0 |
 
 - Skipped tests are database-specific (`skipIf` / `skipUnless` PostgreSQL). Each database skips the
   tests written for the other one.
@@ -147,7 +149,40 @@ count / hash, not id continuity. `max(id)` does not move on a rollback.
 - `test_no_core_writes`: passed on both databases. On PostgreSQL the core sequence that advanced was
   `core_matchresult_id_seq`; on SQLite none did.
 
-__GUARDIAN__
+### Guardian review (numbers-guardian, owner 8-check version)
+
+**Verdict: PASS on all 8 checks.** No path writes or commits a core or accounts row, and no billing
+number changes. The guardian re-ran the suites (SQLite and PostgreSQL: OK), golden idempotent
+(MATCH), golden rebuild (all rows match) and three `agent_cycle` runs on a seeded PostgreSQL
+database: the core/accounts fingerprint was unchanged and 0 AgentActions were made.
+
+| Check | Result | Note |
+|---|---|---|
+| 1 Protected paths | PASS | only `CLAUDE.md` §19 appended; borderline: three earlier agent/intake tests edited (snapshot kind rename; new required form fields) |
+| 2 Smart only, no reset/de-match/delete | PASS | shadow reuses `dry_run` (always rolled back); only agent-table deletes/updates |
+| 3 Channel/month from Schedule | PASS | labels match Schedule strings exactly |
+| 4 LMRB candidates exclude 4 flags | PASS (n/a) | no new candidate query; fingerprint only counts |
+| 5 Writes through gate.py | PASS for core; wording borderline | agent bookkeeping tables written directly (Phase 1 precedent) → checklist text updated in patch 0006 |
+| 6 No wildcard auto-apply | PASS | finding proposals are `tier=4, apply_payload={}` |
+| 7 LLM output validated | PASS (n/a) | no LLM code |
+| 8 Email/file content as data | PASS (n/a) | digest only sends |
+
+Other findings, and what was done:
+
+| # | Finding | Action |
+|---|---|---|
+| 1 | Cycle lock (session advisory lock) silently lost: `_recover()` called `close_old_connections()`, which always closes with `CONN_MAX_AGE=0` | **Fixed.** `_recover()` closes only a broken connection and then re-takes the lock; if another cycle took it, the cycle stops with `lock_lost`. Tests: `CycleLockKeptTest` (incl. PostgreSQL: a second connection cannot take the lock after a scope DB error). Deviation from the literal S7 wording, on purpose. |
+| 2 | Dry runs advance `core_matchresult_id_seq` and hold core row locks up to the statement timeout at night | Documented (above). Row locks can delay, never change, a person's night run. |
+| 3 | Unvalidated `next` redirect in the feedback view | **Fixed** with `url_has_allowed_host_and_scheme`; test `test_feedback_next_must_be_local`. |
+
+Checklist changes: **patch `docs/agent/patches/0006_guardian_phase3.diff`** (for you to apply;
+`git apply --check` passes). Check 1 defines "existing tests"; check 5 exempts the agent's own
+bookkeeping tables; new check 9 (engine calls outside the gate only in rolled-back dry runs, never
+authorised/locked; CoreWriteAttempt never swallowed), 10 (`schedule_id` always passed), 11 (session
+locks survive error recovery; redirect targets validated).
+
+After the two fixes: SQLite 475 run, 466 passed, 9 skipped, 0 failed; PostgreSQL 475 run, 467
+passed, 8 skipped, 0 failed.
 
 ## Synthetic walk-through (copy `synthetic_ui`, console email backend)
 
@@ -188,6 +223,8 @@ Screenshots (`docs/agent/screens/`):
 | 7 | Job health | Heartbeat `agent_cycle` stale after 60 minutes (health card); "Duration p95 / max" |
 
 ## Not done / open
+
+- Guardian patch 0006 is for you to apply (`.claude/` is never edited by the session).
 
 - Not deployed. The Railway cron service for `cron-agent.json` has to be created by you.
 - A live run needs `AgentConfig.enabled = True` (Agent Settings). Level stays 0 (capped).

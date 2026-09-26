@@ -148,6 +148,16 @@ class FeedbackAndLabelsTest(TestCase):
         self.assertEqual((act.actor_kind, act.human_confirmed, act.target_model),
                          ('human', True, 'agent.FindingLedger'))
 
+    def test_feedback_next_must_be_local(self):
+        row = FindingLedger.objects.get(brand='Nexus')
+        self.client.force_login(self.admin)
+        r = self.client.post(f'/dashboard/agent/finding/{row.id}/feedback/',
+                             {'label': 'unsure', 'next': 'https://evil.example/x'})
+        self.assertEqual(r['Location'], '/dashboard/agent/queue/')
+        r = self.client.post(f'/dashboard/agent/finding/{row.id}/feedback/',
+                             {'label': 'unsure', 'next': '/dashboard/agent/queue/?month=x#findings'})
+        self.assertEqual(r['Location'], '/dashboard/agent/queue/?month=x#findings')
+
     def test_feedback_refused_for_non_admin(self):
         row = FindingLedger.objects.get(brand='Nexus')
         self.client.force_login(f.user(role='team_head', email='th@x.lk', accounts=[self.acc]))

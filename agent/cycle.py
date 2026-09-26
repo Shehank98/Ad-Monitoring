@@ -20,7 +20,8 @@ run_cycle(now=None), every 15 minutes (railway/cron-agent.json):
        c. shadow run only inside the nightly window, when dry runs are allowed (PostgreSQL),
           within the night budget, and never for authorised or locked scopes (S5)
      busy_yielded / timeout_yielded are recorded and never retried in the same cycle;
-     any other DB error -> close_old_connections() and the next scope. A write inside a
+     any other DB error -> the next scope (a broken connection is reopened and the cycle lock
+     re-taken; see _recover). A write inside a
      READ ONLY block (CoreWriteAttempt) stops the cycle: stop and ask.
   6. shadow window bookkeeping (core fingerprint at start and end), digest, heartbeat.
 """
@@ -34,7 +35,7 @@ from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 
 from django.conf import settings
-from django.db import DatabaseError, close_old_connections, connection, transaction
+from django.db import DatabaseError, connection, transaction
 from django.db.models import Max
 from django.utils import timezone
 
@@ -204,10 +205,29 @@ def select(scopes, now, cfg, shadow_since=None) -> Selection:
 # ── per scope ─────────────────────────────────────────────────────────────────
 
 def _recover():
-    """S7: after a database error, drop a broken connection (never inside an outer atomic
-    block, e.g. a test transaction) and carry on with the next scope."""
-    if not connection.in_atomic_block:
-        close_old_connections()
+    """S7: after a database error, carry on with the next scope.
+
+    Only a connection that is really broken is closed. close_old_connections() is NOT used
+    here: with CONN_MAX_AGE=0 it always closes the connection, which silently releases the
+    session-level cycle lock (guardian Phase 3 finding 1). If the connection had to be closed,
+    the cycle lock is taken again on the new connection; if another cycle got it meanwhile,
+    this cycle stops (CycleBusy)."""
+    if connection.in_atomic_block or connection.connection is None:
+        return
+    if connection.is_usable():
+        return
+    connection.close()
+    _relock()
+
+
+def _relock():
+    if not is_postgres():
+        return                                   # the ScopeLockRow lock survives a reconnect
+    with connection.cursor() as cur:
+        cur.execute('SELECT pg_try_advisory_lock(%s)', [CYCLE_LOCK_KEY])
+        (ok,) = cur.fetchone()
+    if not ok:
+        raise CycleBusy('cycle lock lost after a reconnect and taken by another cycle')
 
 
 def _yield_reason(exc) -> str | None:
@@ -395,6 +415,11 @@ def run_cycle(now=None) -> dict:
         return {'outcome': 'overlap_skipped'}
     try:
         return _run(now, t_start)
+    except CycleBusy as exc:            # the lock was lost on a reconnect: stop, never run twice
+        AgentRun.objects.create(kind='cycle', status='failed', finished_at=timezone.now(), error=str(exc),
+                                detail={'outcome': 'lock_lost'})
+        beat_error(HEARTBEAT, exc)
+        return {'outcome': 'lock_lost'}
     finally:
         lock.__exit__(None, None, None)
 

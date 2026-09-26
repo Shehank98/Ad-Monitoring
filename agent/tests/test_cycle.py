@@ -314,6 +314,49 @@ class WindowTest(_Setup, TransactionTestCase):
         self.assertEqual(win.detail['diff'], {})
 
 
+class CycleLockKeptTest(_Setup, TransactionTestCase):
+    """Guardian Phase 3 finding 1: a database error must not release the cycle lock."""
+
+    def test_usable_connection_is_not_closed(self):
+        with mock.patch.object(connection, 'close') as close:
+            cycle._recover()
+        close.assert_not_called()
+
+    def test_broken_connection_is_reopened_and_relocked(self):
+        connection.ensure_connection()
+        with mock.patch.object(connection, 'is_usable', return_value=False), \
+                mock.patch.object(connection, 'close') as close, mock.patch.object(cycle, '_relock') as relock:
+            cycle._recover()
+        close.assert_called_once()
+        relock.assert_called_once()
+
+    def test_lost_lock_stops_the_cycle(self):
+        with mock.patch.object(cycle, '_run', side_effect=cycle.CycleBusy('lost')):
+            res = cycle.run_cycle(now=DAY)
+        self.assertEqual(res['outcome'], 'lock_lost')
+        self.assertEqual(AgentRun.objects.get(kind='cycle').detail['outcome'], 'lock_lost')
+
+    @skipUnless(PG, 'PostgreSQL session advisory lock')
+    def test_lock_still_held_after_a_scope_db_error(self):
+        f.full_scope(self.acc, number='201', channel='Derana TV')
+        age_uploads()
+        seen = []
+
+        def boom(*a, **k):
+            other = connections.create_connection('default')
+            try:
+                with other.cursor() as cur:
+                    cur.execute('SELECT pg_try_advisory_lock(%s)', [cycle.CYCLE_LOCK_KEY])
+                    seen.append(cur.fetchone()[0])
+            finally:
+                other.close()
+            raise DatabaseError('boom')
+        with mock.patch.object(cycle, 'observe_reads', side_effect=boom):
+            res = cycle.run_cycle(now=DAY)
+        self.assertEqual(res['counts']['failed'], 2)
+        self.assertEqual(seen, [False, False])      # the second scope still ran under the lock
+
+
 @override_settings(AGENT_ALLOW_SQLITE_DRY_RUN=True)
 class RealTimeoutTest(TransactionTestCase):
     """PostgreSQL: a real lock held by another connection makes the shadow step yield."""

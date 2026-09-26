@@ -262,6 +262,13 @@ def queue(request):
 FEEDBACK_LABELS = (('correct', 'Correct'), ('incorrect', 'Incorrect'), ('unsure', 'Unsure'))
 
 
+def _safe_next(request, default='/dashboard/agent/queue/'):
+    from django.utils.http import url_has_allowed_host_and_scheme
+    nxt = request.POST.get('next') or ''
+    ok = url_has_allowed_host_and_scheme(nxt, allowed_hosts={request.get_host()}, require_https=request.is_secure())
+    return nxt if ok else default
+
+
 @login_required
 @role_required(ADMIN_ROLES)
 def finding_feedback(request, pk):
@@ -276,11 +283,11 @@ def finding_feedback(request, pk):
     note = request.POST.get('note', '').strip()[:500]
     if label not in dict(FEEDBACK_LABELS):
         messages.error(request, 'Choose Correct, Incorrect or Unsure.')
-        return redirect(request.POST.get('next') or '/dashboard/agent/queue/')
+        return redirect(_safe_next(request))
     before = {'label': row.label, 'label_source': row.label_source, 'label_note': row.label_note}
     if row.label_source == 'owner':
         messages.error(request, 'This finding carries an owner label; feedback does not replace it.')
-        return redirect(request.POST.get('next') or '/dashboard/agent/queue/')
+        return redirect(_safe_next(request))
 
     def apply():
         row.label, row.label_source, row.label_note = label, 'feedback', note
@@ -293,7 +300,7 @@ def finding_feedback(request, pk):
         messages.success(request, f'Feedback saved: {dict(FEEDBACK_LABELS)[label]}.')
     except gate.HumanNotAllowed as exc:
         messages.error(request, str(exc))
-    return redirect(request.POST.get('next') or '/dashboard/agent/queue/')
+    return redirect(_safe_next(request))
 
 
 def _activity_qs(user):
