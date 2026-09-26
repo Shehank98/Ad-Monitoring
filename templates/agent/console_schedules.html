@@ -1,0 +1,26 @@
+{% extends 'agent/_base.html' %}
+{% block title %}Schedules{% endblock %}
+{% block page_title %}Schedules{% endblock %}
+{% block page_subtitle %}Reconciliation Agent · {{ month }}{% endblock %}
+{% block nova %}
+<div class="nv-head">
+  <div class="t"><h2>Schedules</h2>
+    <p>What the Summary Sheet showed when the agent last observed each active schedule. Read only: the numbers come from the agent's stored observations, not a new calculation. Open the Summary Sheet for the live page.</p></div>
+  <div class="nv-actions">{% include 'agent/_month.html' %}</div>
+</div>
+<section class="nv-panel">
+  {% if rows %}
+  <div class="nv-tscroll"><table class="nv-t">
+    <thead><tr><th>Client</th><th>Channel</th><th>Schedule</th><th>State</th><th class="num">Planned</th><th class="num">Aired</th><th class="num">3rd Party</th><th class="num">Missed</th><th>Observed</th><th></th></tr></thead>
+    <tbody>{% for r in rows %}
+      <tr><td><b>{{ r.account }}</b></td><td>{{ r.channel }}</td><td class="nv-mono">#{{ r.schedule_number }}</td>
+        <td><span class="nv-chip nodot neutral">{{ r.state }}</span>{% if r.reason %}<br><span class="nv-muted" style="font-size:12px">{{ r.reason }}</span>{% endif %}</td>
+        <td class="num">{{ r.planned }}</td><td class="num">{{ r.aired }}</td><td class="num">{{ r.third_party }}</td>
+        <td class="num {% if r.missed %}miss{% endif %}">{{ r.missed }}</td>
+        <td class="nv-mono nv-muted" style="font-size:12px">{{ r.observed_at|date:"d M H:i" }}</td>
+        <td class="num"><a class="nv-btn sm" href="{{ r.summary_url }}">Summary Sheet →</a></td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="nv-empty"><b>No observations yet</b>The agent has not observed any schedule for {{ month }}.</div>{% endif %}
+</section>
+{% endblock %}

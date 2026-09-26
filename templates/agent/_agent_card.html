@@ -1,0 +1,23 @@
+{% if card %}
+<div class="agent-card" style="margin:8px 10px;padding:10px 12px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(255,255,255,.03);font-size:12px;line-height:1.55;color:rgba(255,255,255,.74)">
+  <div style="display:flex;align-items:center;gap:8px;color:#fff;font-weight:600;margin-bottom:6px">
+    <span style="width:8px;height:8px;border-radius:50%;background:{% if card.status == 'running' %}#35c39a{% else %}#e0a33a{% endif %}"></span>
+    <span class="nav-text">Reconciliation Agent</span>
+  </div>
+  <div class="nav-text" style="display:grid;gap:2px">
+    <div style="display:flex;justify-content:space-between"><span>Status</span><b style="font-weight:500">{% if card.status == 'running' %}Running · level {{ card.level }}{% else %}Paused{% endif %}</b></div>
+    <div style="display:flex;justify-content:space-between"><span>Last cycle</span><b style="font-weight:500">{{ card.last_cycle_at|date:"d M H:i"|default:"—" }}</b></div>
+    <div style="display:flex;justify-content:space-between"><span>Next</span><b style="font-weight:500">{% if card.next_cycle_at %}{{ card.next_cycle_at|date:"H:i" }}{% else %}—{% endif %}</b></div>
+    <div style="display:flex;justify-content:space-between"><span>Health</span><b style="font-weight:500;color:{% if card.health_state == 'ok' %}#6ad596{% elif card.health_state == 'warn' %}#f2b862{% else %}#ff8a80{% endif %}" title="{{ card.health_note }}">{% if card.health_state == 'ok' %}OK{% elif card.health_state == 'warn' %}Check{% else %}Alert{% endif %}</b></div>
+    {% if card.run_requested_at %}<div style="color:#5fd6cb">Run requested {{ card.run_requested_at|date:"H:i" }}</div>{% endif %}
+  </div>
+  {% if card.can_control %}
+  <div class="nav-text" style="display:flex;gap:6px;margin-top:8px">
+    <form method="post" action="/dashboard/agent/console/pause/" style="flex:1">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <button style="width:100%;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:#fff;border-radius:6px;padding:5px 8px;font-size:12px;font-weight:600">{% if card.enabled %}Pause{% else %}Resume{% endif %}</button></form>
+    <form method="post" action="/dashboard/agent/console/run/" style="flex:1">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <button {% if not card.enabled or card.run_requested_at %}disabled{% endif %} style="width:100%;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:#fff;border-radius:6px;padding:5px 8px;font-size:12px;font-weight:600">Run cycle</button></form>
+  </div>
+  {% endif %}
+</div>
+{% endif %}

@@ -47,6 +47,9 @@ class AgentConfig(models.Model):
     db_idle_timeout_ms = models.PositiveIntegerField(default=60000)
     core_fingerprint_timeout_ms = models.PositiveIntegerField(default=600000)
     digest_time = models.TimeField(default=datetime.time(7, 30))          # Asia/Colombo
+    # Phase 3.2: "Run cycle" in the console only sets this; the next agent_cycle (cron) treats it as
+    # run-now and clears it. The web request never runs a cycle.
+    run_requested_at = models.DateTimeField(null=True, blank=True)
     digest_recipients = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='+',
                                                limit_choices_to={'role__in': ('super_admin', 'admin')})
     updated_at = models.DateTimeField(auto_now=True)

@@ -1,0 +1,30 @@
+{% extends 'agent/_base.html' %}
+{% block title %}Theme tester{% endblock %}
+{% block page_title %}Theme tester{% endblock %}
+{% block page_subtitle %}Reconciliation Agent{% endblock %}
+{% block nova %}
+<div class="nv-head">
+  <div class="t"><h2>Theme tester</h2>
+    <p>Type a theme exactly as it appears in a TC or LMRB file and see which brand(s) the engines resolve it to for a client. Read only: nothing is saved. Change mappings on the Brand Mappings page.</p></div>
+</div>
+<section class="nv-panel"><div class="bd">
+  <form method="get" class="nv-form" style="display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));align-items:end">
+    <label>Client<select name="account_id" class="nv-sel" required>{% for a in accounts %}<option value="{{ a.id }}" {% if q.account_id == a.id|stringformat:"s" %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select></label>
+    <label>Source<select name="kind" class="nv-sel"><option value="tc" {% if q.kind == 'tc' %}selected{% endif %}>TC theme</option><option value="lmrb" {% if q.kind == 'lmrb' %}selected{% endif %}>LMRB theme (Advt_Theme)</option></select></label>
+    <label>Theme<input type="text" name="theme" value="{{ q.theme }}" required maxlength="300" placeholder="e.g. NEXUS 30"></label>
+    <label>Duration (s)<input type="text" name="duration" value="{{ q.duration }}" inputmode="numeric" placeholder="optional"></label>
+    <div><button class="nv-btn">Test</button></div>
+  </form>
+  {% if error %}<p class="err" style="margin-top:10px">{{ error }}</p>{% endif %}
+</div></section>
+{% if result %}
+<section class="nv-panel" style="margin-top:16px">
+  <div class="hd"><h3>Result</h3><span class="sub">"{{ q.theme }}"{% if q.duration %} · {{ q.duration }}s{% endif %} · {% if q.kind == 'tc' %}TC{% else %}LMRB{% endif %}</span></div>
+  {% if result.brands %}
+  <div class="nv-tscroll"><table class="nv-t"><thead><tr><th>Brand</th><th>Resolved through</th><th>Product filter</th></tr></thead>
+    <tbody>{% for b in result.brands %}<tr><td><b>{{ b.brand }}</b></td><td class="nv-mono" style="font-size:12px">{{ b.via }}</td><td>{{ b.product|default:"any" }}</td></tr>{% endfor %}</tbody></table></div>
+  {% if result.brands|length > 1 %}<div class="nv-note"><span><b>More than one brand.</b> The engines will treat this theme as belonging to all of them; check the mappings.</span></div>{% endif %}
+  {% else %}<div class="nv-empty"><b>No brand</b>This theme does not resolve to any brand{% if q.duration %} at {{ q.duration }}s{% endif %}. Spots with it count as unmapped (see Summary Sheet rules).</div>{% endif %}
+</section>
+{% endif %}
+{% endblock %}

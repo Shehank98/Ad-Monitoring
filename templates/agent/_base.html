@@ -166,6 +166,9 @@
     <a href="/dashboard/agent/scopes/" class="{% if '/agent/scope' in p %}on{% endif %}">Scopes</a>
     <a href="/dashboard/agent/inbox/" class="{% if '/agent/inbox' in p %}on{% endif %}">TC Inbox</a>
     {% if request.user.role in 'super_admin,admin,team_head' %}<a href="/dashboard/agent/queue/" class="{% if '/agent/queue' in p %}on{% endif %}">Review queue</a>{% endif %}
+    <a href="/dashboard/agent/console/schedules/" class="{% if '/agent/console/schedules' in p %}on{% endif %}">Schedules</a>
+    <a href="/dashboard/agent/console/reports/" class="{% if '/agent/console/reports' in p %}on{% endif %}">Reports</a>
+    <a href="/dashboard/agent/console/theme-tester/" class="{% if '/agent/console/theme' in p %}on{% endif %}">Theme tester</a>
     <a href="/dashboard/agent/activity/" class="{% if '/agent/activity' in p %}on{% endif %}">Activity</a>
     {% if request.user.role in 'super_admin,admin' %}<a href="/dashboard/agent/config/" class="{% if '/agent/config' in p %}on{% endif %}">Settings</a>{% endif %}
   </nav>

@@ -169,13 +169,14 @@ def _shadowed_since(since) -> set:
     return done
 
 
-def select(scopes, now, cfg, shadow_since=None) -> Selection:
-    """Priority: needs_run, changed, shadow_due (in the window: not yet rehearsed tonight), due."""
+def select(scopes, now, cfg, shadow_since=None, run_now=False) -> Selection:
+    """Priority: needs_run, changed, shadow_due (in the window: not yet rehearsed tonight), due.
+    run_now (Phase 3.2 "Run cycle"): every scope counts as due, still under the cap."""
     sel = Selection(candidates=len(scopes))
     last_run, last_fp = _last_ok_scope_runs(), _last_observed_fp()
     # run timestamps are wall-clock, so 'due' is measured on the wall clock too (not `now`,
     # which a synthetic walk-through may set)
-    due_before = timezone.now() - timedelta(minutes=cfg.observe_every_minutes)
+    due_before = timezone.now() if run_now else timezone.now() - timedelta(minutes=cfg.observe_every_minutes)
     shadowed = _shadowed_since(shadow_since) if shadow_since is not None else None
     needs, changed, due, shadow_due = [], [], [], []
     t0 = time.monotonic()
@@ -512,7 +513,9 @@ def _run(now, t_start) -> dict:
     try:
         window_run = open_window(night, w_start, w_end) if shadow_ok else None
         scopes = [s for s in sync_scopes() if gate.is_enabled(s.account_id)]
-        sel = select(scopes, now, cfg, shadow_since=w_start if shadow_ok else None)
+        requested = cfg.run_requested_at                 # Phase 3.2: set by "Run cycle" in the console
+        result['run_requested_at'] = requested.isoformat() if requested else None
+        sel = select(scopes, now, cfg, shadow_since=w_start if shadow_ok else None, run_now=requested is not None)
         result.update(candidates=sel.candidates, fingerprint_seconds=sel.fingerprint_seconds,
                       fingerprint_fallback=sel.fingerprint_fallback)
         counts = {k: 0 for k in ('observed', 'debounced', 'failed', *YIELDS, 'shadow_ok', 'shadow_yielded',
@@ -553,6 +556,9 @@ def _run(now, t_start) -> dict:
         raise
     dur = time.monotonic() - t_start
     result['duration_seconds'] = round(dur, 3)
+    if requested is not None:
+        # Clear only the request this cycle served; a newer click stays for the next cycle.
+        AgentConfig.objects.filter(pk=1, run_requested_at=requested).update(run_requested_at=None)
     cycle.status, cycle.finished_at = 'ok', timezone.now()
     cycle.detail = to_jsonable({k: v for k, v in result.items()})
     cycle.save(update_fields=['status', 'finished_at', 'detail'])

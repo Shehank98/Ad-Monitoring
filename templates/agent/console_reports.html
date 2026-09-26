@@ -1,0 +1,27 @@
+{% extends 'agent/_base.html' %}
+{% block title %}Reports{% endblock %}
+{% block page_title %}Reports{% endblock %}
+{% block page_subtitle %}Reconciliation Agent · {{ month }}{% endblock %}
+{% block nova %}
+<div class="nv-head">
+  <div class="t"><h2>Reports</h2>
+    <p>Sign-off state per scope, with totals from the agent's last observation. Read only. Sign-off, PDF and Excel are on the Summary Sheet.</p></div>
+  <div class="nv-actions">{% include 'agent/_month.html' %}</div>
+</div>
+<section class="nv-panel">
+  {% if rows %}
+  <div class="nv-tscroll"><table class="nv-t">
+    <thead><tr><th>Client</th><th>Channel</th><th>Sign-off</th><th class="num">Schedules</th><th class="num">Planned</th><th class="num">Aired</th><th class="num">Missed</th><th>Prepared / checked</th><th>Observed</th><th></th></tr></thead>
+    <tbody>{% for r in rows %}
+      <tr><td><b>{{ r.account }}</b></td><td>{{ r.channel }}</td>
+        <td><span class="nv-chip nodot {% if 'Authorised' in r.signoff %}ok{% elif r.signoff == 'Ready for sign-off' %}agent{% else %}neutral{% endif %}">{{ r.signoff }}</span></td>
+        <td class="num">{{ r.schedules }}</td><td class="num">{{ r.planned }}</td><td class="num">{{ r.aired }}</td>
+        <td class="num {% if r.missed %}miss{% endif %}">{{ r.missed }}</td>
+        <td class="nv-muted" style="font-size:12px">{{ r.prepared_by|default:"—" }} / {{ r.checked_by|default:"—" }}</td>
+        <td class="nv-mono nv-muted" style="font-size:12px">{{ r.observed_at|date:"d M H:i" }}</td>
+        <td class="num" style="white-space:nowrap"><a class="nv-btn sm" href="{{ r.summary_url }}">Summary Sheet →</a> <a class="nv-btn sm ghost" href="{{ r.pdf_url }}">PDF</a> <a class="nv-btn sm ghost" href="{{ r.excel_url }}">Excel</a></td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="nv-empty"><b>No observations yet</b>The agent has not observed any scope for {{ month }}.</div>{% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,12 @@
+--- a/templates/base.html
++++ b/templates/base.html
+@@ -630,6 +630,9 @@
+       {% endwith %}
+     </nav>
+ 
++    {# Reconciliation Agent card (Phase 3.2): status, last / next cycle, health; Pause/Resume + Run cycle for admins. #}
++    {% load agent_console %}{% agent_card %}
++
+     <!-- Footer -->
+     <div class="sidebar-footer">
+       {% if request.user.must_change_password %}
