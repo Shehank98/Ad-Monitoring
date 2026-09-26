@@ -95,5 +95,7 @@ def scope_lock(key: int, ttl_minutes: int = DEFAULT_TTL_MINUTES):
     with fallback_lock(key, ttl_minutes):
         with transaction.atomic():
             if is_postgres():
+                from .db import apply_timeouts          # Phase 3: every agent transaction
+                apply_timeouts()
                 take_xact_lock(key)
             yield

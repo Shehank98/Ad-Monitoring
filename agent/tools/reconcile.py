@@ -249,7 +249,7 @@ def _schedule_path(scope, active, result, dry, change, actor, run):
         fp_sha = fingerprint_sha(fp_after)
         for s in active:
             SummarySnapshot.objects.create(
-                scope=scope, schedule=s, schedule_number=s.schedule_number, kind='draft',
+                scope=scope, schedule=s, schedule_number=s.schedule_number, kind='observed',
                 data=after[s.id], sha256=sha256_of(after[s.id]), run=run,
                 fingerprint=fp_after, fingerprint_sha256=fp_sha)
     result['multi_flag_lmrb'] = {'before': locks_before, 'after': locks_after}

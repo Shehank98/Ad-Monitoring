@@ -84,7 +84,7 @@ def summary(scope_id: int, persist: bool = False, run=None) -> dict:
         sha = sha256_of(data)
         if persist:
             SummarySnapshot.objects.create(scope=sc, schedule=s, schedule_number=s.schedule_number,
-                                           kind='draft', data=data, sha256=sha, run=run,
+                                           kind='observed', data=data, sha256=sha, run=run,
                                            fingerprint=fp, fingerprint_sha256=fingerprint_sha(fp))
         out[str(s.id)] = {'schedule_number': s.schedule_number, 'sha256': sha, 'data': data}
     return out

@@ -5,7 +5,10 @@ These tables belong to the agent only. They reference core models by foreign key
 but never change them. Channel and month on ScopeState are copied byte-for-byte
 from Schedule (R2) and are never built or re-cased.
 """
+import datetime
+
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 CHANNEL_MAX = 200   # core.Schedule.channel
@@ -33,6 +36,19 @@ class AgentConfig(models.Model):
     min_brand_overlap = models.FloatField(default=0.6)          # owner Q7
     # Phase 2.1 item 4: Gemini reads PDFs for intake only when this is on AND GEMINI_API_KEY is set.
     intake_gemini_enabled = models.BooleanField(default=False)
+    # ── Phase 3: shadow agent (level 0) ──
+    shadow_window_start = models.TimeField(default=datetime.time(1, 0))    # Asia/Colombo
+    shadow_window_end = models.TimeField(default=datetime.time(5, 0))
+    shadow_budget_seconds = models.PositiveIntegerField(default=1800)      # dry-run time per night
+    max_scopes_per_cycle = models.PositiveSmallIntegerField(default=25)
+    observe_every_minutes = models.PositiveIntegerField(default=360)       # "due by time"
+    db_lock_timeout_ms = models.PositiveIntegerField(default=2000)
+    db_statement_timeout_ms = models.PositiveIntegerField(default=120000)
+    db_idle_timeout_ms = models.PositiveIntegerField(default=60000)
+    core_fingerprint_timeout_ms = models.PositiveIntegerField(default=600000)
+    digest_time = models.TimeField(default=datetime.time(7, 30))          # Asia/Colombo
+    digest_recipients = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='+',
+                                               limit_choices_to={'role__in': ('super_admin', 'admin')})
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                                    on_delete=models.SET_NULL, related_name='+')
@@ -134,10 +150,11 @@ class ScheduleStatus(models.Model):
 
 class AgentRun(models.Model):
     KINDS = [('cycle', 'Cycle'), ('scope', 'Scope run'), ('dry_run', 'Dry run'),
-             ('golden', 'Golden check'), ('audit', 'Core audit')]
+             ('golden', 'Golden check'), ('audit', 'Core audit'),
+             ('shadow_window', 'Shadow window'), ('labelled_eval', 'Labelled eval'), ('digest', 'Digest')]
     STATUS = [('running', 'Running'), ('ok', 'OK'), ('failed', 'Failed'),
               ('skipped', 'Skipped'), ('rolled_back', 'Rolled back')]
-    kind = models.CharField(max_length=10, choices=KINDS)
+    kind = models.CharField(max_length=16, choices=KINDS)
     scope = models.ForeignKey(ScopeState, null=True, blank=True, on_delete=models.SET_NULL,
                               related_name='runs')
     status = models.CharField(max_length=12, choices=STATUS, default='running')
@@ -208,12 +225,18 @@ class AgentProposal(_ActionFields):
 
 class SummarySnapshot(models.Model):
     """build_summary_data(..., schedule_id=sid) for ONE schedule (Amendment A4)."""
-    KINDS = [('draft', 'Draft'), ('authorised', 'Authorised'), ('golden', 'Golden baseline')]
+    # Phase 3: 'observed' = what core shows now (build_summary_data, read only, no engine run);
+    # the ONLY kind used as the V5 baseline. 'shadow' = what an agent run would produce
+    # (dry run, rolled back); never a V5 baseline and never authorisable.
+    KINDS = [('observed', 'Observed'), ('shadow', 'Shadow (dry run)'), ('draft', 'Draft'),
+             ('authorised', 'Authorised'), ('golden', 'Golden baseline')]
+    BASELINE_KINDS = ('observed',)
+    AUTHORISABLE_KINDS = ('observed', 'authorised')
     scope = models.ForeignKey(ScopeState, on_delete=models.CASCADE, related_name='snapshots')
     schedule = models.ForeignKey('core.Schedule', null=True, on_delete=models.SET_NULL,
                                  related_name='agent_snapshots')
     schedule_number = models.CharField(max_length=50)
-    kind = models.CharField(max_length=10, choices=KINDS, default='draft')
+    kind = models.CharField(max_length=10, choices=KINDS, default='observed')
     data = models.JSONField()
     sha256 = models.CharField(max_length=64, db_index=True)
     # External-change fingerprint of the account at snapshot time (V5, Phase 1.1)
@@ -244,6 +267,15 @@ class AgentAuthorisation(models.Model):
 
     def __str__(self):
         return f'Authorised #{self.schedule_id} {self.snapshot_sha256[:8]}'
+
+    def clean(self):
+        # S9: never authorise a shadow (dry-run) or golden snapshot.
+        if self.snapshot_id and self.snapshot.kind not in SummarySnapshot.AUTHORISABLE_KINDS:
+            raise ValidationError({'snapshot': f'a {self.snapshot.kind} snapshot cannot be authorised'})
+
+    def save(self, *args, **kwargs):
+        self.clean()                                     # S9 pre-save check (not a DB constraint)
+        super().save(*args, **kwargs)
 
 
 class LlmCall(models.Model):
@@ -303,3 +335,57 @@ class Heartbeat(models.Model):
 
     def __str__(self):
         return f'{self.name} @ {self.last_beat}'
+
+
+class PendingEffect(models.Model):
+    """Phase 3: observed (core now) vs shadow (what an agent run would give), per schedule."""
+    scope = models.ForeignKey(ScopeState, on_delete=models.CASCADE, related_name='pending_effects')
+    schedule = models.ForeignKey('core.Schedule', null=True, on_delete=models.SET_NULL, related_name='+')
+    observed = models.ForeignKey(SummarySnapshot, on_delete=models.CASCADE, related_name='+')
+    shadow = models.ForeignKey(SummarySnapshot, on_delete=models.CASCADE, related_name='+')
+    by_brand = models.JSONField(default=list, blank=True)     # [{section, product, dur, deltas{...}}]
+    totals = models.JSONField(default=dict, blank=True)       # {commercial: {...}, sponsorship: {...}}
+    max_abs = models.PositiveIntegerField(default=0)          # largest |Δ| on aired/missed
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+
+class FindingLedger(models.Model):
+    """Phase 3 (S3): one row per (scope, schedule, code, brand, duration). `key` is the sha256 of
+    scope|schedule-or-none|code|brand-or-none|duration-or-none (non-null, unique)."""
+    LABELS = [('', '—'), ('correct', 'Correct'), ('incorrect', 'Incorrect'), ('unsure', 'Unsure'),
+              ('owner', 'Owner label')]
+    key = models.CharField(max_length=64, unique=True)
+    scope = models.ForeignKey(ScopeState, on_delete=models.CASCADE, related_name='findings')
+    schedule = models.ForeignKey('core.Schedule', null=True, blank=True, on_delete=models.SET_NULL,
+                                 related_name='+')
+    code = models.CharField(max_length=40)
+    brand = models.CharField(max_length=200, blank=True, default='')
+    duration = models.IntegerField(null=True, blank=True)
+    text = models.TextField(blank=True, default='')
+    evidence = models.JSONField(default=dict, blank=True)
+    actionable = models.BooleanField(default=False)
+    open = models.BooleanField(default=True)
+    first_seen = models.DateTimeField()
+    last_seen = models.DateTimeField()
+    absent_count = models.PositiveSmallIntegerField(default=0)   # consecutive observations without it
+    reopen_count = models.PositiveSmallIntegerField(default=0)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution = models.CharField(max_length=24, blank=True, default='')
+    resolution_evidence = models.JSONField(default=dict, blank=True)
+    label = models.CharField(max_length=12, choices=LABELS, blank=True, default='')
+    label_source = models.CharField(max_length=12, blank=True, default='')   # feedback | owner
+    label_note = models.TextField(blank=True, default='')
+    cause_code = models.CharField(max_length=40, blank=True, default='')     # owner CSV
+    label_as_of = models.DateField(null=True, blank=True)
+    proposal = models.ForeignKey('AgentProposal', null=True, blank=True, on_delete=models.SET_NULL,
+                                 related_name='+')
+
+    class Meta:
+        ordering = ['-last_seen', '-id']
+        indexes = [models.Index(fields=['code', 'open'])]
+
+    def __str__(self):
+        return f'{self.code} {self.brand} [{"open" if self.open else "closed"}]'

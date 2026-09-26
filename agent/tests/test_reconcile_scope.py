@@ -111,7 +111,7 @@ class ReconcileScopeTest(TransactionTestCase):
         for name, sid in calls:
             if name != 'run_scope':
                 self.assertIn(sid, (s1.id, s2.id), f'{name} called without schedule_id')
-        self.assertEqual(SummarySnapshot.objects.filter(kind='draft').count(), 2)   # one per schedule
+        self.assertEqual(SummarySnapshot.objects.filter(kind='observed').count(), 2)   # one per schedule (Phase 3: observed)
         self.assertEqual(AgentAction.objects.get().action_type, 'reconcile_scope')
         self.assertEqual(ScheduleStatus.objects.count(), 2)
 

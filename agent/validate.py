@@ -71,8 +71,10 @@ def v5(scope, schedule, new_sha: str, fp_now: dict, ctx: dict | None = None) -> 
       no previous snapshot                      -> baseline 'no_prior_snapshot'
       previous snapshot has no (current) fingerprint -> baseline 'baseline_no_fingerprint'
     """
-    last = (SummarySnapshot.objects.filter(scope=scope, schedule=schedule)
-            .exclude(kind='golden').order_by('-created_at', '-id').first())
+    # Phase 3: only OBSERVED snapshots are a V5 baseline (never shadow / golden).
+    last = (SummarySnapshot.objects.filter(scope=scope, schedule=schedule,
+                                           kind__in=SummarySnapshot.BASELINE_KINDS)
+            .order_by('-created_at', '-id').first())
     base = {'schedule_id': schedule.id, 'new_sha': new_sha}
     if last is None:
         return Check('V5', True, {**base, 'changed': False, 'baseline': 'no_prior_snapshot'})
