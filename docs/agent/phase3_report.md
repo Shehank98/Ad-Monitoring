@@ -633,4 +633,23 @@ Non-blocking notes, and what I did:
   posts `_fields` listing every form field, so it now also sends a value for the new
   `intake_tool_choice` select, as a real page always does.
 
-__GUARDIAN_CLOSE__
+### Guardian review of Phase 3.2 close (48c99a7..f4c159c)
+
+**Verdict: PASS on all 8 checks, nothing blocking.**
+- Check 7: forced mode goes through the same `Decision` schema, `attachment_id` and `returned_ids`
+  checks and the same `llm_no_decision` rules. The intake tool list is still exactly the five tools
+  (assert in `schemas.py`). The probe sends only `submit_decision` with constant, synthetic text.
+- The probe writes only `LlmCall`.
+- The runner cannot use forced without a passing probe of its own model.
+- `BooleanFailSafeTest` and the kill switch still hold.
+- The guardian's runs: `intake.tests.test_probe` 18/18 on SQLite and PostgreSQL; full SQLite suite 564
+  OK (9 skipped); golden idempotent and rebuild MATCH on a throwaway fixture database.
+
+Non-blocking notes, left as they are (recorded for later):
+- **N1:** without `ANTHROPIC_MODEL` in the web process, the form checks the most recently probed
+  model, not necessarily the runner's. This is safe because the runner re-checks its own model.
+- **N2:** the tc_intake `LlmCall` rows do not record which tool_choice mode actually ran, so a silent
+  fallback to auto is not visible. Suggested: store the mode in `LlmCall.detail`.
+- **N3:** a later failing probe does not reset a stored `forced`. The runner falls back to auto.
+- **N4:** any 4xx (for example 401 bad key, 429 rate limit) is labelled `unsupported`, which fails safe
+  but can mislead. The model name is truncated to 80 characters when stored.
