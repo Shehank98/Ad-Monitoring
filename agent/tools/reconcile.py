@@ -290,7 +290,7 @@ def _authorised_check(scope, dry: bool, actor) -> dict:
             continue
         snap = auth.snapshot
         reasons, full, fp_diff = [], {}, {}
-        if AgentAction.objects.filter(scope=scope, created_at__gt=snap.created_at).exists():
+        if validate.explaining_actions(scope, snap.created_at).exists():
             reasons.append('agent_action')
         # Authorised numbers are never accepted on a baseline: a snapshot without a current
         # fingerprint cannot explain anything here (the change stays unexplained).

@@ -301,10 +301,47 @@ table layouts. `agent_nightly` keeps `steps` as before and records the window re
 
 | Run | Run | Passed | Skipped | Failed |
 |---|---|---|---|---|
-| Full suite, SQLite (`manage.py test --exclude-tag=eval`) | 507 | 498 | 9 | 0 |
-| Full suite, PostgreSQL 16 | 507 | 499 | 8 | 0 |
+| Full suite, SQLite (`manage.py test --exclude-tag=eval`), before the guardian fixes | 507 | 498 | 9 | 0 |
+| Full suite, PostgreSQL 16, before the guardian fixes | 507 | 499 | 8 | 0 |
+| **Full suite, SQLite, final** | **510** | **501** | **9** | **0** |
+| **Full suite, PostgreSQL 16, final** | **510** | **502** | **8** | **0** |
 
 - `makemigrations --check --dry-run`: **No changes detected** (new migration `agent/0008_phase3_1`).
-- Golden idempotent on `synthetic` after migrating to 0008: **MATCH** (3 of 3 schedules).
+- Golden idempotent on `synthetic` after migrating to 0008: **MATCH** (3 of 3 schedules), before and after the
+  guardian fixes.
 
-__GUARDIAN31__
+### Guardian review of Phase 3.1
+
+**Verdict: PASS on all 8 checks.** There is no core or accounts write, no engine call and no way for
+a billing number to change. The guardian's SQLite suite gave 507 run, OK; its PostgreSQL runs of the
+Phase 3 test files were OK. Golden idempotent: MATCH. Its rolled-back PostgreSQL probes confirmed that
+`close_window` leaks no READ ONLY state and that `last_login` no longer changes the accounts_user hash.
+Protected paths are unchanged, and the two intake tests are byte-identical to d4eb2d0.
+
+It found two defects in agent-only logic and two gaps in the gate record. All four are fixed:
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| 1 | **T10 kill switch.** A Settings page loaded before this deploy sends no `_fields`, so unticking **Enabled** kept the stored True and still showed "saved". | Checkboxes are never filled: a checkbox the person did not send is always False (fails safe). Other missing fields still keep their stored value. | `test_fields_missing_from_the_post_keep_their_stored_value` (asserts `enabled` becomes False) |
+| 2 | **T1 key.** Keyed on the new sha only, so a change back to numbers that were acknowledged before (A→B, ack, B→A, A→B) opened no row and was lost. | Keyed on the baseline observed snapshot the change was measured against, plus the new sha. The baseline moves forward every observation, so each change gets its own row. | `test_flip_back_to_acknowledged_numbers_opens_a_new_row` |
+| 3 | Acknowledge also writes ScopeState, but `before` did not record it. | `before` / `after` now include the scope's state and reason. | `test_acknowledge_logs_scope_state_and_refuses_a_second_ack` |
+| 4 | Two admins acknowledging at once could both pass `row.open`. | The row is re-read with `select_for_update(of=('self',))` inside the write; the second acknowledgement is refused. | same test |
+
+**One more defect, found while writing test 2 (not by the guardian):** V5 counted *any* AgentAction on the
+scope as an explanation. That included the admin's own acknowledgement, feedback and label writes,
+which only touch agent tables. So a change right after an acknowledgement was silently "explained".
+`validate.explaining_actions()` now ignores actions whose target is an `agent.*` or `intake.*` table. It
+is used by V5 and by the authorised check. Test: `V5AgentTableActionsExplainNothingTest`.
+
+Checklist text: the guardian recommended three more changes. They are added to **patch 0006**, which
+is still for you to apply (`git apply --check` passes):
+- check 5: before/after must cover every row `apply()` changes;
+- check 5: the exemption covers "proposals with kind='finding' and an empty apply_payload" rather than "info-only";
+- new check 12: the kill switch fails safe.
+
+## Not done / open (Phase 3.1)
+
+- Not deployed. Guardian patch 0006 is for you to apply.
+- The Nova Agent Console mockup you linked is not built. Its approve/apply actions (mapping proposals,
+  tolerance changes, manual-match proposals, TC split) need autonomy above 0, which is Phase 4.
+  See the question in my final message.

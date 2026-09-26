@@ -195,7 +195,11 @@ def open_v5_unexplained(scope, schedule_id, prev_data: dict | None, new_data: di
     from .effects import diff_summaries
     now = now or timezone.now()
     new_sha = v5_detail.get('new_sha', '')
-    key = ledger_key(scope.id, schedule_id, 'V5_UNEXPLAINED', f'sha:{new_sha[:16]}', None)
+    # Keyed on the baseline snapshot the change was measured against (guardian 3.1): the baseline
+    # moves forward every observation, so each unexplained change gets its own row, even when the
+    # numbers flip back to a value that was acknowledged before.
+    key = ledger_key(scope.id, schedule_id, 'V5_UNEXPLAINED',
+                     f'base:{v5_detail.get("previous_snapshot_id")}>{new_sha[:16]}', None)
     d = diff_summaries(prev_data or {}, new_data)
     evidence = {'schedule_id': schedule_id, 'previous_sha': v5_detail.get('previous_sha'), 'new_sha': new_sha,
                 'previous_snapshot_id': v5_detail.get('previous_snapshot_id'),

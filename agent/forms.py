@@ -37,8 +37,8 @@ class AgentConfigForm(forms.ModelForm):
 
     def __init__(self, data=None, *args, **kwargs):
         """Phase 3.1 T10: a field missing from the POST keeps its stored value, so a form posted by an
-        older page or test (without the fields added later) never resets or fails them. The page
-        sends `_fields` (every field it rendered); for those, a missing checkbox still means False."""
+        older page or test (without the fields added later) never resets or fails them. Exception:
+        checkboxes. A missing checkbox always means False (the kill switch fails safe)."""
         super().__init__(data, *args, **kwargs)
         if data is None or not self.instance.pk:
             return
@@ -56,8 +56,9 @@ class AgentConfigForm(forms.ModelForm):
                 else:
                     filled[name] = pks
             elif isinstance(field, forms.BooleanField):
-                if value:
-                    filled[name] = 'on'
+                # Fail safe (guardian 3.1): a checkbox the person did not send is always False, so a
+                # stale page can never keep the kill switch (or any other switch) on.
+                continue
             elif hasattr(value, 'strftime'):
                 filled[name] = value.strftime('%H:%M')
             elif value is not None:

@@ -1013,4 +1013,6 @@ Report: `docs/agent/phase3_report.md`. Observe and rehearse only; nothing is app
   pending). `agent_cycle --now` needs DEBUG, AGENT_DISPOSABLE_DB=1 or tests.
 - **Summary GET writes nothing** (S1 section of `docs/agent/phase3_report.md`, READ ONLY tests
   `SummaryGetReadOnlyTest`).
-- Agent Settings form: a field missing from the POST keeps its stored value (`_fields` lists rendered fields).
+- Agent Settings form: a field missing from the POST keeps its stored value, except checkboxes: an unsent
+  checkbox is always False (the kill switch fails safe).
+- V5 explanations ignore AgentActions on `agent.*` / `intake.*` tables (`validate.explaining_actions`).

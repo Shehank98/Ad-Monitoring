@@ -139,6 +139,28 @@ class V5PersistsTest(TestCase):
         self.assertNotEqual(self.scope().state, 'NEEDS_HUMAN')
         self.assertEqual(first.id, rows[0].id)
 
+    def test_flip_back_to_acknowledged_numbers_opens_a_new_row(self):
+        self.make_unexplained()                                  # A -> B
+        self.ack(FindingLedger.objects.get(code='V5_UNEXPLAINED'))
+        TCRow.objects.update(is_schedule_matched=False, is_lmrb_confirmed=False)
+        self.redo()                                              # B -> A
+        self.ack(FindingLedger.objects.get(code='V5_UNEXPLAINED', open=True))
+        TCRow.objects.update(is_schedule_matched=True, is_lmrb_confirmed=True)
+        self.redo()                                              # A -> B again: must not be lost
+        self.assertEqual(FindingLedger.objects.filter(code='V5_UNEXPLAINED').count(), 3)
+        self.assertEqual(self.scope().state, 'NEEDS_HUMAN')
+
+    def test_acknowledge_logs_scope_state_and_refuses_a_second_ack(self):
+        self.make_unexplained()
+        row = FindingLedger.objects.get(code='V5_UNEXPLAINED')
+        self.ack(row, 'core_bug', 'first')
+        self.ack(row, 'accepted', 'second')                      # already closed: refused
+        row.refresh_from_db()
+        self.assertEqual(row.resolution_evidence['note'], 'first')
+        act = AgentAction.objects.get(action_type='v5_acknowledge')
+        self.assertEqual((act.before['scope_state'], act.before['scope_reason']), ('NEEDS_HUMAN', 'unexplained_change'))
+        self.assertIn('scope_state', act.after)
+
     def test_digest_lists_open_rows_with_age(self):
         self.make_unexplained()
         from agent import digest
@@ -354,8 +376,9 @@ class SettingsFormKeepsStoredValuesTest(TestCase):
         r = self.post(grace_days=5)
         self.assertEqual(r.status_code, 302)
         cfg = AgentConfig.get_solo()
-        self.assertEqual((cfg.grace_days, cfg.shadow_budget_seconds, cfg.shadow_window_start, cfg.enabled),
-                         (5, 900, datetime.time(0, 30), True))
+        self.assertEqual((cfg.grace_days, cfg.shadow_budget_seconds, cfg.shadow_window_start),
+                         (5, 900, datetime.time(0, 30)))
+        self.assertFalse(cfg.enabled)          # kill switch fails safe: an unsent checkbox is off
         self.assertEqual(list(cfg.digest_recipients.all()), [self.admin])
 
     def test_rendered_checkbox_left_unticked_turns_off(self):
@@ -368,3 +391,17 @@ class SettingsFormKeepsStoredValuesTest(TestCase):
                       core_fingerprint_timeout_ms=600000, digest_time='07:30')
         self.assertEqual(r.status_code, 302)
         self.assertFalse(AgentConfig.get_solo().enabled)
+
+
+class V5AgentTableActionsExplainNothingTest(TestCase):
+    def test_agent_table_writes_do_not_explain(self):
+        from agent import gate, validate
+        acc, s = f.full_scope()
+        sc = ScopeState.objects.create(account=acc, channel=s.channel, month=s.month)
+        since = timezone.now() - timedelta(minutes=1)
+        admin = f.user(role='admin', email='boss@x.lk')
+        gate.perform(tier=gate.T0, action_type='finding_feedback', actor_kind='human', actor=admin, scope=sc,
+                     target_model='agent.FindingLedger', target_pk=1, before={}, apply=lambda: {})
+        self.assertFalse(validate.explaining_actions(sc, since).exists())
+        AgentAction.objects.create(scope=sc, action_type='reconcile_scope', target_model='Scope', target_pk=str(sc.id))
+        self.assertTrue(validate.explaining_actions(sc, since).exists())

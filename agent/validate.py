@@ -60,6 +60,13 @@ def v3(schedules) -> Check:
     return Check('V3', not bad, {'mismatches': bad})
 
 
+def explaining_actions(scope, since):
+    """AgentActions that could have changed this scope's numbers. Writes to agent or intake tables
+    only (feedback, labels, V5 acknowledgements, settings) never explain a change (guardian 3.1)."""
+    return (AgentAction.objects.filter(scope=scope, created_at__gt=since)
+            .exclude(target_model__startswith='agent.').exclude(target_model__startswith='intake.'))
+
+
 def v5(scope, schedule, new_sha: str, fp_now: dict, ctx: dict | None = None) -> Check:
     """V5: a change in this schedule's numbers since our last snapshot must be explained.
 
@@ -91,7 +98,7 @@ def v5(scope, schedule, new_sha: str, fp_now: dict, ctx: dict | None = None) -> 
     if last.sha256 == new_sha:
         return Check('V5', True, {**base, 'changed': False})
     reasons, full, relevant = [], {}, {}
-    if AgentAction.objects.filter(scope=scope, created_at__gt=last.created_at).exists():
+    if explaining_actions(scope, last.created_at).exists():
         reasons.append('agent_action')
     if fingerprint_sha(fp_now) != last.fingerprint_sha256:
         full = fingerprint_diff(last.fingerprint, fp_now)

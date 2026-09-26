@@ -287,16 +287,24 @@ def v5_acknowledge(request, pk):
     if not _account_access(request.user, row.scope.account_id):
         return render(request, '403.html', status=403)
     cause, note = request.POST.get('root_cause', ''), request.POST.get('note', '').strip()
-    before = {'open': row.open, 'resolution': row.resolution}
+    before = {'open': row.open, 'resolution': row.resolution,
+              'scope_state': row.scope.state, 'scope_reason': row.scope.reason}
 
     def apply():
-        out = ledger_mod.acknowledge_v5(row, cause, note, request.user)
-        sc = row.scope
+        from django.db import transaction
+        with transaction.atomic():
+            # Re-read under a row lock: two admins acknowledging at once -> the second is refused.
+            locked = FindingLedger.objects.select_for_update(of=('self',)).select_related('scope', 'proposal').get(pk=row.pk)
+            out = ledger_mod.acknowledge_v5(locked, cause, note, request.user)
+            return _after_ack(locked, out)
+
+    def _after_ack(locked, out):
+        sc = locked.scope
         if ledger_mod.open_v5_count(sc) == 0 and sc.reason == 'unexplained_change':
             r = assess(sc)                                   # read only
             sc.state, sc.reason = r.state, r.reason or ''
             sc.save(update_fields=['state', 'reason', 'updated_at'])
-        out['scope_state'] = sc.state
+        out['scope_state'], out['scope_reason'] = sc.state, sc.reason
         return out
     try:
         gate.perform(tier=gate.T0, action_type='v5_acknowledge', actor_kind='human', actor=request.user,
