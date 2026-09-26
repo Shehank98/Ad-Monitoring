@@ -36,7 +36,15 @@
         <td><b>{{ f.scope.account.name }}</b><br><span class="nv-muted" style="font-size:12px">{{ f.scope.channel }}</span></td>
         <td class="nv-muted" style="font-size:12px">{{ f.first_seen|date:"d M H:i" }}<br>to {{ f.last_seen|date:"d M H:i" }}</td>
         <td>{% if f.label %}<span class="nv-chip nodot {% if f.label == 'correct' %}ok{% elif f.label == 'incorrect' %}bad{% else %}neutral{% endif %}">{{ f.get_label_display }}</span> <span class="nv-muted" style="font-size:12px">{{ f.label_source }}</span>{% endif %}
-          {% if can_label and f.label_source != 'owner' %}
+          {% if f.code == 'V5_UNEXPLAINED' %}{% if f.open and can_label %}
+          <form method="post" action="/dashboard/agent/finding/{{ f.id }}/acknowledge/" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">{% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}#findings">
+            <select name="root_cause" aria-label="Root cause" style="font-size:12px">{% for k, lbl in v5_causes %}<option value="{{ k }}">{{ lbl }}</option>{% endfor %}</select>
+            <input type="text" name="note" required placeholder="Note (required)" maxlength="1000" aria-label="Acknowledgement note" style="font-size:12px;padding:3px 6px;min-width:140px">
+            <button class="nv-btn sm">Acknowledge</button>
+          </form>{% elif not f.open %}<span class="nv-muted" style="font-size:12px">acknowledged: {{ f.resolution }} — {{ f.resolution_evidence.note }}</span>{% endif %}
+          {% elif f.code == 'RECONCILE_PENDING' %}<span class="nv-muted" style="font-size:12px">Closes when the Summary numbers match the rehearsal.</span>
+          {% elif can_label and f.label_source != 'owner' %}
           <form method="post" action="/dashboard/agent/finding/{{ f.id }}/feedback/" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">{% csrf_token %}
             <input type="hidden" name="next" value="{{ request.get_full_path }}#findings">
             <input type="text" name="note" placeholder="Note (optional)" maxlength="500" aria-label="Feedback note" style="font-size:12px;padding:3px 6px;min-width:120px">

@@ -86,8 +86,6 @@ def build(now) -> dict:
     effects, more = _effect_rows(since)
     new = (FindingLedger.objects.filter(first_seen__gte=since).select_related('scope__account')
            .order_by('code', 'scope_id'))
-    v5 = [r for r in AgentRun.objects.filter(kind='scope', started_at__gte=since, status='ok')
-          .select_related('scope__account') if (r.detail or {}).get('v5_unexplained')]
     window = AgentRun.objects.filter(kind='shadow_window', status='ok').order_by('-started_at').first()
     return {
         'date': today.isoformat(), 'since': since,
@@ -103,13 +101,18 @@ def build(now) -> dict:
         'stale_inputs': _stale_inputs(today),
         'health': [h for h in health(now) if h['state'] != 'ok'],
         'effects': effects, 'effects_more': more,
-        'v5_unexplained': [{'account': r.scope.account.name, 'channel': r.scope.channel, 'month': r.scope.month,
-                            'schedules': r.detail['v5_unexplained']} for r in v5 if r.scope],
+        'v5_unexplained': v5_open(now),
         'window': ({'night': window.detail.get('night'), 'used_seconds': window.detail.get('used_seconds'),
                     'dry_runs': window.detail.get('dry_runs'),
                     'changed_tables': sorted((window.detail.get('diff') or {}).keys()),
                     'agent_actions': window.detail.get('agent_actions_in_window')} if window else None),
     }
+
+
+def v5_open(now) -> list:
+    """T1: every open V5_UNEXPLAINED row with its age (they persist until acknowledged)."""
+    from .measure import v5_criterion
+    return v5_criterion(now=now)['open_rows']
 
 
 def _smtp():

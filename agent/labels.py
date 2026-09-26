@@ -26,11 +26,12 @@ from django.utils import timezone
 from core.models import Account, Schedule
 
 from . import gate
-from .ledger import ACTIONABLE, INFO_ONLY, OWNER_ONLY, UNCOVERED, ledger_key
+from .ledger import ACTIONABLE, CYCLE_CODES, INFO_ONLY, OWNER_ONLY, ledger_key
 from .models import FindingLedger, ScopeState
 
 COLUMNS = ('account', 'channel', 'month', 'schedule_number', 'cause_code', 'brand', 'duration', 'as_of', 'note')
-CAUSE_CODES = tuple(sorted({*ACTIONABLE, *INFO_ONLY, *UNCOVERED})) + ('no_issue', 'other')
+# diagnose codes only (BASELINE is a state; V5_UNEXPLAINED / RECONCILE_PENDING are not diagnoses)
+CAUSE_CODES = tuple(sorted(set(ACTIONABLE) - set(CYCLE_CODES) | set(INFO_ONLY))) + ('no_issue', 'other')
 
 
 class LabelError(ValueError):

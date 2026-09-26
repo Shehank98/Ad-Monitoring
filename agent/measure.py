@@ -17,7 +17,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from .ledger import HUMAN_RESOLUTIONS, OWNER_ONLY, UNMAPPED_BRAND
+from .ledger import CYCLE_CODES, HUMAN_RESOLUTIONS, MAPPING_GROUP, OWNER_ONLY, STATES
 from .models import AgentRun, FindingLedger
 
 WINDOW_DAYS = 30
@@ -30,7 +30,8 @@ def _ratio(c, i):
 def precision(source: str | None = None) -> dict:
     """{'codes': [{code, correct, incorrect, unsure, n, precision}], 'overall': {...},
     'unmapped_brand': {...}}. `source`: 'owner', 'feedback' or None (both)."""
-    qs = FindingLedger.objects.exclude(label='').exclude(resolution=OWNER_ONLY)
+    qs = (FindingLedger.objects.exclude(label='').exclude(resolution=OWNER_ONLY)
+          .exclude(code__in=(*CYCLE_CODES, *STATES)))
     if source:
         qs = qs.filter(label_source=source)
     per = defaultdict(lambda: {'correct': 0, 'incorrect': 0, 'unsure': 0})
@@ -44,14 +45,15 @@ def precision(source: str | None = None) -> dict:
                      'precision': _ratio(d['correct'], d['incorrect'])})
         for k in tot:
             tot[k] += d[k]
-            if code in UNMAPPED_BRAND:
+            if code in MAPPING_GROUP:
                 um[k] += d[k]
     return {'codes': rows,
             'overall': {**tot, 'n': tot['correct'] + tot['incorrect'],
                         'precision': _ratio(tot['correct'], tot['incorrect']),
                         'codes_labelled': sum(1 for r in rows if r['n'])},
             'unmapped_brand': {**um, 'n': um['correct'] + um['incorrect'],
-                               'precision': _ratio(um['correct'], um['incorrect'])}}
+                               'precision': _ratio(um['correct'], um['incorrect']),
+                               'codes': [r for r in rows if r['code'] in MAPPING_GROUP]}}
 
 
 def misses() -> dict:
@@ -65,7 +67,8 @@ def misses() -> dict:
 def inferred(days: int = WINDOW_DAYS, now=None) -> dict:
     now = now or timezone.now()
     since = now - timedelta(days=days)
-    closed = FindingLedger.objects.filter(open=False, resolved_at__gte=since).exclude(resolution=OWNER_ONLY)
+    closed = (FindingLedger.objects.filter(open=False, resolved_at__gte=since).exclude(resolution=OWNER_ONLY)
+              .exclude(code__in=CYCLE_CODES))
     per = defaultdict(lambda: {'closed': 0, 'aligned': 0})
     for code, res in closed.values_list('code', 'resolution'):
         per[code]['closed'] += 1
@@ -85,13 +88,42 @@ def inferred(days: int = WINDOW_DAYS, now=None) -> dict:
             'coverage': round(covered / with_change, 3) if with_change else None}
 
 
+def v5_criterion(days: int = 14, now=None) -> dict:
+    """Exit criterion 5: open V5_UNEXPLAINED rows plus rows acknowledged as fingerprint_gap
+    in the last `days` days."""
+    now = now or timezone.now()
+    qs = FindingLedger.objects.filter(code='V5_UNEXPLAINED')
+    open_rows = list(qs.filter(open=True).select_related('scope__account').order_by('first_seen'))
+    gaps = qs.filter(open=False, resolution='fingerprint_gap', resolved_at__gte=now - timedelta(days=days)).count()
+    return {'open': len(open_rows), 'fingerprint_gap': gaps, 'count': len(open_rows) + gaps,
+            'open_rows': [{'id': r.id, 'account': r.scope.account.name, 'channel': r.scope.channel,
+                           'month': r.scope.month, 'schedule_id': r.schedule_id,
+                           'age_days': round((now - r.first_seen).total_seconds() / 86400, 1)} for r in open_rows]}
+
+
+def reconcile_pending_stats() -> dict:
+    """T5: evidence for enabling T1 reconcile later: how often a person reconciles what the
+    agent predicted, and how long it takes."""
+    qs = FindingLedger.objects.filter(code='RECONCILE_PENDING')
+    secs = sorted(float((r or {}).get('seconds_to_resolve') or 0) for r in
+                  qs.filter(resolution='reconciled_by_human').values_list('resolution_evidence', flat=True))
+    median = None
+    if secs:
+        m = len(secs) // 2
+        median = secs[m] if len(secs) % 2 else (secs[m - 1] + secs[m]) / 2
+    return {'open': qs.filter(open=True).count(), 'reconciled_by_human': len(secs),
+            'no_longer_pending': qs.filter(resolution='no_longer_pending').count(),
+            'median_hours': round(median / 3600, 2) if median is not None else None}
+
+
 def quality() -> dict:
     """Everything the Overview 'Diagnosis quality' card shows."""
     return {'labelled': precision(), 'owner': precision('owner'), 'feedback': precision('feedback'),
             'misses': misses(), 'inferred': inferred(),
             'open': FindingLedger.objects.filter(open=True).count(),
             'open_actionable': FindingLedger.objects.filter(open=True, actionable=True).count(),
-            'flapping': FindingLedger.objects.filter(open=True, reopen_count__gte=2).count()}
+            'flapping': FindingLedger.objects.filter(open=True, reopen_count__gte=2).count(),
+            'v5': v5_criterion(), 'pending': reconcile_pending_stats()}
 
 
 def cycle_health(days: int = 14, now=None) -> dict:

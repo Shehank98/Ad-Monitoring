@@ -13,7 +13,7 @@
 {% for e in effects %}<tr><td>{{ e.account }} | {{ e.channel }} | {{ e.month }}</td><td>#{{ e.schedule_number }}</td><td>{{ e.section }} {{ e.product }} ({{ e.dur }}s)</td><td align="right">{{ e.aired|stringformat:"+d" }}</td><td align="right">{{ e.missed|stringformat:"+d" }}</td></tr>{% empty %}<tr><td colspan="5">none</td></tr>{% endfor %}
 </table>{% if effects_more %}<p>… and {{ effects_more }} more</p>{% endif %}
 <h3>Unexplained number changes (V5)</h3>
-<ul>{% for v in v5_unexplained %}<li>{{ v.account }} | {{ v.channel }} | {{ v.month }} — schedules {{ v.schedules|join:", " }}</li>{% empty %}<li>none</li>{% endfor %}</ul>
+<ul>{% for v in v5_unexplained %}<li>{{ v.account }} | {{ v.channel }} | {{ v.month }} — schedule {{ v.schedule_id }} — open {{ v.age_days }} days (acknowledge in the Review queue)</li>{% empty %}<li>none</li>{% endfor %}</ul>
 <h3>Stale inputs</h3>
 <ul>{% for s in stale_inputs %}<li>{{ s.account }} | {{ s.channel }} | {{ s.month }} — {{ s.reason }} ({{ s.days }} days)</li>{% empty %}<li>none</li>{% endfor %}</ul>
 <h3>Job health</h3>

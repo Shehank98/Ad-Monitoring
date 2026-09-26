@@ -95,7 +95,9 @@
     <dl class="nv-kv">
       <dt>Open findings</dt><dd class="nv-mono">{{ quality.open }} <span class="nv-muted">({{ quality.open_actionable }} actionable)</span></dd>
       <dt>Labelled precision</dt><dd class="nv-mono">{{ quality.labelled.overall.precision|default_if_none:"—" }} <span class="nv-muted">n={{ quality.labelled.overall.n }} · {{ quality.labelled.overall.codes_labelled }} code{{ quality.labelled.overall.codes_labelled|pluralize }}</span></dd>
-      <dt>Unmapped-brand precision</dt><dd class="nv-mono">{{ quality.labelled.unmapped_brand.precision|default_if_none:"—" }} <span class="nv-muted">n={{ quality.labelled.unmapped_brand.n }}</span></dd>
+      <dt>Mapping group precision</dt><dd class="nv-mono">{{ quality.labelled.unmapped_brand.precision|default_if_none:"—" }} <span class="nv-muted">n={{ quality.labelled.unmapped_brand.n }}{% for r in quality.labelled.unmapped_brand.codes %} · {{ r.code }} {{ r.precision|default_if_none:"—" }} (n={{ r.n }}){% endfor %}</span></dd>
+      <dt>Unexplained changes (V5)</dt><dd class="nv-mono">{{ quality.v5.open }} open <span class="nv-muted">· {{ quality.v5.fingerprint_gap }} fingerprint gap (14 days)</span></dd>
+      <dt>Reconcile pending</dt><dd class="nv-mono">{{ quality.pending.open }} open <span class="nv-muted">· {{ quality.pending.reconciled_by_human }} reconciled by a person · median {{ quality.pending.median_hours|default_if_none:"—" }} h</span></dd>
       <dt>Owner / feedback</dt><dd class="nv-mono">{{ quality.owner.overall.precision|default_if_none:"—" }} / {{ quality.feedback.overall.precision|default_if_none:"—" }}</dd>
       <dt>Missed (owner labels)</dt><dd class="nv-mono">{% for c, n in quality.misses.items %}{{ c }} {{ n }}{% if not forloop.last %}, {% endif %}{% empty %}none{% endfor %}</dd>
       <dt>Flapping</dt><dd class="nv-mono">{{ quality.flapping }}</dd>

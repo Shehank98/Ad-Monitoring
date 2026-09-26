@@ -245,6 +245,11 @@ def _yield_reason(exc) -> str | None:
     return None
 
 
+def _prev_observed_schedule(scope, schedule_id):
+    return (SummarySnapshot.objects.filter(scope=scope, schedule_id=schedule_id, kind='observed')
+            .order_by('-created_at', '-id').first())
+
+
 def _prev_observed(scope):
     return (SummarySnapshot.objects.filter(scope=scope, kind='observed')
             .order_by('-created_at', '-id').first())
@@ -301,10 +306,19 @@ def observe_scope(scope, now, actor, run) -> dict:
     unexplained = [c.detail['schedule_id'] for c in v5 if not c.ok]
     baselines = {str(c.detail['schedule_id']): c.detail['baseline'] for c in v5 if c.detail.get('baseline')}
     with transaction.atomic():                    # agent tables only, short
+        prev_by_sid = {sid: _prev_observed_schedule(scope, sid) for sid in unexplained}
         snaps = store_observed(scope, reads['data'], reads['fp'], reads['active'], run=run)
         stats = ledger.observe(scope, reads['findings'], prev.fingerprint if prev else None, reads['fp'],
                                reads['ctx'], actor=actor, now=now)
-        _save_state(scope, reads, bool(unexplained), baselines)
+        # T1: an unexplained change persists as V5_UNEXPLAINED until an admin acknowledges it.
+        # The baseline still moves forward (the observed snapshot above), so it is not re-flagged.
+        for c in v5:
+            if not c.ok:
+                p = prev_by_sid.get(c.detail['schedule_id'])
+                ledger.open_v5_unexplained(scope, c.detail['schedule_id'], p.data if p else None,
+                                           reads['data'][c.detail['schedule_id']], c.detail, actor=actor, now=now)
+        stats['reconcile_pending'] = ledger.reconcile_pending(scope, snaps, actor=actor, now=now)
+        _save_state(scope, reads, bool(unexplained) or ledger.open_v5_count(scope) > 0, baselines)
     return {'reads': reads, 'snapshots': snaps, 'detail': {
         'state': scope.state, 'reason': scope.reason, 'schedules': [s.id for s in reads['active']],
         'observed_snapshot_ids': {str(k): v.id for k, v in snaps.items()},
@@ -531,6 +545,8 @@ def _visit(sc, why, now, actor, cycle, window_run, shadow_ok, cfg, counts) -> st
             counts['shadow_skipped'] += 1
         if sh['outcome'] != 'skipped':
             _add_window_use(window_run, sh['seconds'])
+        if sh['outcome'] == 'ok':                  # T5: a fresh pending effect may open RECONCILE_PENDING
+            detail['reconcile_pending'] = ledger.reconcile_pending(sc, obs['snapshots'], actor=actor, now=now)
     run.status, run.finished_at, run.detail = 'ok', timezone.now(), to_jsonable(detail)
     run.save(update_fields=['status', 'finished_at', 'detail'])
     return 'ok'

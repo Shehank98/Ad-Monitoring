@@ -19,8 +19,8 @@ PENDING EFFECTS (what a run would change; |Δ| >= 1 on Aired or Missed; top 20)
 {% empty %}  none
 {% endfor %}{% if effects_more %}  … and {{ effects_more }} more
 {% endif %}
-UNEXPLAINED NUMBER CHANGES (V5)
-{% for v in v5_unexplained %}  {{ v.account }} | {{ v.channel }} | {{ v.month }} — schedules {{ v.schedules|join:", " }}
+UNEXPLAINED NUMBER CHANGES (V5) — open until an admin acknowledges them
+{% for v in v5_unexplained %}  {{ v.account }} | {{ v.channel }} | {{ v.month }} — schedule {{ v.schedule_id }} — open {{ v.age_days }} days (acknowledge in the Review queue)
 {% empty %}  none
 {% endfor %}
 STALE INPUTS (waiting > 7 days after the period ended)

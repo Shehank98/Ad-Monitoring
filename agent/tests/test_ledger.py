@@ -104,8 +104,9 @@ class LedgerTest(TestCase):
         self.assertEqual(AgentProposal.objects.filter(status='open').count(), 1)
 
     def test_s4_code_lists_are_disjoint_and_cover_diagnose(self):
-        codes = set(ledger.ACTIONABLE) | set(ledger.INFO_ONLY) | set(ledger.UNCOVERED)
-        self.assertEqual(len(codes), len(ledger.ACTIONABLE) + len(ledger.INFO_ONLY) + len(ledger.UNCOVERED))
+        codes = set(ledger.ACTIONABLE) | set(ledger.INFO_ONLY) | set(ledger.STATES)
+        self.assertEqual(len(codes), len(ledger.ACTIONABLE) + len(ledger.INFO_ONLY) + len(ledger.STATES))
+        self.assertEqual(ledger.UNCOVERED, ())
         import inspect
         import re
         from agent import diagnose

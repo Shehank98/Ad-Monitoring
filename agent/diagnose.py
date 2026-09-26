@@ -61,7 +61,17 @@ def diagnose(scope: ScopeState, readiness=None) -> list[Finding]:
               .values_list('brand', 'duration').order_by().distinct())
     for brand, dur in brands:
         themes = _lmrb_themes_for_brand(brand, dur, lmrb_map)
-        if not themes or not start:
+        if not themes:
+            # Phase 3.1 T2: no BrandMapping.theme for this brand + duration, so the
+            # Schedule<->LMRB engine records MatchResult 'no_mapping' and 3rd Party stays 0.
+            has_row = BrandMapping.objects.filter(account_id=acc, brand__iexact=brand.strip()).exists()
+            out.append(Finding('NO_BRAND_MAPPING', f'{brand} ({dur}s) has no LMRB theme mapping'
+                               + ('' if has_row else ' (no BrandMapping row at all)')
+                               + '; the monitoring match reports it as No Brand Mapping.', tier=3, brand=brand,
+                               severity='bad', evidence={'duration': dur, 'brand_mapping_row_exists': has_row},
+                               proposed_fix='Add the exact LMRB Advt_Theme to BrandMapping.theme.'))
+            continue
+        if not start:
             continue
         pat_q = None
         from django.db.models import Q

@@ -255,7 +255,10 @@ def queue(request):
     return render(request, 'agent/queue.html', {
         'months': months, 'month': month, 'items': items, 'kinds': kinds,
         'ledger': ledger[:200], 'can_label': request.user.role in ADMIN_ROLES,
-        'labels': FEEDBACK_LABELS,
+        'labels': FEEDBACK_LABELS, 'v5_causes': (('fingerprint_gap', 'Fingerprint gap'),
+                                                  ('core_bug', 'Core bug'),
+                                                  ('outside_data_fix', 'Data fixed outside the app'),
+                                                  ('accepted', 'Accepted')),
     })
 
 
@@ -267,6 +270,42 @@ def _safe_next(request, default='/dashboard/agent/queue/'):
     nxt = request.POST.get('next') or ''
     ok = url_has_allowed_host_and_scheme(nxt, allowed_hosts={request.get_host()}, require_https=request.is_secure())
     return nxt if ok else default
+
+
+@login_required
+@role_required(ADMIN_ROLES)
+def v5_acknowledge(request, pk):
+    """Phase 3.1 T1: an admin acknowledges one unexplained change: a root cause and a note.
+    Human gate write to agent.FindingLedger only. The scope leaves NEEDS_HUMAN when no open
+    V5_UNEXPLAINED row is left for it."""
+    from . import ledger as ledger_mod
+    from .readiness import assess
+    if request.method != 'POST':
+        return redirect('/dashboard/agent/queue/')
+    row = get_object_or_404(FindingLedger.objects.select_related('scope', 'proposal'), pk=pk,
+                            code='V5_UNEXPLAINED')
+    if not _account_access(request.user, row.scope.account_id):
+        return render(request, '403.html', status=403)
+    cause, note = request.POST.get('root_cause', ''), request.POST.get('note', '').strip()
+    before = {'open': row.open, 'resolution': row.resolution}
+
+    def apply():
+        out = ledger_mod.acknowledge_v5(row, cause, note, request.user)
+        sc = row.scope
+        if ledger_mod.open_v5_count(sc) == 0 and sc.reason == 'unexplained_change':
+            r = assess(sc)                                   # read only
+            sc.state, sc.reason = r.state, r.reason or ''
+            sc.save(update_fields=['state', 'reason', 'updated_at'])
+        out['scope_state'] = sc.state
+        return out
+    try:
+        gate.perform(tier=gate.T0, action_type='v5_acknowledge', actor_kind='human', actor=request.user,
+                     scope=row.scope, target_model='agent.FindingLedger', target_pk=row.id, before=before,
+                     apply=apply, reason=f'V5 acknowledged: {cause}', evidence={'note': note[:500]})
+        messages.success(request, 'Unexplained change acknowledged.')
+    except (ValueError, gate.HumanNotAllowed) as exc:
+        messages.error(request, str(exc))
+    return redirect(_safe_next(request))
 
 
 @login_required
@@ -285,6 +324,9 @@ def finding_feedback(request, pk):
         messages.error(request, 'Choose Correct, Incorrect or Unsure.')
         return redirect(_safe_next(request))
     before = {'label': row.label, 'label_source': row.label_source, 'label_note': row.label_note}
+    if row.code in ('V5_UNEXPLAINED', 'RECONCILE_PENDING'):
+        messages.error(request, 'This is not a diagnosis; it has no Correct / Incorrect feedback.')
+        return redirect(_safe_next(request))
     if row.label_source == 'owner':
         messages.error(request, 'This finding carries an owner label; feedback does not replace it.')
         return redirect(_safe_next(request))
