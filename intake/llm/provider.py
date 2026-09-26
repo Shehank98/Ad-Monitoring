@@ -1,9 +1,10 @@
 """LLM provider interface (owner D). Anthropic by default; a fake for tests.
 
 The model is read from ANTHROPIC_MODEL (never hard-coded). A provider returns a neutral
-Turn so the runner does not depend on SDK types. tool_choice is 'auto': the system
-prompt tells the model to call submit_decision, and strict tool schemas keep the
-arguments valid (forced tool_choice is rejected by some current models).
+Turn so the runner does not depend on SDK types. tool_choice defaults to 'auto': the system
+prompt tells the model to call submit_decision, and strict tool schemas keep the arguments
+valid. Phase 3.2 close: the runner may pass a forced tool_choice, but only after
+`intake_llm_probe` showed that the model accepts it (AgentConfig.intake_tool_choice).
 """
 from __future__ import annotations
 
@@ -12,7 +13,15 @@ from dataclasses import dataclass, field
 
 
 class ProviderError(RuntimeError):
-    pass
+    """status_code: HTTP status when the API answered with an error (None for network errors).
+    error_text: the API's own error message, exactly as returned."""
+
+    def __init__(self, msg, status_code=None, error_text=''):
+        super().__init__(msg)
+        self.status_code, self.error_text = status_code, error_text or str(msg)
+
+
+AUTO = {'type': 'auto'}
 
 
 @dataclass
@@ -36,13 +45,19 @@ class AnthropicProvider:
             client = anthropic.Anthropic()
         self.client = client
 
-    def create(self, system: str, messages: list, tools: list) -> Turn:
+    def create(self, system: str, messages: list, tools: list, tool_choice: dict | None = None,
+               max_tokens: int = 4096) -> Turn:
         import anthropic
         try:
-            r = self.client.messages.create(model=self.model, max_tokens=4096, system=system,
-                                            messages=messages, tools=tools, tool_choice={'type': 'auto'})
+            r = self.client.messages.create(model=self.model, max_tokens=max_tokens, system=system,
+                                            messages=messages, tools=tools, tool_choice=tool_choice or AUTO)
+        except anthropic.APIStatusError as exc:
+            body = exc.body if isinstance(exc.body, dict) else {}
+            err = body.get('error') if isinstance(body.get('error'), dict) else {}
+            raise ProviderError(f'{type(exc).__name__}: {exc}', status_code=exc.status_code,
+                                error_text=err.get('message') or exc.message) from exc
         except anthropic.APIError as exc:
-            raise ProviderError(f'{type(exc).__name__}: {exc}') from exc
+            raise ProviderError(f'{type(exc).__name__}: {exc}', error_text=getattr(exc, 'message', str(exc))) from exc
         return Turn(blocks=[b.to_dict() for b in r.content], stop_reason=r.stop_reason or '',
                     input_tokens=r.usage.input_tokens or 0, output_tokens=r.usage.output_tokens or 0,
                     model=r.model or self.model)
@@ -57,10 +72,10 @@ class FakeProvider:
         self.requests = []
         self.model = 'fake-model'
 
-    def create(self, system, messages, tools) -> Turn:
+    def create(self, system, messages, tools, tool_choice=None, max_tokens=4096) -> Turn:
         import copy
         self.requests.append({'system': system, 'messages': copy.deepcopy(messages),
-                              'tools': [t['name'] for t in tools]})
+                              'tools': [t['name'] for t in tools], 'tool_choice': tool_choice or AUTO})
         if not self.script:
             raise ProviderError('fake script exhausted')
         step = self.script.pop(0)

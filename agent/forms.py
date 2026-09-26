@@ -22,7 +22,9 @@ class AgentConfigForm(forms.ModelForm):
                   # Phase 3
                   'shadow_window_start', 'shadow_window_end', 'shadow_budget_seconds', 'max_scopes_per_cycle',
                   'observe_every_minutes', 'db_lock_timeout_ms', 'db_statement_timeout_ms', 'db_idle_timeout_ms',
-                  'core_fingerprint_timeout_ms', 'digest_time', 'digest_recipients']
+                  'core_fingerprint_timeout_ms', 'digest_time', 'digest_recipients',
+                  # Phase 3.2 close
+                  'intake_tool_choice']
         widgets = {'shadow_window_start': forms.TimeInput(attrs={'type': 'time'}, format='%H:%M'),
                    'shadow_window_end': forms.TimeInput(attrs={'type': 'time'}, format='%H:%M'),
                    'digest_time': forms.TimeInput(attrs={'type': 'time'}, format='%H:%M')}
@@ -73,6 +75,17 @@ class AgentConfigForm(forms.ModelForm):
             if d.get(k) is not None and d[k] < 100:
                 self.add_error(k, 'Use at least 100 ms.')
         return d
+
+    def clean_intake_tool_choice(self):
+        """'forced' only if the latest intake_llm_probe of the current model showed forced tool_choice
+        as supported. Checked when an admin switches to forced; the runner re-checks on every run."""
+        v = self.cleaned_data['intake_tool_choice']
+        if v == 'forced' and getattr(self.instance, 'intake_tool_choice', 'auto') != 'forced':
+            from intake.llm.probe import current_model, forced_supported
+            ok, why = forced_supported(current_model())
+            if not ok:
+                raise forms.ValidationError(f'Forced tool choice is not allowed: {why}.')
+        return v
 
     def clean_autonomy_level(self):
         v = self.cleaned_data['autonomy_level']

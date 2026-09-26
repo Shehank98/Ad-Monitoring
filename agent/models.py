@@ -50,6 +50,12 @@ class AgentConfig(models.Model):
     # Phase 3.2: "Run cycle" in the console only sets this; the next agent_cycle (cron) treats it as
     # run-now and clears it. The web request never runs a cycle.
     run_requested_at = models.DateTimeField(null=True, blank=True)
+    # Phase 3.2 close: how the intake runner calls the LLM. 'forced' only after intake_llm_probe
+    # showed the current model accepts forced tool_choice (checked by the settings form and again
+    # by the runner). The llm_no_decision fallback applies in both modes.
+    TOOL_CHOICES = [('auto', 'Auto (model decides when to call tools)'),
+                    ('forced', 'Forced (a tool call every turn; submit_decision on the follow-up)')]
+    intake_tool_choice = models.CharField(max_length=8, choices=TOOL_CHOICES, default='auto')
     digest_recipients = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='+',
                                                limit_choices_to={'role__in': ('super_admin', 'admin')})
     updated_at = models.DateTimeField(auto_now=True)
@@ -292,6 +298,9 @@ class LlmCall(models.Model):
     output_tokens = models.PositiveIntegerField(default=0)
     latency_ms = models.PositiveIntegerField(default=0)
     outcome = models.CharField(max_length=40, blank=True, default='')
+    # Phase 3.2 close (purpose='probe'): run_id, mode, tool_choice, supported, http_status,
+    # error_text, submit_called
+    detail = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

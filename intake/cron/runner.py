@@ -112,20 +112,42 @@ def _submit(ctx, att, block) -> dict:
     return d
 
 
+ANY = {'type': 'any'}
+FORCE_SUBMIT = {'type': 'tool', 'name': 'submit_decision'}
+
+
+def tool_choice_mode(provider) -> str:
+    """'forced' only when AgentConfig.intake_tool_choice is 'forced' AND the latest probe of this
+    provider's model showed forced tool_choice as supported (checked again here, not only in the
+    settings form, in case the model changed). Otherwise 'auto'."""
+    from ..llm.probe import forced_supported
+    cfg = AgentConfig.objects.filter(pk=1).first()
+    if not cfg or cfg.intake_tool_choice != 'forced':
+        return 'auto'
+    ok, _why = forced_supported(getattr(provider, 'model', '') or '')
+    return 'forced' if ok else 'auto'
+
+
 def llm_loop(ctx, provider, system, version) -> dict:
     """Returns the validated decision dict. Raises LlmFailed on any problem.
 
     Phase 2.1 item 1 (tool_choice stays 'auto', no extended thinking): a turn that ends
     without submit_decision gets ONE follow-up asking for it; if there is still none, the
     result is llm_no_decision. So are: submit_decision called more than once in a turn,
-    text after the submit_decision, and an invalid submit_decision schema."""
+    text after the submit_decision, and an invalid submit_decision schema.
+
+    Phase 3.2 close: in 'forced' mode (tool_choice_mode) normal turns use {"type": "any"} and the
+    follow-up turn uses {"type": "tool", "name": "submit_decision"}. Every llm_no_decision rule
+    above still applies in both modes."""
     att = ctx.attachment
+    forced = tool_choice_mode(provider) == 'forced'
     messages = [{'role': 'user', 'content': first_message(att)}]
     calls, nudged = 0, False
     while True:
         t0 = time.monotonic()
         try:
-            turn = provider.create(system, messages, TOOLS)
+            choice = (FORCE_SUBMIT if nudged else ANY) if forced else None
+            turn = provider.create(system, messages, TOOLS, tool_choice=choice)
         except ProviderError as exc:
             _log(provider, version, 0, 0, t0, 'provider_error')
             raise LlmFailed(f'provider_error: {exc}') from exc

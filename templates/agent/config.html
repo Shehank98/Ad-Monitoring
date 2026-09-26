@@ -16,6 +16,7 @@
         {% if field.name == 'tc_intake_mode' %}<div class="help">Off: fetch and list only. Suggest: the assistant proposes, an admin confirms. There is no automatic mode.</div>{% endif %}
         {% if field.name == 'autonomy_level' %}<div class="help">Levels above 0 unlock in Phase 4.</div>{% endif %}
         {% if field.name == 'intake_gemini_enabled' %}<div class="help">Sends whole intake PDFs to Gemini for a second reading. Needs GEMINI_API_KEY. Off: PDFs are read once and always go to review.</div>{% endif %}
+        {% if field.name == 'intake_tool_choice' %}<div class="help">Forced needs a passing <code>manage.py intake_llm_probe</code> for the current model (tool and any supported). Auto is always safe.</div>{% endif %}
         {% if field.name == 'intake_fetch_enabled' %}<div class="help">Reads the TC mailbox (read-only). Needs at least one active sender below.</div>{% endif %}
         {% if field.name == 'min_brand_overlap' %}<div class="help">Share of TC rows that must map to the schedule's brands (0.6 = 60%).</div>{% endif %}
         {% for e in field.errors %}<div class="err">{{ e }}</div>{% endfor %}</div>
