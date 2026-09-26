@@ -258,3 +258,53 @@ Screenshots (`docs/agent/screens/`):
 - A live run needs `AgentConfig.enabled = True` (Agent Settings). Level stays 0 (capped).
 - The owner labels and the pre-fix restore are yours (runbook step 4b).
 - The S4 gaps above need a decision.
+
+---
+
+# Phase 3.1 (owner follow-ups T1–T10)
+
+Synthetic data only. Not deployed. Autonomy stays 0.
+
+## Owner decisions carried out
+
+| Decision | Where |
+|---|---|
+| TC_NO_ROWS, LMRB_THEME_NO_ROWS, SPONSORSHIP_NOT_RUN actionable (one T4 info proposal each) | `ledger.ACTIONABLE` |
+| LMRB_MULTI_FLAG info only | `ledger.INFO_ONLY` |
+| BASELINE is a state: out of the ledger, proposals, precision, recall and the labelled eval | `ledger.STATES` (skipped by `ledger.group`), label cause codes, `measure.precision`, `agent_diagnose_labelled`; migration `agent/0008_phase3_1` deletes stored BASELINE ledger rows (agent table) |
+| Mapping group for criterion 2: NO_TC_MAPPING, LMRB_THEME_NO_ROWS, NO_BRAND_MAPPING; the group and each code, each with n | `ledger.MAPPING_GROUP`; Overview → Diagnosis quality "Mapping group precision" |
+
+V5_UNEXPLAINED and RECONCILE_PENDING are made by the cycle, not by diagnose. They carry no
+Correct/Incorrect buttons and are never label cause codes, precision or eval inputs.
+
+## T1–T10
+
+| Item | What was built | Tests |
+|---|---|---|
+| **T1** unexplained changes persist | An unexplained V5 change opens one `V5_UNEXPLAINED` row per schedule and change (key includes the new sha, so the same change is never re-opened). It is actionable with a T4 proposal. Evidence: the before/after observed numbers per brand (`effects.diff_summaries`) plus the fingerprint diff (empty). The baseline still moves forward. Rows never close by absence. The scope stays `NEEDS_HUMAN / unexplained_change` while any row is open. **Acknowledge** (Review queue, admins): root cause `fingerprint_gap` / `core_bug` / `outside_data_fix` / `accepted` plus a required note, as a human `gate.perform` on `agent.FindingLedger`; the scope's state is re-derived once the last row is acknowledged. Authorised schedules keep their existing handling. Criterion 5 = open rows + rows acknowledged as `fingerprint_gap` (14 days), on the quality card. The digest lists open rows with their age. | `V5PersistsTest` (7): next cycle does not clear it, acknowledging clears it, NEEDS_HUMAN until every row is acknowledged, note/cause required, digest |
+| **T2** no mapping at all | Checked: NO_TC_MAPPING **does** fire for a brand with no BrandMapping row. But a brand that has a TC theme and **no LMRB theme** (MatchResult `no_mapping`) produced **no finding at all** (LMRB_THEME_NO_ROWS skipped it). Added **NO_BRAND_MAPPING** (actionable, mapping group) for any commercial brand + duration with no `BrandMapping.theme`; evidence says whether any BrandMapping row exists. A brand with no row at all gets both codes. | `NoBrandMappingTest` (2) |
+| **T3** window close | `agent_nightly` first runs `cycle.nightly_close()`: it takes the cycle lock (waits up to 10 minutes) and closes any ended window (end core fingerprint + diff + agent/human action counts). Closing is idempotent: each window is re-read with `select_for_update` and closed only while `running`, and both jobs hold the cycle lock. On a lock timeout the window stays open and is reported **pending**; the audit's agent-effect section lists pending windows, and the next cycle or night closes and includes them. | `NightlyCloseTest` (3): nightly closes a still-open window; nightly and cycle racing close it once (end fingerprint not overwritten); lock timeout → pending, the next cycle closes it |
+| **T4** labelled eval | Optional CSV column `complete` (yes/no, default no; validated). An unmatched agent finding is a false positive only in a scope with `complete=yes` or a `no_issue` label; otherwise it is **unverified**, listed in `labelled_eval_<date>.md` and left out of precision. Precision is reported over complete-labelled scopes only and overall. `agent_label_scopes` applies the same rule on the ledger (unexplained findings in a complete scope → `incorrect`, one human gate write per scope). | `test_evaluate_counts_tp_fp_miss` (both ways), `test_complete_scope_marks_unexplained_findings_incorrect`, `test_complete_column_is_validated` |
+| **T5** RECONCILE_PENDING | When the latest PendingEffect of a schedule has \|Δ\| ≥ 1 on Aired or Missed for any brand, an actionable `RECONCILE_PENDING` finding opens ("Running reconciliation would change these numbers."), with the PendingEffect as evidence. When a later observed snapshot equals that shadow (a person ran the core reconcile), it closes `reconciled_by_human` and records `seconds_to_resolve`. A newer zero effect closes it `no_longer_pending`. Evaluated after every observation and after every shadow run. The quality card shows open / reconciled-by-a-person counts and the median hours. | `ReconcilePendingUnitTest` (4), `ReconcilePendingCycleTest` |
+| **T6** S1 answer | Section "S1: does the Summary GET write?" above, with file:line for every path. No write is reachable from the GET. New READ ONLY tests for every path the parity test did not reach (no `schedule_id` with one schedule, several schedules → `schedule_id=None`, card grid, meta with costs + special notes, `tc_three_way`). **No write was hit on PostgreSQL.** | `SummaryGetReadOnlyTest` (5) |
+| **T7** `--now` | `agent_cycle --now` is refused unless `DEBUG=True`, `AGENT_DISPOSABLE_DB=1`, or a test run. | `NowFlagTest` |
+| **T8** service user coverage | Each cycle compares the service user's accounts with all accounts (read only; never `sync_service_user`). Missing accounts go into the heartbeat counts, the health card ("… run agent_ensure_service_user") and the digest. | `ServiceUserCoverageTest` |
+| **T9** fingerprint noise | `accounts_user.last_login` is left out of the accounts_user hash (PostgreSQL `to_jsonb(t) - 'last_login'`). Per-table fingerprint time and total are recorded. The agent-effect section lists changed tables in two groups, always both: **reconciliation data** (`core_schedule*`, `core_lmrbrow`, `core_tcrow`, `core_transmissionreport`, `core_brandmapping`, `core_manualmatch`, `core_*sponsorship*`, `core_tclmrb*`, `core_matchresult`, `core_summaryreportmeta`, `core_systemsetting`) and **activity tables** (everything else), with the start/end fingerprint times. | `FingerprintNoiseTest` (3) |
+| **T10** settings form | A field missing from the POST keeps its stored value (M2M, times, booleans included). The page sends `_fields` (every field it rendered), so an unticked checkbox on the real page still turns the setting off. The two intake tests are back to posting only their own fields (identical to their pre-Phase-3 content); the `PHASE3_CONFIG_POST` helper was removed. | `SettingsFormKeepsStoredValuesTest` (2) |
+
+Two other test adjustments, both agent tests: the kill-switch test now checks
+`counts['disabled']` (the heartbeat also carries T8's list), and the audit/eval tests follow the new
+table layouts. `agent_nightly` keeps `steps` as before and records the window result under
+`counts['shadow_window']`, so the Phase 2.1 nightly test is unchanged.
+
+## Phase 3.1 results
+
+| Run | Run | Passed | Skipped | Failed |
+|---|---|---|---|---|
+| Full suite, SQLite (`manage.py test --exclude-tag=eval`) | 507 | 498 | 9 | 0 |
+| Full suite, PostgreSQL 16 | 507 | 499 | 8 | 0 |
+
+- `makemigrations --check --dry-run`: **No changes detected** (new migration `agent/0008_phase3_1`).
+- Golden idempotent on `synthetic` after migrating to 0008: **MATCH** (3 of 3 schedules).
+
+__GUARDIAN31__

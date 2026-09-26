@@ -999,3 +999,18 @@ Report: `docs/agent/phase3_report.md`. Observe and rehearse only; nothing is app
 - PostgreSQL sequences (e.g. `core_matchresult_id_seq`) advance during rolled-back dry runs: id gaps are expected.
 - Tests: `agent/tests/test_cycle.py`, `test_ledger.py`, `test_digest.py`, `test_no_core_writes.py`
   (every core/accounts table hash unchanged over a full cycle incl. shadow; `gate.perform` spy: 0 calls).
+
+### Phase 3.1 — owner follow-ups on Phase 3 (level 0, not deployed)
+- **Codes** (`agent/ledger.py`): actionable = NO_TC_MAPPING, NO_BRAND_MAPPING, LMRB_THEME_NO_ROWS, TC_NO_ROWS,
+  SPONSORSHIP_NOT_RUN, CHANNEL_VARIANT, TC_NOT_LINKED, WILDCARD_TC_THEME_COMMERCIAL, MANUAL_LOCK_LOST,
+  DUPLICATE_ACTIVE_NUMBER, SCHEDULE_LOCKED, V5_UNEXPLAINED, RECONCILE_PENDING. BASELINE is a state, never a
+  finding. Mapping group (criterion 2) = NO_TC_MAPPING + LMRB_THEME_NO_ROWS + NO_BRAND_MAPPING.
+- **V5_UNEXPLAINED** rows never close by themselves: the scope stays NEEDS_HUMAN until an admin acknowledges
+  every row (root cause + note, human `gate.perform` on agent.FindingLedger). The baseline still moves forward.
+- **RECONCILE_PENDING** opens from a PendingEffect with |Δ| ≥ 1 on Aired/Missed and closes
+  `reconciled_by_human` when an observed snapshot equals the shadow (time to reconcile recorded).
+- **agent_nightly** closes the shadow window under the cycle lock (waits 10 min; idempotent; timeout →
+  pending). `agent_cycle --now` needs DEBUG, AGENT_DISPOSABLE_DB=1 or tests.
+- **Summary GET writes nothing** (S1 section of `docs/agent/phase3_report.md`, READ ONLY tests
+  `SummaryGetReadOnlyTest`).
+- Agent Settings form: a field missing from the POST keeps its stored value (`_fields` lists rendered fields).
