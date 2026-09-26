@@ -70,7 +70,7 @@ class ReadOnlyViewsTest(ConsoleBase):
     def test_theme_tester_wildcard_lmrb(self):
         from core.models import BrandMapping
         BrandMapping.objects.create(account=self.acc, brand='Expo', theme='Ai Expo 2025*', tc_theme='AI EXPO')
-        r = self.client.get(f'{VIEWS[2]}?account_id={self.acc.id}&kind=lmrb&theme=Ai Expo 2025_3 (30)(Sin)')
+        r = self.client.get(f'{VIEWS[2]}?account_id={self.acc.id}&kind=lmrb&theme=Ai Expo 2025_3 (30)(Sin)&duration=30')
         self.assertEqual([b['brand'] for b in r.context['result']['brands']], ['expo'])
 
     def test_theme_tester_other_account_is_refused(self):
@@ -217,3 +217,169 @@ class BooleanFailSafeTest(TestCase):
         cfg.refresh_from_db()
         for name in self.SAFE_WHEN_FALSE:
             self.assertFalse(getattr(cfg, name), name)
+
+
+
+class GuardianFindingsTest(ConsoleBase):
+    """Phase 3.2 guardian findings on the console."""
+
+    def test_superseded_version_is_not_counted_twice(self):
+        from core.models import Schedule
+        v2 = f.schedule(self.acc, number='101', version=2)
+        for d in (10, 12, 14):
+            f.row(self.acc, v2, day=d)
+        Schedule.objects.filter(pk=self.s.pk).update(is_superseded=True)
+        age_uploads()
+        from agent.models import AgentRun
+        AgentRun.objects.filter(kind='scope').update(started_at=timezone.now() - datetime.timedelta(hours=7))
+        cycle.run_cycle(now=DAY)
+        r = self.client.get(f'{VIEWS[0]}?month={self.s.month}')
+        self.assertEqual([(x['schedule_id'], x['planned']) for x in r.context['rows']], [(v2.id, 3)])
+        r = self.client.get(f'{VIEWS[1]}?month={self.s.month}')
+        self.assertEqual((r.context['rows'][0]['schedules'], r.context['rows'][0]['planned']), (1, 3))
+
+    def test_signoff_comes_from_scope_state(self):
+        from core.models import SummaryReportMeta
+        SummaryReportMeta.objects.create(account=self.acc, channel=self.s.channel, month=self.s.month,
+                                         authorised_by='Finance Head')
+        from agent.models import AgentRun
+        AgentRun.objects.filter(kind='scope').update(started_at=timezone.now() - datetime.timedelta(hours=7))
+        cycle.run_cycle(now=DAY)
+        r = self.client.get(f'{VIEWS[1]}?month={self.s.month}')
+        self.assertEqual(r.context['rows'][0]['signoff'], 'Authorised by Finance Head')
+
+    def test_theme_tester_bad_input_never_500(self):
+        for q in ('account_id=abc&kind=tc&theme=X&duration=30', f'account_id={self.acc.id}&kind=tc&theme=X',
+                  f'account_id={self.acc.id}&kind=tc&theme=X&duration=3o', f'account_id={self.acc.id}&kind=zz&theme=X&duration=30'):
+            with self.subTest(q):
+                r = self.client.get(f'{VIEWS[2]}?{q}')
+                self.assertEqual(r.status_code, 200)
+                self.assertTrue(r.context['error'])
+                self.assertIsNone(r.context['result'])
+
+    def test_pause_message_only_on_success(self):
+        from unittest import mock
+        from agent import gate
+        with mock.patch.object(gate, 'perform', side_effect=gate.HumanNotAllowed('no')):
+            r = self.client.post('/dashboard/agent/console/pause/', follow=True)
+        texts = [m.message for m in r.context['messages']]
+        self.assertIn('no', texts)
+        self.assertFalse(any('paused' in t for t in texts))
+
+
+class RunRequestSemanticsTest(ConsoleBase):
+    """Owner item 6: what run_requested_at changes in the next cycle."""
+
+    def request_run(self):
+        return self.client.post('/dashboard/agent/console/run/', follow=True)
+
+    def test_every_scope_counts_as_due(self):
+        self.assertEqual(cycle.run_cycle(now=DAY)['scopes'], {})           # fresh: nothing due
+        self.request_run()
+        res = cycle.run_cycle(now=DAY)
+        self.assertEqual(res['scopes'], {ScopeState.objects.get().id: 'ok'})
+        self.assertEqual(AgentRun.objects.filter(kind='scope').order_by('-id').first().detail['why'], 'due')
+
+    def test_same_cap(self):
+        f.full_scope(self.acc, number='201', channel='Derana TV')
+        age_uploads()
+        enable(max_scopes_per_cycle=1)
+        self.request_run()
+        res = cycle.run_cycle(now=DAY)
+        self.assertEqual((res['counts']['observed'], res['capped']), (1, 1))
+
+    def test_same_debounce(self):
+        from core.models import Schedule
+        self.request_run()
+        Schedule.objects.update(uploaded_at=timezone.now())
+        res = cycle.run_cycle(now=DAY)
+        self.assertEqual((res['counts']['debounced'], res['counts']['observed']), (1, 0))
+
+    def test_observe_only_outside_the_shadow_window(self):
+        self.request_run()
+        res = cycle.run_cycle(now=DAY)
+        self.assertFalse(res['in_window'])
+        self.assertFalse(AgentRun.objects.filter(kind__in=('dry_run', 'shadow_window')).exists())
+        self.assertNotIn('shadow', AgentRun.objects.filter(kind='scope').order_by('-id').first().detail)
+
+    def test_second_click_while_pending_changes_nothing(self):
+        self.request_run()
+        first = AgentConfig.get_solo().run_requested_at
+        r = self.request_run()
+        self.assertEqual(AgentConfig.get_solo().run_requested_at, first)
+        self.assertEqual(AgentAction.objects.filter(action_type='agent_run_requested').count(), 1)
+        self.assertTrue(any('already requested' in m.message for m in r.context['messages']))
+
+    def test_refused_while_paused(self):
+        enable(enabled=False)
+        r = self.request_run()
+        self.assertIsNone(AgentConfig.get_solo().run_requested_at)
+        self.assertFalse(AgentAction.objects.exists())
+        self.assertTrue(any('paused' in m.message for m in r.context['messages']))
+
+
+class CardSafetyTest(ConsoleBase):
+    """Owner item 5: the card never breaks a page, runs a fixed number of queries, hides itself."""
+
+    def render(self, user):
+        req = RequestFactory().get('/dashboard/')
+        req.user = user
+        return Template('{% load agent_console %}{% agent_card %}').render(Context({'request': req}))
+
+    def test_any_exception_renders_nothing_and_logs(self):
+        from unittest import mock
+        with mock.patch('agent.console._card', side_effect=RuntimeError('boom')):
+            with self.assertLogs('agent.console', level='ERROR') as logs:
+                self.assertEqual(self.render(self.admin).strip(), '')
+        self.assertIn('agent card failed', logs.output[0])
+
+    def test_agent_tables_missing_renders_nothing(self):
+        from unittest import mock
+        from django.db import ProgrammingError
+        with mock.patch('agent.console.AgentConfig.objects.filter',
+                        side_effect=ProgrammingError('relation "agent_agentconfig" does not exist')):
+            with self.assertLogs('agent.console', level='ERROR'):
+                self.assertEqual(self.render(self.admin).strip(), '')
+
+    def test_fixed_small_number_of_queries(self):
+        with self.assertNumQueries(4):     # AgentConfig, last cycle run, health(): AgentConfig + heartbeats
+            self.render(self.admin)
+        f.full_scope(f.account('Second'), number='301', channel='Hiru TV')
+        age_uploads()
+        cycle.run_cycle(now=DAY)
+        with self.assertNumQueries(4):     # same count with more scopes, runs and heartbeats
+            self.render(self.admin)
+
+    def test_hidden_for_channel_officer_and_anonymous_without_queries(self):
+        from django.contrib.auth.models import AnonymousUser
+        for user in (f.user(role='channel_officer', email='co@x.lk'), AnonymousUser()):
+            with self.subTest(user=str(user)):
+                with self.assertNumQueries(0):
+                    self.assertEqual(self.render(user).strip(), '')
+
+    def test_no_request_in_context_renders_nothing(self):
+        self.assertEqual(Template('{% load agent_console %}{% agent_card %}').render(Context({})).strip(), '')
+
+
+class Patch0007Test(TestCase):
+    def test_applies_after_0001_and_0005(self):
+        import pathlib
+        import shutil
+        import subprocess
+        import tempfile
+        from unittest import SkipTest
+        if shutil.which('git') is None:
+            raise SkipTest('git not available')
+        root = pathlib.Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as tmp:
+            (pathlib.Path(tmp) / 'templates').mkdir()
+            shutil.copy(root / 'templates' / 'base.html', pathlib.Path(tmp) / 'templates' / 'base.html')
+            patches = root / 'docs' / 'agent' / 'patches'
+            for name in ('0001_base_nav_rename.diff', '0005_base_nav_inbox.diff'):
+                subprocess.run(['git', 'apply', str(patches / name)], cwd=tmp, check=True)
+            r = subprocess.run(['git', 'apply', '--check', str(patches / '0007_base_agent_card.diff')],
+                               cwd=tmp, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            subprocess.run(['git', 'apply', str(patches / '0007_base_agent_card.diff')], cwd=tmp, check=True)
+            text = (pathlib.Path(tmp) / 'templates' / 'base.html').read_text()
+            self.assertEqual(text.count('{% agent_card %}'), 1)

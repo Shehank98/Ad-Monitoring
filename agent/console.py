@@ -10,6 +10,7 @@ There are no approve / apply controls anywhere in the console (level 0).
 """
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from urllib.parse import urlencode
 
@@ -21,7 +22,9 @@ from verification.tc_engine import (
 )
 
 from .heartbeat import health
-from .models import AgentAuthorisation, AgentConfig, AgentRun, ScopeState, SummarySnapshot
+from .models import AgentConfig, AgentRun, ScopeState, SummarySnapshot
+
+log = logging.getLogger('agent.console')
 
 CRON_MINUTES = 15            # railway/cron-agent.json: */15 * * * *
 STAFF_ROLES = ('super_admin', 'admin', 'team_head', 'planner', 'operations')
@@ -35,8 +38,18 @@ def next_tick(now):
 
 
 def card(user) -> dict | None:
-    """Context for the sidebar card; None for channel officers (they never see it)."""
-    if getattr(user, 'role', None) not in STAFF_ROLES:
+    """Context for the sidebar card; None for channel officers and anonymous users (they never see
+    it). It runs on every core page, so it must never break one: any error (for example the agent
+    tables not migrated yet) is logged and the card is simply not shown."""
+    try:
+        return _card(user)
+    except Exception:                                  # noqa: BLE001 — never break a core page
+        log.exception('agent card failed; not shown')
+        return None
+
+
+def _card(user) -> dict | None:
+    if not getattr(user, 'is_authenticated', False) or getattr(user, 'role', None) not in STAFF_ROLES:
         return None
     cfg = AgentConfig.objects.filter(pk=1).first() or AgentConfig()        # read only: never creates it
     last = AgentRun.objects.filter(kind='cycle').order_by('-started_at').first()
@@ -66,14 +79,20 @@ def summary_url(account_id, channel, month, schedule_id=None) -> str:
 
 
 def _latest_observed(account_ids, month=''):
-    qs = (SummarySnapshot.objects.filter(kind='observed', scope__account_id__in=account_ids)
-          .select_related('scope__account', 'schedule').order_by('schedule_id', '-created_at', '-id'))
+    """Latest observed snapshot per ACTIVE schedule (Rule 12: superseded versions and deleted
+    schedules are left out), for the user's accounts only."""
+    from verification.engine import active_schedule_ids
+    scopes = ScopeState.objects.filter(account_id__in=account_ids).select_related('account')
     if month:
-        qs = qs.filter(scope__month=month)
-    latest = {}
-    for snap in qs:
-        latest.setdefault(snap.schedule_id, snap)
-    return list(latest.values())
+        scopes = scopes.filter(month=month)
+    out = []
+    for sc in scopes:
+        for sid in active_schedule_ids(sc.account_id, sc.channel, sc.month):
+            snap = (SummarySnapshot.objects.filter(kind='observed', scope=sc, schedule_id=sid)
+                    .select_related('scope__account').order_by('-created_at', '-id').first())
+            if snap is not None:
+                out.append(snap)
+    return out
 
 
 def _totals(data: dict) -> dict:
@@ -104,12 +123,11 @@ def report_rows(account_ids, month='') -> list[dict]:
     for sid, snaps in by_scope.items():
         sc = snaps[0].scope
         meta = metas.get((sc.account_id, sc.channel, sc.month))
-        agent_auth = AgentAuthorisation.objects.filter(schedule_id__in=[s.schedule_id for s in snaps]).count()
         totals = {k: sum(_totals(s.data or {})[k] for s in snaps) for k in ('planned', 'aired', 'missed')}
-        if meta and meta.authorised_by.strip():
-            signoff = f'Authorised by {meta.authorised_by.strip()}'
-        elif agent_auth == len(snaps):
-            signoff = 'Authorised'
+        # Sign-off comes from the agent's single source of scope state (agent/readiness.py).
+        if sc.state == 'AUTHORISED':
+            who = meta.authorised_by.strip() if meta and meta.authorised_by.strip() else ''
+            signoff = f'Authorised by {who}' if who else 'Authorised'
         elif sc.state == 'READY_FOR_SIGNOFF':
             signoff = 'Ready for sign-off'
         else:

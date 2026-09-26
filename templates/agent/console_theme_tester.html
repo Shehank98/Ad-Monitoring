@@ -12,7 +12,7 @@
     <label>Client<select name="account_id" class="nv-sel" required>{% for a in accounts %}<option value="{{ a.id }}" {% if q.account_id == a.id|stringformat:"s" %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select></label>
     <label>Source<select name="kind" class="nv-sel"><option value="tc" {% if q.kind == 'tc' %}selected{% endif %}>TC theme</option><option value="lmrb" {% if q.kind == 'lmrb' %}selected{% endif %}>LMRB theme (Advt_Theme)</option></select></label>
     <label>Theme<input type="text" name="theme" value="{{ q.theme }}" required maxlength="300" placeholder="e.g. NEXUS 30"></label>
-    <label>Duration (s)<input type="text" name="duration" value="{{ q.duration }}" inputmode="numeric" placeholder="optional"></label>
+    <label>Duration (s)<input type="text" name="duration" value="{{ q.duration }}" inputmode="numeric" required placeholder="e.g. 30"></label>
     <div><button class="nv-btn">Test</button></div>
   </form>
   {% if error %}<p class="err" style="margin-top:10px">{{ error }}</p>{% endif %}

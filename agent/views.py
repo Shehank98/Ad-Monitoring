@@ -513,24 +513,28 @@ def console_theme_tester(request):
     q = {'account_id': request.GET.get('account_id', ''), 'kind': request.GET.get('kind', 'tc'),
          'theme': request.GET.get('theme', '').strip(), 'duration': request.GET.get('duration', '').strip()}
     result, error = None, ''
-    if q['account_id'] and q['theme']:
-        if not _account_access(request.user, q['account_id']):
+    if q['account_id'] or q['theme']:
+        if not q['account_id'].isdigit():
+            error = 'Choose a client.'
+        elif not _account_access(request.user, q['account_id']):
             return render(request, '403.html', status=403)
-        if q['duration'] and not q['duration'].isdigit():
-            error = 'Duration must be whole seconds.'
+        elif not q['theme']:
+            error = 'Enter a theme.'
+        elif not q['duration'].isdigit():
+            # Required: with no duration the engine resolvers only match mappings that have no
+            # duration, so a blank duration would give a misleading "No brand".
+            error = 'Enter the duration in whole seconds (for example 30).'
         elif q['kind'] not in ('tc', 'lmrb'):
             error = 'Choose TC or LMRB.'
         else:
-            result = resolve_theme(int(q['account_id']), q['kind'], q['theme'], q['duration'] or None)
+            result = resolve_theme(int(q['account_id']), q['kind'], q['theme'], q['duration'])
     return render(request, 'agent/console_theme_tester.html', {'accounts': accounts, 'q': q, 'result': result,
                                                                'error': error})
 
 
-def _console_switch(request, action_type, change, reason):
-    """Admin-only, POST-only, human gate write on agent.AgentConfig (logged with before/after)."""
-    if request.method != 'POST':
-        from django.http import HttpResponseNotAllowed
-        return HttpResponseNotAllowed(['POST'])
+def _console_switch(request, action_type, change, reason) -> bool:
+    """Admin-only (decorator), POST-only (caller), human gate write on agent.AgentConfig, logged with
+    before/after. Returns True when the write happened."""
     cfg = AgentConfig.get_solo()
     before = {'enabled': cfg.enabled, 'run_requested_at': cfg.run_requested_at.isoformat() if cfg.run_requested_at else None}
 
@@ -541,41 +545,57 @@ def _console_switch(request, action_type, change, reason):
     try:
         gate.perform(tier=gate.T0, action_type=action_type, actor_kind='human', actor=request.user,
                      target_model='agent.AgentConfig', target_pk=1, before=before, apply=apply, reason=reason)
+        return True
     except gate.HumanNotAllowed as exc:
         messages.error(request, str(exc))
-    return redirect(_safe_next(request, default='/dashboard/agent/'))
+        return False
+
+
+def _post_only(request):
+    if request.method != 'POST':
+        from django.http import HttpResponseNotAllowed
+        return HttpResponseNotAllowed(['POST'])
+    return None
 
 
 @login_required
 @role_required(ADMIN_ROLES)
 def console_pause(request):
     """Pause / Resume = the kill switch (AgentConfig.enabled)."""
-    if request.method != 'POST':
-        from django.http import HttpResponseNotAllowed
-        return HttpResponseNotAllowed(['POST'])
+    refused = _post_only(request)
+    if refused:
+        return refused
     resuming = not AgentConfig.get_solo().enabled
 
     def change(cfg):
         cfg.enabled = resuming
         cfg.save(update_fields=['enabled', 'updated_at'])
-    resp = _console_switch(request, 'agent_resume' if resuming else 'agent_pause', change,
-                           'console Resume' if resuming else 'console Pause')
-    messages.success(request, 'Reconciliation Agent ' + ('resumed.' if resuming else 'paused.'))
-    return resp
+    if _console_switch(request, 'agent_resume' if resuming else 'agent_pause', change,
+                       'console Resume' if resuming else 'console Pause'):
+        messages.success(request, 'Reconciliation Agent ' + ('resumed.' if resuming else 'paused.'))
+    return redirect(_safe_next(request, default='/dashboard/agent/'))
 
 
 @login_required
 @role_required(ADMIN_ROLES)
 def console_run(request):
-    """Only records the request; the next agent_cycle (cron, every 15 minutes) runs it."""
+    """Only records the request; the next agent_cycle (cron, every 15 minutes) runs it.
+    A click while a request is pending changes nothing ("already requested"); while the agent is
+    paused nothing is recorded either."""
     from django.utils import timezone as tz
-
-    def change(cfg):
-        cfg.run_requested_at = tz.now()
-        cfg.save(update_fields=['run_requested_at', 'updated_at'])
-    if request.method != 'POST':
-        from django.http import HttpResponseNotAllowed
-        return HttpResponseNotAllowed(['POST'])
-    resp = _console_switch(request, 'agent_run_requested', change, 'console Run cycle')
-    messages.success(request, 'Cycle requested. It runs at the next scheduled tick (within 15 minutes).')
-    return resp
+    refused = _post_only(request)
+    if refused:
+        return refused
+    cfg = AgentConfig.get_solo()
+    if cfg.run_requested_at is not None:
+        messages.info(request, f'A cycle is already requested (at {tz.localtime(cfg.run_requested_at):%H:%M}). '
+                               'It runs at the next scheduled tick.')
+    elif not cfg.enabled:
+        messages.error(request, 'The Reconciliation Agent is paused. Resume it first.')
+    else:
+        def change(c):
+            c.run_requested_at = tz.now()
+            c.save(update_fields=['run_requested_at', 'updated_at'])
+        if _console_switch(request, 'agent_run_requested', change, 'console Run cycle'):
+            messages.success(request, 'Cycle requested. It runs at the next scheduled tick (within 15 minutes).')
+    return redirect(_safe_next(request, default='/dashboard/agent/'))

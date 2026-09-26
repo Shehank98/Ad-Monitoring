@@ -11,5 +11,5 @@ register = template.Library()
 def agent_card(context):
     request = context.get('request')
     user = getattr(request, 'user', None)
-    data = card(user) if user is not None and user.is_authenticated else None
+    data = card(user) if user is not None else None          # card() never raises; None = not shown
     return {'card': data, 'request': request, 'csrf_token': context.get('csrf_token')}
