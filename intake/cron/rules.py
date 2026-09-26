@@ -79,9 +79,14 @@ def evaluate(ctx) -> dict:
         if refs and refs != {per[sid]['schedule']['schedule_number']}:
             return _verdict('needs_review', 'conflict', sid, **ev)
         return _verdict('propose', '', sid, **ev)
-    if len(eligible) > 1 or len(per) > 1:
+    if len(eligible) > 1:
         return _verdict('needs_review', 'multiple_schedules', None, **ev)
-    only = next(iter(per.values()))
+    # Nothing eligible: only candidates whose brands appear in the file tell us why
+    # (a schedule of another client on the same channel is not a real candidate).
+    relevant = [v for v in per.values() if (v['overlap'].get('candidate') or 0) > 0] or list(per.values())
+    if len(relevant) > 1:
+        return _verdict('needs_review', 'multiple_schedules', None, **ev)
+    only = relevant[0]
     reason = next((r for r in FAIL_ORDER if r in only['fails']), only['fails'][0])
     return _verdict('needs_review', reason, only['schedule']['schedule_id'], **ev)
 
