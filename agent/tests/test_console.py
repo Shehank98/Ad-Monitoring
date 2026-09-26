@@ -187,3 +187,33 @@ class AgentCardTest(ConsoleBase):
         t = timezone.make_aware(datetime.datetime(2026, 9, 26, 10, 7, 30))
         self.assertEqual(next_tick(t).strftime('%H:%M'), '10:15')
         self.assertEqual(next_tick(t.replace(minute=45, second=0)).strftime('%H:%M'), '11:00')
+
+
+class BooleanFailSafeTest(TestCase):
+    """Phase 3.2 item 2: every AgentConfig boolean becomes False when missing from the POST, and False
+    is the safe value for each. A new boolean fails this test until its safe value is reviewed."""
+    SAFE_WHEN_FALSE = {
+        'enabled': 'kill switch: the agent does nothing but write its heartbeat',
+        'intake_fetch_enabled': 'no mailbox is read',
+        'intake_gemini_enabled': 'intake PDFs are not sent to Gemini; they are read once and go to review',
+    }
+
+    def test_boolean_fields_are_the_reviewed_ones(self):
+        from django.db import models
+        found = {fl.name for fl in AgentConfig._meta.get_fields() if isinstance(fl, models.BooleanField)}
+        self.assertEqual(found, set(self.SAFE_WHEN_FALSE))
+
+    def test_each_boolean_turns_off_when_missing_from_the_post(self):
+        cfg = AgentConfig.get_solo()
+        cfg.enabled = cfg.intake_fetch_enabled = cfg.intake_gemini_enabled = True
+        cfg.save()
+        admin = f.user(role='admin', email='boss@x.lk')
+        self.client.force_login(admin)
+        r = self.client.post('/dashboard/agent/config/', {
+            'what': 'config', 'autonomy_level': 0, 'mapping_threshold': 0.92, 'grace_days': 3,
+            'upload_debounce_minutes': 10, 'tc_intake_mode': 'off', 'min_brand_overlap': 0.6,
+            'llm_daily_token_cap': 200000})
+        self.assertEqual(r.status_code, 302)
+        cfg.refresh_from_db()
+        for name in self.SAFE_WHEN_FALSE:
+            self.assertFalse(getattr(cfg, name), name)
