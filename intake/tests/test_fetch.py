@@ -35,8 +35,12 @@ class FetchTest(TestCase):
         self.assertEqual((att.status, att.content.tobytes() if hasattr(att.content, 'tobytes') else bytes(att.content)),
                          ('new', b'PK-fake'))
         acts = AgentAction.objects.filter(action_type='intake_fetch')
-        self.assertEqual(acts.count(), 2)
+        self.assertEqual(acts.count(), 1)                    # 2.1: empty runs are not logged
         self.assertTrue(all(a.actor_kind == 'intake_fetch' for a in acts))
+        from agent.models import Heartbeat
+        hb = Heartbeat.objects.get(name='intake_fetch')
+        self.assertIsNotNone(hb.last_ok_at)
+        self.assertEqual(hb.counts, {'seen': 1, 'stored': 0})
 
     def test_same_attachment_on_another_email_is_duplicate(self):
         setup_fetch()

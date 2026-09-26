@@ -27,6 +27,7 @@ from intake.models import AllowedSender, InboundAttachment
 
 from . import gate
 from .checks import baseline_groups
+from .heartbeat import health
 from .forms import AgentConfigForm, AllowedSenderForm, OverrideForm
 from .models import AgentAccountOverride, AgentAction, AgentConfig, AgentRun
 from .scopes import (
@@ -128,6 +129,7 @@ def overview(request):
         'audit_counts': [(k.replace('_', ' ').capitalize(), v)
                          for k, v in ((audit.detail or {}).get('counts') or {}).items() if v] if audit else [],
         'intake_counts': _intake_counts(request.user),
+        'health': health(),
     })
 
 

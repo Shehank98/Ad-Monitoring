@@ -1,0 +1,14 @@
+diff --git a/templates/base.html b/templates/base.html
+--- a/templates/base.html
++++ b/templates/base.html
+@@ -515,6 +515,10 @@
+       </a>
+       <a href="/dashboard/agent/scopes/" class="nav-item agent-link {% if '/agent/scope' in path %}active{% endif %}">
+         <i class="nav-icon fa-solid fa-layer-group"></i><span class="nav-text">Scopes</span>
++      </a>
++      {# TC Inbox: admins and users; the whole group is already hidden from channel_officer #}
++      <a href="/dashboard/agent/inbox/" class="nav-item agent-link {% if '/agent/inbox/' in path %}active{% endif %}">
++        <i class="nav-icon fa-solid fa-envelope-open-text"></i><span class="nav-text">TC Inbox</span>
+       </a>
+       {% if ur in 'super_admin,admin,team_head' %}
+       <a href="/dashboard/agent/queue/" class="nav-item agent-link {% if '/agent/queue/' in path %}active{% endif %}">

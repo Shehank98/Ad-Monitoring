@@ -13,6 +13,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from agent import gate
+from agent.heartbeat import beat_error, beat_ok
 from agent.service import require_service_user
 
 from ..mailbox import since_window
@@ -72,28 +73,50 @@ def store_message(m) -> InboundEmail | None:
     return em
 
 
+def _already_stored(m) -> bool:
+    if InboundEmail.objects.filter(message_id=m.message_id).exists():
+        return True
+    return bool(m.uid) and InboundEmail.objects.filter(imap_uid=m.uid, sender=m.sender,
+                                                       received_at=m.received_at).exists()
+
+
 def fetch_emails(mailbox, now=None) -> dict:
-    """One fetch run. Returns counts; {'status': 'busy'} when another run holds the lock."""
+    """One fetch run. Returns counts; {'status': 'busy'} when another run holds the lock.
+
+    Phase 2.1 item 6: an AgentAction is logged only when something was stored or the run
+    failed; every run (ok or failed) updates Heartbeat 'intake_fetch'."""
     with intake_lock() as got:
         if not got:
             return {'status': 'busy'}
+        gate.check('intake_fetch', target_model='intake.InboundEmail')     # FetchDisabled: nothing read
         actor = require_service_user()
         since = since_window(now)
-        box = {}
-
-        def apply():
+        try:
             messages = mailbox.fetch(since)
-            stored = []
-            for m in messages:
-                with transaction.atomic():
-                    em = store_message(m)
-                if em is not None:
-                    stored.append(em.id)
-            box.update(seen=len(messages), stored=len(stored))
-            return {'email_ids': stored, 'seen': len(messages)}
-
-        gate.perform(tier=gate.T0, action_type='intake_fetch', actor_kind='intake_fetch',
-                     actor=actor, target_model='intake.InboundEmail',
-                     before={'emails': InboundEmail.objects.count(), 'since': since.isoformat()},
-                     apply=apply, reason='read-only mailbox fetch')
-        return {'status': 'ok', **box, 'at': timezone.now().isoformat()}
+            new = [m for m in messages if not _already_stored(m)]
+            counts = {'seen': len(messages), 'stored': 0}
+            if new:
+                def apply():
+                    stored = []
+                    for m in new:
+                        with transaction.atomic():
+                            em = store_message(m)
+                        if em is not None:
+                            stored.append(em.id)
+                    counts['stored'] = len(stored)
+                    return {'email_ids': stored, 'seen': len(messages)}
+                gate.perform(tier=gate.T0, action_type='intake_fetch', actor_kind='intake_fetch',
+                             actor=actor, target_model='intake.InboundEmail',
+                             before={'emails': InboundEmail.objects.count(), 'since': since.isoformat()},
+                             apply=apply, reason='read-only mailbox fetch')
+        except gate.FetchDisabled:
+            raise
+        except Exception as exc:        # noqa: BLE001 — logged, heartbeat set, reported to the caller
+            beat_error('intake_fetch', exc)
+            gate.perform(tier=gate.T0, action_type='intake_fetch_failed', actor_kind='intake_fetch',
+                         actor=actor, target_model='intake.InboundEmail', before={'since': since.isoformat()},
+                         apply=lambda: {'error': f'{type(exc).__name__}: {exc}'[:500]},
+                         reason='mailbox fetch failed')
+            return {'status': 'error', 'error': f'{type(exc).__name__}: {exc}'}
+        beat_ok('intake_fetch', counts)
+        return {'status': 'ok', **counts, 'at': timezone.now().isoformat()}

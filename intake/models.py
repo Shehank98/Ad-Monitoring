@@ -28,10 +28,13 @@ REASONS = [
     ('schedule_locked', 'Schedule locked'), ('too_large', 'Attachment too large'),
     ('foreign_brands', "Other clients' brands"), ('llm_disagrees', 'Assistant disagrees with rules'),
     ('duplicate_attachment', 'Duplicate attachment'), ('unsupported_type', 'Unsupported file type'),
+    # Phase 2.1
+    ('llm_no_decision', 'Assistant gave no valid decision'), ('scope_busy', 'Scope busy'),
+    ('retention_expired', 'Expired (retention)'),
 ]
 STATUS = [('new', 'New'), ('processing', 'Processing'), ('needs_review', 'Needs review'),
           ('suggested', 'Proposed'), ('uploaded', 'Uploaded'), ('ignored', 'Ignored'),
-          ('duplicate', 'Duplicate'), ('rejected', 'Rejected')]
+          ('duplicate', 'Duplicate'), ('rejected', 'Rejected'), ('expired', 'Expired')]
 
 
 class AllowedSender(models.Model):

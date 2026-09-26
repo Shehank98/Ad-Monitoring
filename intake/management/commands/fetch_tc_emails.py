@@ -15,3 +15,5 @@ class Command(BaseCommand):
             self.stdout.write(f'fetch skipped: {exc}')
             return
         self.stdout.write(f'fetch: {res}')
+        if res.get('status') == 'error':
+            raise SystemExit(1)

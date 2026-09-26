@@ -131,6 +131,14 @@ def _channel_hint(ctx) -> str:
     return next((s.channel_hint for s in ctx.senders() if s.channel_hint), '')
 
 
+def gemini_allowed() -> bool:
+    """Phase 2.1 item 4: Gemini reads intake PDFs only when AgentConfig.intake_gemini_enabled
+    is on AND GEMINI_API_KEY is configured. The same rule applies at Confirm, so an admin
+    confirms the reading that was reviewed."""
+    cfg = AgentConfig.objects.filter(pk=1).first()
+    return bool(cfg and cfg.intake_gemini_enabled and gemini_configured())
+
+
 def parse_attachment(att, channel_for_pdf: str = '') -> dict:
     """Parse the stored bytes. For PDFs: heuristic converter AND Gemini when configured,
     compared on (date, aired_time, tc_theme, duration) (Amendment A6)."""
@@ -144,7 +152,7 @@ def parse_attachment(att, channel_for_pdf: str = '') -> dict:
     def read_pdf(path):
         heur = get_converter(channel_for_pdf).parse_pdf(path)
         ai = None
-        if gemini_configured():
+        if gemini_allowed():
             try:
                 ai = gemini_parse_pdf(path, channel=channel_for_pdf,
                                       extra_instructions=_tc_channel_prompt(channel_for_pdf))

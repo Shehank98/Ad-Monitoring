@@ -24,6 +24,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from agent import gate
+from agent.heartbeat import beat_error, beat_ok
 from agent.models import AgentConfig, LlmCall
 from agent.service import require_service_user
 
@@ -93,11 +94,34 @@ class LlmFailed(Exception):
     pass
 
 
+NO_DECISION = 'llm_no_decision'
+FOLLOW_UP = ('Your turn ended without a valid submit_decision. Call submit_decision now, exactly '
+             'once, as the last thing in your turn, with no text after it.')
+
+
+def _submit(ctx, att, block) -> dict:
+    args = {**(block.get('input') or {}), 'note': str((block.get('input') or {}).get('note') or '')[:200]}
+    try:
+        d = Decision(**args).model_dump()
+    except Exception as exc:      # noqa: BLE001 — pydantic ValidationError / TypeError: invalid schema
+        raise LlmFailed(NO_DECISION) from exc
+    if d['attachment_id'] != att.id:
+        raise LlmFailed(NO_DECISION)
+    if d['schedule_id'] is not None and d['schedule_id'] not in ctx.returned_ids:
+        raise LlmFailed('unknown_schedule_id')
+    return d
+
+
 def llm_loop(ctx, provider, system, version) -> dict:
-    """Returns the validated decision dict. Raises LlmFailed on any problem."""
+    """Returns the validated decision dict. Raises LlmFailed on any problem.
+
+    Phase 2.1 item 1 (tool_choice stays 'auto', no extended thinking): a turn that ends
+    without submit_decision gets ONE follow-up asking for it; if there is still none, the
+    result is llm_no_decision. So are: submit_decision called more than once in a turn,
+    text after the submit_decision, and an invalid submit_decision schema."""
     att = ctx.attachment
     messages = [{'role': 'user', 'content': first_message(att)}]
-    calls = 0
+    calls, nudged = 0, False
     while True:
         t0 = time.monotonic()
         try:
@@ -110,8 +134,24 @@ def llm_loop(ctx, provider, system, version) -> dict:
             raise LlmFailed('refusal')
         messages.append({'role': 'assistant', 'content': turn.blocks})
         uses = [b for b in turn.blocks if b.get('type') == 'tool_use']
+        submits = [i for i, b in enumerate(turn.blocks)
+                   if b.get('type') == 'tool_use' and b.get('name') == 'submit_decision']
+        if len(submits) > 1:
+            raise LlmFailed(NO_DECISION)
+        if submits:
+            after = turn.blocks[submits[0] + 1:]
+            if any(b.get('type') == 'text' and str(b.get('text') or '').strip() for b in after):
+                raise LlmFailed(NO_DECISION)
+            calls += 1
+            if calls > MAX_TOOL_CALLS:
+                raise LlmFailed('tool_call_limit')
+            return _submit(ctx, att, turn.blocks[submits[0]])
         if not uses:
-            raise LlmFailed('no_decision')
+            if nudged:
+                raise LlmFailed(NO_DECISION)
+            nudged = True
+            messages.append({'role': 'user', 'content': FOLLOW_UP})
+            continue
         results = []
         for u in uses:
             calls += 1
@@ -122,17 +162,6 @@ def llm_loop(ctx, provider, system, version) -> dict:
                 results.append({'type': 'tool_result', 'tool_use_id': u['id'], 'is_error': True,
                                 'content': f'unknown tool {name}'})
                 continue
-            if name == 'submit_decision':
-                args = {**args, 'note': str(args.get('note') or '')[:200]}
-                try:
-                    d = Decision(**args).model_dump()
-                except Exception as exc:      # noqa: BLE001 — pydantic ValidationError / TypeError
-                    raise LlmFailed(f'invalid_decision: {type(exc).__name__}') from exc
-                if d['attachment_id'] != att.id:
-                    raise LlmFailed('wrong_attachment_id')
-                if d['schedule_id'] is not None and d['schedule_id'] not in ctx.returned_ids:
-                    raise LlmFailed('unknown_schedule_id')
-                return d
             schema = next(t for t in TOOLS if t['name'] == name)['input_schema']
             if 'attachment_id' in schema['required'] and args.get('attachment_id') != att.id:
                 res = {'error': 'wrong attachment_id'}
@@ -220,7 +249,13 @@ def run_pending(provider='default', limit: int = 50) -> dict:
             except ProviderError:
                 provider = None
         done = []
-        for att in (InboundAttachment.objects.filter(status='new', purged_at__isnull=True)
-                    .select_related('email').order_by('id')[:limit]):
-            done.append(process_attachment(att, provider, actor)['status'])
+        try:
+            for att in (InboundAttachment.objects.filter(status='new', purged_at__isnull=True)
+                        .select_related('email').order_by('id')[:limit]):
+                done.append(process_attachment(att, provider, actor)['status'])
+        except Exception as exc:          # noqa: BLE001 — heartbeat, then re-raise
+            beat_error('intake_runner', exc)
+            raise
+        counts = {s: done.count(s) for s in set(done)}
+        beat_ok('intake_runner', {'processed': len(done), **counts})
         return {'status': 'ok', 'processed': len(done), 'results': done}

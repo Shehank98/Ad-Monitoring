@@ -144,6 +144,14 @@ def _check_actor(actor_kind, tier, account_id, conditions, values, actor):
         raise ValueError(f'unknown actor_kind {actor_kind!r}')
 
 
+def check(actor_kind: str, *, tier: int = T0, account_id=None, conditions=None, values=None,
+          actor=None, target_model: str = '') -> None:
+    """Raise if the gate would refuse this write. Lets a job stop before reading anything
+    (e.g. mail fetch) and decide whether there is anything to write at all."""
+    _check_target(actor_kind, target_model)
+    _check_actor(actor_kind, tier, account_id, conditions, values, actor)
+
+
 def perform(*, tier: int, action_type: str, scope=None, target_model: str = '', target_pk='',
             before: dict, apply, reason: str = '', evidence: dict | None = None,
             actor=None, run=None, conditions: dict | None = None, account_id=None,

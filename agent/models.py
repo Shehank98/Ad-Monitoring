@@ -9,6 +9,9 @@ from django.conf import settings
 from django.db import models
 
 CHANNEL_MAX = 200   # core.Schedule.channel
+# Phase 2.1 item 7: the agent stays at level 0 until Phase 4.
+MAX_AUTONOMY_LEVEL = 0
+AUTONOMY_NOTE = 'Levels above 0 unlock in Phase 4.'
 MONTH_MAX = 50      # core.Schedule.month
 
 
@@ -28,6 +31,8 @@ class AgentConfig(models.Model):
     # Mail fetch is independent of the kill switch (owner Q6) and off until an admin enables it.
     intake_fetch_enabled = models.BooleanField(default=False)
     min_brand_overlap = models.FloatField(default=0.6)          # owner Q7
+    # Phase 2.1 item 4: Gemini reads PDFs for intake only when this is on AND GEMINI_API_KEY is set.
+    intake_gemini_enabled = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                                    on_delete=models.SET_NULL, related_name='+')
@@ -42,6 +47,8 @@ class AgentConfig(models.Model):
         from django.core.exceptions import ValidationError
         if self.tc_intake_mode not in dict(self.INTAKE_MODES):
             raise ValidationError({'tc_intake_mode': 'Only off and suggest are available.'})
+        if self.autonomy_level > MAX_AUTONOMY_LEVEL:
+            raise ValidationError({'autonomy_level': AUTONOMY_NOTE})
 
     def save(self, *args, **kwargs):
         if self.tc_intake_mode not in dict(self.INTAKE_MODES):     # never store 'auto'
@@ -288,6 +295,11 @@ class Heartbeat(models.Model):
     detail = models.JSONField(default=dict, blank=True)
     alert = models.BooleanField(default=False)          # e.g. service user role check failed
     alert_message = models.TextField(blank=True, default='')
+    # Phase 2.1 item 6
+    last_ok_at = models.DateTimeField(null=True, blank=True)
+    last_error_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True, default='')
+    counts = models.JSONField(default=dict, blank=True)
 
     def __str__(self):
         return f'{self.name} @ {self.last_beat}'

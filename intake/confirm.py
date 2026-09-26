@@ -19,6 +19,7 @@ its TCRows and its file (owner C, C4; Amendment A6).
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import timedelta
 
 from django.core.files.base import ContentFile
@@ -26,14 +27,16 @@ from django.db import transaction
 from django.utils import timezone
 
 from agent import gate
+from agent.locks import DEFAULT_TTL_MINUTES, ScopeBusy, _acquire_row, _release_row, is_postgres, take_xact_lock
 from agent.models import AgentAuthorisation, AgentConfig, AgentProposal, ScopeState
+from agent.scope import lock_key
 from core.models import Schedule, SummaryReportMeta, TCRow, TransmissionReport
 from core.views import _detect_tc_meta, _parse_tc_rows
 from verification.engine import active_schedule_ids
 
 from .cron.tools import parse_attachment
 
-REFUSALS = ('schedule_frozen', 'schedule_locked', 'duplicate_active_number', 'no_schedule',
+REFUSALS = ('scope_busy', 'schedule_frozen', 'schedule_locked', 'duplicate_active_number', 'no_schedule',
             'date_out_of_range', 'tc_already_exists', 'too_large', 'columns_unrecognised')
 
 
@@ -92,6 +95,27 @@ def _window(s):
     return s.start_date, (s.end_date + timedelta(days=grace)) if s.end_date else None
 
 
+@contextmanager
+def _scope_guard(key: int):
+    """ScopeLock for the schedule's scope around one transaction.atomic() block.
+    PostgreSQL: pg_try_advisory_xact_lock inside the block. Other databases: the agent's
+    ScopeLockRow (works inside an outer request/test transaction). Busy -> scope_busy."""
+    try:
+        if is_postgres():
+            with transaction.atomic():
+                take_xact_lock(key)
+                yield
+            return
+        owner = _acquire_row(key, DEFAULT_TTL_MINUTES)
+    except ScopeBusy as exc:
+        raise ConfirmRefused('scope_busy', 'The agent is working on this scope. Try again in a minute.') from exc
+    try:
+        with transaction.atomic():
+            yield
+    finally:
+        _release_row(key, owner)
+
+
 def confirm_upload(att, schedule: Schedule, admin, dates_ack: bool = False) -> dict:
     problems = schedule_problems(schedule)
     if problems:
@@ -115,7 +139,17 @@ def confirm_upload(att, schedule: Schedule, admin, dates_ack: bool = False) -> d
                              f"TC {meta['start_date']}..{meta['end_date']} vs {start}..{end}")
 
     def apply():
-        with transaction.atomic():
+        with _scope_guard(lock_key(schedule.account_id, schedule.channel, schedule.month)):
+            # Phase 2.1 item 2: re-read the Schedule under the lock and re-check EVERY refusal
+            # condition, so nothing that changed since the page was loaded slips through.
+            fresh = Schedule.objects.select_for_update().select_related('account').get(pk=schedule.id)
+            again = schedule_problems(fresh)
+            if again:
+                raise ConfirmRefused(again[0], 'changed since the page was loaded')
+            f_start, f_end = _window(fresh)
+            if bool(meta['start_date'] and f_start and f_end and
+                    (meta['start_date'] < f_start or meta['end_date'] > f_end)) and not dates_ack:
+                raise ConfirmRefused('date_out_of_range', 'the schedule period changed since the page was loaded')
             protected = set(TCRow.objects.filter(account_id=schedule.account_id, channel=schedule.channel)
                             .values_list('id', flat=True))
             same_schedule = set(TCRow.objects.filter(id__in=protected, tc_report__schedule=schedule)

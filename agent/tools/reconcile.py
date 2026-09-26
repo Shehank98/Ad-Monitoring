@@ -25,7 +25,7 @@ from django.conf import settings
 from django.db import connection, transaction
 from django.utils import timezone
 
-from core.models import MonitoringData, PeriodSponsorship, Schedule
+from core.models import MonitoringData, PeriodSponsorship, Schedule, TransmissionReport
 from verification.engine import run_scope
 from verification.period_sponsorship_engine import reconcile_period_sponsorship
 from verification.sponsorship_engine import reconcile_sponsorship
@@ -57,8 +57,10 @@ def debounce_hit(scope: ScopeState, minutes: int | None = None) -> bool:
         cfg = AgentConfig.objects.filter(pk=1).first()
         minutes = cfg.upload_debounce_minutes if cfg else 10
     since = timezone.now() - timedelta(minutes=minutes)
+    # Phase 2.1 item 3: TC uploads (incl. an admin Confirm from the TC Inbox) count too.
     return (Schedule.objects.filter(account_id=scope.account_id, uploaded_at__gte=since).exists()
-            or MonitoringData.objects.filter(account_id=scope.account_id, uploaded_at__gte=since).exists())
+            or MonitoringData.objects.filter(account_id=scope.account_id, uploaded_at__gte=since).exists()
+            or TransmissionReport.objects.filter(account_id=scope.account_id, uploaded_at__gte=since).exists())
 
 
 def schedule_summaries(scope: ScopeState, active) -> dict:

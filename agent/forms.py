@@ -4,7 +4,7 @@ from django import forms
 from core.models import Account
 from intake.models import AllowedSender
 
-from .models import AgentConfig
+from .models import AUTONOMY_NOTE, MAX_AUTONOMY_LEVEL, AgentConfig
 
 
 class AgentConfigForm(forms.ModelForm):
@@ -13,12 +13,13 @@ class AgentConfigForm(forms.ModelForm):
     class Meta:
         model = AgentConfig
         fields = ['enabled', 'autonomy_level', 'mapping_threshold', 'grace_days', 'upload_debounce_minutes',
-                  'tc_intake_mode', 'intake_fetch_enabled', 'min_brand_overlap', 'llm_daily_token_cap']
+                  'tc_intake_mode', 'intake_fetch_enabled', 'intake_gemini_enabled', 'min_brand_overlap',
+                  'llm_daily_token_cap']
 
     def clean_autonomy_level(self):
         v = self.cleaned_data['autonomy_level']
-        if v > 3:
-            raise forms.ValidationError('Autonomy level is 0 to 3.')
+        if v > MAX_AUTONOMY_LEVEL:                      # Phase 2.1 item 7
+            raise forms.ValidationError(AUTONOMY_NOTE)
         return v
 
     def clean_min_brand_overlap(self):

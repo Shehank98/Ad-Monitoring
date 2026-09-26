@@ -97,6 +97,11 @@ def combine(R: dict, L: dict | None, *, rules_only: bool, pdf_single_reader: boo
         return {'status': 'ignored', 'reason': R['reason'], 'schedule_id': None, 'hint_schedule_id': None,
                 'why': 'rules: not a TC'}
     hint = (L or {}).get('schedule_id')
+    if llm_error == 'llm_no_decision':               # Phase 2.1 item 1: rules only, own reason code
+        return {'status': 'needs_review', 'reason': 'llm_no_decision', 'schedule_id': R.get('schedule_id'),
+                'hint_schedule_id': None,
+                'why': f"the assistant gave no valid decision; rules said {R['decision']}"
+                       f"{' (' + R['reason'] + ')' if R.get('reason') else ''}"}
     if R['decision'] == 'needs_review':
         return {'status': 'needs_review', 'reason': R['reason'], 'schedule_id': R.get('schedule_id'),
                 'hint_schedule_id': hint, 'why': 'rules need a person'}
