@@ -967,3 +967,35 @@ Rules: `docs/agent/BRIEF_AMENDMENT_01.md` wins over the brief. Report: `docs/age
 - Eval set: `intake/tests/eval_cases.py` (27 cases) and `docs/agent/eval_criteria.md`. The
   live run uses `--tag=eval`.
 - Pending patches for the owner: 0001 → 0005 (`base.html`), 0002 → 0003 → 0004 (`.claude/`).
+
+### Phase 3 — shadow agent (level 0, not deployed)
+Report: `docs/agent/phase3_report.md`. Observe and rehearse only; nothing is applied.
+- **`agent_cycle`** (`agent/cycle.py`, `railway/cron-agent.json`, every 15 min): cycle-wide lock
+  (`overlap_skipped`), `require_service_user()` only (never `sync_service_user` — it writes accounts.*),
+  kill switch → heartbeat only, then up to `max_scopes_per_cycle` scopes by needs_run → changed
+  fingerprint → shadow_due → due (`observe_every_minutes`); debounce applies.
+- **Observed snapshot** = `build_summary_data(schedule_id=…)` per active schedule inside
+  `agent/db.py::guard(read_only=True)` (READ ONLY + always rolled back on PostgreSQL). It equals the
+  Summary page and is the **only V5 baseline**. A write there raises `CoreWriteAttempt`: the cycle stops
+  (stop and ask) — never catch it. `needs_run` is cleared only after the observed snapshot.
+- **Shadow run** = the existing `dry_run` (rolled back), only in the window
+  (`shadow_window_start/end`, Asia/Colombo), on PostgreSQL, within `shadow_budget_seconds`; never for
+  authorised or locked scopes. Stored as `SummarySnapshot(kind='shadow')` + `PendingEffect`
+  (shadow − observed per brand × duration). Shadow snapshots are never a baseline and never authorisable.
+- **Guard timeouts** (`SET LOCAL`, PostgreSQL): `db_lock_timeout_ms` / `db_statement_timeout_ms` /
+  `db_idle_timeout_ms`; 55P03 → `busy_yielded`, 57014 → `timeout_yielded`, not retried in the same cycle.
+- **Findings ledger** (`agent/ledger.py`): key = sha256(scope|schedule|code|brand|duration); closes after
+  2 consecutive absences; `reopen_count`. Only `ledger.ACTIONABLE` codes get an info
+  `AgentProposal(kind='finding', tier=4, apply_payload={})`.
+- **Labels:** queue feedback buttons and `agent_label_scopes` are human `gate.perform` writes to
+  `agent.FindingLedger` only. `agent_diagnose_labelled` needs `AGENT_DISPOSABLE_DB=1`. Measures:
+  `agent/measure.py` (inferred ones are display only).
+- **Night check:** `AgentRun(kind='shadow_window')` holds the core fingerprint
+  (`agent/core_fingerprint.py`, every core + accounts table: count, max(id), sum(hashtext)) at window
+  start and end — detection, not proof; shown in `agent_core_audit` "Agent effect".
+  `agent_nightly` now runs at 23:45 UTC (05:15 Colombo).
+- **Digest** (`agent/digest.py`): admins only, after `digest_time`, core SMTP via `get_setting`,
+  deduplicated by `NotificationLog`; email off → logged only.
+- PostgreSQL sequences (e.g. `core_matchresult_id_seq`) advance during rolled-back dry runs: id gaps are expected.
+- Tests: `agent/tests/test_cycle.py`, `test_ledger.py`, `test_digest.py`, `test_no_core_writes.py`
+  (every core/accounts table hash unchanged over a full cycle incl. shadow; `gate.perform` spy: 0 calls).
