@@ -193,15 +193,33 @@ tool use. The runner doesn't depend on it either way.
 ## Results (Phase 2.1)
 | Run | Run | Passed | Skipped | Failed |
 |---|---:|---:|---:|---:|
-| SQLite, full suite (`--exclude-tag=eval`) | 400 | 398 | 2 | 0 |
-| PostgreSQL 16, full suite (`--exclude-tag=eval`) | 400 | 393 | 7 | 0 |
+| SQLite, full suite (`--exclude-tag=eval`) | 402 | 400 | 2 | 0 |
+| PostgreSQL 16, full suite (`--exclude-tag=eval`) | 402 | 395 | 7 | 0 |
 
-Phase 2 ended at 379 tests, so Phase 2.1 adds 21: 20 in `test_phase2_1.py` and the
-offline eval-case test. The skips are the same database-specific lock tests as before.
+Phase 2 ended at 379 tests, so Phase 2.1 adds 23: 20 in `test_phase2_1.py`, the offline
+eval-case test, and 2 tests for the guardian follow-ups below. Before those follow-ups the
+counts were 400 run: 398 passed on SQLite, 393 on PostgreSQL. The skips are the same database-specific lock tests as before.
 The live eval tests are excluded by the tag.
 
-- `makemigrations agent intake --check`: no changes (new migrations `agent/0005_phase2_1` and `intake/0003_phase2_1`).
+- `makemigrations agent intake --check`: no changes. New migrations: `agent/0005_phase2_1`, `agent/0006_clamp_autonomy` (a data step that sets any stored level above 0 back to 0) and `intake/0003_phase2_1`.
 - Golden `verify --mode idempotent` on the synthetic PostgreSQL data, after migrating it: **MATCH** (#101, #201, #202).
 
 ## Guardian review (Phase 2.1)
-GUARDIAN21_PLACEHOLDER
+Range `9c6c501..f3c8a48`, using the current 8-check file plus your proposed checks 5, 19, 20
+and 21 by hand.
+
+**PASS on all 8 checks; the proposed checks 5, 19, 20 and 21 also pass.**
+- SQLite: 400 run, 398 passed, 2 skipped, 0 failed.
+- The reviewer's extra PostgreSQL run of `agent intake`: 232 run, 225 passed, 7 skipped.
+- Golden on a throwaway copy of the synthetic database: idempotent MATCH, rebuild 0 differences.
+- `base.html` is not in the diff; the TC Inbox link exists only as patch 0005.
+- The reviewer checked the rules change: it cannot turn needs_review into propose.
+
+| Guardian note | Action |
+|---|---|
+| 1. The attachment was not re-checked under the lock. A double submit to two schedules on different channels could upload it twice, and a second submit could overwrite `uploaded` with needs_review. Ignore/Reject also accepted finished items. | **Fixed.** Inside the lock the attachment is re-read with `select_for_update`; if it is already uploaded or not decidable, the result is `tc_already_exists` "already <status>". The collision path re-reads the attachment first. Ignore/Reject refuse finished items. Tests: `test_attachment_cannot_be_confirmed_twice`, `test_ignored_items_cannot_be_confirmed`. |
+| 2. A partial fetch failure did not record the emails already stored. | **Fixed.** The `intake_fetch_failed` action now lists `stored_before_failure`. |
+| 3. The expiry update filtered by id only, and the retention docstring was out of date. | **Fixed.** The expiry now also requires `status='needs_review'`, and the gate docstring describes the expiry. |
+| 4. The autonomy cap applied only to new edits; a stored row above 0 was not clamped. | **Fixed.** Migration `agent/0006_clamp_autonomy`. |
+| 5. Tool calls in the same turn as `submit_decision` are not run and not counted. | Accepted (harmless, as the reviewer noted). |
+| 6. `agent_nightly` writes the report to `/tmp`, which is not kept. | Accepted: `AgentRun(kind='audit')` is the persistent copy and feeds the Overview card. |

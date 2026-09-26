@@ -113,9 +113,10 @@ def _check_actor(actor_kind, tier, account_id, conditions, values, actor):
     agent          kill switch (re-read) + tier rules
     intake_runner  kill switch (re-read) + tc_intake_mode == 'suggest'
     intake_fetch   NO kill switch; intake_fetch_enabled + >=1 active AllowedSender
-    intake_retention NO kill switch, no conditions: only clears stored bytes/bodies of
-                   finished intake items (C6), so retention keeps running even after
-                   fetch is switched off
+    intake_retention NO kill switch, no conditions: clears stored bytes/bodies of
+                   finished intake items (C6) and expires needs_review items older than
+                   --review-days (status expired, Phase 2.1); intake tables only
+                   (_check_target), so retention keeps running after fetch is switched off
     human          NO kill switch; actor role super_admin/admin + every condition True
     """
     if actor_kind == 'agent':

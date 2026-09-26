@@ -309,3 +309,28 @@ class AutonomyCapTest(TestCase):
         admin = f.user(role='admin')
         self.client.force_login(admin)
         self.assertContains(self.client.get('/dashboard/agent/config/'), 'Levels above 0 unlock in Phase 4.')
+
+
+class GuardianFollowUpsTest(TestCase):
+    """Phase 2.1 guardian notes 1 and 3."""
+
+    def test_attachment_cannot_be_confirmed_twice(self):
+        acc, s, att = scenario()
+        admin = f.user(role='admin')
+        other = f.schedule(acc, number='901', channel='Derana TV')
+        f.row(acc, other, brand='Nexus', day=10)
+        stale = InboundAttachment.objects.get(pk=att.id)           # second tab, loaded before the first submit
+        confirm_upload(att, s, admin)
+        with self.assertRaisesMessage(ConfirmRefused, 'tc_already_exists'):
+            confirm_upload(stale, other, admin)
+        from core.models import TransmissionReport
+        self.assertEqual(TransmissionReport.objects.count(), 1)
+        stale.refresh_from_db()
+        self.assertEqual(stale.status, 'uploaded')
+
+    def test_ignored_items_cannot_be_confirmed(self):
+        acc, s, att = scenario()
+        att.status = 'ignored'
+        att.save()
+        with self.assertRaisesMessage(ConfirmRefused, 'already ignored'):
+            confirm_upload(att, s, f.user(role='admin'))

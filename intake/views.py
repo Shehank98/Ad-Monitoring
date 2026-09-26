@@ -108,6 +108,8 @@ def inbox_decide(request, pk):
             return redirect(f'/dashboard/agent/inbox/{att.id}/')
         messages.success(request, f"Uploaded {res['rows']} TC rows to #{s.schedule_number} "
                                   f"({res['channel']} · {res['month']}). The scope is queued for its next run.")
+    elif action in ('ignore', 'reject') and (att.tc_report_id or att.status not in ('new', 'needs_review', 'suggested')):
+        messages.error(request, f'Not changed — this item is already {att.status}.')
     elif action in ('ignore', 'reject'):
         decide(att, request.user, 'ignored' if action == 'ignore' else 'rejected', request.POST.get('note', ''))
         messages.success(request, 'Saved.')

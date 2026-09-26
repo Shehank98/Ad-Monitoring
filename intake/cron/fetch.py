@@ -94,7 +94,7 @@ def fetch_emails(mailbox, now=None) -> dict:
         try:
             messages = mailbox.fetch(since)
             new = [m for m in messages if not _already_stored(m)]
-            counts = {'seen': len(messages), 'stored': 0}
+            counts = {'seen': len(messages), 'stored': 0, 'email_ids': []}
             if new:
                 def apply():
                     stored = []
@@ -103,6 +103,7 @@ def fetch_emails(mailbox, now=None) -> dict:
                             em = store_message(m)
                         if em is not None:
                             stored.append(em.id)
+                            counts['email_ids'].append(em.id)       # kept if a later message fails
                     counts['stored'] = len(stored)
                     return {'email_ids': stored, 'seen': len(messages)}
                 gate.perform(tier=gate.T0, action_type='intake_fetch', actor_kind='intake_fetch',
@@ -113,10 +114,13 @@ def fetch_emails(mailbox, now=None) -> dict:
             raise
         except Exception as exc:        # noqa: BLE001 — logged, heartbeat set, reported to the caller
             beat_error('intake_fetch', exc)
+            stored_before_failure = list(locals().get('counts', {}).get('email_ids', []))
             gate.perform(tier=gate.T0, action_type='intake_fetch_failed', actor_kind='intake_fetch',
-                         actor=actor, target_model='intake.InboundEmail', before={'since': since.isoformat()},
+                         actor=actor, target_model='intake.InboundEmail',
+                         before={'since': since.isoformat(), 'stored_before_failure': stored_before_failure},
                          apply=lambda: {'error': f'{type(exc).__name__}: {exc}'[:500]},
                          reason='mailbox fetch failed')
             return {'status': 'error', 'error': f'{type(exc).__name__}: {exc}'}
+        counts.pop('email_ids', None)
         beat_ok('intake_fetch', counts)
         return {'status': 'ok', **counts, 'at': timezone.now().isoformat()}

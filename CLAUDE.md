@@ -950,3 +950,20 @@ Rules: `docs/agent/BRIEF_AMENDMENT_01.md` wins over the brief. Report: `docs/age
 - UI: `/dashboard/agent/` Overview, Scopes, TC Inbox (`inbox/`), Review queue, Activity
   (AgentAction), Settings. Railway cron configs are in `railway/` (not deployed).
   Report: `docs/agent/phase2_report.md`.
+
+### Phase 2.1 — owner follow-ups on Phase 2
+- Intake LLM: `tool_choice` stays `auto`. A turn without a valid `submit_decision` gets one
+  follow-up, then `llm_no_decision` (rules only, needs review). The same applies to a
+  duplicate submit, text after the submit, or an invalid schema.
+- Confirm takes the scope's ScopeLock and re-checks the Schedule and the attachment under
+  `select_for_update`; a busy lock gives `scope_busy`. The upload debounce counts TC uploads.
+- `AgentConfig.intake_gemini_enabled` (default off) gates Gemini PDF reading for intake.
+  `agent_nightly` (audit, then purge; non-zero exit on any failure) is the nightly cron. The
+  purge expires review items after 180 days (minimum 30).
+- Heartbeat: fetch, runner and nightly record `last_ok_at` / `last_error`; the Overview health
+  card flags fetch as stale after 20 minutes. Fetch logs an AgentAction only when it stored
+  something or failed.
+- Autonomy level is capped at 0 until Phase 4 (form, `clean()`, and migration 0006).
+- Eval set: `intake/tests/eval_cases.py` (27 cases) and `docs/agent/eval_criteria.md`. The
+  live run uses `--tag=eval`.
+- Pending patches for the owner: 0001 → 0005 (`base.html`), 0002 → 0003 → 0004 (`.claude/`).

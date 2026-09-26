@@ -36,6 +36,7 @@ from verification.engine import active_schedule_ids
 
 from .cron.tools import parse_attachment
 
+DECIDABLE = ('new', 'needs_review', 'suggested')
 REFUSALS = ('scope_busy', 'schedule_frozen', 'schedule_locked', 'duplicate_active_number', 'no_schedule',
             'date_out_of_range', 'tc_already_exists', 'too_large', 'columns_unrecognised')
 
@@ -120,8 +121,8 @@ def confirm_upload(att, schedule: Schedule, admin, dates_ack: bool = False) -> d
     problems = schedule_problems(schedule)
     if problems:
         raise ConfirmRefused(problems[0])
-    if att.tc_report_id:
-        raise ConfirmRefused('tc_already_exists', 'this attachment was already uploaded')
+    if att.tc_report_id or att.status not in DECIDABLE:
+        raise ConfirmRefused('tc_already_exists', f'this attachment is already {att.status}')
     data = bytes(att.content or b'')
     if not data:
         raise ConfirmRefused('too_large', 'no stored content (too large or purged)')
@@ -143,6 +144,10 @@ def confirm_upload(att, schedule: Schedule, admin, dates_ack: bool = False) -> d
             # Phase 2.1 item 2: re-read the Schedule under the lock and re-check EVERY refusal
             # condition, so nothing that changed since the page was loaded slips through.
             fresh = Schedule.objects.select_for_update().select_related('account').get(pk=schedule.id)
+            # ... and the attachment: a double submit (even to another channel) must not upload twice.
+            locked_att = type(att).objects.select_for_update().get(pk=att.id)
+            if locked_att.tc_report_id or locked_att.status not in DECIDABLE:
+                raise ConfirmRefused('tc_already_exists', f'this attachment is already {locked_att.status}')
             again = schedule_problems(fresh)
             if again:
                 raise ConfirmRefused(again[0], 'changed since the page was loaded')
@@ -192,6 +197,7 @@ def confirm_upload(att, schedule: Schedule, admin, dates_ack: bool = False) -> d
             apply=apply, reason=f'admin confirmed TC upload to schedule #{schedule.schedule_number}',
             evidence={'dates_outside_window_ticked': out_of_window})
     except Collision as c:
+        att.refresh_from_db()
         AgentProposal.objects.create(
             kind='tc_link', tier=gate.T4, action_type='intake_collision', schedule=schedule,
             target_model='intake.InboundAttachment', target_pk=str(att.id), actor=admin,

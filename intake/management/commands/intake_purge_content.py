@@ -37,7 +37,7 @@ def purge(days: int, review_days: int = REVIEW_DAYS_DEFAULT, now=None) -> dict:
                       .values_list('id', flat=True))
 
     def apply():
-        InboundAttachment.objects.filter(id__in=expire_ids).update(
+        InboundAttachment.objects.filter(id__in=expire_ids, status='needs_review').update(
             status='expired', reason='retention_expired', content=b'', purged_at=now)
         att_ids = list(InboundAttachment.objects.filter(status__in=FINISHED, email__fetched_at__lt=cutoff,
                                                         purged_at__isnull=True).values_list('id', flat=True))
