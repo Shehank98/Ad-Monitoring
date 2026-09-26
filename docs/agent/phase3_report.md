@@ -361,7 +361,7 @@ Synthetic data only. Not deployed. Autonomy stays 0.
 | Run cycle | Sets the new `AgentConfig.run_requested_at` (admin only, POST only, logged as `agent_run_requested`). **The request never runs a cycle.** The next `agent_cycle` (cron) treats it as run-now: every scope counts as due (still capped at `max_scopes_per_cycle`, still level 0). It clears the flag afterwards, but only if nobody clicked again during the cycle. | `agent/views.py::console_run`, `agent/cycle.py` (`select(run_now=…)`), migration `agent/0009_phase3_2` |
 | Schedules | Latest **observed** SummarySnapshot per schedule: state, Planned / Aired / 3rd Party / Missed, when observed, link to the core Summary Sheet. No Summary calculation. | `/dashboard/agent/console/schedules/` |
 | Reports | Per scope: sign-off state (core `authorised_by`, AgentAuthorisation, Ready for sign-off, Not ready), totals from observed snapshots, prepared/checked by, links to the Summary Sheet, PDF and Excel. | `/dashboard/agent/console/reports/` |
-| Theme tester | Client + TC or LMRB theme + optional duration → brand(s). TC uses `_build_reverse_tc_theme_map` + `_brands_for_tc_theme`. LMRB uses `_build_lmrb_theme_map` + `_lmrb_themes_for_brand` per brand with the engines' exact / `*`-prefix rule. All are pinned in `test_core_contract`. GET only, no save action; accounts outside the user's access → 403. | `/dashboard/agent/console/theme-tester/` |
+| Theme tester | Client + TC or LMRB theme + duration (required; guardian finding 4) → brand(s). TC uses `_build_reverse_tc_theme_map` + `_brands_for_tc_theme`. LMRB uses `_build_lmrb_theme_map` + `_lmrb_themes_for_brand` per brand with the engines' exact / `*`-prefix rule. All are pinned in `test_core_contract`. GET only, no save action; accounts outside the user's access → 403. | `/dashboard/agent/console/theme-tester/` |
 
 There are **no approve / apply controls** anywhere in the console, not even disabled ones (tested).
 The three views are also tabs in the agent pages (`templates/agent/_base.html`).
@@ -554,3 +554,83 @@ apply; `git apply --check` passes):
 - new check 13: agent code on core pages is read-only, never uses `get_solo` / `get_or_create`, and
   cannot break a page;
 - new check 14: console snapshot views are limited to the user's accounts and active schedules.
+
+
+### Guardian re-review of the Phase 3.2 fixes (43ea79f..48c99a7)
+
+**Verdict: PASS, nothing blocking.**
+- Checks 1–8 pass, and so do the new checks 13 (agent code on core pages) and 14 (console snapshots:
+  own accounts, active schedules only).
+- No other account's data leaks through `active_schedule_ids`. Makeup schedules show in their own scope,
+  as the cycle does.
+- The card cannot raise on any page, including 403; there is no custom 500 page.
+- The access SQL is correct for `accounts_user`, and deactivating users does not affect the agent: the
+  service user stays active, and `require_service_user` checks only role.
+- The list of file-deleting views is complete.
+- The guardian's run at 48c99a7, in a scratch worktree: console tests 36/36 on both databases. Full
+  suite: SQLite 547 passed / 10 skipped; PostgreSQL 547 passed / 9 skipped. Those counts include the
+  Phase 3.2 close tests I was adding in the main checkout at the time. Golden idempotent and rebuild
+  matched.
+
+Non-blocking notes, and what I did:
+
+| Note | Action |
+|---|---|
+| Runbook said `ensure_superadmin` re-activates the `SUPER_ADMIN_EMAIL` user; it does not set `is_active` | wording fixed: that user must be one of the named testers in the SQL; emails in lower case |
+| **`Procfile` runs `purge_maponline` on every web start** (`railway.json`'s start command does not). On staging it would delete restored MapOnline rows and files older than 30 days | runbook step 1 now says to use the `railway.json` start command for the staging web service; the purge row says so too |
+| Purge call line is `core/views.py:1535`, not `:1534` | fixed |
+| `FIREBASE_AUTH_PROVIDER_X509_CERT_URL` missing from the variable list | added |
+| Report still said "optional duration" for the theme tester | fixed |
+| `test_theme_tester_wildcard_lmrb` now sends `duration=30`; this reason was only implicit | duration became required (guardian finding 4) |
+| Two simultaneous Run clicks could each log an action (no lock) | left as is: the stored value is still correct and both clicks are logged |
+| One query per scope and schedule on the console pages | left as is for level 0; noted |
+| Uncommitted changes "disappeared" from the main checkout during the review | those were my Phase 3.2 close edits, committed while the review ran; no other session was involved |
+
+---
+
+# Phase 3.2 close
+
+## LLM probe and tool_choice setting
+
+- **`manage.py intake_llm_probe`**, run by a person:
+  - refuses unless both `ANTHROPIC_MODEL` and `ANTHROPIC_API_KEY` are set;
+  - sends one tiny synthetic request (no client data; only the `submit_decision` tool) three ways:
+    `auto`, `{"type":"tool","name":"submit_decision"}` and `{"type":"any"}`;
+  - for each, prints supported / unsupported / error, the HTTP status, the API's exact error text,
+    whether `submit_decision` was called, and the tokens used;
+  - logs each call as `LlmCall(purpose='probe')` with those details in the new `LlmCall.detail`, and
+    writes nothing else (tested).
+  - Code: `intake/llm/probe.py`, `intake/management/commands/intake_llm_probe.py`. The provider now
+    passes the HTTP status and exact error text through `ProviderError`. This was checked against the
+    installed SDK's own `BadRequestError` class (anthropic 1.8.0).
+- **`AgentConfig.intake_tool_choice`** (`auto` | `forced`), default `auto`, on Agent Settings.
+  - **What "forced" means in the runner:** normal turns use `{"type":"any"}`, so the model must call a
+    tool every turn but can still use `detect_tc` and `find_schedules`. The single follow-up turn uses
+    `{"type":"tool","name":"submit_decision"}`. Forcing `submit_decision` on every turn would stop the
+    model from using the other tools, so "forced supported" requires **both** `tool` and `any` to be
+    supported in the latest probe.
+  - **The settings form** refuses `forced` unless the latest probe of the current model passed.
+    "Current model" is `ANTHROPIC_MODEL` when the web process has it; that variable normally lives on
+    cron-intake, so otherwise it is the model of the most recent probe. The check runs when switching
+    to forced.
+  - **The runner re-checks on every run** against its own `ANTHROPIC_MODEL`, and falls back to `auto`
+    if that probe is missing or failed (for example after a model change).
+  - **The `llm_no_decision` fallback applies in both modes** (tested in forced mode: text-only ending,
+    duplicate submit).
+- Tests: `intake/tests/test_probe.py` (18).
+
+## Phase 3.2 close results
+
+| Run | Run | Passed | Skipped | Failed |
+|---|---|---|---|---|
+| Full suite, SQLite (`manage.py test --exclude-tag=eval`) | 564 | 555 | 9 | 0 |
+| Full suite, PostgreSQL 16 | 564 | 556 | 8 | 0 |
+
+- The skipped tests are the same database-specific ones listed in the Phase 3.2 results.
+- `makemigrations --check --dry-run`: **No changes detected** (new migration `agent/0010_phase3_2_close`).
+- Golden idempotent on `synthetic` after 0010: **MATCH** (3 of 3 schedules).
+- One earlier agent test was updated: `SettingsFormKeepsStoredValuesTest.test_rendered_checkbox_left_unticked_turns_off`
+  posts `_fields` listing every form field, so it now also sends a value for the new
+  `intake_tool_choice` select, as a real page always does.
+
+__GUARDIAN_CLOSE__

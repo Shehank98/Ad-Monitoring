@@ -388,7 +388,8 @@ class SettingsFormKeepsStoredValuesTest(TestCase):
                       shadow_window_start='00:30', shadow_window_end='05:00', shadow_budget_seconds=900,
                       max_scopes_per_cycle=25, observe_every_minutes=360, db_lock_timeout_ms=2000,
                       db_statement_timeout_ms=120000, db_idle_timeout_ms=60000,
-                      core_fingerprint_timeout_ms=600000, digest_time='07:30')
+                      core_fingerprint_timeout_ms=600000, digest_time='07:30',
+                      intake_tool_choice='auto')
         self.assertEqual(r.status_code, 302)
         self.assertFalse(AgentConfig.get_solo().enabled)
 

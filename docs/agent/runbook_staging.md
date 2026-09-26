@@ -46,8 +46,8 @@ Related runbook: `docs/agent/runbook_real_data.md` (golden check and audit on a 
 | `monitoring_delete_group` | `core/views.py:1825` (delete at `:1914`) | the shared file of a multi-channel upload |
 | `tc_delete` | `core/views.py:5123` (delete at `:5144`) | the TC file |
 | `schedule_template_upload` | `core/views.py:1150` (delete at `:1165`) | the previous sample template, replaced on every upload |
-| `monitoring_upload` (MapOnline) | `core/views.py:1418`, purge call at `:1534` → `core/maponline_cleanup.py:71` | **every MapOnline file older than 30 days**, automatically after any MapOnline upload |
-| `purge_maponline` command | `core/management/commands/purge_maponline.py` → `core/maponline_cleanup.py:71` | the same 30-day purge, when someone runs it |
+| `monitoring_upload` (MapOnline) | `core/views.py:1418`, purge call at `:1535` → `core/maponline_cleanup.py:71` | **every MapOnline file older than 30 days**, automatically after any MapOnline upload |
+| `purge_maponline` command | `core/management/commands/purge_maponline.py` → `core/maponline_cleanup.py:71` | the same 30-day purge (rows **and** files). **`Procfile` runs it on every web start**; the Railway start command in `railway.json` does not. Set the staging web service's start command to the `railway.json` one (below), or restored MapOnline data older than 30 days is deleted at the first start |
 | `branding_upload` | `core/views.py:8440` (`os.remove` at `:8462`) | the previous logo file under the **local** `MEDIA_ROOT/branding` only (never the bucket) |
 
 ### 1b. Choose staging storage (one of two)
@@ -59,6 +59,10 @@ Related runbook: `docs/agent/runbook_real_data.md` (golden check and audit on a 
 
 **Never the production bucket or the production Firebase credentials.**
 
+**Start command of the staging web service:** use the one in `railway.json` (migrate, collectstatic,
+`ensure_superadmin`, gunicorn). Do not use the `Procfile` line: it also runs `purge_maponline`, which
+deletes MapOnline rows and files older than 30 days on every start.
+
 ### 1c. Environment variables: never copy these from production
 
 Create the staging services' variables from this list, not by cloning production.
@@ -68,7 +72,7 @@ Create the staging services' variables from this list, not by cloning production
 | `DATABASE_URL` | the database | `$STAGING_URL` (the staging database only) |
 | `SECRET_KEY` | sessions, password-reset tokens | a **new** staging-only value |
 | `FIREBASE_STORAGE_BUCKET` | Firebase Storage | staging bucket (1b A) or **unset** (1b B) |
-| `FIREBASE_TYPE`, `FIREBASE_PROJECT_ID`, `FIREBASE_PRIVATE_KEY_ID`, `FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_CLIENT_ID`, `FIREBASE_AUTH_URI`, `FIREBASE_TOKEN_URI`, `FIREBASE_CLIENT_X509_CERT_URL` | Firebase (Google) | the staging project's service account (1b A) or **unset** (1b B) |
+| `FIREBASE_TYPE`, `FIREBASE_PROJECT_ID`, `FIREBASE_PRIVATE_KEY_ID`, `FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_CLIENT_ID`, `FIREBASE_AUTH_URI`, `FIREBASE_TOKEN_URI`, `FIREBASE_AUTH_PROVIDER_X509_CERT_URL`, `FIREBASE_CLIENT_X509_CERT_URL` | Firebase (Google) | the staging project's service account (1b A) or **unset** (1b B) |
 | `MEDIA_ROOT` | local disk | the staging volume path (1b B), otherwise unset |
 | `GEMINI_API_KEY` | Google Gemini: PDF TC conversion and the Nova chat send file and chat content to Google | **unset**. This is the real lock for Nova chat |
 | `GEMINI_TC_MODEL` | (model name only) | unset (default) |
@@ -109,8 +113,9 @@ COMMIT;
    The agent's service user (`reconciliation-agent@agent.invalid`) stays active; it cannot log in (no
    usable password). Email is off on staging (step 3), so password-reset mails do not arrive: set each
    tester's password with a one-off `python manage.py changepassword tester1@company.lk`. The
-   `SUPER_ADMIN_EMAIL` user is created or re-activated on every web deploy (1c), so make that one of the
-   named testers.
+   `SUPER_ADMIN_EMAIL` user is created (or its password, role and super-user flags reset) on every web
+   deploy, but `ensure_superadmin` does **not** re-activate it. So make that user one of the named testers
+   in the SQL above; otherwise it stays inactive and cannot log in. Type the tester emails in lower case.
 
 ## 2. Restore the production backup into staging PostgreSQL
 

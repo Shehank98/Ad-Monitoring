@@ -1034,3 +1034,12 @@ Report: `docs/agent/phase3_report.md`. Observe and rehearse only; nothing is app
   logged and the card is hidden; 4 queries for staff, 0 for channel officers and anonymous users.
 - Staging week: `docs/agent/runbook_staging.md` (step 1 = own storage, variables, access; then outbound
   messages off, all before any service starts).
+
+### Phase 3.2 close — LLM probe (not deployed)
+- `manage.py intake_llm_probe` (person-run; needs `ANTHROPIC_MODEL` + `ANTHROPIC_API_KEY`): one synthetic
+  request with tool_choice auto / tool(submit_decision) / any; logs `LlmCall(purpose='probe')` with
+  `detail` (status, exact error text, submit called, tokens). Writes nothing else.
+- `AgentConfig.intake_tool_choice` (`auto` default | `forced`). Forced = `any` on normal turns, forced
+  `submit_decision` on the follow-up. Allowed by the settings form only after a passing probe of the current
+  model; the runner re-checks and falls back to auto. `llm_no_decision` applies in both modes.
+- Staging: use the `railway.json` start command (the `Procfile` also runs `purge_maponline`).
